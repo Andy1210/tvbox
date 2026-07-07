@@ -1,0 +1,187 @@
+# CLAUDE.md - tvbox
+
+FireTV-style TV box for the Raspberry Pi 5: Electron shell + React 10-foot
+launcher + native `mpv`, driven by the TV remote over HDMI-CEC. The
+user-facing [README.md](README.md) is the manual; this file is the **map for
+an AI agent** - what runs where and which assumptions burn you.
+
+> Convention in this file: `<pi-ssh-host>` is the SSH host of the target Pi
+> (e.g. `pi@raspberrypi.local`, or a `~/.ssh/config` alias) - substitute your
+> own. `<user>` is the box's login user; everything lives under its
+> `~/.tvbox/`.
+
+## Architecture in one screen
+
+```
+TV remote ─HDMI-CEC→ cec_uinput_bridge.py (systemd USER unit tvbox-cec,
+                     /dev/uinput via udev+input group - NO root)
+                        │ uinput key events            ▲ FIFO /tmp/tvbox-cec-cmd
+                        ▼                              │ ("on 0"/"standby 0" only)
+labwc session (autologin) ── respawn loop ── run-shell.sh ── Electron shell (shell/)
+   • HTTP 127.0.0.1:8097 - serves the launcher (/tvbox/), app web/ bundles at /<id>/, JSON API
+   • apps = PACKAGES in ~/.tvbox/apps/<id>/ (manifest.json + plugin.js + web/), installed from the registry
+   • plugins ship IN the package (~/.tvbox/apps/<id>/plugin.js) - deps-gated, host-process, boot-time only
+   • mpv: lazy shared player BEHIND the transparent window (JSON IPC /tmp/tvbox-mpv.sock)
+   • local app UI → main window (/<id>/, full preload SDK); remote apps (YouTube) → hardened sandbox window
+   • pairing server 0.0.0.0:8099 - phone forms, only while pairing, code-gated
+   • MQTT (optional, ~/.tvbox/config.json) - now-playing / commands / notify (HA)
+```
+
+Launcher (launcher/) is React+TS+Vite+Tailwind, spatial nav via
+`@noriginmedia/norigin-spatial-navigation`, built into `shell/launcher-dist/`.
+
+## Layout
+
+| Path                                                                                       | What                                                                                                                                                                                                                                                                                       |
+| ------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| [shell/main.js](shell/main.js)                                                             | Electron host: HTTP+API, windows, mpv, plugin loader, MQTT glue.                                                                                                                                                                                                                           |
+| [shell/install.js](shell/install.js)                                                       | Manifest loading/**validation** + bundle install runner. Shared by shell + CLI.                                                                                                                                                                                                            |
+| [shell/cli.js](shell/cli.js)                                                               | `tvbox list/deps/install/remove/update/backup/restore` (symlinked at `~/.local/bin/tvbox`).                                                                                                                                                                                                |
+| [shell/updater.js](shell/updater.js)                                                       | OTA self-update: feed check, versions/ install, `current` symlink flip. Rollback lives in [deploy/run-shell.sh](deploy/run-shell.sh).                                                                                                                                                      |
+| [shell/backup.js](shell/backup.js)                                                         | Encrypted settings backup/restore (phone page: [shell/pairing/backup.js](shell/pairing/backup.js)).                                                                                                                                                                                        |
+| [app-sdk/](app-sdk/)                                                                       | `@tvbox/app-sdk` - the shared 10-foot UI SDK (spatial-nav focus components, OSK, PIN pad, i18n, config/capability clients). The launcher AND every app package consume it as source via the `@sdk` Vite alias.                                                                             |
+| `~/.tvbox/apps/<id>/`                                                                      | Where installed app PACKAGES live (manifest.json + plugin.js + web/), fetched from the [tvbox-apps registry](https://github.com/Andy1210/tvbox-apps). No in-shell first-party slot - the shell ships only the SDK. Schema: [docs/app-manifest.schema.json](docs/app-manifest.schema.json). |
+| [shell/appfetch.js](shell/appfetch.js) + [shell/appdata.js](shell/appdata.js)              | Capability brokers: `fetch` (origin-locked SSRF-guarded data proxy) + `storage` (per-app kv). See [docs/capabilities.md](docs/capabilities.md).                                                                                                                                            |
+| [shell/preload-app.js](shell/preload-app.js)                                               | Sandbox-safe contextBridge preload for **capability apps** in the isolated window (vs [shell/preload.js](shell/preload.js) for the main/Node-capable window).                                                                                                                              |
+| [tvbox-apps AUTHORING.md](https://github.com/Andy1210/tvbox-apps/blob/main/AUTHORING.md)   | How to write an app package (layout, manifest, web/ UI via `@tvbox/app-sdk`, host plugin, deps + platform baseline). The launcher no longer compiles in any app view.                                                                                                                      |
+| [launcher/src/lib/i18n.tsx](launcher/src/lib/i18n.tsx) + [locales/](launcher/src/locales/) | i18n; en+hu key parity is test-enforced.                                                                                                                                                                                                                                                   |
+| [deploy/deploy.sh](deploy/deploy.sh)                                                       | Build + rsync + provision + user-space setup. Idempotent.                                                                                                                                                                                                                                  |
+| [deploy/provision.sh](deploy/provision.sh)                                                 | **The ONE root step** (apt baseline, udev/polkit, linger, legacy migration).                                                                                                                                                                                                               |
+| [cec/cec_uinput_bridge.py](cec/cec_uinput_bridge.py)                                       | CEC→uinput bridge (user service). LG quirks documented in its docstring.                                                                                                                                                                                                                   |
+| [docs/app-manifest.md](docs/app-manifest.md)                                               | How to write an app (the extension story).                                                                                                                                                                                                                                                 |
+| [docs/sd-image.md](docs/sd-image.md)                                                       | pi-gen flashable-image recipe (workflow: .github/workflows/image.yml).                                                                                                                                                                                                                     |
+| [docs/updates-and-backup.md](docs/updates-and-backup.md)                                   | OTA + OS updates (never auto-reboot) + phone backup. Release: [scripts/make-release.sh](scripts/make-release.sh) / release.yml.                                                                                                                                                            |
+
+## Hard rules
+
+1. **No root at runtime.** Root lives ONLY in `deploy/provision.sh` (one-time
+   udev/polkit/apt) and the apt path of `tvbox deps`. Never add `sudo` to the
+   shell - a feature that seems to need it needs a udev/polkit grant in
+   provision instead. Reboot/poweroff = plain `systemctl` (logind
+   active-session polkit), sudo is only a fallback.
+2. **`runtime.capabilities` is the security boundary** and fails closed
+   (default `["nav"]`, `capsFor` in main.js). The launcher (id null) gets
+   nav+player+config. Remote sites NEVER run in the main window - it has
+   `contextIsolation:false` for the Plex QWebChannel bridge; remote apps get
+   the hardened separate window. Don't move apps between these worlds. Brokered
+   capabilities (`player`, `fetch`, `storage`) are gated the same way in BOTH
+   preloads (`preload.js` main window; `preload-app.js` isolated window, attached
+   only to capability apps). A new capability = a new broker gated on its cap
+   name; never expose one unconditionally. The `fetch` broker is origin-locked +
+   SSRF-guarded (appfetch.js) - see [docs/capabilities.md](docs/capabilities.md).
+3. **Manifests reload live, plugins don't.** `GET /tvbox/api/apps` re-reads
+   `shell/apps/` + `~/.tvbox/apps/` on every call; a dropped-in manifest
+   appears immediately. `service` plugins load at boot only (deps-gated) - a
+   new plugin needs a shell restart. `manifestVersion` is 1; the validator in
+   install.js skips anything else.
+4. **i18n both-or-nothing:** every launcher string goes through `t()`/`loc()`
+   and must exist in BOTH `locales/en.json` and `hu.json` -
+   `locales.test.ts` fails on drift or dead keys. Defaults are `en`
+   everywhere (pairing pages, livetv "Other" fallback, `index.html` lang).
+   No emoji in launcher UI - the box's Chromium has no colour-emoji font
+   (renders tofu); inline SVG only.
+5. **Apps install their own binaries (Kodi model); the core ships only the
+   shared media stack.** `image/stage-tvbox` + `deploy/provision.sh` preinstall
+   **`mpv`** (the shared player for Live TV + Plex) and the runtime libs
+   **`libpulse0`/`libasound2t64`** - the "core provides ffmpeg/system libs" layer.
+   App-specific binaries are NOT bundled: they're `requires.download` static
+   binaries the app installs **from the UI, no root** (tap the greyed tile →
+   `POST /apps/deps` → `installDownload`, sha256-pinned into `~/.tvbox/bin`).
+   Spotify's `librespot` is exactly this - a hosted aarch64 binary (release
+   `librespot-v0.8.0`, extracted from raspotify/librespot v0.8.0), not bundled.
+   `apt`/`aptRepo` deps still need `tvbox deps` (root) and should be avoided for
+   apps - prefer `requires.download`. Spotify Connect is also opt-in at
+   _runtime_: the daemon runs only when `config.spotify.enabled` is set (the
+   launcher's enable toggle). A `service` app that gains its binary via a UI
+   deps-install auto-restarts the shell to load its plugin - but only when
+   `boxIdle()` and nothing else is installing.
+6. **Secrets stay in `~/.tvbox/`** (config.json chmod 600). The launcher only
+   ever sees `publicConfig()` - check it before exposing a new config field.
+   Parental PIN: salted sha256 + timingSafeEqual (legacy unsalted still
+   verifies).
+7. **Everything must degrade on a keyboardless TV**: missing binary → greyed
+   tile; shell API down → retry screen (not onboarding); renderer crash →
+   ErrorBoundary reload button. Never leave a dead end that needs a keyboard.
+
+## Dev / deploy / verify
+
+```sh
+npm run format         # ALWAYS before any commit - prettier --write over the repo
+cd launcher && npm run typecheck && npm test && npm run build      # before any commit
+./deploy/deploy.sh <pi-ssh-host>                    # full deploy (provision included)
+./deploy/deploy.sh <pi-ssh-host> --skip-provision   # iterate without the root step
+```
+
+**Run `npm run format` before every commit.** CI runs `npm run format:check`
+(prettier `--check .`) and fails the build on any unformatted file - this is
+not optional and not launcher-scoped, it covers the whole repo. If you only
+touched one file, `npx prettier --write <file>` is enough; when in doubt run
+`npm run format`.
+
+- Deploy does NOT restart a running shell. Restart it with
+  `ssh <pi-ssh-host> pkill -f 'electron[/]dist'` (the autostart respawn loop restarts it; note:
+  a bare `pkill -f "electron ."` also matches your own ssh command line and
+  kills the connection - hence the `[/]` character class).
+- Verify (on the box, via ssh): `curl -s http://127.0.0.1:8097/tvbox/api/apps`,
+  `systemctl --user status tvbox-cec`, `~/.tvbox/cec_raw.log` for CEC traffic.
+  A screenshot of the running UI: `grim ~/shot.png` in the Wayland session
+  (`XDG_RUNTIME_DIR=/run/user/$(id -u) WAYLAND_DISPLAY=wayland-0`).
+- Lockfiles are committed (shell's was generated with
+  `npm i --package-lock-only`; a full `npm install` in shell/ downloads the
+  ~100MB ARM64 Electron - avoid on the dev host).
+
+## Sharp edges
+
+- **CEC is TV-specific.** Every TV forwards a different subset of remote keys
+  and quirks its own way - the mapping in `cec_uinput_bridge.py` was tuned
+  empirically (e.g. on the LG set it was developed against, Back and Exit share
+  one code, Home/colour keys are never forwarded, and long-press is
+  undetectable, so Home is synthesized as a double-tap of Back within 0.4s).
+  Don't "fix" the mapping without a real TV to test on, and name the TV model
+  in any commit touching CEC.
+- **LG TVs need the vendor shim** ([cec/cec_vendor_shim.c](cec/cec_vendor_shim.c)):
+  SIMPLINK only forwards keys to devices whose CEC vendor ID reads LG, and
+  libcec's own LG masquerade loses the TV's vendor query race (details in the
+  bridge docstring). The shim mechanism is vendor-agnostic (target comes from
+  `$CEC_SHIM_VENDOR_ID`); the bridge compiles and LD_PRELOADs it into
+  cec-client per the `cec.vendorShim` config key (`"auto"` default = LG TVs
+  only - the only tested brand; `"tv"`/hex/`false` for experiments) - non-LG
+  TVs run stock libcec, don't make the shim unconditional. If keys are dead
+  right after first setup on an LG, the TV cached the wrong identity: toggle
+  SIMPLINK off/on on the TV once.
+- **Kernel 6.14-6.18 + a forced HDMI connector kills CEC** on the Pi 5: with
+  `video=HDMI-A-1:e` on the cmdline the vc4 driver never feeds the EDID
+  physical address to the CEC core (phys addr stays `f.f.f.f`, nothing
+  transmits; fixed in mainline 6.19 by `cf207ea2c39d`). If a box needs a
+  forced output (boot with TV off), use `vc4.force_hotplug=1` instead - it
+  keeps the normal detect/EDID/CEC path. Diagnose with
+  `cec-ctl -d0` (look at "Physical Address").
+- The Pi 5 has **no H.264 hardware decode** - mpv runs `--vo=gpu` with
+  software decode; don't add hwdec flags blindly.
+- mpv PiP runs under **XWayland** (`DISPLAY`, no `WAYLAND_DISPLAY`) because
+  Wayland clients can't self-position; fullscreen mpv is a Wayland client
+  behind the transparent window. The `raiseWindow` retry loop after launch is
+  load-bearing (mpv steals focus late).
+- `~/.tvbox/apps/` user manifests: built-in ids win on clash; a manifest-only
+  app is sandboxed/capability-scoped, but a user-app `plugin.js` is trusted
+  Node code in the host process - that trust split is by design (SECURITY.md).
+- Raspberry Pi OS ships its own `010_pi-nopasswd` passwordless-sudo drop-in on
+  some images; tvbox does **not** rely on it (provision is the only root step),
+  so don't write code that assumes passwordless sudo at runtime.
+- `deploy.sh` requires an explicit `<pi-ssh-host>` - never hardcode a host.
+- A deployed box is usually someone's actual living-room TV: restarting the
+  shell or `mpv` interrupts whatever is playing. Check `pgrep -x mpv` (or ask)
+  before disruptive ops on a box that might be in use.
+- **OTA vs dev deploy:** an OTA release runs from `~/.tvbox/current/shell`
+  (symlink into `versions/`), NOT `~/.tvbox/shell`. `deploy.sh` deletes the
+  symlink so a dev deploy always wins - if a box seems to ignore your deploy,
+  look for a stray `current` symlink. Update state: `~/.tvbox/update/*`
+  (pending/attempts/failed/last). Full design: docs/updates-and-backup.md.
+- **`deploy/run-shell.sh` IS the rollback mechanism** (boot-attempt counting +
+  symlink flip-back). Keep it dependency-free POSIX sh; a release's infra
+  files (incl. run-shell.sh itself) are only installed AFTER the new shell's
+  first healthy boot (updater.js `onLauncherLoaded`), never before.
+- Nothing on the box ever reboots it or restarts the shell on its own while
+  something plays: OS updates run with `Automatic-Reboot "false"` (Settings
+  shows the reboot hint), and the OTA auto-apply is gated on `boxIdle()` +
+  the 03-06h window.

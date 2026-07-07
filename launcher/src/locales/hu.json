@@ -1,0 +1,226 @@
+{
+  "_meta": {
+    "name": "Magyar",
+    "tag": "hu-HU"
+  },
+  "home": {
+    "apps": "Alkalmazások",
+    "comingSoon": "{name} - hamarosan elérhető",
+    "comingSoonBadge": "Hamarosan",
+    "bridgeMissing": "A rendszerkapcsolat nem érhető el",
+    "needs": "hiányzik: {dep}",
+    "install": "Telepítés",
+    "installingBadge": "Telepítés…",
+    "installing": "{name} telepítése…",
+    "installed": "{name} telepítve",
+    "installFailed": "Nem sikerült telepíteni: {name}",
+    "setupNeeded": "{name} beállítást igényel - nyisd meg a Beállításokat",
+    "getMore": "Továbbiak beszerzése"
+  },
+  "greeting": {
+    "night": "Jó éjszakát",
+    "morning": "Jó reggelt",
+    "day": "Jó napot",
+    "evening": "Jó estét"
+  },
+  "settings": {
+    "title": "Beállítások",
+    "language": "Nyelv",
+    "wifi": "WiFi"
+  },
+  "settingsCat": {
+    "general": "Általános",
+    "av": "Kép és hang",
+    "network": "Hálózat",
+    "peripherals": "Perifériák",
+    "apps": "Alkalmazások",
+    "ambient": "Képernyővédő",
+    "store": "Alkalmazásbolt",
+    "system": "Rendszer és frissítés"
+  },
+  "wifi": {
+    "connectedTo": "csatlakozva · {ssid}",
+    "notConnected": "nincs kapcsolat",
+    "rescan": "Keresés újra",
+    "scanning": "Keresés…",
+    "connecting": "Csatlakozás: {ssid}…",
+    "connected": "Csatlakozva: {ssid}",
+    "failed": "Nem sikerült csatlakozni: {ssid}",
+    "active": "aktív",
+    "none": "Nincs elérhető hálózat",
+    "passwordFor": "Jelszó - {ssid}",
+    "ethernet": "Ethernet",
+    "ethConnected": "csatlakoztatva"
+  },
+  "display": {
+    "title": "Kijelző",
+    "resolution": "Felbontás",
+    "choose": "Válassz felbontást",
+    "active": "aktív",
+    "none": "Nincs elérhető mód",
+    "applying": "Beállítás…",
+    "failed": "Nem sikerült a módváltás",
+    "matchFramerate": "Igazítás a tartalom képfrissítéséhez",
+    "matchHint": "Az 50 fps-es adást simábban játssza 60 Hz-en (mpv).",
+    "on": "Be",
+    "off": "Ki"
+  },
+  "notify": {
+    "dismiss": "Vissza a bezáráshoz"
+  },
+  "power": {
+    "title": "Energia",
+    "sleep": "Alvás",
+    "sleepHint": "Kijelző ki - a TV bekapcsolásával ébred",
+    "restart": "Újraindítás",
+    "shutdown": "Kikapcsolás",
+    "shutdownHint": "A visszakapcsoláshoz áram alá kell helyezni",
+    "confirmRestart": "Biztosan újraindítod a boxot?",
+    "confirmShutdown": "Biztosan kikapcsolod a boxot?",
+    "yes": "Igen",
+    "cancel": "Mégse"
+  },
+  "ambient": {
+    "title": "Képernyővédő",
+    "enable": "Bekapcsolva tétlenség esetén",
+    "idle": "Tétlenség (perc)",
+    "city": "Város (időjárás)",
+    "cityPrompt": "Város az időjáráshoz",
+    "notSet": "nincs beállítva",
+    "photosUpload": "Háttérképek feltöltése (QR)",
+    "photosClear": "Összes törlése",
+    "photosCount": "{n} kép",
+    "photosManage": "Válaszd ki a képet a törléshez",
+    "photosTitle": "Háttérképek feltöltése",
+    "photosHint": "Olvasd be a QR-kódot a telefonoddal, és válaszd ki a fotókat - átméretezve feltöltődnek.",
+    "photosDone": "Kész",
+    "dismiss": "Nyomj meg egy gombot a kilépéshez",
+    "wx": {
+      "clear": "Derült",
+      "cloudy": "Felhős",
+      "fog": "Ködös",
+      "rain": "Esős",
+      "snow": "Havas",
+      "storm": "Zivatar"
+    }
+  },
+  "bt": {
+    "title": "Bluetooth",
+    "scan": "Keresés",
+    "scanning": "Keresés…",
+    "working": "Dolgozom…",
+    "none": "Nincs eszköz - indíts keresést",
+    "off": "A Bluetooth ki van kapcsolva",
+    "connected": "csatlakoztatva",
+    "paired": "párosítva",
+    "pair": "Párosítás",
+    "remove": "Törlés",
+    "pairing": "{name} párosítása…",
+    "failed": "Nem sikerült: {name}"
+  },
+  "appsettings": {
+    "title": "Alkalmazások",
+    "hint": "Rendezd át vagy rejtsd el az alkalmazásokat a főképernyőn.",
+    "hide": "Elrejtés",
+    "show": "Megjelenítés",
+    "none": "Nincs alkalmazás",
+    "getMore": "„Továbbiak beszerzése” csempe",
+    "uninstall": "Eltávolítás",
+    "uninstalled": "{name} eltávolítva",
+    "uninstallFailed": "{name} eltávolítása nem sikerült"
+  },
+  "catalog": {
+    "title": "Továbbiak beszerzése"
+  },
+  "audio": {
+    "title": "Hang",
+    "auto": "Automatikus",
+    "autoHint": "HDMI kimenet automatikus felismerése",
+    "default": "alapértelmezett",
+    "volume": "Hangerő",
+    "muted": "némítva",
+    "none": "Nincs elérhető kimenet"
+  },
+  "about": {
+    "title": "Diagnosztika",
+    "refresh": "Frissítés",
+    "version": "Verzió",
+    "device": "Eszköz",
+    "ip": "IP-cím",
+    "wifi": "WiFi",
+    "cpuTemp": "CPU hőmérséklet",
+    "uptime": "Működési idő",
+    "memory": "Memória (szabad/össz.)",
+    "unitD": "n",
+    "unitH": "ó",
+    "unitM": "p"
+  },
+  "livetv": {
+    "error": "Nem sikerült betölteni a csatornákat",
+    "phoneSetupTitle": "Beállítás telefonról",
+    "phoneSetupHint": "Olvasd be a QR-kódot a telefonoddal (vagy nyisd meg a címet böngészőben), és add meg az IPTV-adataidat.",
+    "phoneSetupCode": "Kód"
+  },
+  "app": {
+    "shellUnreachable": "A box nem elérhető",
+    "shellUnreachableHint": "A tvbox szolgáltatás nem válaszolt. Lehet, hogy még indul - próbáld újra kicsit később.",
+    "retry": "Újra"
+  },
+  "store": {
+    "title": "Alkalmazásbolt",
+    "hint": "Közösségi appok a tvbox-apps registryből. A telepítés felteszi az appot a főképernyőre; a szükséges programok külön települnek (tvbox deps).",
+    "loading": "Registry betöltése…",
+    "registryError": "Az alkalmazás-registry nem elérhető",
+    "empty": "Még nincs app a registryben",
+    "builtin": "Beépített",
+    "setUrl": "Cím megadása",
+    "urlPrompt": "{name} szerver címe",
+    "urlMissing": "nincs megadva szervercím",
+    "urlSaved": "{name}: cím elmentve",
+    "installed": "{name} telepítve - kint van a főképernyőn",
+    "removed": "{name} eltávolítva",
+    "failed": "{name}: sikertelen művelet",
+    "update": "Frissítés",
+    "updated": "{name} frissítve",
+    "version": "Verzió {v}",
+    "installedLatest": "Telepítve v{installed} · Legújabb v{latest}",
+    "updateAvailableBadge": "Frissítés elérhető",
+    "whatsNew": "Újdonságok",
+    "noNotes": "Nincsenek megjegyzések",
+    "back": "Vissza"
+  },
+  "update": {
+    "title": "Szoftverfrissítés",
+    "current": "Telepített verzió",
+    "lastUpdated": "Utoljára frissítve",
+    "never": "még soha",
+    "check": "Frissítés keresése",
+    "checking": "Keresés…",
+    "upToDate": "Naprakész",
+    "available": "Új verzió érhető el: {version}",
+    "install": "Telepítés most",
+    "installHint": "A végén a box újraindul (1-2 perc).",
+    "downloading": "Letöltés…",
+    "installing": "Telepítés…",
+    "restarting": "Újraindulás…",
+    "error": "A frissítés nem sikerült",
+    "failedRollback": "A(z) {version} frissítés nem indult el, ezért automatikusan visszaálltunk. Próbáld újra, vagy várd meg a következő kiadást.",
+    "auto": "Automatikus frissítés",
+    "autoHint": "Éjszaka telepít, csak amikor semmi nem megy a TV-n.",
+    "osTitle": "Operációs rendszer",
+    "osAuto": "A biztonsági frissítések maguktól települnek a háttérben - nincs teendő.",
+    "rebootNeeded": "A rendszerfrissítések befejezéséhez újraindítás ajánlott.",
+    "rebootNow": "Újraindítás most",
+    "rebootNone": "Nincs függőben újraindítás."
+  },
+  "backup": {
+    "title": "Mentés és visszaállítás",
+    "hint": "A box beállításait (csatornák, fiókok, app-elrendezés) jelszóval titkosított fájlként mentheted a telefonodra - és onnan vissza is töltheted, akár egy újratelepített boxra.",
+    "start": "Mentés / visszaállítás telefonról (QR)",
+    "phoneTitle": "Mentés a telefonodon",
+    "phoneHint": "Olvasd be a QR-kódot a telefonoddal. Az oldalon letölthetsz egy titkosított mentést, vagy kiválaszthatsz egy korábbi fájlt a visszaállításhoz.",
+    "code": "Kód",
+    "restored": "Visszaállítva - a box most újraindul…",
+    "error": "Nem sikerült elindítani a telefonos munkamenetet"
+  }
+}

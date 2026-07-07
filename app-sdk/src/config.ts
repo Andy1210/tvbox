@@ -1,0 +1,88 @@
+// Launcher-side access to the shell config store (secret-free). The parental
+// PIN is verified server-side; the launcher only sees whether one is set.
+export interface PublicConfig {
+  iptv: {
+    mode: "xtream" | "m3u" | null;
+    xtream: { base: string; user: string } | null;
+    m3u: { url: string; epgUrl: string } | null;
+    configured: boolean;
+  };
+  parental: { pinSet: boolean; lockedGroups: string[] };
+  spotify: { deviceName: string; hasCredentials: boolean; enabled: boolean };
+  ambient: { enabled: boolean; idleMinutes: number; city: string };
+  update: { auto: boolean };
+}
+
+// null = the shell is unreachable - NOT the same as an unconfigured box. The
+// UI must offer retry instead of dropping the user into first-run onboarding
+// over a transient shell hiccup.
+export async function fetchConfig(): Promise<PublicConfig | null> {
+  try {
+    const res = await fetch("/tvbox/api/config", { cache: "no-store" });
+    if (!res.ok) throw new Error("HTTP " + res.status);
+    return (await res.json()) as PublicConfig;
+  } catch (e) {
+    console.warn("[launcher] /tvbox/api/config unavailable:", e);
+    return null;
+  }
+}
+
+export type IptvInput =
+  | { mode: "xtream"; xtream: { base: string; user: string; pass: string } }
+  | { mode: "m3u"; m3u: { url: string; epgUrl: string } };
+
+export async function saveIptv(iptv: IptvInput): Promise<PublicConfig> {
+  const res = await fetch("/tvbox/api/config", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ iptv }),
+  });
+  const data = await res.json();
+  return data.config as PublicConfig;
+}
+
+export async function saveParental(p: { pin?: string; lockedGroups?: string[] }): Promise<PublicConfig> {
+  const res = await fetch("/tvbox/api/config", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ parental: p }),
+  });
+  const data = await res.json();
+  return data.config as PublicConfig;
+}
+
+export type AmbientInput = Partial<{ enabled: boolean; idleMinutes: number; city: string }>;
+export async function saveAmbient(ambient: AmbientInput): Promise<PublicConfig> {
+  const res = await fetch("/tvbox/api/config", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ ambient }),
+  });
+  const data = await res.json();
+  return data.config as PublicConfig;
+}
+
+// OTA auto-update toggle (the feed URL itself is box-local, not a UI concern).
+export async function saveUpdate(update: { auto: boolean }): Promise<PublicConfig> {
+  const res = await fetch("/tvbox/api/config", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ update }),
+  });
+  const data = await res.json();
+  return data.config as PublicConfig;
+}
+
+export async function verifyPin(pin: string): Promise<boolean> {
+  try {
+    const res = await fetch("/tvbox/api/parental/verify", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ pin }),
+    });
+    const data = await res.json();
+    return !!data.ok;
+  } catch {
+    return false;
+  }
+}

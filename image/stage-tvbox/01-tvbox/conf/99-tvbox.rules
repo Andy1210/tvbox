@@ -1,0 +1,4 @@
+# tvbox: let the box user's CEC->uinput remote bridge run without root
+# KEEP IN SYNC with the heredoc in deploy/provision.sh (SSH installs write that).
+KERNEL=="uinput", GROUP="input", MODE="0660", OPTIONS+="static_node=uinput"
+SUBSYSTEM=="cec", GROUP="video", MODE="0660"

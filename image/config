@@ -1,0 +1,17 @@
+# pi-gen config for LOCAL image builds (CI passes the same values as
+# usimd/pi-gen-action inputs - keep the two in sync). See docs/sd-image.md.
+IMG_NAME=tvbox
+RELEASE=trixie
+ARM64=1
+STAGE_LIST="stage0 stage1 stage2 stage-tvbox"
+FIRST_USER_NAME=tv
+# fixed user, no first-boot rename wizard (a TV box has no keyboard); the
+# account password ends up LOCKED - greetd autologin doesn't need one, and SSH
+# stays unusable until the owner sets a password.
+DISABLE_FIRST_BOOT_USER_RENAME=1
+# pi-gen refuses DISABLE_FIRST_BOOT_USER_RENAME without a password, so feed it
+# a random throwaway - stage-tvbox locks the account right after (passwd -l),
+# so no build ever ships a usable password. (head|base64: pipefail-safe.)
+FIRST_USER_PASS="$(head -c 24 /dev/urandom | base64)"
+ENABLE_SSH=1
+DEPLOY_COMPRESSION=xz

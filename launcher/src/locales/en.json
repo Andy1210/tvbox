@@ -1,0 +1,226 @@
+{
+  "_meta": {
+    "name": "English",
+    "tag": "en-GB"
+  },
+  "home": {
+    "apps": "Apps",
+    "comingSoon": "{name} - coming soon",
+    "comingSoonBadge": "Coming soon",
+    "bridgeMissing": "Shell bridge unavailable",
+    "needs": "needs {dep}",
+    "install": "Install",
+    "installingBadge": "Installing…",
+    "installing": "Installing {name}…",
+    "installed": "{name} installed",
+    "installFailed": "Couldn't install {name}",
+    "setupNeeded": "{name} needs setup - open Settings",
+    "getMore": "Get more apps"
+  },
+  "greeting": {
+    "night": "Good night",
+    "morning": "Good morning",
+    "day": "Good afternoon",
+    "evening": "Good evening"
+  },
+  "settings": {
+    "title": "Settings",
+    "language": "Language",
+    "wifi": "WiFi"
+  },
+  "settingsCat": {
+    "general": "General",
+    "av": "Video & audio",
+    "network": "Network",
+    "peripherals": "Peripherals",
+    "apps": "Apps",
+    "ambient": "Ambient",
+    "store": "App Store",
+    "system": "System & updates"
+  },
+  "wifi": {
+    "connectedTo": "connected · {ssid}",
+    "notConnected": "not connected",
+    "rescan": "Rescan",
+    "scanning": "Scanning…",
+    "connecting": "Connecting to {ssid}…",
+    "connected": "Connected to {ssid}",
+    "failed": "Couldn't connect to {ssid}",
+    "active": "on",
+    "none": "No networks found",
+    "passwordFor": "Password - {ssid}",
+    "ethernet": "Ethernet",
+    "ethConnected": "connected"
+  },
+  "display": {
+    "title": "Display",
+    "resolution": "Resolution",
+    "choose": "Choose resolution",
+    "active": "active",
+    "none": "No modes available",
+    "applying": "Applying…",
+    "failed": "Couldn't switch mode",
+    "matchFramerate": "Match content framerate",
+    "matchHint": "Plays 50fps content more smoothly on 60Hz (mpv).",
+    "on": "On",
+    "off": "Off"
+  },
+  "notify": {
+    "dismiss": "Back to dismiss"
+  },
+  "power": {
+    "title": "Power",
+    "sleep": "Sleep",
+    "sleepHint": "Display off - turn the TV on to wake",
+    "restart": "Restart",
+    "shutdown": "Shut down",
+    "shutdownHint": "Needs power cycling to turn back on",
+    "confirmRestart": "Restart the box?",
+    "confirmShutdown": "Shut down the box?",
+    "yes": "Yes",
+    "cancel": "Cancel"
+  },
+  "ambient": {
+    "title": "Ambient screen",
+    "enable": "Turn on when idle",
+    "idle": "Idle (minutes)",
+    "city": "City (weather)",
+    "cityPrompt": "City for weather",
+    "notSet": "not set",
+    "photosUpload": "Upload wallpapers (QR)",
+    "photosClear": "Clear all",
+    "photosCount": "{n} photos",
+    "photosManage": "Select a photo to delete",
+    "photosTitle": "Upload wallpapers",
+    "photosHint": "Scan the QR with your phone and pick photos - they upload resized.",
+    "photosDone": "Done",
+    "dismiss": "Press any key to exit",
+    "wx": {
+      "clear": "Clear",
+      "cloudy": "Cloudy",
+      "fog": "Fog",
+      "rain": "Rain",
+      "snow": "Snow",
+      "storm": "Storm"
+    }
+  },
+  "bt": {
+    "title": "Bluetooth",
+    "scan": "Scan",
+    "scanning": "Scanning…",
+    "working": "Working…",
+    "none": "No devices - scan to find some",
+    "off": "Bluetooth is off",
+    "connected": "connected",
+    "paired": "paired",
+    "pair": "Pair",
+    "remove": "Remove",
+    "pairing": "Pairing {name}…",
+    "failed": "Failed: {name}"
+  },
+  "appsettings": {
+    "title": "Apps",
+    "hint": "Reorder or hide apps on the home screen.",
+    "hide": "Hide",
+    "show": "Show",
+    "none": "No apps",
+    "getMore": "\"Get more apps\" tile",
+    "uninstall": "Uninstall",
+    "uninstalled": "{name} removed",
+    "uninstallFailed": "Couldn't remove {name}"
+  },
+  "catalog": {
+    "title": "Get more apps"
+  },
+  "audio": {
+    "title": "Audio",
+    "auto": "Automatic",
+    "autoHint": "Auto-detect the HDMI output",
+    "default": "default",
+    "volume": "Volume",
+    "muted": "muted",
+    "none": "No outputs available"
+  },
+  "about": {
+    "title": "Diagnostics",
+    "refresh": "Refresh",
+    "version": "Version",
+    "device": "Device",
+    "ip": "IP address",
+    "wifi": "WiFi",
+    "cpuTemp": "CPU temperature",
+    "uptime": "Uptime",
+    "memory": "Memory (free/total)",
+    "unitD": "d",
+    "unitH": "h",
+    "unitM": "m"
+  },
+  "livetv": {
+    "error": "Couldn't load channels",
+    "phoneSetupTitle": "Set up from your phone",
+    "phoneSetupHint": "Scan the QR with your phone (or open the address in a browser), then enter your IPTV details.",
+    "phoneSetupCode": "Code"
+  },
+  "app": {
+    "shellUnreachable": "Can't reach the box",
+    "shellUnreachableHint": "The tvbox service didn't answer. It may still be starting - try again in a moment.",
+    "retry": "Try again"
+  },
+  "store": {
+    "title": "App Store",
+    "hint": "Community apps from the tvbox-apps registry. Installing adds the app to your home screen; binaries it needs are installed separately (tvbox deps).",
+    "loading": "Loading the registry…",
+    "registryError": "The app registry is unreachable",
+    "empty": "No apps in the registry yet",
+    "builtin": "Built in",
+    "setUrl": "Set address",
+    "urlPrompt": "Server address for {name}",
+    "urlMissing": "server address not set",
+    "urlSaved": "{name}: address saved",
+    "installed": "{name} installed - it's on your home screen",
+    "removed": "{name} removed",
+    "failed": "{name}: action failed",
+    "update": "Update",
+    "updated": "{name} updated",
+    "version": "Version {v}",
+    "installedLatest": "Installed v{installed} · Latest v{latest}",
+    "updateAvailableBadge": "Update available",
+    "whatsNew": "What's new",
+    "noNotes": "No release notes",
+    "back": "Back"
+  },
+  "update": {
+    "title": "Software update",
+    "current": "Installed version",
+    "lastUpdated": "Last updated",
+    "never": "never",
+    "check": "Check for updates",
+    "checking": "Checking…",
+    "upToDate": "Up to date",
+    "available": "Update available: {version}",
+    "install": "Install now",
+    "installHint": "The box restarts at the end (a minute or two).",
+    "downloading": "Downloading…",
+    "installing": "Installing…",
+    "restarting": "Restarting…",
+    "error": "The update failed",
+    "failedRollback": "Update {version} didn't start up and was rolled back automatically. Try again, or wait for the next release.",
+    "auto": "Automatic updates",
+    "autoHint": "Installs overnight, only while nothing is playing.",
+    "osTitle": "Operating system",
+    "osAuto": "Security updates install themselves in the background - no action needed.",
+    "rebootNeeded": "A restart is recommended to finish system updates.",
+    "rebootNow": "Restart now",
+    "rebootNone": "No restart pending."
+  },
+  "backup": {
+    "title": "Backup & restore",
+    "hint": "Save the box's settings (channels, accounts, app layout) to your phone as a password-encrypted file - and restore them from there, even onto a re-flashed box.",
+    "start": "Backup / restore on phone (QR)",
+    "phoneTitle": "Backup on your phone",
+    "phoneHint": "Scan the QR with your phone. On the page you can download an encrypted backup, or pick a saved file to restore.",
+    "code": "Code",
+    "restored": "Restored - the box restarts now…",
+    "error": "Couldn't start the phone session"
+  }
+}

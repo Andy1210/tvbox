@@ -1,0 +1,9 @@
+# build output / generated / vendored - never hand-formatted
+node_modules/
+shell/launcher-dist/
+shell/apps-data/
+shell/electron-web-client/
+launcher/dist/
+launcher/dist-demo/
+package-lock.json
+image/stage-tvbox/01-tvbox/files/

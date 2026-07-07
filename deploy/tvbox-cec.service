@@ -1,0 +1,14 @@
+# tvbox CEC remote -> uinput bridge - systemd USER unit (no root: /dev/uinput
+# and /dev/cec* access comes from the udev rule + input/video group membership
+# set up by provision.sh). Installed to ~/.config/systemd/user/ by deploy.sh;
+# starts at boot via `loginctl enable-linger`.
+[Unit]
+Description=tvbox CEC remote -> uinput bridge
+
+[Service]
+ExecStart=/usr/bin/python3 %h/.tvbox/cec_uinput_bridge.py
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=default.target

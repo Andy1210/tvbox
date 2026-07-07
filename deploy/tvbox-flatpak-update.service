@@ -1,0 +1,9 @@
+# tvbox: update the user-scope flatpaks (app bundles installed from the UI,
+# e.g. Plex). User service - flatpak --user needs no root. Triggered by
+# tvbox-flatpak-update.timer; harmless no-op when nothing is installed.
+[Unit]
+Description=tvbox: update user flatpaks
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/flatpak update --user --noninteractive --assumeyes

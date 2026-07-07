@@ -1,0 +1,186 @@
+<!doctype html>
+<html lang="{{lang}}">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>{{title}}</title>
+    <style>
+      :root {
+        color-scheme: dark;
+      }
+      body {
+        margin: 0;
+        background: #0b0f14;
+        color: #f4f6fa;
+        font:
+          16px/1.5 system-ui,
+          sans-serif;
+        padding: 24px;
+        max-width: 520px;
+        margin: auto;
+      }
+      h1 {
+        font-size: 20px;
+      }
+      p {
+        color: #aab4c2;
+        font-size: 14px;
+      }
+      .card {
+        background: #11161d;
+        border: 1px solid #1f2733;
+        border-radius: 14px;
+        padding: 18px;
+        margin-top: 18px;
+      }
+      h2 {
+        font-size: 16px;
+        margin: 0 0 6px;
+      }
+      input[type="password"] {
+        width: 100%;
+        box-sizing: border-box;
+        padding: 13px;
+        border-radius: 10px;
+        border: 1px solid #2a3442;
+        background: #0b0f14;
+        color: #f4f6fa;
+        font-size: 16px;
+        margin-top: 10px;
+      }
+      .btn {
+        display: block;
+        width: 100%;
+        box-sizing: border-box;
+        text-align: center;
+        padding: 15px;
+        border: 0;
+        border-radius: 12px;
+        background: #1f6feb;
+        color: #fff;
+        font-size: 16px;
+        font-weight: 700;
+        margin-top: 12px;
+        cursor: pointer;
+      }
+      .btn.alt {
+        background: #238636;
+      }
+      .file {
+        display: block;
+        text-align: center;
+        padding: 13px;
+        border-radius: 10px;
+        border: 1px dashed #2a3442;
+        color: #aab4c2;
+        margin-top: 10px;
+      }
+      .st {
+        margin-top: 10px;
+        font-size: 14px;
+        color: #7d8a99;
+        min-height: 1.4em;
+      }
+      .ok {
+        color: #3fb950;
+      }
+      .err {
+        color: #f85149;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>{{title}}</h1>
+    <p>{{hint}}</p>
+
+    <div class="card">
+      <h2>{{saveTitle}}</h2>
+      <p>{{saveHint}}</p>
+      <input id="sp" type="password" placeholder="{{password}}" autocomplete="new-password" />
+      <button class="btn" id="save">{{saveBtn}}</button>
+      <div class="st" id="sst"></div>
+    </div>
+
+    <div class="card">
+      <h2>{{restoreTitle}}</h2>
+      <p>{{restoreHint}}</p>
+      <label class="file" for="rf" id="rfl">{{pickFile}}</label>
+      <input id="rf" type="file" accept=".tvbackup,application/json" style="display: none" />
+      <input id="rp" type="password" placeholder="{{password}}" autocomplete="current-password" />
+      <button class="btn alt" id="restore">{{restoreBtn}}</button>
+      <div class="st" id="rst"></div>
+    </div>
+
+    <script>
+      var code = new URLSearchParams(location.search).get("c") || "";
+      function st(el, msg, cls) {
+        el.textContent = msg;
+        el.className = "st" + (cls ? " " + cls : "");
+      }
+      var sst = document.getElementById("sst"),
+        rst = document.getElementById("rst");
+
+      document.getElementById("save").onclick = async function () {
+        var pw = document.getElementById("sp").value;
+        if (pw.length < 4) {
+          st(sst, "{{passShort}}", "err");
+          return;
+        }
+        st(sst, "{{working}}");
+        try {
+          var r = await fetch("/backup-file", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ code: code, password: pw }),
+          });
+          var d = await r.json();
+          if (!d.ok) throw 0;
+          var blob = new Blob([JSON.stringify(d.envelope)], { type: "application/octet-stream" });
+          var a = document.createElement("a");
+          a.href = URL.createObjectURL(blob);
+          a.download = "tvbox-{{host}}-" + new Date().toISOString().slice(0, 10) + ".tvbackup";
+          document.body.appendChild(a);
+          a.click();
+          a.remove();
+          st(sst, "{{saved}}", "ok");
+        } catch (_) {
+          st(sst, "{{error}}", "err");
+        }
+      };
+
+      var file = null;
+      document.getElementById("rf").addEventListener("change", function (e) {
+        file = (e.target.files || [])[0] || null;
+        if (file) document.getElementById("rfl").textContent = file.name;
+      });
+      document.getElementById("restore").onclick = async function () {
+        if (!file) {
+          st(rst, "{{noFile}}", "err");
+          return;
+        }
+        var pw = document.getElementById("rp").value;
+        if (pw.length < 4) {
+          st(rst, "{{passShort}}", "err");
+          return;
+        }
+        st(rst, "{{working}}");
+        try {
+          var envelope = JSON.parse(await file.text());
+          var r = await fetch("/restore", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ code: code, password: pw, envelope: envelope }),
+          });
+          var d = await r.json();
+          if (d.ok) {
+            st(rst, "{{restored}}", "ok");
+          } else {
+            st(rst, d.error === "password" ? "{{wrongPassword}}" : "{{error}}", "err");
+          }
+        } catch (_) {
+          st(rst, "{{error}}", "err");
+        }
+      };
+    </script>
+  </body>
+</html>

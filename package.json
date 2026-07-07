@@ -1,0 +1,26 @@
+{
+  "name": "tvbox",
+  "private": true,
+  "description": "Repo-level tooling only (lint/format standard) - the shell and the launcher have their own package.json.",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Andy1210/tvbox"
+  },
+  "scripts": {
+    "lint": "eslint .",
+    "lint:fix": "eslint . --fix",
+    "format": "prettier --write .",
+    "format:check": "prettier --check ."
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.39.0",
+    "eslint": "^9.39.0",
+    "eslint-config-prettier": "^10.1.0",
+    "eslint-plugin-react-hooks": "^7.1.0",
+    "globals": "^16.0.0",
+    "prettier": "^3.8.0",
+    "typescript": "^6.0.0",
+    "typescript-eslint": "^8.46.0"
+  }
+}

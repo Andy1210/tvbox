@@ -1,0 +1,8 @@
+#!/bin/sh
+# tvbox app CLI launcher (installed to ~/.tvbox/tvbox, symlinked to
+# ~/.local/bin/tvbox by deploy.sh). Follows the OTA `current` symlink so the
+# CLI always matches the running shell; falls back to the dev tree.
+if [ -f "$HOME/.tvbox/current/shell/cli.js" ]; then
+  exec node "$HOME/.tvbox/current/shell/cli.js" "$@"
+fi
+exec node "$HOME/.tvbox/shell/cli.js" "$@"

@@ -1,0 +1,7 @@
+// tvbox: allow netdev users to manage connections (WiFi settings on the TV)
+// KEEP IN SYNC with the heredoc in deploy/provision.sh (SSH installs write that).
+polkit.addRule(function (action, subject) {
+  if (action.id.indexOf("org.freedesktop.NetworkManager.") === 0 && subject.isInGroup("netdev")) {
+    return polkit.Result.YES;
+  }
+});

@@ -1,0 +1,160 @@
+@import "tailwindcss";
+
+/* The shared @tvbox/app-sdk components (Osk, PinPad, FocusButton, …) live outside
+   this project's src/, so Tailwind must be told to scan them or their utility
+   classes get purged from the build. */
+@source "../../app-sdk/src";
+
+/* tvbox design tokens (10-foot UI). Per-app accent colors are applied inline
+   from each manifest; these are the shared shell colors + type. */
+@theme {
+  --color-bg-0: #05070a;
+  --color-bg-1: #0c1219;
+  --color-fg: #f4f6fa;
+  --color-fg-dim: #8a96a6;
+  --color-focus: #ffffff;
+  --font-sans: "Inter", "Segoe UI", system-ui, -apple-system, Roboto, sans-serif;
+}
+
+@layer base {
+  html,
+  body,
+  #root {
+    height: 100%;
+  }
+  body {
+    margin: 0;
+    background: radial-gradient(120% 100% at 50% -10%, var(--color-bg-1) 0%, var(--color-bg-0) 60%);
+    color: var(--color-fg);
+    font-family: var(--font-sans);
+    overflow: hidden;
+    cursor: none; /* TV: hidden by default (D-pad); shown when a mouse actually moves */
+    -webkit-user-select: none;
+    user-select: none;
+  }
+  /* main.tsx adds .cursor-on for ~2.5s after real mouse movement, so a connected
+     mouse is usable but an idle pointer never sits on screen */
+  html.cursor-on body,
+  html.cursor-on body * {
+    cursor: auto !important;
+  }
+  /* hide scrollbars on the app rails */
+  .no-scrollbar {
+    scrollbar-width: none;
+  }
+  .no-scrollbar::-webkit-scrollbar {
+    display: none;
+  }
+  /* custom dark scrollbar (the default is ugly on a 10-foot UI) */
+  ::-webkit-scrollbar {
+    width: 0.9vh;
+    height: 0.9vh;
+  }
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: rgba(255, 255, 255, 0.16);
+    border-radius: 999px;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: rgba(255, 255, 255, 0.28);
+  }
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: rgba(255, 255, 255, 0.16) transparent;
+  }
+  /* video mode: the shell toggles html.tvbox-video while mpv plays behind the
+     transparent window, so the launcher must let it show through */
+  html.tvbox-video,
+  html.tvbox-video body,
+  html.tvbox-video #root {
+    background: transparent !important;
+  }
+
+  /* Ambient backdrop (Backdrop.tsx): two slowly drifting colour glows + a
+     layer tinted by the focused tile's accent + an edge vignette. Pi-friendly:
+     pre-soft radial gradients, transform-only animation, no filter blur. */
+  :root {
+    --tile-accent: #4152d8; /* Tile.tsx sets this to the focused app's accent */
+  }
+  .tv-backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: -1; /* above the body background, below all content */
+    overflow: hidden;
+    pointer-events: none;
+  }
+  html.tvbox-video .tv-backdrop {
+    display: none; /* never paint over mpv showing through the window */
+  }
+  /* One continuous, full-screen colour field - no bands, no dark gaps: three
+     HUGE overlapping gradients (indigo upper-left, teal lower-right, a faint
+     violet lower-left) whose tails cross mid-screen, so every corner is gently
+     lit and the hues blend diagonally. Peaks are low; the wash stays subtle.
+     Layers are oversized (inset -15%) so the slow sway never exposes an edge. */
+  .tv-backdrop-glow {
+    position: absolute;
+    inset: -15%;
+    will-change: transform;
+  }
+  .tv-backdrop-a {
+    background: radial-gradient(
+      80% 80% at 20% 15%,
+      rgba(65, 82, 216, 0.24),
+      rgba(65, 82, 216, 0.08) 50%,
+      transparent 88%
+    );
+    animation: tv-sway-a 75s ease-in-out infinite alternate;
+  }
+  .tv-backdrop-b {
+    background: radial-gradient(
+      85% 85% at 82% 88%,
+      rgba(13, 150, 168, 0.22),
+      rgba(13, 150, 168, 0.07) 50%,
+      transparent 88%
+    );
+    animation: tv-sway-b 95s ease-in-out infinite alternate;
+  }
+  .tv-backdrop-c {
+    background: radial-gradient(
+      70% 70% at 12% 90%,
+      rgba(122, 82, 216, 0.13),
+      rgba(122, 82, 216, 0.04) 55%,
+      transparent 85%
+    );
+  }
+  /* whole-screen accent tint, slightly stronger around the rail -
+     background-color transitions when Tile.tsx flips --tile-accent */
+  .tv-backdrop-accent {
+    position: absolute;
+    inset: 0;
+    background-color: var(--tile-accent);
+    opacity: 0.1;
+    transition: background-color 900ms ease;
+    -webkit-mask-image: radial-gradient(90% 75% at 50% 58%, black, transparent 96%);
+    mask-image: radial-gradient(90% 75% at 50% 58%, black, transparent 96%);
+  }
+  /* barely-there edge falloff - kept wide and weak so it never reads as a band */
+  .tv-backdrop-vignette {
+    position: absolute;
+    inset: 0;
+    background: radial-gradient(135% 120% at 50% 48%, transparent 58%, rgba(0, 0, 0, 0.3) 100%);
+  }
+  @keyframes tv-sway-a {
+    from {
+      transform: translate3d(-2.5%, 0.5%, 0) scale(1);
+    }
+    to {
+      transform: translate3d(2.5%, -0.5%, 0) scale(1.06);
+    }
+  }
+  @keyframes tv-sway-b {
+    from {
+      transform: translate3d(2%, -0.5%, 0) scale(1.05);
+    }
+    to {
+      transform: translate3d(-2.5%, 0.5%, 0) scale(1);
+    }
+  }
+}

@@ -1,0 +1,13 @@
+{
+  "name": "@tvbox/app-sdk",
+  "private": true,
+  "type": "module",
+  "version": "0.0.0",
+  "peerDependencies": {
+    "react": ">=19",
+    "react-dom": ">=19",
+    "zustand": ">=5",
+    "@noriginmedia/norigin-spatial-navigation": ">=3",
+    "qrcode": ">=1"
+  }
+}

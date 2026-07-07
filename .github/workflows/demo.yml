@@ -1,0 +1,42 @@
+# Publishes the browser demo (launcher built with --mode demo: mocked shell
+# API, no real box needed) to GitHub Pages: https://andy1210.github.io/tvbox/
+name: demo
+on:
+  push:
+    branches: [main, master]
+    paths:
+      - "launcher/**"
+      - ".github/workflows/demo.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    defaults: { run: { working-directory: launcher } }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: npm, cache-dependency-path: launcher/package-lock.json }
+      - run: npm ci --no-audit --no-fund
+      - run: npm run build:demo
+      - uses: actions/upload-pages-artifact@v3
+        with: { path: launcher/dist-demo }
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

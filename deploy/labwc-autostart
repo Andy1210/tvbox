@@ -1,0 +1,30 @@
+#!/bin/sh
+# tvbox session autostart (installed to ~/.config/labwc/autostart).
+# Replaces the LXDE-pi desktop session: no panel, no file-manager, no Kodi -
+# just the tvbox Electron shell.
+command -v kanshi >/dev/null 2>&1 && kanshi 2>/dev/null &      # keep output/HDMI config (optional)
+sh "$HOME/.tvbox/shell/audio-default.sh" >/dev/null 2>&1 &   # route audio to HDMI
+
+# Solid-black background layer BEHIND the Electron shell. The shell is fullscreen
+# always-on-top, so this is normally hidden - but when the shell restarts (e.g.
+# after installing/updating an app) there's a ~1s gap where it would otherwise
+# expose the Pi desktop/wallpaper. swaybg keeps that gap black. Best-effort: if
+# swaybg isn't installed the session is unchanged.
+command -v swaybg >/dev/null 2>&1 && swaybg -c '#000000' >/dev/null 2>&1 &
+
+# The Pi desktop (panel + file-manager/wallpaper/icons) never starts: provision.sh
+# replaces the system labwc autostart (/etc/xdg/labwc/autostart) so there's
+# nothing to kill here - no race, and nothing to flash behind the shell on a
+# restart. (Belt: swaybg above keeps the screen black even if that override is
+# somehow missing on an un-provisioned box.)
+
+# The tvbox shell, respawned on crash. Self-contained POSIX respawn loop - do
+# NOT depend on the Pi desktop's /usr/bin/lwrespawn helper: the flashable image
+# is Raspberry Pi OS *Lite* + our own labwc, and lwrespawn ships with the
+# desktop session, which Lite doesn't have. Relying on it left a freshly flashed
+# box at a black screen (labwc up, cursor + black swaybg, but nothing ever
+# launched the shell). A plain loop needs no extra package and keeps the OTA
+# rollback contract: run-shell.sh exec's Electron, so when Electron exits/crashes
+# run-shell.sh exits, we re-run it and its own attempt counter / rollback runs -
+# exactly what lwrespawn gave us. (On a full-desktop deploy this behaves the same.)
+( while :; do "$HOME/.tvbox/run-shell.sh"; sleep 1; done ) &
