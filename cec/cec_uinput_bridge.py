@@ -55,6 +55,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import shutil
 import stat
 import subprocess
 import threading
@@ -103,7 +104,6 @@ SHIM_SO = os.path.expanduser("~/.tvbox/cec_vendor_shim.so")
 # param 00=on, 01=standby, 02=transition->on, 03=transition->standby.
 RX_PWR = re.compile(r">> 0[0-9a-f]:90:([0-9a-f]{2})", re.IGNORECASE)
 RX_STANDBY = re.compile(r">> 0f:36", re.IGNORECASE)   # TV broadcasts <Standby> on power-off
-RAW_LOG = os.path.expanduser("~/.tvbox/cec_raw.log")  # full cec-client output (truncated each start)
 # When the TV powers off, tell the shell to stop playback (so a stream doesn't
 # keep running on a dark screen). Best-effort, fire-and-forget.
 STANDBY_URL = "http://127.0.0.1:8097/tvbox/api/tv/standby"
@@ -300,8 +300,16 @@ def main() -> None:
 
     ui = UInput({e.EV_KEY: ALL_KEYS}, name="tvbox-cec-remote")
     print("uinput device created: tvbox-cec-remote", flush=True)
+    # cec-client is a C program: with its stdout on a pipe (not a TTY) glibc
+    # block-buffers it, so at -d 8 the key frames leave in ~4 KB lumps and the UI
+    # catches up in bursts under rapid presses - "the remote piles up / jams"
+    # while a keyboard (which never goes through this pipe) stays smooth. stdbuf
+    # forces line buffering so each frame is delivered the instant cec-client
+    # logs it. stdbuf appends libstdbuf.so to LD_PRELOAD, so the LG vendor shim
+    # (also LD_PRELOAD, via env) still loads alongside it.
+    launch = ["stdbuf", "-oL", *CEC_CLIENT] if shutil.which("stdbuf") else CEC_CLIENT
     proc = subprocess.Popen(
-        CEC_CLIENT,
+        launch,
         stdin=subprocess.PIPE,
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
@@ -315,11 +323,8 @@ def main() -> None:
     bridge = Bridge(ui)
     print("bridging keys (tap Back=Esc, double-tap Back=Home)", flush=True)
 
-    raw = open(RAW_LOG, "w")  # full cec-client output, for debugging
     try:
         for line in proc.stdout:
-            raw.write(line)
-            raw.flush()
             mp = RX_PRESS.search(line)
             if mp:
                 bridge.on_press(int(mp.group(1), 16))
@@ -354,7 +359,6 @@ def main() -> None:
     finally:
         proc.terminate()
         ui.close()
-        raw.close()
 
 
 if __name__ == "__main__":
