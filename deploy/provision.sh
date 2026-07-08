@@ -122,6 +122,23 @@ polkit.addRule(function(action, subject) {
 RULES
 ok "polkit rule (netdev -> NetworkManager)"
 
+# Timezone + keyboard layout from the box user (first-boot wizard + Settings).
+# set-timezone is already allowed for an active local session; set-keyboard /
+# set-locale require admin auth by default, so grant them to an active session
+# or netdev (headless/SSH). Kept in sync with conf/51-tvbox-locale.rules.
+cat > /etc/polkit-1/rules.d/51-tvbox-locale.rules <<'RULES'
+// tvbox: allow the box user to set timezone + keyboard layout (setup wizard)
+polkit.addRule(function(action, subject) {
+    if ((action.id == "org.freedesktop.locale1.set-keyboard" ||
+         action.id == "org.freedesktop.locale1.set-locale" ||
+         action.id == "org.freedesktop.timedate1.set-timezone") &&
+        (subject.active || subject.isInGroup("netdev"))) {
+        return polkit.Result.YES;
+    }
+});
+RULES
+ok "polkit rule (timezone + keymap)"
+
 echo "==> user-service lingering (CEC bridge starts at boot, before login)"
 loginctl enable-linger "$TVBOX_USER" 2>/dev/null && ok "linger enabled for $TVBOX_USER" || warn "enable-linger failed"
 

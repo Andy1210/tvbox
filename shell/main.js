@@ -6,7 +6,7 @@
 // (preload.js); the remote Home button returns to the launcher from anywhere.
 // Run: electron . --ozone-platform=wayland --no-sandbox
 const { app, BrowserWindow, ipcMain } = require("electron");
-const { spawn, execFile } = require("child_process");
+const { spawn, execFile, execFileSync } = require("child_process");
 const http = require("http");
 const net = require("net");
 const fs = require("fs");
@@ -498,6 +498,12 @@ function handlePost(p, data, res) {
   if (p === "/tvbox/api/wifi/connect") {
     return wifiConnect(String(data.ssid || ""), String(data.password || ""), (r) => jsonRes(res, r));
   }
+  if (p === "/tvbox/api/system/timezone") {
+    return setTimezone(String(data.timezone || ""), (r) => jsonRes(res, r));
+  }
+  if (p === "/tvbox/api/system/keymap") {
+    return setKeymap(String(data.keymap || ""), (r) => jsonRes(res, r));
+  }
   res.writeHead(404, { "Content-Type": "text/plain" });
   res.end("not found");
 }
@@ -616,6 +622,44 @@ function ethernetStatus(cb) {
       cb({ connected: true, ip: m ? m[1].trim() : "", device: dev });
     });
   });
+}
+// System region for the first-boot wizard + Settings: current timezone + the
+// full zone list, and the current X11 keymap + the layout list. The launcher
+// groups timezones by region (Europe/Budapest -> Europe > Budapest). Reads are
+// fast + rare (wizard/Settings open only), so a brief sync call is fine.
+function systemRegion(cb) {
+  const out = { timezone: "", timezones: [], keymap: "", keymaps: [] };
+  const lines = (s) =>
+    String(s)
+      .split("\n")
+      .map((x) => x.trim())
+      .filter(Boolean);
+  try {
+    out.timezone = String(execFileSync("timedatectl", ["show", "-p", "Timezone", "--value"], { timeout: 5000 })).trim();
+    out.timezones = lines(execFileSync("timedatectl", ["list-timezones"], { timeout: 5000 }));
+    const st = String(execFileSync("localectl", ["status"], { timeout: 5000 }));
+    const km = /X11 Layout:\s*(\S+)/.exec(st);
+    out.keymap = km ? km[1] : "";
+    out.keymaps = lines(execFileSync("localectl", ["list-x11-keymap-layouts"], { timeout: 5000 }));
+  } catch (e) {
+    console.warn("[region]", e.message);
+  }
+  cb(out);
+}
+// timedatectl set-timezone works from the box user's active session (polkit
+// allows timedate1.set-timezone). localectl set-x11-keymap needs the locale1
+// polkit grant provision installs (auth is required by default).
+function setTimezone(tz, cb) {
+  if (!/^[A-Za-z0-9_+/-]{1,64}$/.test(tz)) return cb({ ok: false, error: "bad timezone" });
+  execFile("timedatectl", ["set-timezone", tz], { timeout: 8000 }, (e) =>
+    cb(e ? { ok: false, error: String(e.message || e).slice(0, 120) } : { ok: true }),
+  );
+}
+function setKeymap(layout, cb) {
+  if (!/^[a-z0-9,_-]{1,32}$/.test(layout)) return cb({ ok: false, error: "bad layout" });
+  execFile("localectl", ["set-x11-keymap", layout], { timeout: 8000 }, (e) =>
+    cb(e ? { ok: false, error: String(e.message || e).slice(0, 120) } : { ok: true }),
+  );
 }
 function wifiList(cb) {
   execFile(
@@ -824,6 +868,10 @@ function serve() {
     }
     if (p === "/tvbox/api/wifi/status") {
       wifiStatus((s) => ethernetStatus((eth) => jsonRes(res, { ...s, ethernet: eth })));
+      return;
+    }
+    if (p === "/tvbox/api/system/region") {
+      systemRegion((r) => jsonRes(res, r));
       return;
     }
     if (p === "/tvbox/api/wifi/list") {

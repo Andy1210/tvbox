@@ -23,7 +23,7 @@ install -m 644 files/labwc-autostart files/provision.sh files/tvbox-cec.service 
 
 # 2) device access + polkit + OS auto-updates (no auto-reboot) - see conf/
 install -m 644 conf/99-tvbox.rules "${ROOTFS_DIR}/etc/udev/rules.d/"
-install -m 644 conf/50-tvbox-networkmanager.rules "${ROOTFS_DIR}/etc/polkit-1/rules.d/"
+install -m 644 conf/50-tvbox-networkmanager.rules conf/51-tvbox-locale.rules "${ROOTFS_DIR}/etc/polkit-1/rules.d/"
 install -m 644 conf/20auto-upgrades conf/52tvbox-unattended-upgrades "${ROOTFS_DIR}/etc/apt/apt.conf.d/"
 
 # 2b) WiFi usable on a fresh boot with NO ethernet and NO keyboard. This image
