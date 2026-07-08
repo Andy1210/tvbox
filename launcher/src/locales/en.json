@@ -185,6 +185,7 @@
     "version": "Version {v}",
     "installedLatest": "Installed v{installed} · Latest v{latest}",
     "updateAvailableBadge": "Update available",
+    "screenshots": "Screenshots",
     "whatsNew": "What's new",
     "noNotes": "No release notes",
     "back": "Back"

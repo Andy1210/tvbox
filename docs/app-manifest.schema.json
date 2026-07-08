@@ -46,6 +46,12 @@
     "name": { "$ref": "#/$defs/localeString" },
     "tagline": { "$ref": "#/$defs/localeString" },
     "description": { "$ref": "#/$defs/localeString" },
+    "screenshots": {
+      "type": "array",
+      "items": { "type": "string", "format": "uri" },
+      "maxItems": 8,
+      "description": "Store-detail screenshots (https URLs, e.g. hosted in the registry repo)."
+    },
     "type": {
       "enum": ["webclient"],
       "description": "webclient = the shell serves/loads the app (a package's own local web/ bundle, the legacy root bundle, or a remote site). Apps are self-contained packages now; there are no launcher-compiled 'builtin' views."

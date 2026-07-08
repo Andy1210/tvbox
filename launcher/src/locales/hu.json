@@ -185,6 +185,7 @@
     "version": "Verzió {v}",
     "installedLatest": "Telepítve v{installed} · Legújabb v{latest}",
     "updateAvailableBadge": "Frissítés elérhető",
+    "screenshots": "Képernyőképek",
     "whatsNew": "Újdonságok",
     "noNotes": "Nincsenek megjegyzések",
     "back": "Vissza"

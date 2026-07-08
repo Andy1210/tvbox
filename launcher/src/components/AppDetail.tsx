@@ -33,6 +33,30 @@ function ChangelogEntry({ focusKey, version, notes }: { focusKey: string; versio
   );
 }
 
+// A store screenshot: a D-pad-focusable card so the remote can scroll a wide
+// gallery into view (like ChangelogEntry). The image is an external https URL
+// (hosted in the registry); a broken/offline URL just hides itself.
+function Screenshot({ focusKey, src }: { focusKey: string; src: string }) {
+  const { ref, focused } = useFocusableItem<HTMLDivElement>({ focusKey }, { block: "nearest", inline: "nearest" });
+  return (
+    <div
+      ref={ref}
+      className={[
+        "shrink-0 rounded-[1.1vh] overflow-hidden border-[0.3vh] transition-colors bg-black/30",
+        focused ? "border-focus" : "border-transparent",
+      ].join(" ")}
+    >
+      <img
+        src={src}
+        alt=""
+        loading="lazy"
+        className="h-[26vh] w-auto block"
+        onError={(e) => ((e.currentTarget.parentElement as HTMLElement).style.display = "none")}
+      />
+    </div>
+  );
+}
+
 // Shown while a store install runs: a localized phase line + an indeterminate
 // progress bar (the shell reports a coarse phase, not a percentage, so the bar
 // animates rather than fills). It replaces the action buttons; focus lives on
@@ -202,6 +226,18 @@ export function AppDetail({
           <div className="text-[1.8vh] text-fg-dim mt-[1.2vh]" role="status" aria-live="polite">
             {status}
           </div>
+        )}
+
+        {/* screenshots */}
+        {app.screenshots && app.screenshots.length > 0 && (
+          <>
+            <div className="text-[2.4vh] font-semibold mt-[3.5vh] mb-[1.4vh]">{t("store.screenshots")}</div>
+            <div className="flex gap-[1.5vw] overflow-x-auto no-scrollbar pb-[1vh] -mx-[1vw] px-[1vw]">
+              {app.screenshots.map((s, i) => (
+                <Screenshot key={i} focusKey={"detail-shot-" + i} src={s} />
+              ))}
+            </div>
+          </>
         )}
 
         {/* what's new */}

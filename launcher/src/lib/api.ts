@@ -67,6 +67,7 @@ export interface StoreEntry {
   name: import("./types").LocaleString;
   tagline?: import("./types").LocaleString;
   description?: import("./types").LocaleString | null; // longer store-detail copy
+  screenshots?: string[]; // https screenshot URLs for the store detail (may be [])
   icon: string;
   accent?: string;
   installed: boolean;

@@ -134,6 +134,7 @@ function listForUi(config) {
         name: m.name,
         tagline: m.tagline,
         description: m.description || null, // longer store-detail copy (string or {hu,en})
+        screenshots: Array.isArray(m.screenshots) ? m.screenshots.filter((s) => /^https:\/\//.test(s)) : [], // https-only
         icon: m.icon,
         accent: m.accent,
         installed,
