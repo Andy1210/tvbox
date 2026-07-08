@@ -133,6 +133,7 @@ function listForUi(config) {
         id: m.id,
         name: m.name,
         tagline: m.tagline,
+        description: m.description || null, // longer store-detail copy (string or {hu,en})
         icon: m.icon,
         accent: m.accent,
         installed,

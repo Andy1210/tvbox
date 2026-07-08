@@ -134,6 +134,12 @@ export function AppDetail({
           )}
         </div>
 
+        {app.description && (
+          <div className="text-[2.1vh] text-fg leading-[1.6] max-w-[72vw] mb-[2vh] whitespace-pre-line">
+            {loc(app.description)}
+          </div>
+        )}
+
         {hints.length > 0 && <div className="text-[1.7vh] text-amber-200 mb-[1.6vh]">{hints.join(" · ")}</div>}
 
         {/* actions - while an install runs, the progress indicator takes the
