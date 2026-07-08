@@ -77,12 +77,15 @@ export interface StoreEntry {
   baseUrl: string; // current value of that URL ("" = not set)
   missing: string[]; // binaries the app needs but the box lacks (tvbox deps <id>)
   changelog: { version: string; notes: string }[]; // release notes, newest version first (English, from the manifest)
+  installing: boolean; // a full install (deps + bundle) is currently running in the background
+  progress: { phase: string } | null; // install phase while installing (deps | bundle | finishing), null otherwise
 }
 export interface StoreList {
   registry: string;
   apps: StoreEntry[];
   error: string | null;
   updates: string[]; // ids with an update available - for a HOME "updates" hint
+  installing?: string[]; // ids currently installing (mirrors entry.installing)
 }
 
 export async function fetchStore(refresh = false): Promise<StoreList | null> {

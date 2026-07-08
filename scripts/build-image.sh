@@ -98,6 +98,7 @@ F="$TVBOX/image/stage-tvbox/01-tvbox/files"
 mkdir -p "$F"
 rsync -a --delete --exclude node_modules --exclude apps-data --exclude '*.log' "$TVBOX/shell" "$F/"
 cp "$TVBOX/cec/cec_uinput_bridge.py" "$TVBOX/deploy/run-shell.sh" "$TVBOX/deploy/labwc-autostart" \
+  "$TVBOX/deploy/cursor_idle_hide.py" \
   "$TVBOX/deploy/tvbox" "$TVBOX/deploy/tvbox-cec.service" "$TVBOX/deploy/provision.sh" \
   "$TVBOX/deploy/tvbox-flatpak-update.service" "$TVBOX/deploy/tvbox-flatpak-update.timer" "$F/"
 

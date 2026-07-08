@@ -38,10 +38,13 @@ export function Home() {
   }, []);
 
   // apply the user's manual order + hidden set (Settings → Apps); unlisted apps
-  // fall back to localized-name order, so a newly installed app appears at the end
+  // fall back to localized-name order, so a newly installed app appears at the end.
+  // HOME shows ONLY launchable apps: the shell marks those `ready` - an app still
+  // installing or not yet provisioned is `ready:false` and lives in the store with
+  // its progress. `ready` absent (dev/demo/fallback apps) still shows.
   const sorted = useMemo(() => {
     const byId = new Map(apps.map((a) => [a.id, a]));
-    const visible = apps.filter((a) => !hidden.includes(a.id));
+    const visible = apps.filter((a) => a.ready !== false && !hidden.includes(a.id));
     const byName = (x: string, y: string) => loc(byId.get(x)!.name).localeCompare(loc(byId.get(y)!.name), tag);
     return orderIds(
       visible.map((a) => a.id),
@@ -64,70 +67,10 @@ export function Home() {
     toastTimer.current = setTimeout(() => setToast(null), 2200);
   }, []);
 
-  // Kick off an on-demand provision - either a bundle install (e.g. Plex's
-  // flatpak, /apps/install) or a no-root binary-dep install (/apps/deps, the
-  // "no CLI" path for an app whose required binary ships as a download dep).
-  // Optimistically mark the tile installing; the poll effect below refetches
-  // until it completes. `kind` is remembered so the completion toast checks the
-  // right success signal (bundle -> installed, deps -> depsOk).
-  const pendingKind = useRef<Map<string, "bundle" | "deps">>(new Map());
-  const provision = useCallback(
-    (app: AppManifest, kind: "bundle" | "deps") => {
-      showToast(t("home.installing", { name: loc(app.name) }));
-      pendingKind.current.set(app.id, kind);
-      setApps((prev) => prev.map((a) => (a.id === app.id ? { ...a, installing: true } : a)));
-      // On a failed kickoff just clear the optimistic flag; the installing→idle
-      // transition is announced once by the completion effect below (avoids a
-      // double "install failed" toast).
-      const clear = () => setApps((prev) => prev.map((a) => (a.id === app.id ? { ...a, installing: false } : a)));
-      fetch(kind === "deps" ? "/tvbox/api/apps/deps" : "/tvbox/api/apps/install", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ id: app.id }),
-      })
-        .then((r) => r.json())
-        .then((d) => {
-          if (!d.ok) clear();
-        })
-        .catch(clear);
-    },
-    [showToast, t, loc],
-  );
-
-  // While any app is installing, poll /apps so the tile updates and completions
-  // are announced; polling stops once nothing is installing.
-  const prevInstalling = useRef<Set<string>>(new Set());
-  useEffect(() => {
-    const now = new Set(apps.filter((a) => a.installing).map((a) => a.id));
-    for (const id of prevInstalling.current) {
-      if (!now.has(id)) {
-        const a = apps.find((x) => x.id === id);
-        const kind = pendingKind.current.get(id);
-        pendingKind.current.delete(id);
-        // success = the thing we provisioned actually landed: a bundle install
-        // flips `installed`; a deps install flips `depsOk`. If we don't know the
-        // kind (e.g. a reload observed an install we didn't start), be lenient -
-        // treat either signal as success rather than a false "failed".
-        const ok =
-          a &&
-          (kind === "bundle" ? a.installed : kind === "deps" ? a.depsOk !== false : a.installed || a.depsOk !== false);
-        if (a) showToast(t(ok ? "home.installed" : "home.installFailed", { name: loc(a.name) }));
-      }
-    }
-    prevInstalling.current = now;
-    if (!now.size) return;
-    let alive = true;
-    const iv = setInterval(() => {
-      fetchApps().then((list) => {
-        if (alive) setApps(list);
-      });
-    }, 2000);
-    return () => {
-      alive = false;
-      clearInterval(iv);
-    };
-  }, [apps, showToast, t, loc]);
-
+  // Every HOME tile is a ready, launchable app now - installing is entirely the
+  // store's job (Settings → Store / the catalog show progress there). So onSelect
+  // just launches, with the synthetic "Get more" tile, coming-soon and
+  // needs-setup cases still handled.
   const onSelect = useCallback(
     (app: AppManifest) => {
       if (app.id === GET_MORE_ID) {
@@ -138,31 +81,15 @@ export function Home() {
         showToast(t("home.comingSoon", { name: loc(app.name) }));
         return;
       }
-      if (app.installing) {
-        showToast(t("home.installing", { name: loc(app.name) }));
-        return;
-      }
-      if (app.depsOk === false) {
-        // a required binary isn't installed. If it's a no-root download dep,
-        // install it right here (remote-only, no CLI); otherwise it needs the
-        // box (`tvbox deps <id>` / an apt package).
-        if (app.depsInstallable) provision(app, "deps");
-        else showToast(t("home.needs", { dep: (app.missing || []).join(", ") }));
-        return;
-      }
       if (app.configured === false) {
         // a config-driven remote app (e.g. Home Assistant) has no URL yet
         showToast(t("home.setupNeeded", { name: loc(app.name) }));
         open("settings");
         return;
       }
-      if (app.installable && !app.installed) {
-        provision(app, "bundle");
-        return;
-      } // fetch the bundle first (e.g. Plex)
       if (!launchApp(app.id)) showToast(t("home.bridgeMissing")); // every app opens as a shell window
     },
-    [showToast, t, loc, open, provision],
+    [showToast, t, loc, open],
   );
 
   const getMoreTile: AppManifest = {

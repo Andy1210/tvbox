@@ -12,6 +12,12 @@ sh "$HOME/.tvbox/shell/audio-default.sh" >/dev/null 2>&1 &   # route audio to HD
 # swaybg isn't installed the session is unchanged.
 command -v swaybg >/dev/null 2>&1 && swaybg -c '#000000' >/dev/null 2>&1 &
 
+# Hide the idle mouse cursor. A wireless TV remote often also presents a mouse
+# endpoint, so labwc parks a pointer on screen that never moves. This helper
+# hides it after a few idle seconds and lets it reappear the moment a real mouse
+# moves. Best-effort (needs python3-evdev + wlrctl, both in the baseline).
+command -v python3 >/dev/null 2>&1 && python3 "$HOME/.tvbox/cursor_idle_hide.py" >/dev/null 2>&1 &
+
 # The Pi desktop (panel + file-manager/wallpaper/icons) never starts: provision.sh
 # replaces the system labwc autostart (/etc/xdg/labwc/autostart) so there's
 # nothing to kill here - no race, and nothing to flash behind the shell on a

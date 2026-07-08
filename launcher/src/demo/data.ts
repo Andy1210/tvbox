@@ -51,7 +51,6 @@ export const BASE_APPS: AppManifest[] = [
     status: "ready",
     accent: "#e5a00d",
     icon: "<svg viewBox='0 0 512 512'><rect width='512' height='512' rx='15%' fill='#282a2d'/><path d='m256 70h-108l108 186-108 186h108l108-186z' fill='#e5a00d'/></svg>",
-    installable: true,
   },
 ];
 
@@ -168,7 +167,7 @@ export const UPDATE_STATUS: UpdateStatus = {
   os: { rebootRequired: false, packages: [] },
 };
 
-const V = { version: "1.0.0", installedVersion: "1.0.0", updateAvailable: false };
+const V = { version: "1.0.0", installedVersion: "1.0.0", updateAvailable: false, installing: false, progress: null };
 export const STORE_ENTRIES: StoreEntry[] = [
   {
     id: "livetv",
@@ -244,6 +243,8 @@ export const STORE_ENTRIES: StoreEntry[] = [
     version: "1.0.0",
     installedVersion: null,
     updateAvailable: false,
+    installing: false,
+    progress: null,
     urlConfig: "jellyfin",
     baseUrl: "",
     missing: [],

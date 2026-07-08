@@ -46,6 +46,7 @@ jobs:
           mkdir -p "$F"
           rsync -a --delete --exclude node_modules --exclude apps-data --exclude '*.log' shell "$F/"
           cp cec/cec_uinput_bridge.py deploy/run-shell.sh deploy/labwc-autostart \
+             deploy/cursor_idle_hide.py \
              deploy/tvbox deploy/tvbox-cec.service deploy/provision.sh \
              deploy/tvbox-flatpak-update.service deploy/tvbox-flatpak-update.timer "$F/"
 

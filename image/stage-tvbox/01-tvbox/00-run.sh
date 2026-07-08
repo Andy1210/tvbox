@@ -15,7 +15,7 @@ install -d "${ROOTFS_DIR}${USER_HOME}/.tvbox"
 cp -r files/shell "${ROOTFS_DIR}${USER_HOME}/.tvbox/"
 # A fresh image starts with an EMPTY home - no apps installed. Apps are added
 # from the registry via HOME -> "Get more apps" (the Kodi model).
-install -m 755 files/run-shell.sh files/tvbox files/cec_uinput_bridge.py \
+install -m 755 files/run-shell.sh files/tvbox files/cec_uinput_bridge.py files/cursor_idle_hide.py \
   "${ROOTFS_DIR}${USER_HOME}/.tvbox/"
 install -m 644 files/labwc-autostart files/provision.sh files/tvbox-cec.service \
   files/tvbox-flatpak-update.service files/tvbox-flatpak-update.timer \

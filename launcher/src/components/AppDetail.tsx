@@ -33,6 +33,30 @@ function ChangelogEntry({ focusKey, version, notes }: { focusKey: string; versio
   );
 }
 
+// Shown while a store install runs: a localized phase line + an indeterminate
+// progress bar (the shell reports a coarse phase, not a percentage, so the bar
+// animates rather than fills). It replaces the action buttons; focus lives on
+// the Back button meanwhile so the D-pad is never stranded.
+function InstallProgress({ phase }: { phase?: string | null }) {
+  const { t } = useI18n();
+  const label =
+    phase === "deps"
+      ? t("store.phaseDeps")
+      : phase === "bundle"
+        ? t("store.phaseBundle")
+        : phase === "finishing"
+          ? t("store.phaseFinishing")
+          : t("store.installingGeneric");
+  return (
+    <div className="flex flex-col gap-[1.1vh] min-w-[32vw]" role="status" aria-live="polite">
+      <span className="text-[2.1vh] font-semibold text-sky-200">{label}</span>
+      <div className="h-[0.9vh] w-full rounded-full bg-white/10 overflow-hidden">
+        <div className="tv-install-bar h-full w-[40%] rounded-full bg-sky-400" />
+      </div>
+    </div>
+  );
+}
+
 export function AppDetail({
   app,
   status,
@@ -57,6 +81,7 @@ export function AppDetail({
 
   // The first action that exists for this app - where focus lands on open.
   const firstAction = (): string => {
+    if (app.installing) return "detail-back"; // progress replaces the action buttons
     if (!app.builtin && !app.installed) return "detail-install";
     if (!app.builtin && app.updateAvailable) return "detail-update";
     if (!app.builtin && app.installed) return "detail-remove";
@@ -70,10 +95,7 @@ export function AppDetail({
   }, []);
   useBackspace(onExit);
 
-  const hints = [
-    app.missing.length > 0 ? t("home.needs", { dep: app.missing.join(", ") }) : null,
-    app.urlConfig && app.installed && !app.baseUrl ? t("store.urlMissing") : null,
-  ].filter(Boolean);
+  const hints = [app.urlConfig && app.installed && !app.baseUrl ? t("store.urlMissing") : null].filter(Boolean);
 
   return (
     <FocusContext.Provider value={focusKey}>
@@ -114,36 +136,44 @@ export function AppDetail({
 
         {hints.length > 0 && <div className="text-[1.7vh] text-amber-200 mb-[1.6vh]">{hints.join(" · ")}</div>}
 
-        {/* actions */}
+        {/* actions - while an install runs, the progress indicator takes the
+            place of Install/Update/Remove (Back stays focusable throughout) */}
         <div className="flex flex-wrap items-center gap-[1.2vw]">
           {app.builtin && <span className="text-[2vh] text-fg-dim px-[1.6vw] py-[1.4vh]">{t("store.builtin")}</span>}
-          {!app.builtin && !app.installed && (
-            <FocusButton
-              focusKey="detail-install"
-              onEnter={onInstall}
-              className="px-[2.4vw] h-[6vh] rounded-[1.1vh] bg-sky-500/15 text-sky-200 flex items-center justify-center text-[2.1vh] font-semibold"
-            >
-              {t("home.install")}
-            </FocusButton>
-          )}
-          {!app.builtin && app.updateAvailable && (
-            <FocusButton
-              focusKey="detail-update"
-              onEnter={onUpdate}
-              className="px-[2.4vw] h-[6vh] rounded-[1.1vh] bg-emerald-500/15 text-emerald-200 flex items-center justify-center text-[2.1vh] font-semibold"
-            >
-              {t("store.update")}
-            </FocusButton>
-          )}
-          {!app.builtin && app.installed && (
-            <FocusButton
-              focusKey="detail-remove"
-              onEnter={onRemove}
-              className="px-[2.4vw] h-[6vh] rounded-[1.1vh] bg-red-500/15 text-red-200 flex items-center justify-center text-[2.1vh] font-semibold"
-            >
-              {t("appsettings.uninstall")}
-            </FocusButton>
-          )}
+          {!app.builtin &&
+            (app.installing ? (
+              <InstallProgress phase={app.progress?.phase} />
+            ) : (
+              <>
+                {!app.installed && (
+                  <FocusButton
+                    focusKey="detail-install"
+                    onEnter={onInstall}
+                    className="px-[2.4vw] h-[6vh] rounded-[1.1vh] bg-sky-500/15 text-sky-200 flex items-center justify-center text-[2.1vh] font-semibold"
+                  >
+                    {t("home.install")}
+                  </FocusButton>
+                )}
+                {app.updateAvailable && (
+                  <FocusButton
+                    focusKey="detail-update"
+                    onEnter={onUpdate}
+                    className="px-[2.4vw] h-[6vh] rounded-[1.1vh] bg-emerald-500/15 text-emerald-200 flex items-center justify-center text-[2.1vh] font-semibold"
+                  >
+                    {t("store.update")}
+                  </FocusButton>
+                )}
+                {app.installed && (
+                  <FocusButton
+                    focusKey="detail-remove"
+                    onEnter={onRemove}
+                    className="px-[2.4vw] h-[6vh] rounded-[1.1vh] bg-red-500/15 text-red-200 flex items-center justify-center text-[2.1vh] font-semibold"
+                  >
+                    {t("appsettings.uninstall")}
+                  </FocusButton>
+                )}
+              </>
+            ))}
           {app.urlConfig && (
             <FocusButton
               focusKey="detail-url"

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { setFocus } from "@noriginmedia/norigin-spatial-navigation";
 import { fetchStore, storeInstall, storeUninstall, saveAppUrl, type StoreEntry } from "../lib/api";
 import { useI18n } from "../lib/i18n";
@@ -61,23 +61,68 @@ export function StoreSettings() {
     load(false, true);
   }, [load]);
 
-  // Actions live in the detail view; after each one the detail stays open and
-  // its buttons change (Install↔Remove, Update disappears), so refocus the
-  // matching detail button once the refreshed list has re-rendered.
-  const install = async (e: StoreEntry) => {
+  // Install runs in the background on the box (POST /store/install returns at
+  // once); we poll /store/list while anything is installing so the entry's
+  // progress phase - and its completion - show up. The interval stops the moment
+  // nothing is installing.
+  const anyInstalling = (entries || []).some((e) => e.installing);
+  useEffect(() => {
+    if (!anyInstalling) return;
+    let alive = true;
+    const iv = setInterval(async () => {
+      const d = await fetchStore();
+      if (alive && d) setEntries(d.apps);
+    }, 1500);
+    return () => {
+      alive = false;
+      clearInterval(iv);
+    };
+  }, [anyInstalling]);
+
+  // Detect installing -> done transitions: announce the result and, if the
+  // detail view is open on that app, refocus its now-current action button
+  // (the progress indicator that held focus is about to unmount).
+  const pending = useRef<Map<string, "install" | "update">>(new Map());
+  const prevInstalling = useRef<Set<string>>(new Set());
+  useEffect(() => {
+    const now = new Set((entries || []).filter((e) => e.installing).map((e) => e.id));
+    for (const id of prevInstalling.current) {
+      if (!now.has(id)) {
+        const e = (entries || []).find((x) => x.id === id);
+        const kind = pending.current.get(id) ?? "install";
+        pending.current.delete(id);
+        if (e) {
+          const key = e.installed ? (kind === "update" ? "store.updated" : "store.installed") : "store.failed";
+          setStatus(t(key, { name: loc(e.name) }));
+          if (detailId === id) setTimeout(() => setFocus(e.installed ? "detail-remove" : "detail-install"), 0);
+        }
+      }
+    }
+    prevInstalling.current = now;
+  }, [entries, detailId, t, loc]);
+
+  // Install / Update both POST /store/install (a re-install upgrades in place).
+  // The call returns immediately; we mark the entry installing so the detail
+  // view swaps its Install/Update button for the progress indicator, move focus
+  // to the still-mounted Back button, then refresh once so the phase appears.
+  // The poll + completion effects above take it from there.
+  const kickoff = async (e: StoreEntry, kind: "install" | "update") => {
+    pending.current.set(e.id, kind);
     const ok = await storeInstall(e.id);
-    setStatus(t(ok ? "store.installed" : "store.failed", { name: loc(e.name) }));
-    if (ok) await load();
-    setTimeout(() => setFocus(ok ? "detail-remove" : "detail-install"), 0);
+    if (!ok) {
+      pending.current.delete(e.id);
+      setStatus(t("store.failed", { name: loc(e.name) }));
+      setTimeout(() => setFocus(kind === "update" ? "detail-update" : "detail-install"), 0);
+      return;
+    }
+    setStatus(null);
+    setEntries((prev) => (prev ? prev.map((x) => (x.id === e.id ? { ...x, installing: true } : x)) : prev));
+    setTimeout(() => setFocus("detail-back"), 0);
+    const d = await fetchStore();
+    if (d) setEntries(d.apps);
   };
-  // Update = re-install from the registry (installPackage upgrades in place).
-  // Independent of any tvbox/shell release - just a newer package in tvbox-apps.
-  const update = async (e: StoreEntry) => {
-    const ok = await storeInstall(e.id);
-    setStatus(t(ok ? "store.updated" : "store.failed", { name: loc(e.name) }));
-    if (ok) await load();
-    setTimeout(() => setFocus(ok ? "detail-remove" : "detail-update"), 0);
-  };
+  const install = (e: StoreEntry) => kickoff(e, "install");
+  const update = (e: StoreEntry) => kickoff(e, "update");
   const remove = async (e: StoreEntry) => {
     const ok = await storeUninstall(e.id);
     setStatus(t(ok ? "store.removed" : "store.failed", { name: loc(e.name) }));
@@ -158,7 +203,6 @@ export function StoreSettings() {
           const subtitle = [
             e.tagline ? loc(e.tagline) : null,
             "v" + shownVersion,
-            e.missing.length > 0 ? t("home.needs", { dep: e.missing.join(", ") }) : null,
             e.urlConfig && e.installed && !e.baseUrl ? t("store.urlMissing") : null,
           ]
             .filter(Boolean)

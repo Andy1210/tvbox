@@ -33,7 +33,7 @@ rsync -az --delete \
   --exclude node_modules --exclude '*.log' --exclude apps-data --exclude electron-web-client \
   "$TVBOX/shell" "$PI:.tvbox/"
 rsync -az "$TVBOX/cec/cec_uinput_bridge.py" "$TVBOX/cec/cec_vendor_shim.c" \
-  "$HERE/run-shell.sh" "$HERE/labwc-autostart" \
+  "$HERE/run-shell.sh" "$HERE/labwc-autostart" "$HERE/cursor_idle_hide.py" \
   "$HERE/tvbox" "$HERE/provision.sh" "$HERE/tvbox-cec.service" \
   "$HERE/tvbox-flatpak-update.service" "$HERE/tvbox-flatpak-update.timer" "$PI:.tvbox/"
 

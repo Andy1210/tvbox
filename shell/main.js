@@ -137,6 +137,85 @@ function emitConfigChange(sections) {
   }
 }
 const installing = new Set(); // app ids whose bundle is being installed on-demand (UI)
+// Per-app install progress for the store UI: id -> { phase }. `phase` is a
+// coarse, reliable stage the launcher turns into "Downloading.../Installing..."
+// text (not a fragile parsed %), so an install shows a live stage instead of a
+// frozen screen. Every install step is also appended to ~/.tvbox/install.log so
+// a slow/stuck install can be diagnosed (there was no install log before).
+const installProgress = new Map(); // id -> { phase: "deps" | "bundle" | "finishing" }
+const INSTALL_LOG = path.join(os.homedir(), ".tvbox", "install.log");
+function setInstallPhase(id, phase) {
+  if (phase) installProgress.set(id, { phase });
+  else installProgress.delete(id);
+}
+function logInstall(id, line) {
+  try {
+    fs.appendFileSync(INSTALL_LOG, "[" + id + "] " + line + "\n");
+  } catch (e) {
+    /* best effort - a missing log must never fail an install */
+  }
+}
+// Run `cli.js <args>` for app <id> at stage <phase>, piping its output to the
+// install log (so flatpak/curl progress is inspectable) and resolving true on a
+// clean exit. Used for both the bundle fetch and the no-root binary-dep install.
+function spawnCli(args, id, phase) {
+  return new Promise((resolve) => {
+    setInstallPhase(id, phase);
+    logInstall(id, phase + " start: cli " + args.join(" "));
+    const child = spawn(process.execPath, [path.join(__dirname, "cli.js"), ...args], {
+      env: { ...process.env, ...WL_ENV, ELECTRON_RUN_AS_NODE: "1" },
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    const onData = (d) =>
+      String(d)
+        .split(/\r?\n/)
+        .forEach((l) => l.trim() && logInstall(id, l.trim()));
+    child.stdout.on("data", onData);
+    child.stderr.on("data", onData);
+    child.on("error", (e) => {
+      logInstall(id, phase + " spawn error: " + e.message);
+      resolve(false);
+    });
+    child.on("exit", (code) => {
+      logInstall(id, phase + " exit " + code);
+      resolve(code === 0);
+    });
+  });
+}
+// Full provision of a just-installed store app: fetch its no-root binary deps
+// AND its bundle (whichever it declares), in order, from ONE store action - so
+// the user never has to press the HOME tile to finish an install, and the app
+// only reaches HOME once it is actually launchable. A `service` app's plugin
+// still loads at boot, so it restarts once at the end (gated on idle); that is
+// the last step, after everything is in place (hot-loading without a restart is
+// a follow-up). Progress + the installing flag drive the store UI.
+async function provisionFull(id) {
+  const m = apps.manifestById(id);
+  if (!m || installing.has(id)) return;
+  installing.add(id);
+  let ok = true;
+  try {
+    const deps = apps.appDeps(m);
+    if (!deps.depsOk && deps.installable) ok = await spawnCli(["deps", id, "--download-only"], id, "deps");
+    if (ok && m.install && m.install.source && !apps.isInstalled(id))
+      ok = await spawnCli(["install", id], id, "bundle");
+  } catch (e) {
+    logInstall(id, "provision error: " + (e.message || e));
+    ok = false;
+  }
+  // A service app's plugin only registers at boot: restart once, as the final
+  // step, when nothing is playing. Keep the "finishing" phase visible briefly so
+  // the store can show it before the shell goes down and comes back with the app.
+  if (ok && m.service && boxIdle()) {
+    setInstallPhase(id, "finishing");
+    // Keep `installing` set so the store shows "finishing" right up to the
+    // restart instead of briefly flipping to done; app.quit() clears it anyway.
+    setTimeout(() => restartShell("app installed: " + id), 1200);
+    return;
+  }
+  installing.delete(id);
+  setInstallPhase(id, null);
+}
 
 // ---- app manifests + install (the install-recipe runner lives in install.js,
 // shared with the `tvbox` CLI; the shell just queries manifests + serves apps) ----
@@ -169,6 +248,17 @@ function appTiles() {
       installed: apps.isInstalled(m.id),
       installing: installing.has(m.id),
       configured,
+      // Launchable = belongs on HOME: ready status, binary deps present,
+      // configured, a bundle app has its bundle, and not mid-install. HOME shows
+      // ONLY these, so a still-installing / not-yet-provisioned app stays in the
+      // store (with progress) instead of appearing greyed on HOME.
+      ready:
+        m.status === "ready" &&
+        depsOk &&
+        configured &&
+        !installing.has(m.id) &&
+        (!installable || apps.isInstalled(m.id)),
+      progress: installProgress.get(m.id) || null,
     };
   });
 }
@@ -366,9 +456,11 @@ function handlePost(p, data, res) {
       .install(config, id)
       .then((r) => {
         jsonRes(res, r);
-        // A `service` app's plugin loads only at boot - restart to activate it,
-        // gated so it never interrupts playback or a concurrent install.
-        if (r.ok && r.service && boxIdle() && !installing.size) restartShell("store app installed: " + id);
+        // The manifest is on disk; now finish the install (no-root binary deps +
+        // bundle) in the SAME action, so the app reaches HOME only once it is
+        // actually launchable - no "press the tile to finish" step. provisionFull
+        // handles the final service-plugin restart itself, gated on idle.
+        if (r.ok) provisionFull(id);
       })
       .catch((e) => jsonRes(res, { ok: false, error: String(e.message || e).slice(0, 120) }));
     return;
@@ -800,7 +892,16 @@ function serve() {
       const refresh = (req.url || "").includes("refresh=1");
       store
         .listForUi(config)(refresh)
-        .then((d) => jsonRes(res, d))
+        // Merge in live install state so the store can show progress + poll it:
+        // each entry gains `installing` and a coarse `progress.phase`.
+        .then((d) => {
+          const apps2 = (d.apps || []).map((e) => ({
+            ...e,
+            installing: installing.has(e.id),
+            progress: installProgress.get(e.id) || null,
+          }));
+          jsonRes(res, { ...d, apps: apps2, installing: [...installing] });
+        })
         .catch((e) => jsonRes(res, { apps: [], error: String(e.message || e).slice(0, 120) }));
       return;
     }

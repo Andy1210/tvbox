@@ -23,4 +23,6 @@ export interface AppManifest {
   installed?: boolean; // its bundle is present (only meaningful when installable)
   installing?: boolean; // an on-demand install is currently running
   configured?: boolean; // false when a config-driven remote app has no URL yet (e.g. Home Assistant)
+  ready?: boolean; // launchable: installed + depsOk + configured, not installing. Only ready apps belong on HOME. Absent on dev/demo/fallback apps (which still show).
+  progress?: { phase: string } | null; // install phase while installing (deps | bundle | finishing), null otherwise
 }

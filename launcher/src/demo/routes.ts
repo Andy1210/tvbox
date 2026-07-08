@@ -12,8 +12,6 @@ const btDevices = data.BT_DEVICES.map((d) => ({ ...d }));
 const audio = structuredClone(data.AUDIO);
 const display = structuredClone(data.DISPLAY);
 let btExtraFound = false;
-let plexInstalled = false;
-let plexInstallKick = 0;
 let jellyfinInstalled = false;
 let jellyfinUrl = "";
 let parentalPin = "";
@@ -35,15 +33,15 @@ function pairingStart(b: Record<string, unknown>) {
   return { ok: true, url, shortUrl: base.replace(/^https?:\/\//, "") + "pair", code };
 }
 
+// HOME shows only `ready` (launchable) apps now; installing is the store's job.
+// The base apps are all installed + ready; jellyfin is only ready once its
+// server URL is set (an unconfigured app stays in the store, not on HOME).
 function appsList(): AppManifest[] {
-  if (plexInstallKick && Date.now() - plexInstallKick > 4000) {
-    plexInstalled = true;
-    plexInstallKick = 0;
+  const apps = data.BASE_APPS.map((a) => ({ ...a, ready: true, progress: null }));
+  if (jellyfinInstalled) {
+    const configured = jellyfinUrl !== "";
+    apps.push({ ...data.JELLYFIN_APP, configured, ready: configured, progress: null });
   }
-  const apps = data.BASE_APPS.map((a) =>
-    a.id === "plex" ? { ...a, installed: plexInstalled, installing: plexInstallKick > 0 } : { ...a },
-  );
-  if (jellyfinInstalled) apps.push({ ...data.JELLYFIN_APP, configured: jellyfinUrl !== "" });
   return apps;
 }
 
@@ -110,11 +108,9 @@ export async function handleApi(
     // ---- apps + store ----
     case "/tvbox/api/apps":
       return appsList();
-    case "/tvbox/api/apps/install":
-      plexInstallKick = Date.now();
-      return ok;
     case "/tvbox/api/apps/remove":
-      if (b.id === "plex") plexInstalled = false;
+      // still reachable from Settings → Apps; the demo base apps aren't
+      // removable, so this is a no-op here.
       return ok;
     case "/tvbox/api/store/list":
       return {
@@ -124,8 +120,11 @@ export async function handleApi(
         ),
         error: null,
         updates: [],
+        installing: [],
       };
     case "/tvbox/api/store/install":
+      // POST /store/install does the full install and returns at once; the demo
+      // completes instantly (installing stays false in /store/list).
       jellyfinInstalled = true;
       return ok;
     case "/tvbox/api/store/uninstall":

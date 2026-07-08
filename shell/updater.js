@@ -53,6 +53,7 @@ const INFRA_FILES = [
   "run-shell.sh",
   "cec_uinput_bridge.py",
   "cec_vendor_shim.c", // the bridge compiles it on start (mtime check)
+  "cursor_idle_hide.py", // idle mouse-cursor hider (launched from labwc-autostart)
   "tvbox",
   "provision.sh",
   "labwc-autostart",

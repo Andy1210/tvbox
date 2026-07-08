@@ -157,4 +157,20 @@
       transform: translate3d(-2.5%, 0.5%, 0) scale(1);
     }
   }
+
+  /* Store install progress (AppDetail InstallProgress): an INDETERMINATE bar -
+     the shell reports a coarse phase, not a percentage - so a short fill sweeps
+     across the track instead of filling to a fake number. */
+  .tv-install-bar {
+    animation: tv-install-slide 1.4s ease-in-out infinite;
+    will-change: transform;
+  }
+  @keyframes tv-install-slide {
+    from {
+      transform: translateX(-100%);
+    }
+    to {
+      transform: translateX(300%);
+    }
+  }
 }

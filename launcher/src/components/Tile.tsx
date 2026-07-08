@@ -7,7 +7,6 @@ import { Icon } from "./Icon";
 export function Tile({ app, onSelect }: { app: AppManifest; onSelect: (app: AppManifest) => void }) {
   const { t, loc } = useI18n();
   const ready = app.status === "ready";
-  const depsMissing = app.depsOk === false; // a required binary isn't installed
 
   // keep the focused tile centered in the horizontally-scrolling rail
   const { ref, focused } = useFocusableItem(
@@ -30,7 +29,7 @@ export function Tile({ app, onSelect }: { app: AppManifest; onSelect: (app: AppM
         "relative flex-none w-[22vw] max-w-[320px] aspect-[16/10] rounded-[1.6vh] overflow-hidden",
         "flex flex-col justify-end p-[2vh] transition-[transform,box-shadow,outline-color] duration-150",
         "outline outline-[3px] outline-transparent outline-offset-[3px]",
-        ready && !depsMissing ? "" : "opacity-55",
+        ready ? "" : "opacity-55",
         focused
           ? "scale-[1.09] outline-[var(--color-focus)] shadow-[0_2vh_5vh_rgba(0,0,0,0.6)]"
           : "shadow-[0_1vh_3vh_rgba(0,0,0,0.45)]",
@@ -44,10 +43,6 @@ export function Tile({ app, onSelect }: { app: AppManifest; onSelect: (app: AppM
       {!ready ? (
         <div className="absolute top-[1.4vh] right-[1.4vh] text-[1.2vh] font-bold tracking-wide uppercase bg-white/15 px-[1vh] py-[0.5vh] rounded-[1vh]">
           {t("home.comingSoonBadge")}
-        </div>
-      ) : depsMissing ? (
-        <div className="absolute top-[1.4vh] right-[1.4vh] text-[1.2vh] font-bold tracking-wide bg-amber-500/25 text-amber-200 px-[1vh] py-[0.5vh] rounded-[1vh]">
-          {t("home.needs", { dep: (app.missing || []).join(", ") })}
         </div>
       ) : app.installing ? (
         <div className="absolute top-[1.4vh] right-[1.4vh] text-[1.2vh] font-bold tracking-wide bg-white/15 px-[1vh] py-[0.5vh] rounded-[1vh]">
