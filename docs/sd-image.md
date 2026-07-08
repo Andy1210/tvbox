@@ -90,8 +90,9 @@ Notes:
   own step (`tvbox-firstboot`, a systemd oneshot) that reads **one** plain file
   off the **bootfs** (FAT) partition - `tvbox.conf` - editable on any OS, no
   tooling. It's `KEY=value`, `#` comments, all keys optional; drop it after
-  flashing. A click-together generator lives at [`docs/config/`](config/) (open
-  it in a browser, export the file). Keys:
+  flashing. A click-together generator lives at
+  [andy1210.github.io/tvbox/config/](https://andy1210.github.io/tvbox/config/)
+  (or open [`docs/config/index.html`](config/index.html) locally). Keys:
 
   ```sh
   HOSTNAME=living-room            # name this box (several would clash on the LAN)

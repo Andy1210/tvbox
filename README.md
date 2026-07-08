@@ -112,8 +112,8 @@ What the image gives you:
   scans out of the box.
 - **First-boot setup with one file.** Drop a `tvbox.conf` on the boot (FAT)
   partition to name the box, join WiFi, add your SSH key, and more - all
-  optional, all in one place (there's a click-together generator under
-  [`docs/config/`](docs/config/)):
+  optional, all in one place (there's a click-together generator at
+  [andy1210.github.io/tvbox/config/](https://andy1210.github.io/tvbox/config/)):
 
   ```sh
   HOSTNAME=living-room

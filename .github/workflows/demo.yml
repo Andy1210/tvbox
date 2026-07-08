@@ -1,11 +1,13 @@
 # Publishes the browser demo (launcher built with --mode demo: mocked shell
 # API, no real box needed) to GitHub Pages: https://andy1210.github.io/tvbox/
+# Also hosts the static tvbox.conf generator at /tvbox/config/.
 name: demo
 on:
   push:
     branches: [main, master]
     paths:
       - "launcher/**"
+      - "docs/config/**"
       - ".github/workflows/demo.yml"
   workflow_dispatch:
 
@@ -28,6 +30,8 @@ jobs:
         with: { node-version: 22, cache: npm, cache-dependency-path: launcher/package-lock.json }
       - run: npm ci --no-audit --no-fund
       - run: npm run build:demo
+      # Ship the static tvbox.conf generator alongside the demo -> /tvbox/config/.
+      - run: mkdir -p dist-demo/config && cp ../docs/config/index.html dist-demo/config/index.html
       - uses: actions/upload-pages-artifact@v3
         with: { path: launcher/dist-demo }
 
