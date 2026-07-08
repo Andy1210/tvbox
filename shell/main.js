@@ -121,6 +121,7 @@ function restartShell(why) {
 // resolve; it gets a scoped `host` API (below) and never touches shell internals.
 const supervisor = new Supervisor(); // shared supervised-child manager for plugins
 const loadedPlugins = []; // { start, stop } from each plugin factory
+const loadedPluginIds = new Set(); // app ids whose plugin is loaded (dedupe hot-load vs boot)
 const pluginRoutes = []; // [{ prefix, table }] - HTTP routes a plugin registered
 const configListeners = []; // plugins that react to a config write (e.g. Live TV drops its cache)
 // Notify plugins that config sections changed (host.onConfigChange). A package
@@ -203,15 +204,21 @@ async function provisionFull(id) {
     logInstall(id, "provision error: " + (e.message || e));
     ok = false;
   }
-  // A service app's plugin only registers at boot: restart once, as the final
-  // step, when nothing is playing. Keep the "finishing" phase visible briefly so
-  // the store can show it before the shell goes down and comes back with the app.
-  if (ok && m.service && boxIdle()) {
+  // Activate a service app's plugin WITHOUT a restart: hot-load registers its
+  // routes on the live server and starts its daemon. Only if hot-load fails do
+  // we fall back to a one-off restart (and only when idle, so nothing playing is
+  // interrupted); otherwise the plugin just loads on the next natural boot.
+  if (ok && m.service) {
     setInstallPhase(id, "finishing");
-    // Keep `installing` set so the store shows "finishing" right up to the
-    // restart instead of briefly flipping to done; app.quit() clears it anyway.
-    setTimeout(() => restartShell("app installed: " + id), 1200);
-    return;
+    if (hotLoadPlugin(id)) {
+      installing.delete(id);
+      setInstallPhase(id, null);
+      return;
+    }
+    if (boxIdle()) {
+      setTimeout(() => restartShell("service install (hot-load failed): " + id), 1200);
+      return; // keep installing/phase set until the restart
+    }
   }
   installing.delete(id);
   setInstallPhase(id, null);
@@ -552,13 +559,9 @@ function startDeps(id, res) {
   child.on("exit", (code) => {
     console.log("[deps]", id, "exit", code);
     installing.delete(id);
-    // A freshly downloaded binary is now on PATH, but a `service` plugin only
-    // loads at boot - so a plugin app needs a shell restart to actually start.
-    // Only auto-restart when the box is idle AND nothing else is provisioning,
-    // so we never interrupt playback or a concurrent install (CLAUDE.md: nothing
-    // restarts the shell on its own while something plays). Otherwise the plugin
-    // just starts on the next natural restart/boot.
-    if (code === 0 && m.service && boxIdle() && installing.size === 0) restartShell("deps installed for " + id);
+    // A freshly downloaded binary is now on PATH; activate a `service` plugin
+    // by hot-load (no restart) - same as the store install path.
+    if (code === 0 && m.service) hotLoadPlugin(id);
   });
   return jsonRes(res, { ok: true, installing: true });
 }
@@ -1573,34 +1576,63 @@ const host = {
 // (before serve()) so routes are registered (via host.registerRoutes in the
 // factory) before the launcher's first request; daemons start later in
 // startPlugins() (after audio).
-function loadPlugins() {
-  for (const m of apps.getManifests()) {
-    const name = m.service;
-    if (!name) continue;
-    if (!/^[a-z0-9_-]+$/.test(name)) {
-      console.warn("[plugin] bad service name for", m.id, "->", name);
-      continue;
-    }
-    // A service plugin ships INSIDE the app package (~/.tvbox/apps/<id>/plugin.js);
-    // the shell has no first-party plugins anymore. A manifest with a service but
-    // no package dir is malformed - skip it.
-    if (!m._dir) {
-      console.warn("[plugin] skip", m.id, "- declares service", name, "but ships no package plugin.js");
-      continue;
-    }
-    const deps = apps.appDeps(m);
-    if (!deps.depsOk) {
-      console.warn("[plugin] skip", m.id, "- missing:", deps.missing.join(","));
-      continue;
-    }
-    try {
-      const plugin = require(path.join(m._dir, "plugin.js"))(host) || {};
-      loadedPlugins.push(plugin);
-      console.log("[plugin] loaded", m.id, "(" + name + ")");
-    } catch (e) {
-      console.warn("[plugin]", m.id, "failed to load:", e.message);
-    }
+// Load ONE app's service plugin (require + run its factory so it registers its
+// routes via host.registerRoutes). Returns the plugin object, or null if it has
+// no valid service, ships no package plugin.js, its deps are missing, or it is
+// already loaded. Does NOT start the daemon - the caller decides when (boot:
+// startPlugins; runtime hot-load: right away).
+function loadOnePlugin(m) {
+  const name = m.service;
+  if (!name) return null;
+  if (loadedPluginIds.has(m.id)) return null;
+  if (!/^[a-z0-9_-]+$/.test(name)) {
+    console.warn("[plugin] bad service name for", m.id, "->", name);
+    return null;
   }
+  // A service plugin ships INSIDE the app package (~/.tvbox/apps/<id>/plugin.js);
+  // the shell has no first-party plugins anymore. A manifest with a service but
+  // no package dir is malformed - skip it.
+  if (!m._dir) {
+    console.warn("[plugin] skip", m.id, "- declares service", name, "but ships no package plugin.js");
+    return null;
+  }
+  const deps = apps.appDeps(m);
+  if (!deps.depsOk) {
+    console.warn("[plugin] skip", m.id, "- missing:", deps.missing.join(","));
+    return null;
+  }
+  try {
+    const plugin = require(path.join(m._dir, "plugin.js"))(host) || {};
+    loadedPlugins.push(plugin);
+    loadedPluginIds.add(m.id);
+    console.log("[plugin] loaded", m.id, "(" + name + ")");
+    return plugin;
+  } catch (e) {
+    console.warn("[plugin]", m.id, "failed to load:", e.message);
+    return null;
+  }
+}
+function loadPlugins() {
+  for (const m of apps.getManifests()) loadOnePlugin(m);
+}
+// Hot-load a plugin whose app just became installable (deps + package present)
+// WITHOUT a shell restart: run its factory so its routes register on the live
+// server, then start its daemon now. Returns true if the plugin is running (or
+// already was). This is why a `service` app no longer needs a full restart to
+// activate after install.
+function hotLoadPlugin(id) {
+  const m = apps.manifestById(id);
+  if (!m || !m.service) return false;
+  if (loadedPluginIds.has(id)) return true;
+  const plugin = loadOnePlugin(m);
+  if (!plugin) return false;
+  try {
+    if (plugin.start) plugin.start();
+    console.log("[plugin] hot-started", id);
+  } catch (e) {
+    console.warn("[plugin] hot-start", id, "failed:", e.message);
+  }
+  return true;
 }
 function startPlugins() {
   for (const p of loadedPlugins) {

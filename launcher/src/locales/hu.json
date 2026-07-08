@@ -177,7 +177,7 @@
     "installingGeneric": "Telepítés…",
     "phaseDeps": "Komponensek telepítése…",
     "phaseBundle": "Alkalmazás letöltése…",
-    "phaseFinishing": "Befejezés - a box újraindul…",
+    "phaseFinishing": "Befejezés…",
     "removed": "{name} eltávolítva",
     "failed": "{name}: sikertelen művelet",
     "update": "Frissítés",
@@ -188,6 +188,10 @@
     "whatsNew": "Újdonságok",
     "noNotes": "Nincsenek megjegyzések",
     "back": "Vissza"
+  },
+  "install": {
+    "done": "{name} telepítve",
+    "failed": "{name} telepítése nem sikerült"
   },
   "update": {
     "title": "Szoftverfrissítés",

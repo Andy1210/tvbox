@@ -177,7 +177,7 @@
     "installingGeneric": "Installing…",
     "phaseDeps": "Installing components…",
     "phaseBundle": "Downloading the app…",
-    "phaseFinishing": "Finishing - the box will restart…",
+    "phaseFinishing": "Finishing up…",
     "removed": "{name} removed",
     "failed": "{name}: action failed",
     "update": "Update",
@@ -188,6 +188,10 @@
     "whatsNew": "What's new",
     "noNotes": "No release notes",
     "back": "Back"
+  },
+  "install": {
+    "done": "{name} installed",
+    "failed": "{name} could not be installed"
   },
   "update": {
     "title": "Software update",

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { setFocus } from "@noriginmedia/norigin-spatial-navigation";
 import { fetchStore, storeInstall, storeUninstall, saveAppUrl, type StoreEntry } from "../lib/api";
 import { useI18n } from "../lib/i18n";
+import { useInstalls } from "../stores/installs";
 import { FocusButton } from "./FocusButton";
 import { Icon } from "./Icon";
 import { Osk } from "./Osk";
@@ -116,6 +117,9 @@ export function StoreSettings() {
       return;
     }
     setStatus(null);
+    // Owe a global completion toast even if the user leaves the store (the
+    // install runs in the background); InstallWatcher fires it when it finishes.
+    useInstalls.getState().add(e.id);
     setEntries((prev) => (prev ? prev.map((x) => (x.id === e.id ? { ...x, installing: true } : x)) : prev));
     setTimeout(() => setFocus("detail-back"), 0);
     const d = await fetchStore();

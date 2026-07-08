@@ -9,6 +9,7 @@ import { Settings } from "./components/Settings";
 import { Catalog } from "./components/Catalog";
 import { Ambient } from "./components/Ambient";
 import { NotificationToast } from "./components/NotificationToast";
+import { InstallWatcher } from "./components/InstallWatcher";
 import { useIdle } from "./lib/useIdle";
 import { applyPendingRestore } from "./lib/backup";
 
@@ -80,6 +81,7 @@ export function App() {
       <Backdrop />
       {content}
       <NotificationToast />
+      <InstallWatcher />
     </>
   );
 }
