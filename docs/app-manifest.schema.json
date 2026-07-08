@@ -48,7 +48,7 @@
     "description": { "$ref": "#/$defs/localeString" },
     "screenshots": {
       "type": "array",
-      "items": { "type": "string", "format": "uri" },
+      "items": { "type": "string", "pattern": "^https?://" },
       "maxItems": 8,
       "description": "Store-detail screenshots (https URLs, e.g. hosted in the registry repo)."
     },
