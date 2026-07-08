@@ -85,27 +85,44 @@ Notes:
   Mechanics: pi-gen refuses `DISABLE_FIRST_BOOT_USER_RENAME` without a
   `FIRST_USER_PASS`, so `image/config` feeds it a random throwaway and
   `00-run.sh` locks the account (`passwd -l`) in the same build.
-- **Headless provisioning (SSH key + WiFi), no `custom.toml`**: because this
+- **Headless provisioning via `tvbox.conf`, no `custom.toml`**: because this
   image can't process `custom.toml` (below), first-boot config is done with our
-  own step (`tvbox-firstboot`, a systemd oneshot) that reads plain files off the
-  **bootfs** (FAT) partition - editable on any OS, no tooling. Drop either/both
-  after flashing:
-  - `authorized_keys` - your SSH **public** key(s). Installed to
-    `~tv/.ssh/authorized_keys`; then `ssh tv@<box-ip>` works (key auth, locked
-    password is fine). This is how you get a shell on the box.
-  - `tvbox-wifi.conf` - for an **ethernet-less** box that should come online by
-    itself instead of being set up from the TV:
+  own step (`tvbox-firstboot`, a systemd oneshot) that reads **one** plain file
+  off the **bootfs** (FAT) partition - `tvbox.conf` - editable on any OS, no
+  tooling. It's `KEY=value`, `#` comments, all keys optional; drop it after
+  flashing. A click-together generator lives at [`docs/config/`](config/) (open
+  it in a browser, export the file). Keys:
 
-    ```sh
-    SSID="YourNetwork"
-    PSK="your-wifi-password"   # omit for an open network
-    ```
+  ```sh
+  HOSTNAME=living-room            # name this box (several would clash on the LAN)
+  WIFI_SSID=YourNetwork           # for an ethernet-less box (else set WiFi on the TV)
+  WIFI_PASSWORD=your-wifi-pass    # omit for an open network
+  SUDO=true                       # passwordless sudo over SSH for power users (default off)
+  PASSWORD=hunter2                # optional: unlock the tv account for password login
+  SSH_AUTHORIZED_KEY=ssh-ed25519 AAAA... you@host   # your PUBLIC key -> `ssh tv@<box-ip>`
+  ```
 
-    It becomes a NetworkManager connection (`tvbox-preseed`) that auto-connects.
-    Both are applied every boot (idempotent); the files may stay on the card (the
-    key is public; the WiFi PSK is plaintext on the FAT partition - the usual
-    headless-preseed trade-off). Without `tvbox-wifi.conf`, set WiFi up from the
-    TV (Settings → Network) - that path works out of the box now too.
+  Notes on the fields:
+  - **SSH_AUTHORIZED_KEY / PASSWORD** - the `tv` account ships password-locked;
+    a key gets you in with no password. Multiple keys? use a standalone
+    `authorized_keys` file (still honoured). `PASSWORD=` unlocks the account for
+    password login (set-only - removing it later doesn't re-lock; while it's in
+    the file it re-applies each boot, so change the password in tvbox.conf, not
+    with `passwd`).
+  - **SUDO** - a deliberate power-user opt-in; a normal box has no sudo at all, a
+    fully hardened kiosk. NOPASSWD is the only option (the account is
+    password-locked, so plain sudo can't prompt), mirroring Raspberry Pi OS's own
+    `010_pi-nopasswd`. `SUDO=true`/absent toggles it both ways. The tvbox shell
+    itself always runs rootless - this only affects a human on the SSH shell.
+  - **HOSTNAME** - the image default is `tvbox`; set this so multiple boxes are
+    distinct (also editable later on the TV: Settings → General → Device name).
+
+  Applied every boot (idempotent); the file may stay on the card (the key is
+  public; the WiFi/account passwords are plaintext on the FAT partition - the
+  usual headless-preseed trade-off). Legacy single-purpose files
+  (`authorized_keys`, `tvbox-wifi.conf` with `SSID=`/`PSK=`) still work as
+  fallbacks. Without any WiFi preseed, set it up from the TV (Settings → Network).
+
 - **WiFi**: set up **from the TV** once booted (Settings → Network) - the image
   brings the radio up (NetworkManager ships it off) and sets the WiFi country
   (HU) so it scans out of the box. Or preseed it (see _Headless provisioning_).

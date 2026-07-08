@@ -218,6 +218,29 @@
     "rebootNow": "Újraindítás most",
     "rebootNone": "Nincs függőben újraindítás."
   },
+  "hostname": {
+    "title": "Eszköz neve",
+    "hint": "Nevezd el a boxot, hogy több box közül könnyen megkülönböztesd a hálózaton.",
+    "name": "Név",
+    "later": "Elmentve - az új név a box következő frissítése után lép életbe."
+  },
+  "region": {
+    "title": "Beállítás",
+    "welcome": "Üdvözlünk - állítsuk be a boxot.",
+    "timezone": "Időzóna",
+    "keyboard": "Billentyűzetkiosztás",
+    "region": "Régió",
+    "city": "Város",
+    "current": "Jelenlegi",
+    "next": "Tovább",
+    "skip": "Kihagyás",
+    "back": "Vissza",
+    "finish": "Befejezés",
+    "allSet": "Minden kész",
+    "allSetHint": "A boxod készen áll. Jó szórakozást!",
+    "keymapLater": "Elmentve - a billentyűzetkiosztás a box következő frissítése után lép életbe.",
+    "tzLater": "Elmentve - az időzóna a box következő frissítése után lép életbe."
+  },
   "backup": {
     "title": "Mentés és visszaállítás",
     "hint": "A box beállításait (csatornák, fiókok, app-elrendezés) jelszóval titkosított fájlként mentheted a telefonodra - és onnan vissza is töltheted, akár egy újratelepített boxra.",

@@ -4,6 +4,8 @@ import { useI18n } from "../lib/i18n";
 import { useBackspace } from "../lib/useBackspace";
 import { FocusButton } from "./FocusButton";
 import { LanguageSettings } from "./LanguageSettings";
+import { RegionSettings } from "./RegionSettings";
+import { HostnameSettings } from "./HostnameSettings";
 import { WifiSettings } from "./WifiSettings";
 import { DisplaySettings } from "./DisplaySettings";
 import { AudioSettings } from "./AudioSettings";
@@ -51,6 +53,8 @@ const CATEGORIES: Category[] = [
     render: () => (
       <>
         <LanguageSettings />
+        <RegionSettings />
+        <HostnameSettings />
         <AboutSettings />
       </>
     ),

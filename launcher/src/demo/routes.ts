@@ -7,6 +7,7 @@ import * as data from "./data";
 import { demoLocale, notifyAll } from "./bridge";
 
 const config: PublicConfig = structuredClone(data.CONFIG);
+const region = structuredClone(data.REGION);
 const wifiNetworks = data.WIFI_NETWORKS.map((n) => ({ ...n }));
 const btDevices = data.BT_DEVICES.map((d) => ({ ...d }));
 const audio = structuredClone(data.AUDIO);
@@ -190,6 +191,19 @@ export async function handleApi(
     // ---- system / update / ambient / backup / misc ----
     case "/tvbox/api/system/info":
       return data.SYSTEM_INFO;
+    case "/tvbox/api/system/region":
+      return region;
+    case "/tvbox/api/system/timezone":
+      region.timezone = String(b.timezone ?? region.timezone);
+      return ok;
+    case "/tvbox/api/system/keymap":
+      // The real box may reject this until a polkit grant ships; the demo shows
+      // the happy path so the picker's highlight tracks the selection.
+      region.keymap = String(b.keymap ?? region.keymap);
+      return ok;
+    case "/tvbox/api/system/hostname":
+      data.SYSTEM_INFO.hostname = String(b.hostname ?? data.SYSTEM_INFO.hostname);
+      return ok;
     case "/tvbox/api/update/status":
       return updateStatus();
     case "/tvbox/api/update/check":

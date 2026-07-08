@@ -9,6 +9,7 @@ import type { BtDevice } from "../lib/bluetooth";
 import type { AudioState } from "../lib/audio";
 import type { DisplayInfo } from "../lib/display";
 import type { SystemInfo } from "../lib/system";
+import type { RegionInfo } from "../lib/region";
 import type { UpdateStatus } from "../lib/update";
 import type { PublicConfig } from "../lib/config";
 import type { StoreEntry } from "../lib/api";
@@ -259,3 +260,82 @@ export const STORE_ENTRIES: StoreEntry[] = [
 ];
 
 export const WEATHER = { city: "Budapest", tempC: 27, code: 1 };
+
+// Region/keyboard fixtures for the first-boot wizard + Settings -> General. A
+// representative subset (the real box exposes ~485 zones / ~99 keymaps) that
+// still spans several regions incl. a sub-region ("America/Argentina/...") and a
+// slash-less zone ("UTC") so the drill-down is fully exercisable in the demo.
+export const REGION: RegionInfo = {
+  timezone: "Europe/Budapest",
+  keymap: "hu",
+  timezones: [
+    "UTC",
+    "Europe/Budapest",
+    "Europe/London",
+    "Europe/Paris",
+    "Europe/Berlin",
+    "Europe/Madrid",
+    "Europe/Rome",
+    "Europe/Vienna",
+    "Europe/Warsaw",
+    "Europe/Prague",
+    "Europe/Bucharest",
+    "Europe/Athens",
+    "Europe/Moscow",
+    "America/New_York",
+    "America/Chicago",
+    "America/Denver",
+    "America/Los_Angeles",
+    "America/Toronto",
+    "America/Mexico_City",
+    "America/Sao_Paulo",
+    "America/Argentina/Buenos_Aires",
+    "America/Argentina/Cordoba",
+    "Asia/Tokyo",
+    "Asia/Shanghai",
+    "Asia/Hong_Kong",
+    "Asia/Singapore",
+    "Asia/Kolkata",
+    "Asia/Dubai",
+    "Asia/Jerusalem",
+    "Africa/Cairo",
+    "Africa/Lagos",
+    "Africa/Johannesburg",
+    "Australia/Sydney",
+    "Australia/Perth",
+    "Pacific/Auckland",
+    "Pacific/Honolulu",
+  ],
+  keymaps: [
+    "gb",
+    "us",
+    "hu",
+    "de",
+    "fr",
+    "es",
+    "it",
+    "pt",
+    "br",
+    "nl",
+    "pl",
+    "cz",
+    "sk",
+    "ro",
+    "hr",
+    "rs",
+    "ru",
+    "ua",
+    "gr",
+    "tr",
+    "se",
+    "no",
+    "dk",
+    "fi",
+    "ch",
+    "be",
+    "jp",
+    "kr",
+    "dvorak",
+    "colemak",
+  ],
+};

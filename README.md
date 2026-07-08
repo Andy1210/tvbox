@@ -110,11 +110,25 @@ What the image gives you:
 - **Network.** Ethernet works immediately. WiFi is set up from the TV (Settings
   → Network); the image brings the radio up and sets the WiFi country so it
   scans out of the box.
-- **SSH.** Enabled, but the account is locked, so you get in with a **key**:
-  drop your public key as `authorized_keys` on the boot (FAT) partition and it
-  is installed on first boot, then `ssh tv@<box-ip>`.
-- **No Ethernet?** Also drop a `tvbox-wifi.conf` (`SSID=...` / `PSK=...`) on the
-  boot partition to auto-connect instead of setting WiFi up from the TV.
+- **First-boot setup with one file.** Drop a `tvbox.conf` on the boot (FAT)
+  partition to name the box, join WiFi, add your SSH key, and more - all
+  optional, all in one place (there's a click-together generator under
+  [`docs/config/`](docs/config/)):
+
+  ```sh
+  HOSTNAME=living-room
+  WIFI_SSID=MyNetwork
+  WIFI_PASSWORD=secret        # omit for open
+  SUDO=true                   # passwordless sudo over SSH for power users
+  SSH_AUTHORIZED_KEY=ssh-ed25519 AAAA... you@host
+  ```
+
+  The `tv` account is password-locked, so an **SSH key** is how you get in
+  (`ssh tv@<box-ip>`); `SUDO=true` is an opt-in power-user affordance (a normal
+  box has no sudo - the app always runs rootless). See
+  [docs/sd-image.md](docs/sd-image.md) for every key. The hostname is also
+  editable later on the TV (Settings → General → Device name).
+
 - **Self-updating.** OTA app/box updates from the releases feed, plus OS
   security updates, both without ever auto-rebooting.
 

@@ -58,7 +58,11 @@ Launcher (launcher/) is React+TS+Vite+Tailwind, spatial nav via
    udev/polkit/apt) and the apt path of `tvbox deps`. Never add `sudo` to the
    shell - a feature that seems to need it needs a udev/polkit grant in
    provision instead. Reboot/poweroff = plain `systemctl` (logind
-   active-session polkit), sudo is only a fallback.
+   active-session polkit), sudo is only a fallback. **Power-user sudo is a
+   separate, opt-in HUMAN affordance**, not a runtime path: `SUDO=true` in the
+   boot-partition `tvbox.conf` makes `tvbox-firstboot`/`provision.sh` grant the
+   box user passwordless sudo for an SSH admin (see the `010_pi-nopasswd` note in
+   Sharp edges). It never changes that the shell/app code runs rootless.
 2. **`runtime.capabilities` is the security boundary** and fails closed
    (default `["nav"]`, `capsFor` in main.js). The launcher (id null) gets
    nav+player+config. Remote sites NEVER run in the main window - it has
@@ -123,7 +127,8 @@ touched one file, `npx prettier --write <file>` is enough; when in doubt run
   a bare `pkill -f "electron ."` also matches your own ssh command line and
   kills the connection - hence the `[/]` character class).
 - Verify (on the box, via ssh): `curl -s http://127.0.0.1:8097/tvbox/api/apps`,
-  `systemctl --user status tvbox-cec`, `~/.tvbox/cec_raw.log` for CEC traffic.
+  `systemctl --user status tvbox-cec`, `journalctl --user -u tvbox-cec` for CEC
+  traffic/keypress logs.
   A screenshot of the running UI: `grim ~/shot.png` in the Wayland session
   (`XDG_RUNTIME_DIR=/run/user/$(id -u) WAYLAND_DISPLAY=wayland-0`).
 - Lockfiles are committed (shell's was generated with
@@ -167,7 +172,13 @@ touched one file, `npx prettier --write <file>` is enough; when in doubt run
   Node code in the host process - that trust split is by design (SECURITY.md).
 - Raspberry Pi OS ships its own `010_pi-nopasswd` passwordless-sudo drop-in on
   some images; tvbox does **not** rely on it (provision is the only root step),
-  so don't write code that assumes passwordless sudo at runtime.
+  so don't write code that assumes passwordless sudo at runtime. tvbox _does_
+  optionally grant it, but only as an opt-in power-user affordance gated on
+  `SUDO=true` in the boot-partition `tvbox.conf` (our own `/etc/sudoers.d/010-tvbox`,
+  written by `tvbox-firstboot` on flashed boxes and `provision.sh` on dev
+  deploys; toggles both ways; the legacy empty `tvbox-sudo` marker also still
+  works). It's for a human on the SSH shell - runtime code must still never call
+  sudo.
 - `deploy.sh` requires an explicit `<pi-ssh-host>` - never hardcode a host.
 - A deployed box is usually someone's actual living-room TV: restarting the
   shell or `mpv` interrupts whatever is playing. Check `pgrep -x mpv` (or ask)

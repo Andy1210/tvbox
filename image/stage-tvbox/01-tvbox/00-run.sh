@@ -82,38 +82,104 @@ ln -sf ../tvbox-wifi-unblock.service \
 
 # 2c) Headless provisioning WITHOUT custom.toml (which this image can't process).
 #     The account password is locked, so there's no way into a fresh box until
-#     an SSH key is present. Read simple files off the boot (FAT) partition -
-#     editable on any OS, no special tooling - and apply them on first boot:
-#       - boot/authorized_keys      -> ~tv/.ssh/authorized_keys  (SSH key auth
-#                                       works even with the password locked)
-#       - boot/tvbox-wifi.conf      -> an NM connection so a box with no ethernet
-#         (SSID=.. PSK=..)             comes online by itself (else set WiFi from
-#                                       the TV: Settings -> Network)
-#     Runs every boot, idempotent; the public key / config may stay on the card.
+#     an SSH key is present. First-boot config is driven by ONE file on the boot
+#     (FAT) partition - tvbox.conf (KEY=value, editable on any OS; there's a
+#     click-together generator under docs/config/) - applied every boot by
+#     tvbox-firstboot:
+#       HOSTNAME=  WIFI_SSID=/WIFI_PASSWORD=  SUDO=true  PASSWORD=  SSH_AUTHORIZED_KEY=
+#     Legacy standalone files (authorized_keys, tvbox-wifi.conf) still work.
+#     Runs every boot, idempotent; the config may stay on the card.
+
+# Default hostname: RPi OS Lite ships "raspberrypi"; several boxes would collide
+# on the LAN. Ship "tvbox"; tvbox-firstboot overrides it per box from tvbox.conf.
+echo "tvbox" > "${ROOTFS_DIR}/etc/hostname"
+if grep -q '^127.0.1.1' "${ROOTFS_DIR}/etc/hosts" 2>/dev/null; then
+  sed -i 's/^127.0.1.1.*/127.0.1.1\ttvbox/' "${ROOTFS_DIR}/etc/hosts"
+else
+  printf '127.0.1.1\ttvbox\n' >> "${ROOTFS_DIR}/etc/hosts"
+fi
+
 cat > "${ROOTFS_DIR}/usr/local/sbin/tvbox-firstboot" <<'FIRSTBOOT'
 #!/bin/sh
 # tvbox headless provisioning from the boot partition (see stage-tvbox 00-run.sh).
+# Everything is driven by ONE optional file: tvbox.conf (KEY=value, '#' comments),
+# dropped on the boot (FAT) partition, editable on any OS. Runs every boot,
+# idempotent. The legacy single-purpose files (authorized_keys, tvbox-wifi.conf,
+# tvbox-sudo) are still honoured as fallbacks.
 BOOT=/boot/firmware
 [ -d "$BOOT" ] || BOOT=/boot
+CONF="$BOOT/tvbox.conf"
 
-# SSH: install the owner's public key for the (password-locked) tv account.
-if [ -f "$BOOT/authorized_keys" ]; then
+# Read one KEY from tvbox.conf: everything after the first '=' on the first
+# matching line, CR stripped. NOT sourced - a value may contain spaces, '#',
+# '$', '/' etc. (e.g. a WiFi password or an SSH key) with no quoting and no code
+# execution.
+conf_get() { [ -f "$CONF" ] && sed -n "s/^$1=//p" "$CONF" | head -n1 | tr -d '\r'; }
+
+# --- SSH: authorised key for the (locked-by-default) tv account ---
+KEY=$(conf_get SSH_AUTHORIZED_KEY)
+if [ -n "$KEY" ]; then
+  install -d -m 700 -o tv -g tv /home/tv/.ssh
+  printf '%s\n' "$KEY" > /home/tv/.ssh/authorized_keys
+  chown tv:tv /home/tv/.ssh/authorized_keys && chmod 600 /home/tv/.ssh/authorized_keys
+elif [ -f "$BOOT/authorized_keys" ]; then          # legacy standalone file (allows many keys)
   install -d -m 700 -o tv -g tv /home/tv/.ssh
   install -m 600 -o tv -g tv "$BOOT/authorized_keys" /home/tv/.ssh/authorized_keys
 fi
 
-# WiFi: optional auto-connect for an ethernet-less box. tvbox-wifi.conf holds
-#   SSID="MyNetwork"
-#   PSK="my-wifi-password"   # omit for an open network
-if [ -f "$BOOT/tvbox-wifi.conf" ]; then
+# --- Account password (optional): unlock tv for password login (console/SSH).
+# Absent = the account stays locked (key-only). Set-only: removing it later does
+# NOT re-lock (we never surprise-lock a box). ---
+PASSWORD=$(conf_get PASSWORD)
+if [ -n "$PASSWORD" ]; then
+  printf 'tv:%s\n' "$PASSWORD" | chpasswd 2>/dev/null && passwd -u tv >/dev/null 2>&1
+fi
+
+# --- Power-user sudo: SUDO=true grants the tv account passwordless sudo (for an
+# SSH admin). Default (absent/false) = no sudo at all, a hardened kiosk. NOPASSWD
+# is the only option when the account is locked (mirrors Raspberry Pi OS's
+# 010_pi-nopasswd); the tvbox shell stays rootless regardless (hard rule #1) -
+# this is a human affordance only. Toggles both ways every boot. ---
+SUDO=$(conf_get SUDO)
+SUDOERS=/etc/sudoers.d/010-tvbox
+if [ "$SUDO" = "true" ] || [ "$SUDO" = "1" ] || [ "$SUDO" = "yes" ] || [ -f "$BOOT/tvbox-sudo" ]; then
+  printf 'tv ALL=(ALL) NOPASSWD: ALL\n' > "$SUDOERS.tmp"
+  if visudo -cf "$SUDOERS.tmp" >/dev/null 2>&1; then
+    chmod 440 "$SUDOERS.tmp" && mv "$SUDOERS.tmp" "$SUDOERS"
+  else
+    rm -f "$SUDOERS.tmp"
+  fi
+elif [ -f "$SUDOERS" ]; then
+  rm -f "$SUDOERS"
+fi
+
+# --- Hostname: name this box (several would otherwise all be "tvbox" and clash
+# on the LAN). Sanitised to a valid label; applied only on a real change. ---
+NAME=$(conf_get HOSTNAME | tr -cd 'A-Za-z0-9-' | cut -c1-63 | sed 's/^-*//; s/-*$//')
+if [ -n "$NAME" ] && [ "$NAME" != "$(cat /etc/hostname 2>/dev/null)" ]; then
+  hostnamectl set-hostname "$NAME" 2>/dev/null || { printf '%s\n' "$NAME" > /etc/hostname; hostname "$NAME"; }
+  if grep -q '^127.0.1.1' /etc/hosts 2>/dev/null; then
+    sed -i "s/^127.0.1.1.*/127.0.1.1\t$NAME/" /etc/hosts
+  else
+    printf '127.0.1.1\t%s\n' "$NAME" >> /etc/hosts
+  fi
+fi
+
+# --- WiFi: auto-connect for an ethernet-less box (else set it up from the TV:
+# Settings -> Network). From tvbox.conf WIFI_SSID/WIFI_PASSWORD, or the legacy
+# tvbox-wifi.conf (SSID=/PSK=). Written once; edit/remove the NM file to change. ---
+SSID=$(conf_get WIFI_SSID)
+PSK=$(conf_get WIFI_PASSWORD)
+if [ -z "$SSID" ] && [ -f "$BOOT/tvbox-wifi.conf" ]; then
   SSID=; PSK=
-  . "$BOOT/tvbox-wifi.conf" 2>/dev/null || true
-  KF=/etc/NetworkManager/system-connections/tvbox-preseed.nmconnection
-  if [ -n "$SSID" ] && [ ! -f "$KF" ]; then
-    if [ -n "$PSK" ]; then SEC="[wifi-security]
+  . "$BOOT/tvbox-wifi.conf" 2>/dev/null || true    # legacy: sources SSID=/PSK=
+fi
+KF=/etc/NetworkManager/system-connections/tvbox-preseed.nmconnection
+if [ -n "$SSID" ] && [ ! -f "$KF" ]; then
+  if [ -n "$PSK" ]; then SEC="[wifi-security]
 key-mgmt=wpa-psk
 psk=$PSK"; else SEC=""; fi
-    cat > "$KF" <<EOF2
+  cat > "$KF" <<EOF2
 [connection]
 id=tvbox-preseed
 type=wifi
@@ -127,9 +193,8 @@ method=auto
 [ipv6]
 method=auto
 EOF2
-    chmod 600 "$KF"
-    nmcli con reload 2>/dev/null || true
-  fi
+  chmod 600 "$KF"
+  nmcli con reload 2>/dev/null || true
 fi
 FIRSTBOOT
 chmod 755 "${ROOTFS_DIR}/usr/local/sbin/tvbox-firstboot"
@@ -149,6 +214,18 @@ WantedBy=multi-user.target
 EOF
 ln -sf ../tvbox-firstboot.service \
   "${ROOTFS_DIR}/etc/systemd/system/multi-user.target.wants/tvbox-firstboot.service"
+
+# 2d) Default keyboard layout = US (Raspberry Pi OS Lite defaults to gb). Written
+#     to /etc/default/keyboard, which labwc + the console read at login; the setup
+#     wizard / Settings can change it later (localectl set-x11-keymap via the
+#     locale1 polkit grant above).
+cat > "${ROOTFS_DIR}/etc/default/keyboard" <<'EOF'
+XKBMODEL="pc105"
+XKBLAYOUT="us"
+XKBVARIANT=""
+XKBOPTIONS=""
+BACKSPACE="guess"
+EOF
 
 # 3) boot straight into labwc as the box user (greetd autologin, kiosk - no
 #    desktop, no login prompt; the account password can stay locked)

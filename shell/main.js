@@ -6,7 +6,7 @@
 // (preload.js); the remote Home button returns to the launcher from anywhere.
 // Run: electron . --ozone-platform=wayland --no-sandbox
 const { app, BrowserWindow, ipcMain } = require("electron");
-const { spawn, execFile, execFileSync } = require("child_process");
+const { spawn, execFile } = require("child_process");
 const http = require("http");
 const net = require("net");
 const fs = require("fs");
@@ -504,6 +504,9 @@ function handlePost(p, data, res) {
   if (p === "/tvbox/api/system/keymap") {
     return setKeymap(String(data.keymap || ""), (r) => jsonRes(res, r));
   }
+  if (p === "/tvbox/api/system/hostname") {
+    return setHostname(String(data.hostname || ""), (r) => jsonRes(res, r));
+  }
   res.writeHead(404, { "Content-Type": "text/plain" });
   res.end("not found");
 }
@@ -625,39 +628,62 @@ function ethernetStatus(cb) {
 }
 // System region for the first-boot wizard + Settings: current timezone + the
 // full zone list, and the current X11 keymap + the layout list. The launcher
-// groups timezones by region (Europe/Budapest -> Europe > Budapest). Reads are
-// fast + rare (wizard/Settings open only), so a brief sync call is fine.
+// groups timezones by region (Europe/Budapest -> Europe > Budapest). ASYNC
+// (never block the Electron main thread) and the big STATIC lists are cached
+// after the first read, so re-opening the picker doesn't re-spawn 4 processes
+// each time (that was blocking the UI). Only current tz/keymap is re-read.
+const lines = (s) =>
+  String(s || "")
+    .split("\n")
+    .map((x) => x.trim())
+    .filter(Boolean);
+let regionListCache = null; // { timezones, keymaps } - static lists, cached after a successful fetch
 function systemRegion(cb) {
-  const out = { timezone: "", timezones: [], keymap: "", keymaps: [] };
-  const lines = (s) =>
-    String(s)
-      .split("\n")
-      .map((x) => x.trim())
-      .filter(Boolean);
-  try {
-    out.timezone = String(execFileSync("timedatectl", ["show", "-p", "Timezone", "--value"], { timeout: 5000 })).trim();
-    out.timezones = lines(execFileSync("timedatectl", ["list-timezones"], { timeout: 5000 }));
-    const st = String(execFileSync("localectl", ["status"], { timeout: 5000 }));
-    const km = /X11 Layout:\s*(\S+)/.exec(st);
-    out.keymap = km ? km[1] : "";
-    out.keymaps = lines(execFileSync("localectl", ["list-x11-keymap-layouts"], { timeout: 5000 }));
-  } catch (e) {
-    console.warn("[region]", e.message);
-  }
-  cb(out);
+  const readCurrent = (lists) =>
+    execFile("timedatectl", ["show", "-p", "Timezone", "--value"], { timeout: 5000 }, (e, tzOut) => {
+      const timezone = e ? "" : String(tzOut).trim();
+      execFile("localectl", ["status"], { timeout: 5000 }, (e2, st) => {
+        const m = /X11 Layout:\s*(\S+)/.exec(String(st || ""));
+        cb({ timezone, keymap: m ? m[1] : "", timezones: lists.timezones, keymaps: lists.keymaps });
+      });
+    });
+  if (regionListCache) return readCurrent(regionListCache);
+  execFile("timedatectl", ["list-timezones"], { timeout: 8000 }, (e, tzs) => {
+    execFile("localectl", ["list-x11-keymap-layouts"], { timeout: 8000 }, (e2, kms) => {
+      const lists = { timezones: lines(tzs), keymaps: lines(kms) };
+      // Cache only a SUCCESSFUL, non-empty fetch. A transient failure (the wizard
+      // opens before systemd-localed/timedated is up, or the 8s timeout trips
+      // under first-boot load) must not poison the cache with empty lists - a
+      // truthy empty cache would blank the region picker for the life of the
+      // shell. On failure we serve this one call and re-fetch next time.
+      if (!e && !e2 && lists.timezones.length && lists.keymaps.length) regionListCache = lists;
+      readCurrent(lists);
+    });
+  });
 }
 // timedatectl set-timezone works from the box user's active session (polkit
 // allows timedate1.set-timezone). localectl set-x11-keymap needs the locale1
 // polkit grant provision installs (auth is required by default).
 function setTimezone(tz, cb) {
-  if (!/^[A-Za-z0-9_+/-]{1,64}$/.test(tz)) return cb({ ok: false, error: "bad timezone" });
+  if (!/^[A-Za-z0-9_+/][A-Za-z0-9_+/-]{0,63}$/.test(tz)) return cb({ ok: false, error: "bad timezone" });
   execFile("timedatectl", ["set-timezone", tz], { timeout: 8000 }, (e) =>
     cb(e ? { ok: false, error: String(e.message || e).slice(0, 120) } : { ok: true }),
   );
 }
 function setKeymap(layout, cb) {
-  if (!/^[a-z0-9,_-]{1,32}$/.test(layout)) return cb({ ok: false, error: "bad layout" });
+  if (!/^[a-z0-9][a-z0-9,_-]{0,31}$/.test(layout)) return cb({ ok: false, error: "bad layout" });
   execFile("localectl", ["set-x11-keymap", layout], { timeout: 8000 }, (e) =>
+    cb(e ? { ok: false, error: String(e.message || e).slice(0, 120) } : { ok: true }),
+  );
+}
+// hostnamectl set-hostname needs the hostname1 polkit grant provision installs
+// (set-hostname / set-static-hostname require admin auth by default). Sets the
+// static + transient name; /etc/hosts is left to tvbox-firstboot (root) - a
+// stale 127.0.1.1 line only costs a cosmetic sudo warning. Name = one RFC-1123
+// label (letters/digits/hyphen, 1-63, no leading/trailing hyphen).
+function setHostname(name, cb) {
+  if (!/^[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?$/.test(name)) return cb({ ok: false, error: "bad hostname" });
+  execFile("hostnamectl", ["set-hostname", name], { timeout: 8000 }, (e) =>
     cb(e ? { ok: false, error: String(e.message || e).slice(0, 120) } : { ok: true }),
   );
 }

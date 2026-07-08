@@ -12,8 +12,10 @@ in the shell) returns here from any app.
 ## i18n
 
 No hardcoded UI strings - everything resolves through `src/lib/i18n.tsx` against
-JSON locale files in `src/locales/`. First launch shows a language picker
-(`SetupScreen`); the choice persists in `localStorage`. Dates/times use `Intl`
+JSON locale files in `src/locales/`. First launch shows the setup wizard
+(`SetupWizard`: language -> WiFi -> timezone -> keyboard -> done); the language
+choice persists in `localStorage` and a `tvbox.setup.done` flag gates the wizard
+so it only runs on a fresh box. Dates/times use `Intl`
 with the locale tag, so a new language needs **only a `src/locales/<id>.json`**
 (register it in `i18n.tsx`). Manifest `name`/`tagline` may be a string or a
 `{ "hu": …, "en": … }` map.

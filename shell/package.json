@@ -1,6 +1,6 @@
 {
   "name": "tvbox-shell",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "private": true,
   "description": "tvbox Electron shell - manifest-driven host for the launcher + apps (web-client/mpv).",
   "license": "MIT",

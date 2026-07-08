@@ -1,10 +1,10 @@
-import { useEffect, type ReactNode } from "react";
-import { useI18n } from "./lib/i18n";
+import { useEffect, useState, type ReactNode } from "react";
+import { useI18n, useLocaleStore } from "./lib/i18n";
 import { useConfigStore } from "./stores/config";
 import { useNavStore } from "./stores/nav";
 import { Backdrop } from "./components/Backdrop";
 import { Home } from "./components/Home";
-import { SetupScreen } from "./components/SetupScreen";
+import { SetupWizard, markSetupDone } from "./components/SetupWizard";
 import { Settings } from "./components/Settings";
 import { Catalog } from "./components/Catalog";
 import { Ambient } from "./components/Ambient";
@@ -19,7 +19,24 @@ import { applyPendingRestore } from "./lib/backup";
 // onboarding anymore; each app does its own setup once installed. State comes
 // from stores (i18n, config, nav).
 export function App() {
-  const { locale, t } = useI18n();
+  const { t } = useI18n();
+  // First-boot gate: show the setup wizard until setup is marked complete
+  // (persisted flag). MIGRATION - an already-configured box (a locale was
+  // chosen before the wizard existed) has no flag yet, so on first mount we
+  // set it and skip the wizard; only a truly fresh box (no locale, no flag)
+  // starts at the wizard's language step.
+  const [setupDone, setSetupDone] = useState<boolean>(() => {
+    try {
+      if (localStorage.getItem("tvbox.setup.done") === "1") return true;
+      if (useLocaleStore.getState().locale) {
+        markSetupDone();
+        return true;
+      }
+    } catch {
+      /* no storage: treat as fresh - the wizard is harmless and fully skippable */
+    }
+    return false;
+  });
   const config = useConfigStore((s) => s.config);
   const configError = useConfigStore((s) => s.error);
   const loadConfig = useConfigStore((s) => s.load);
@@ -47,7 +64,7 @@ export function App() {
   // notification overlay is mounted alongside every view, so it can appear on top
   // of anything (Home, Settings, the ambient screen).
   let content: ReactNode;
-  if (!locale) content = <SetupScreen />;
+  if (!setupDone) content = <SetupWizard onDone={() => setSetupDone(true)} />;
   else if (config === null && configError) {
     // The shell API didn't answer - a transient hiccup must NOT look like a
     // factory-fresh box (it would drop the user into onboarding). Offer retry.

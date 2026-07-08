@@ -5,6 +5,22 @@ updates). `scripts/make-release.sh` lifts the current version's `hu`/`en`
 blocks into the OTA feed's `notes` - keep both languages, keep it short, and
 write for the person on the couch (what changes for THEM), not for developers.
 
+## 1.0.1
+
+### hu
+
+- Első indításkor beállítás varázsló: nyelv, WiFi, időzóna és billentyűzet, lépésről lépésre.
+- Az időzóna és a billentyűzetkiosztás mostantól a Beállításokban is módosítható.
+- Elnevezheted a boxot (Beállítások → Általános), így több box közül könnyen megkülönbözteted.
+- Gyorsabb, azonnali reagálás a távirányító gombjaira.
+
+### en
+
+- First-boot setup wizard: language, WiFi, time zone and keyboard, step by step.
+- Change the time zone and keyboard layout from Settings, too.
+- Name your box (Settings → General) so several boxes are easy to tell apart.
+- Faster, more immediate response to the remote's buttons.
+
 ## 1.0.0
 
 ### hu

@@ -218,6 +218,29 @@
     "rebootNow": "Restart now",
     "rebootNone": "No restart pending."
   },
+  "hostname": {
+    "title": "Device name",
+    "hint": "Name this box so several boxes are easy to tell apart on your network.",
+    "name": "Name",
+    "later": "Saved - the new name applies after the next box update."
+  },
+  "region": {
+    "title": "Setup",
+    "welcome": "Welcome - let's get your box ready.",
+    "timezone": "Time zone",
+    "keyboard": "Keyboard layout",
+    "region": "Region",
+    "city": "City",
+    "current": "Current",
+    "next": "Next",
+    "skip": "Skip",
+    "back": "Back",
+    "finish": "Finish",
+    "allSet": "All set",
+    "allSetHint": "Your box is ready. Enjoy.",
+    "keymapLater": "Saved - the keyboard layout applies after the next box update.",
+    "tzLater": "Saved - the time zone applies after the next box update."
+  },
   "backup": {
     "title": "Backup & restore",
     "hint": "Save the box's settings (channels, accounts, app layout) to your phone as a password-encrypted file - and restore them from there, even onto a re-flashed box.",

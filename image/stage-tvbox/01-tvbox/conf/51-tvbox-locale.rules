@@ -1,9 +1,11 @@
-// tvbox: allow the box user to set timezone + keyboard layout (setup wizard)
-// KEEP IN SYNC with the heredoc in deploy/provision.sh.
+// tvbox: allow the box user to set timezone, keyboard layout and hostname
+// (setup wizard + Settings). KEEP IN SYNC with the heredoc in deploy/provision.sh.
 polkit.addRule(function(action, subject) {
     if ((action.id == "org.freedesktop.locale1.set-keyboard" ||
          action.id == "org.freedesktop.locale1.set-locale" ||
-         action.id == "org.freedesktop.timedate1.set-timezone") &&
+         action.id == "org.freedesktop.timedate1.set-timezone" ||
+         action.id == "org.freedesktop.hostname1.set-hostname" ||
+         action.id == "org.freedesktop.hostname1.set-static-hostname") &&
         (subject.active || subject.isInGroup("netdev"))) {
         return polkit.Result.YES;
     }

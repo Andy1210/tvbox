@@ -124,22 +124,25 @@ polkit.addRule(function(action, subject) {
 RULES
 ok "polkit rule (netdev -> NetworkManager)"
 
-# Timezone + keyboard layout from the box user (first-boot wizard + Settings).
-# set-timezone is already allowed for an active local session; set-keyboard /
-# set-locale require admin auth by default, so grant them to an active session
-# or netdev (headless/SSH). Kept in sync with conf/51-tvbox-locale.rules.
+# Timezone, keyboard layout and hostname from the box user (first-boot wizard +
+# Settings). set-timezone is already allowed for an active local session;
+# set-keyboard / set-locale / hostname1 require admin auth by default, so grant
+# them to an active session or netdev (headless/SSH). Kept in sync with
+# conf/51-tvbox-locale.rules.
 cat > /etc/polkit-1/rules.d/51-tvbox-locale.rules <<'RULES'
-// tvbox: allow the box user to set timezone + keyboard layout (setup wizard)
+// tvbox: allow the box user to set timezone, keyboard layout and hostname
 polkit.addRule(function(action, subject) {
     if ((action.id == "org.freedesktop.locale1.set-keyboard" ||
          action.id == "org.freedesktop.locale1.set-locale" ||
-         action.id == "org.freedesktop.timedate1.set-timezone") &&
+         action.id == "org.freedesktop.timedate1.set-timezone" ||
+         action.id == "org.freedesktop.hostname1.set-hostname" ||
+         action.id == "org.freedesktop.hostname1.set-static-hostname") &&
         (subject.active || subject.isInGroup("netdev"))) {
         return polkit.Result.YES;
     }
 });
 RULES
-ok "polkit rule (timezone + keymap)"
+ok "polkit rule (timezone + keymap + hostname)"
 
 echo "==> user-service lingering (CEC bridge starts at boot, before login)"
 loginctl enable-linger "$TVBOX_USER" 2>/dev/null && ok "linger enabled for $TVBOX_USER" || warn "enable-linger failed"
@@ -156,11 +159,36 @@ if [ -L /usr/local/bin/tvbox ]; then
   rm -f /usr/local/bin/tvbox
   ok "removed legacy /usr/local/bin/tvbox symlink (CLI now lives in ~/.local/bin)"
 fi
-# A NOPASSWD:ALL sudoers file from a pre-provision install is no longer needed -
-# nothing at runtime requires root. Left in place only if the user customised it.
+# Retire the pre-1.0 unconditional NOPASSWD:ALL drop-in - sudo is now opt-in
+# (below), and nothing at runtime requires root.
 if [ -f /etc/sudoers.d/tvbox ] && grep -q "NOPASSWD:ALL" /etc/sudoers.d/tvbox 2>/dev/null; then
   rm -f /etc/sudoers.d/tvbox
-  ok "removed legacy NOPASSWD:ALL sudoers drop-in (no longer needed)"
+  ok "removed legacy NOPASSWD:ALL sudoers drop-in (superseded by the opt-in grant)"
+fi
+
+# Power-user sudo (opt-in via the boot-partition tvbox.conf, exactly like SSH).
+# If tvbox.conf has SUDO=true (or the legacy empty `tvbox-sudo` marker is
+# present), grant the box user passwordless sudo so an admin over SSH can do root
+# work; otherwise make sure no such grant lingers. NOPASSWD is the only option
+# (the account is password-locked, so plain sudo can't prompt) - this mirrors
+# Raspberry Pi OS's own 010_pi-nopasswd default. The tvbox shell stays rootless
+# (hard rule #1); nothing at runtime calls sudo - this is a HUMAN affordance
+# only. The image's tvbox-firstboot applies the identical rule on a flashed box.
+echo "==> power-user sudo (opt-in via boot-partition tvbox.conf SUDO=true)"
+BOOTP=/boot/firmware; [ -d "$BOOTP" ] || BOOTP=/boot
+SUDO_CONF="$(sed -n 's/^SUDO=//p' "$BOOTP/tvbox.conf" 2>/dev/null | head -n1 | tr -d '\r')"
+if [ "$SUDO_CONF" = "true" ] || [ "$SUDO_CONF" = "1" ] || [ "$SUDO_CONF" = "yes" ] || [ -f "$BOOTP/tvbox-sudo" ]; then
+  printf '%s ALL=(ALL) NOPASSWD: ALL\n' "$TVBOX_USER" > /etc/sudoers.d/010-tvbox.tmp
+  if visudo -cf /etc/sudoers.d/010-tvbox.tmp >/dev/null 2>&1; then
+    chmod 440 /etc/sudoers.d/010-tvbox.tmp && mv /etc/sudoers.d/010-tvbox.tmp /etc/sudoers.d/010-tvbox
+    ok "passwordless sudo for $TVBOX_USER (tvbox.conf SUDO)"
+  else
+    rm -f /etc/sudoers.d/010-tvbox.tmp; warn "sudoers validation failed - sudo not enabled"
+  fi
+elif [ -f /etc/sudoers.d/010-tvbox ]; then
+  rm -f /etc/sudoers.d/010-tvbox; ok "revoked passwordless sudo (no SUDO=true)"
+else
+  ok "no sudo grant (set SUDO=true in the boot partition's tvbox.conf to enable)"
 fi
 
 # tvbox is a kiosk: the Electron shell owns the whole screen. The stock system
