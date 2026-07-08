@@ -49,7 +49,9 @@ apt-get install -y -qq $HARD 2>/dev/null && ok "core deps ($HARD)" || bad "core 
 # (Lite-based) box has NO system sans font, so Chromium renders blank/tofu -
 # one ubiquitous Latin font makes the whole UI legible (kept in sync with the
 # image's 00-packages).
-SOFT="jq flatpak kanshi curl git unzip ca-certificates gcc libc6-dev swaybg fonts-dejavu-core"
+# grim: Wayland screenshot tool - not used by the box itself, but lets a dev
+# capture the running UI over ssh (`grim ~/shot.png`) to see what's on screen.
+SOFT="jq flatpak kanshi curl git unzip ca-certificates gcc libc6-dev swaybg fonts-dejavu-core grim"
 apt-get install -y -qq $SOFT 2>/dev/null && ok "extra deps ($SOFT)" || warn "some extra deps missing: $SOFT"
 
 # Shared media stack in the core (kept in sync with image/stage-tvbox): mpv is
