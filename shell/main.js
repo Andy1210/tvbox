@@ -1000,6 +1000,14 @@ function observeMpv() {
             console.log("[player] first frame -> reveal video");
             setVideoMode(true);
           }
+          // mpv maps its window and grabs keyboard focus exactly when playback
+          // actually starts. For a slow-to-buffer source (a Plex movie can take
+          // well over 5s to start) that happens AFTER the fixed post-launch raise
+          // retries ended, leaving mpv focused so the remote stops reaching the
+          // app UI. Re-raise on the real playback-start event (and a short burst
+          // after, since the focus grab can trail the first frame) - this covers
+          // any buffer delay, unlike the fixed launch-time window.
+          [0, 250, 700, 1500].forEach((ms) => setTimeout(raiseWindow, ms));
         }
         emit({ type: "playing" });
         emit({ type: "position", ms: Math.round(m.data * 1000) });
