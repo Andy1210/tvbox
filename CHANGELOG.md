@@ -14,6 +14,7 @@ write for the person on the couch (what changes for THEM), not for developers.
 - Elnevezheted a boxot (Beállítások → Általános), így több box közül könnyen megkülönbözteted.
 - Gyorsabb, azonnali reagálás a távirányító gombjaira.
 - Bluetooth távirányítók (pl. Fire TV) párosítása a Beállításokból - és mostantól a Vissza gombjuk is működik.
+- A távirányító gombjai átállíthatók, eszközönként (Beállítások → Perifériák): válaszd ki a távirányítót, és tanítsd be a saját gombjait - a home és a media gombok is.
 
 ### en
 
@@ -22,6 +23,7 @@ write for the person on the couch (what changes for THEM), not for developers.
 - Name your box (Settings → General) so several boxes are easy to tell apart.
 - Faster, more immediate response to the remote's buttons.
 - Pair Bluetooth remotes (e.g. Fire TV) from Settings - and their Back button now works too.
+- Remap remote buttons per device (Settings → Peripherals): pick a remote and teach it your own buttons - home and media too.
 
 ## 1.0.0
 

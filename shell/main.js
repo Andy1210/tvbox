@@ -366,6 +366,11 @@ function handlePost(p, data, res) {
       config.setUpdate({ auto: data.update.auto !== false }); // only the toggle; feed is box-local
       changed.push("update");
     }
+    if (data.remote) {
+      config.setRemote(data.remote); // per-device button remap (sanitized in config.js)
+      remoteBridgeCmd("reload"); // tell the bridge to re-read the keymap
+      changed.push("remote");
+    }
     emitConfigChange(changed); // e.g. Live TV drops its channel/EPG cache on a new IPTV source
     return jsonRes(res, { ok: true, config: config.publicConfig() });
   }
@@ -440,6 +445,18 @@ function handlePost(p, data, res) {
     }
     if (!/^[0-9A-F]{2}(:[0-9A-F]{2}){5}$/.test(mac)) return jsonRes(res, { ok: false, error: "bad mac" });
     return fn({ ...process.env, ...WL_ENV }, mac, (r) => jsonRes(res, r));
+  }
+  if (p === "/tvbox/api/remote/learn") {
+    // Enter learn mode for a device: the bridge captures & reports the next
+    // button pressed on it (id may contain spaces -> rest-of-line in the FIFO).
+    const id = String((data && data.id) || "").replace(/[\r\n]/g, "");
+    if (!id) return jsonRes(res, { ok: false, error: "no id" });
+    remoteBridgeCmd("learn " + id);
+    return jsonRes(res, { ok: true });
+  }
+  if (p === "/tvbox/api/remote/learn-off") {
+    remoteBridgeCmd("learn-off");
+    return jsonRes(res, { ok: true });
   }
   if (p === "/tvbox/api/parental/verify") {
     return jsonRes(res, { ok: config.verifyPin(String(data.pin || "")) });
@@ -946,6 +963,18 @@ function serve() {
       bluetooth.list({ ...process.env, ...WL_ENV }, (d) => jsonRes(res, { devices: d }));
       return;
     }
+    if (p === "/tvbox/api/remote/devices") {
+      // Currently-managed remotes (published by the bridge). Merge in the saved
+      // keymap per device so the UI shows what's already bound.
+      const list = (readBridgeJson("remote-devices.json", { devices: [] }).devices || []).slice(0, 20);
+      const saved = (config.rawRemote() || {}).devices || {};
+      jsonRes(res, { devices: list.map((d) => ({ ...d, keymap: (saved[d.id] && saved[d.id].keymap) || {} })) });
+      return;
+    }
+    if (p === "/tvbox/api/remote/learned") {
+      jsonRes(res, { learned: readBridgeJson("remote-learned.json", null) });
+      return;
+    }
     if (p === "/tvbox/api/ambient/weather") {
       ambient.weather((config.rawAmbient() || {}).city, (w) => jsonRes(res, w || {}));
       return;
@@ -1427,6 +1456,29 @@ function forwardCommand(cmd) {
     try {
       win.webContents.send("tv-command", cmd);
     } catch (e) {}
+  }
+}
+
+// Remote input bridge (tvbox-remote user service) control FIFO: "reload" (re-read
+// the remap config) or drive learn mode ("learn <id>" / "learn-off"). O_NONBLOCK
+// so we never hang if the bridge isn't running.
+const REMOTE_CMD_FIFO = "/tmp/tvbox-remote-cmd";
+function remoteBridgeCmd(cmd) {
+  try {
+    const fd = fs.openSync(REMOTE_CMD_FIFO, fs.constants.O_WRONLY | fs.constants.O_NONBLOCK);
+    fs.writeSync(fd, cmd + "\n");
+    fs.closeSync(fd);
+  } catch (e) {
+    console.warn("[remote] cmd failed (bridge running?):", e.message);
+  }
+}
+// The bridge publishes its state to small JSON files under ~/.tvbox: the list of
+// currently-managed remotes, and the last button captured in learn mode.
+function readBridgeJson(name, fallback) {
+  try {
+    return JSON.parse(fs.readFileSync(path.join(os.homedir(), ".tvbox", name), "utf8"));
+  } catch (e) {
+    return fallback;
   }
 }
 

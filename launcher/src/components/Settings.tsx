@@ -10,6 +10,7 @@ import { WifiSettings } from "./WifiSettings";
 import { DisplaySettings } from "./DisplaySettings";
 import { AudioSettings } from "./AudioSettings";
 import { BluetoothSettings } from "./BluetoothSettings";
+import { RemoteRemap } from "./RemoteRemap";
 import { AppOrderSettings } from "./AppOrderSettings";
 import { StoreSettings } from "./StoreSettings";
 import { AmbientSettings } from "./AmbientSettings";
@@ -84,7 +85,16 @@ const CATEGORIES: Category[] = [
     ),
     render: () => <WifiSettings />,
   },
-  { id: "peripherals", icon: svg(<path d="M7 7l10 10-5 4V3l5 4L7 17" />), render: () => <BluetoothSettings /> },
+  {
+    id: "peripherals",
+    icon: svg(<path d="M7 7l10 10-5 4V3l5 4L7 17" />),
+    render: () => (
+      <>
+        <BluetoothSettings />
+        <RemoteRemap />
+      </>
+    ),
+  },
   {
     id: "apps",
     icon: svg(
@@ -178,7 +188,14 @@ function CategoryPanel({ id, onBack }: { id: string; onBack: () => void }) {
   useBackspace(onBack);
   const cat = CATEGORIES.find((c) => c.id === id);
   return (
-    <div className="h-full flex flex-col px-[5vw] py-[4vh] overflow-y-auto no-scrollbar">
+    // scrollPaddingTop leaves headroom when a focused item scrolls to the top
+    // edge, so the panel header + section title stay reachable (norigin uses
+    // block:"nearest"; without this the topmost focusable pins to the very top
+    // and hides everything above it).
+    <div
+      className="h-full flex flex-col px-[5vw] py-[4vh] overflow-y-auto no-scrollbar"
+      style={{ scrollPaddingTop: "16vh" }}
+    >
       <div className="flex items-center gap-[1.2vw] mb-[1vh]">
         <span className="w-[2.8vh] h-[2.8vh] text-white/50 rotate-180">{chevron}</span>
         <div className="text-[3vh] font-bold">{t("settingsCat." + id)}</div>

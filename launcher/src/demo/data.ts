@@ -78,6 +78,7 @@ export const CONFIG: PublicConfig = {
   spotify: { deviceName: "tvbox demo", hasCredentials: true, enabled: true },
   ambient: { enabled: true, idleMinutes: 5, city: "Budapest" },
   update: { auto: true },
+  remote: { devices: {} },
 };
 
 export const WIFI_STATUS: WifiStatus = {

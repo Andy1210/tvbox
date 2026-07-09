@@ -1,0 +1,14 @@
+# tvbox remote input bridge -> per-device button remap - systemd USER unit (no
+# root: /dev/input read from the `input` group, /dev/uinput write from the udev
+# rule provision.sh sets up, same as the CEC bridge). Installed to
+# ~/.config/systemd/user/ by deploy.sh; starts at boot via `loginctl enable-linger`.
+[Unit]
+Description=tvbox remote input bridge (per-device button remap)
+
+[Service]
+ExecStart=/usr/bin/python3 %h/.tvbox/remote_input_bridge.py
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=default.target

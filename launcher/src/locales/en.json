@@ -114,6 +114,31 @@
     "pairing": "Pairing {name}…",
     "failed": "Failed: {name}"
   },
+  "remote": {
+    "title": "Remote buttons",
+    "hint": "Standard remotes (arrows / OK / Back / Home) work as-is. To teach a remote another button, pick an action under it and press that button on the remote. Each remote is remapped on its own.",
+    "none": "No remotes connected - pair or wake one first.",
+    "press": "Press a button…",
+    "custom": "custom",
+    "default": "default",
+    "clear": "Clear",
+    "customCount": "{n} custom",
+    "action": {
+      "up": "Up",
+      "down": "Down",
+      "left": "Left",
+      "right": "Right",
+      "ok": "OK / Select",
+      "back": "Back",
+      "home": "Home",
+      "playpause": "Play / Pause",
+      "rewind": "Rewind",
+      "fastforward": "Fast-forward",
+      "prev": "Previous",
+      "next": "Next",
+      "stop": "Stop"
+    }
+  },
   "appsettings": {
     "title": "Apps",
     "hint": "Reorder or hide apps on the home screen.",

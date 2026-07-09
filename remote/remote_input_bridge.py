@@ -1,0 +1,312 @@
+#!/usr/bin/env python3
+"""tvbox remote input bridge - per-device button remap for BT/USB remotes.
+
+The launcher receives input as ordinary keyboard events, and a "standard" remote
+(arrows / Enter / Back / Home / media) already works. This daemon adds a
+PER-DEVICE remap so a user can teach the box any remote's buttons - and remapping
+one remote never touches another (the renderer can't tell devices apart; only
+here, at /dev/input, is there a device identity).
+
+How it works, mirroring the CEC bridge (systemd USER unit, no root - /dev/input
+read comes from `input` group, /dev/uinput write from the udev grant provision
+sets up):
+
+  * It EVIOCGRABs every remote/keyboard input device (so the raw key doesn't ALSO
+    reach the compositor and fire twice) and re-emits keys through ONE uinput
+    device. Unmapped buttons pass straight through, so with no config the box
+    behaves exactly as before. If this process dies the kernel releases every
+    grab, so a crash degrades to the remote's raw (un-remapped) keys - never a
+    dead remote.
+  * A per-device override maps one of the device's button codes to an ACTION; the
+    action is emitted as its canonical key (KEY_UP/ENTER/BACKSPACE/HOMEPAGE/media).
+  * Learn mode (driven by the shell over a FIFO): the next button pressed on the
+    chosen device is reported to a file the shell reads, and swallowed.
+
+Files (all under ~/.tvbox):
+  config.json         read   - remote.devices[<id>].keymap = { action: [codes] }
+  remote-devices.json write  - [{ id, name }] currently-managed remotes (for the UI)
+  remote-learned.json write  - { id, code, name } last button captured in learn mode
+/tmp/tvbox-remote-cmd  FIFO  - commands from the shell: reload | learn <id> | learn-off
+"""
+import json
+import os
+import select
+import sys
+import time
+
+from evdev import InputDevice, UInput, ecodes as e, list_devices
+
+HOME = os.path.expanduser("~")
+TVBOX = os.path.join(HOME, ".tvbox")
+CONFIG = os.path.join(TVBOX, "config.json")
+DEVICES_OUT = os.path.join(TVBOX, "remote-devices.json")
+LEARNED_OUT = os.path.join(TVBOX, "remote-learned.json")
+CMD_FIFO = "/tmp/tvbox-remote-cmd"
+
+OUT_NAME = "tvbox-remote-bridge"
+
+# Action -> the canonical key we emit for it. Unmapped buttons pass through
+# unchanged, so this only governs buttons the user explicitly remapped. back is
+# KEY_BACKSPACE to match the CEC bridge (the launcher's primary Back key); a Fire
+# TV's native Back (KEY_BACK) still passes through and is handled too.
+ACTION_KEY = {
+    "up": e.KEY_UP,
+    "down": e.KEY_DOWN,
+    "left": e.KEY_LEFT,
+    "right": e.KEY_RIGHT,
+    "ok": e.KEY_ENTER,
+    "back": e.KEY_BACKSPACE,
+    "home": e.KEY_HOMEPAGE,
+    "playpause": e.KEY_PLAYPAUSE,
+    "stop": e.KEY_STOP,
+    "rewind": e.KEY_REWIND,
+    "fastforward": e.KEY_FASTFORWARD,
+    "prev": e.KEY_PREVIOUSSONG,
+    "next": e.KEY_NEXTSONG,
+}
+
+# Only manage things that are actually remotes/keyboards: they must expose at
+# least one of these navigation/select keys. This skips pure pointers, the HDMI
+# CEC receivers, audio jacks, etc.
+NAV_KEYS = {e.KEY_ENTER, e.KEY_KPENTER, e.KEY_OK, e.KEY_SELECT, e.KEY_UP, e.KEY_LEFT, e.KEY_RIGHT, e.KEY_DOWN}
+# Never grab these (built-ins + our own / the CEC bridge's virtual keyboards).
+EXCLUDE_EXACT = {OUT_NAME, "tvbox-cec-remote", "pwr_button"}
+
+
+def log(*a):
+    print("[remote-bridge]", *a, file=sys.stderr, flush=True)
+
+
+# The kernel splits a composite HID remote into one input node per collection
+# and appends the collection type to the name ("<name> Keyboard", "<name>
+# Consumer Control", …). Strip that so one physical remote reads as one friendly
+# name ("AR", "Telink Wireless Receiver") instead of a technical node name.
+NAME_SUFFIXES = (" Consumer Control", " System Control", " Keyboard", " Mouse", " Touchpad", " Gamepad", " Pointer")
+
+
+def dev_key(dev):
+    # One id per PHYSICAL remote, stable across reconnects: the BT MAC (uniq) when
+    # present, else the USB device path (phys minus the per-interface "/inputN"
+    # tail) so a composite device's nodes group into a single id.
+    if dev.uniq:
+        return dev.uniq.strip()
+    if dev.phys:
+        return dev.phys.split("/input")[0].strip()
+    return (dev.name or dev.path).strip()
+
+
+def friendly_name(dev):
+    name = (dev.name or "").strip()
+    for s in NAME_SUFFIXES:
+        if name.endswith(s):
+            return name[: -len(s)].strip() or name
+    return name
+
+
+def excluded(name):
+    if name in EXCLUDE_EXACT:
+        return True
+    return name.startswith("vc4-hdmi") or "HDMI Jack" in name
+
+
+def manageable(dev):
+    if excluded(dev.name):
+        return False
+    keys = set(dev.capabilities().get(e.EV_KEY, []))
+    return bool(keys & NAV_KEYS)
+
+
+def load_keymaps():
+    """{ device_id: { code(int): action } } inverted from config for fast lookup."""
+    try:
+        with open(CONFIG) as f:
+            cfg = json.load(f)
+    except Exception:
+        return {}
+    devices = (((cfg or {}).get("remote") or {}).get("devices")) or {}
+    out = {}
+    for dev_key, entry in devices.items():
+        km = (entry or {}).get("keymap") or {}
+        code2action = {}
+        for action, codes in km.items():
+            if action not in ACTION_KEY or not isinstance(codes, list):
+                continue
+            for c in codes:
+                if isinstance(c, int):
+                    code2action[c] = action
+        if code2action:
+            out[dev_key] = code2action
+    return out
+
+
+class Bridge:
+    def __init__(self):
+        self.devices = {}  # path -> InputDevice (grabbed)
+        self.keymaps = load_keymaps()
+        self.ui = None
+        self.ui_keys = set()
+        self.learning = None  # device_id we're capturing a button for
+        self.rescan()
+
+    # ---- uinput output (declares the union of every managed device's keys) ----
+    def ensure_uinput(self):
+        keys = set(ACTION_KEY.values())
+        for d in self.devices.values():
+            keys |= set(d.capabilities().get(e.EV_KEY, []))
+        if self.ui is not None and keys <= self.ui_keys:
+            return
+        if self.ui is not None:
+            try:
+                self.ui.close()
+            except Exception:
+                pass
+        self.ui_keys = keys
+        self.ui = UInput({e.EV_KEY: sorted(keys)}, name=OUT_NAME)
+        log("uinput (re)created with", len(keys), "keys")
+
+    # ---- device discovery / grab / drop ----
+    def rescan(self):
+        seen = set()
+        for path in list_devices():
+            try:
+                dev = InputDevice(path)
+            except Exception:
+                continue
+            if not manageable(dev):
+                continue
+            seen.add(path)
+            if path not in self.devices:
+                try:
+                    dev.grab()
+                except Exception as ex:
+                    log("grab failed for", dev.name, ex)
+                    continue
+                self.devices[path] = dev
+                log("managing", dev.name, "id=", dev_key(dev), path)
+        for path in list(self.devices):
+            if path not in seen:
+                self.drop(path)
+        self.ensure_uinput()
+        self.write_devices()
+
+    def drop(self, path):
+        dev = self.devices.pop(path, None)
+        if not dev:
+            return
+        try:
+            dev.ungrab()
+        except Exception:
+            pass
+        try:
+            dev.close()
+        except Exception:
+            pass
+        log("dropped", path)
+
+    def write_devices(self):
+        seen, out = set(), []
+        for d in self.devices.values():
+            i = dev_key(d)
+            if i in seen:
+                continue
+            seen.add(i)
+            out.append({"id": i, "name": friendly_name(d)})
+        tmp = DEVICES_OUT + ".tmp"
+        with open(tmp, "w") as f:
+            json.dump({"devices": out}, f)
+        os.replace(tmp, DEVICES_OUT)
+
+    # ---- event handling ----
+    def handle(self, dev):
+        try:
+            events = list(dev.read())
+        except OSError:
+            self.drop(dev.path)  # disconnected mid-read
+            self.write_devices()
+            return
+        did = dev_key(dev)
+        code2action = self.keymaps.get(did, {})
+        for ev in events:
+            if ev.type != e.EV_KEY:
+                continue  # only remap keys; pointer/misc are grabbed away (remotes don't use them)
+            if self.learning and did == self.learning and ev.value == 1:
+                self.capture(did, dev, ev.code)
+                continue  # swallow the learned press
+            action = code2action.get(ev.code)
+            out_code = ACTION_KEY[action] if action else ev.code
+            try:
+                self.ui.write(e.EV_KEY, out_code, ev.value)
+                self.ui.syn()
+            except Exception as ex:
+                log("emit failed", out_code, ex)
+
+    def capture(self, did, dev, code):
+        name = next((n for n, c in vars(e).items() if n.startswith("KEY_") and c == code), str(code))
+        tmp = LEARNED_OUT + ".tmp"
+        with open(tmp, "w") as f:
+            json.dump({"id": did, "code": code, "name": name, "ts": int(time.time())}, f)
+        os.replace(tmp, LEARNED_OUT)
+        self.learning = None
+        log("learned", did, code, name)
+
+    # ---- control FIFO from the shell ----
+    # "learn <id>" takes the rest of the line as the id (device names can contain
+    # spaces), so match by prefix rather than splitting on whitespace.
+    def command(self, line):
+        line = line.strip()
+        if line == "reload":
+            self.keymaps = load_keymaps()
+            log("config reloaded")
+        elif line.startswith("learn ") and len(line) > 6:
+            self.learning = line[6:].strip()
+            try:
+                os.remove(LEARNED_OUT)
+            except OSError:
+                pass
+            log("learn mode:", self.learning)
+        elif line == "learn-off":
+            self.learning = None
+
+
+def open_fifo():
+    try:
+        if not os.path.exists(CMD_FIFO):
+            os.mkfifo(CMD_FIFO)
+    except OSError as ex:
+        log("fifo:", ex)
+    # O_RDWR keeps the fifo readable without blocking and without EOF churn.
+    return os.open(CMD_FIFO, os.O_RDWR | os.O_NONBLOCK)
+
+
+def main():
+    bridge = Bridge()
+    fifo = open_fifo()
+    buf = b""
+    last_rescan = time.time()
+    while True:
+        fds = [d.fd for d in bridge.devices.values()] + [fifo]
+        r, _, _ = select.select(fds, [], [], 2.0)
+        for fd in r:
+            if fd == fifo:
+                try:
+                    buf += os.read(fifo, 4096)
+                except OSError:
+                    buf = b""
+                while b"\n" in buf:
+                    line, buf = buf.split(b"\n", 1)
+                    bridge.command(line.decode("utf-8", "replace"))
+            else:
+                dev = next((d for d in bridge.devices.values() if d.fd == fd), None)
+                if dev:
+                    bridge.handle(dev)
+        # Periodic rescan catches BT remotes sleeping/waking (connect/disconnect).
+        if time.time() - last_rescan > 2.0:
+            bridge.rescan()
+            last_rescan = time.time()
+
+
+if __name__ == "__main__":
+    try:
+        main()
+    except KeyboardInterrupt:
+        pass

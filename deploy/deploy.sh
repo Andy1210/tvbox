@@ -33,8 +33,9 @@ rsync -az --delete \
   --exclude node_modules --exclude '*.log' --exclude apps-data --exclude electron-web-client \
   "$TVBOX/shell" "$PI:.tvbox/"
 rsync -az "$TVBOX/cec/cec_uinput_bridge.py" "$TVBOX/cec/cec_vendor_shim.c" \
+  "$TVBOX/remote/remote_input_bridge.py" \
   "$HERE/run-shell.sh" "$HERE/labwc-autostart" "$HERE/cursor_idle_hide.py" \
-  "$HERE/tvbox" "$HERE/provision.sh" "$HERE/tvbox-cec.service" \
+  "$HERE/tvbox" "$HERE/provision.sh" "$HERE/tvbox-cec.service" "$HERE/tvbox-remote.service" \
   "$HERE/tvbox-flatpak-update.service" "$HERE/tvbox-flatpak-update.timer" "$PI:.tvbox/"
 
 # ---- the ONE root step: provision (apt baseline, udev/polkit, groups) ----
@@ -101,6 +102,16 @@ else
   # First install: /dev/uinput group access lands after the reboot; the unit
   # is enabled and will come up clean then.
   warn "CEC user service not running yet (fresh group grant? fine after reboot)"
+fi
+
+echo "==> remote input bridge (systemd user service - per-device button remap)"
+cp ~/.tvbox/tvbox-remote.service ~/.config/systemd/user/tvbox-remote.service
+if systemctl --user daemon-reload 2>/dev/null \
+   && systemctl --user enable tvbox-remote.service >/dev/null 2>&1 \
+   && systemctl --user restart tvbox-remote.service 2>/dev/null; then
+  ok "remote input bridge"
+else
+  warn "remote input bridge not running yet (fresh group grant? fine after reboot)"
 fi
 
 echo "==> session autostart (tvbox shell; no panel / Kodi)"

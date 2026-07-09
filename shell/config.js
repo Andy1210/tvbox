@@ -89,7 +89,50 @@ function publicConfig() {
       // OTA self-update (updater.js); feed URL itself stays box-local
       auto: !(c.update && c.update.auto === false), // default on
     },
+    remote: {
+      // Per-device button remap consumed by remote_input_bridge.py. Not a
+      // secret - exposed as-is. Default (no entries) = every remote passes
+      // through unchanged.
+      devices: sanitizeDevices(c.remote && c.remote.devices),
+    },
   };
+}
+
+// Actions the remap can bind, mirroring ACTION_KEY in remote_input_bridge.py.
+// Codes are evdev keycodes (ints); anything else is dropped - the renderer
+// writes this from the shell-reported learn captures.
+const REMOTE_ACTIONS = [
+  "up",
+  "down",
+  "left",
+  "right",
+  "ok",
+  "back",
+  "home",
+  "playpause",
+  "stop",
+  "rewind",
+  "fastforward",
+  "prev",
+  "next",
+];
+function sanitizeDevices(devices) {
+  const out = {};
+  if (!devices || typeof devices !== "object") return out;
+  for (const [id, entry] of Object.entries(devices)) {
+    if (typeof id !== "string" || !id || id.length > 80 || !entry || typeof entry !== "object") continue;
+    const rawkm = entry.keymap && typeof entry.keymap === "object" ? entry.keymap : {};
+    const keymap = {};
+    for (const a of REMOTE_ACTIONS) {
+      if (!Array.isArray(rawkm[a])) continue;
+      const codes = rawkm[a].filter((c) => Number.isInteger(c) && c >= 0 && c < 1024).slice(0, 6);
+      if (codes.length) keymap[a] = codes;
+    }
+    const name = typeof entry.name === "string" ? entry.name.slice(0, 80) : "";
+    if (Object.keys(keymap).length || name) out[id] = { name, keymap };
+    if (Object.keys(out).length >= 20) break; // cap
+  }
+  return out;
 }
 
 function setIptv(iptv) {
@@ -211,6 +254,18 @@ function rawUpdate() {
   return load().update || null;
 }
 
+// Per-device remote button remap (consumed by remote_input_bridge.py). The
+// renderer sends the FULL desired devices map (built from the current config +
+// its edit), so this replaces rather than merges. Stored sanitized.
+function setRemote(remote) {
+  const c = load();
+  c.remote = { devices: sanitizeDevices(remote && remote.devices) };
+  save(c);
+}
+function rawRemote() {
+  return load().remote || null;
+}
+
 // Restore path (backup.js): replace the WHOLE config file with the backup's
 // copy - restore is deliberately not a merge, the backup is the truth.
 function replaceAll(cfg) {
@@ -237,5 +292,7 @@ module.exports = {
   rawMqtt,
   setUpdate,
   rawUpdate,
+  setRemote,
+  rawRemote,
   replaceAll,
 };

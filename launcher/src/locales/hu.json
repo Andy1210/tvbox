@@ -114,6 +114,31 @@
     "pairing": "{name} párosítása…",
     "failed": "Nem sikerült: {name}"
   },
+  "remote": {
+    "title": "Távirányító gombok",
+    "hint": "A szokásos távirányítók (nyilak / OK / Vissza / Kezdőképernyő) alapból működnek. Egy másik gomb betanításához válaszd ki alatta a műveletet, majd nyomd meg a kívánt gombot a távirányítón. Minden távirányító külön állítható.",
+    "none": "Nincs csatlakoztatott távirányító - előbb párosíts vagy ébressz fel egyet.",
+    "press": "Nyomj meg egy gombot…",
+    "custom": "egyéni",
+    "default": "alapértelmezett",
+    "clear": "Törlés",
+    "customCount": "{n} egyéni",
+    "action": {
+      "up": "Fel",
+      "down": "Le",
+      "left": "Balra",
+      "right": "Jobbra",
+      "ok": "OK / Kiválasztás",
+      "back": "Vissza",
+      "home": "Kezdőképernyő",
+      "playpause": "Lejátszás / Szünet",
+      "rewind": "Visszatekerés",
+      "fastforward": "Előretekerés",
+      "prev": "Előző",
+      "next": "Következő",
+      "stop": "Leállítás"
+    }
+  },
   "appsettings": {
     "title": "Alkalmazások",
     "hint": "Rendezd át vagy rejtsd el az alkalmazásokat a főképernyőn.",
