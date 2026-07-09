@@ -1,10 +1,10 @@
 // tvbox Bluetooth control (BlueZ via bluetoothctl; runs as the session user, no
 // sudo - the active local session + netdev grants D-Bus access to org.bluez).
-// Covers audio (speakers/headphones) AND input devices (keyboard/mouse): pair
-// does pair -> trust -> connect, which establishes A2DP or HID respectively.
+// Covers audio (speakers/headphones) AND input devices (keyboard/mouse/remote):
+// pair does agent -> pair -> trust -> connect, which establishes A2DP or HID.
 // Callers pass the session env (main's childEnv). MAC addresses are validated by
 // the route before reaching here; execFile (no shell) means args are literal.
-const { execFile } = require("child_process");
+const { execFile, spawn } = require("child_process");
 
 function bt(env, args, timeout, cb) {
   execFile("bluetoothctl", args, { env, timeout: timeout || 15000 }, (_e, out, err) => cb((out || "") + (err || "")));
@@ -95,18 +95,73 @@ function scan(env, seconds, cb) {
   const s = Math.max(2, Math.min(30, Number(seconds) || 8));
   bt(env, ["--timeout", String(s), "scan", "on"], s * 1000 + 6000, () => list(env, cb));
 }
-// pair -> trust -> connect. Works for "just works" SSP devices (most speakers,
-// headphones, mice, many keyboards); a device that demands a typed passkey needs
-// manual bluetoothctl (noted in the UI). trust so it auto-reconnects on boot.
+// agent -> pair -> trust -> connect, in ONE persistent bluetoothctl session.
+//
+// A one-shot `bluetoothctl pair` registers no pairing agent, so when a BLE HID
+// device (e.g. the Fire TV remote) asks for authentication BlueZ logs
+// "No agent available for request type 2" and pairing dies with
+// AuthenticationFailed. The fix is an interactive session that registers a
+// NoInputNoOutput ("just works") agent BEFORE pairing, and keeps discovery on
+// while pairing so a briefly-advertising remote is reachable. Works for "just
+// works" SSP audio/mice/keyboards too; a device demanding a typed passkey is
+// still unsupported (noted in the UI). We report ok once the bond completes
+// (Paired: yes); the connection then establishes here or on first keypress, and
+// the live status poll reflects it. trust so it auto-reconnects on boot.
 function pair(env, mac, cb) {
-  bt(env, ["pair", mac], 35000, (o1) => {
-    bt(env, ["trust", mac], 8000, () => {
-      bt(env, ["connect", mac], 25000, (o3) => {
-        const ok = /Pairing successful|already|AlreadyExists|Connection successful|Connected: yes/i.test(o1 + o3);
-        cb({ ok, log: (o1 + o3).replace(/\s+/g, " ").trim().slice(-200) });
-      });
-    });
-  });
+  const p = spawn("bluetoothctl", [], { env });
+  let out = "";
+  const grab = (d) => (out += d.toString());
+  p.stdout.on("data", grab);
+  p.stderr.on("data", grab);
+  const send = (s) => {
+    try {
+      p.stdin.write(s + "\n");
+    } catch (_e) {
+      /* session gone */
+    }
+  };
+  // Bring up the agent + discovery, then pair. Small delays let each command
+  // settle (bluetoothctl processes stdin lines as it prints prompts).
+  [
+    [0, "power on"],
+    [300, "agent NoInputNoOutput"],
+    [600, "default-agent"],
+    [900, "pairable on"],
+    [1200, "scan on"],
+    [2500, "pair " + mac],
+  ].forEach(([t, c]) => setTimeout(() => send(c), t));
+
+  let finished = false;
+  let bonded = false;
+  const finish = (ok) => {
+    if (finished) return;
+    finished = true;
+    clearInterval(iv);
+    clearTimeout(to);
+    send("scan off");
+    send("quit");
+    setTimeout(() => {
+      try {
+        p.kill("SIGKILL");
+      } catch (_e) {
+        /* already gone */
+      }
+    }, 400);
+    cb({ ok, log: out.replace(/\s+/g, " ").trim().slice(-240) });
+  };
+  const paired = () => /Pairing successful|Paired: yes|AlreadyExists|already exists/i.test(out);
+  const iv = setInterval(() => {
+    if (!bonded && !paired() && /Failed to pair|org\.bluez\.Error\.Auth/i.test(out)) {
+      return finish(false); // hard auth failure and not (yet) bonded
+    }
+    if (paired() && !bonded) {
+      bonded = true; // trust + connect, then report success (bond is the win)
+      send("trust " + mac);
+      setTimeout(() => send("connect " + mac), 800);
+      setTimeout(() => finish(true), 6000);
+    }
+  }, 500);
+  const to = setTimeout(() => finish(paired()), 35000);
 }
 function connect(env, mac, cb) {
   bt(env, ["connect", mac], 25000, (o) => cb({ ok: /Connection successful|already connected/i.test(o) }));

@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { setFocus } from "@noriginmedia/norigin-spatial-navigation";
 import { useI18n } from "../lib/i18n";
 import { fetchBtStatus, fetchBtDevices, btScan, btAction, type BtDevice, type BtStatus } from "../lib/bluetooth";
@@ -56,6 +56,11 @@ export function BluetoothSettings() {
   const [scanning, setScanning] = useState(false);
   const [busy, setBusy] = useState<string | null>(null); // mac being acted on
   const [msg, setMsg] = useState("");
+  // Mirrors for the polling interval (its closure would otherwise see stale state).
+  const busyRef = useRef<string | null>(null);
+  const scanningRef = useRef(false);
+  busyRef.current = busy;
+  scanningRef.current = scanning;
 
   const refresh = () => {
     fetchBtStatus().then(setStatus);
@@ -63,6 +68,15 @@ export function BluetoothSettings() {
   };
   useEffect(() => {
     refresh();
+    // Live status: a BLE remote sleeps/wakes and (dis)connects on its own, so
+    // poll while this screen is open instead of only on mount + after actions -
+    // otherwise a stale "connected" lingers. Skip a tick while an action is in
+    // flight so the poll doesn't clobber the optimistic busy state.
+    const iv = setInterval(() => {
+      if (!busyRef.current && !scanningRef.current) refresh();
+    }, 4000);
+    return () => clearInterval(iv);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const scan = async () => {

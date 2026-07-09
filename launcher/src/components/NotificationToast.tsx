@@ -32,7 +32,7 @@ export function NotificationToast() {
   useEffect(() => {
     if (!note) return;
     const onKey = (e: KeyboardEvent) => {
-      if (["Backspace", "Cancel", "Escape", "BrowserHome"].includes(e.key)) {
+      if (["Backspace", "BrowserBack", "GoBack", "Cancel", "Escape", "BrowserHome"].includes(e.key)) {
         e.preventDefault();
         e.stopImmediatePropagation();
         dismiss();

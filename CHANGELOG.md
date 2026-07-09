@@ -13,6 +13,7 @@ write for the person on the couch (what changes for THEM), not for developers.
 - Az időzóna és a billentyűzetkiosztás mostantól a Beállításokban is módosítható.
 - Elnevezheted a boxot (Beállítások → Általános), így több box közül könnyen megkülönbözteted.
 - Gyorsabb, azonnali reagálás a távirányító gombjaira.
+- Bluetooth távirányítók (pl. Fire TV) párosítása a Beállításokból - és mostantól a Vissza gombjuk is működik.
 
 ### en
 
@@ -20,6 +21,7 @@ write for the person on the couch (what changes for THEM), not for developers.
 - Change the time zone and keyboard layout from Settings, too.
 - Name your box (Settings → General) so several boxes are easy to tell apart.
 - Faster, more immediate response to the remote's buttons.
+- Pair Bluetooth remotes (e.g. Fire TV) from Settings - and their Back button now works too.
 
 ## 1.0.0
 
