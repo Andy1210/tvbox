@@ -31,6 +31,7 @@ Files (all under ~/.tvbox):
 import json
 import os
 import select
+import subprocess
 import sys
 import time
 
@@ -42,8 +43,18 @@ CONFIG = os.path.join(TVBOX, "config.json")
 DEVICES_OUT = os.path.join(TVBOX, "remote-devices.json")
 LEARNED_OUT = os.path.join(TVBOX, "remote-learned.json")
 CMD_FIFO = "/tmp/tvbox-remote-cmd"
+# The CEC bridge's command FIFO - we drop "standby 0" here to turn the TV off.
+CEC_CMD_FIFO = "/tmp/tvbox-cec-cmd"
 
 OUT_NAME = "tvbox-remote-bridge"
+
+# What the remote's Power button does (config.remote.power). The button always
+# reaches us over BT as KEY_POWER; we never pass it to the system (logind would
+# power off the box). Default: turn the TV off over CEC only.
+POWER_TV = "tv"  # CEC standby to the TV, box stays on (default)
+POWER_TV_AND_BOX = "tv_and_box"  # TV off + power the box off (needs manual power-on)
+POWER_IGNORE = "ignore"  # do nothing
+POWER_VALUES = (POWER_TV, POWER_TV_AND_BOX, POWER_IGNORE)
 
 # Action -> the canonical key we emit for it. Unmapped buttons pass through
 # unchanged, so this only governs buttons the user explicitly remapped. back is
@@ -125,7 +136,7 @@ def load_keymaps():
         return {}
     devices = (((cfg or {}).get("remote") or {}).get("devices")) or {}
     out = {}
-    for dev_key, entry in devices.items():
+    for did, entry in devices.items():
         km = (entry or {}).get("keymap") or {}
         code2action = {}
         for action, codes in km.items():
@@ -135,14 +146,44 @@ def load_keymaps():
                 if isinstance(c, int):
                     code2action[c] = action
         if code2action:
-            out[dev_key] = code2action
+            out[did] = code2action
     return out
+
+
+def load_power():
+    """config.remote.power: what the Power button does (POWER_VALUES; default tv)."""
+    try:
+        with open(CONFIG) as f:
+            cfg = json.load(f)
+    except Exception:
+        return POWER_TV
+    p = (((cfg or {}).get("remote") or {}).get("power")) or POWER_TV
+    return p if p in POWER_VALUES else POWER_TV
+
+
+def cec_standby():
+    """Tell the CEC bridge to put the TV in standby (drop into its FIFO)."""
+    try:
+        fd = os.open(CEC_CMD_FIFO, os.O_WRONLY | os.O_NONBLOCK)
+        os.write(fd, b"standby 0\n")
+        os.close(fd)
+    except OSError as ex:
+        log("cec standby failed (bridge running?):", ex)
+
+
+def poweroff_box():
+    """Power the box off via logind (active-session polkit - no root/sudo)."""
+    try:
+        subprocess.Popen(["systemctl", "poweroff"])
+    except Exception as ex:
+        log("poweroff failed:", ex)
 
 
 class Bridge:
     def __init__(self):
         self.devices = {}  # path -> InputDevice (grabbed)
         self.keymaps = load_keymaps()
+        self.power = load_power()
         self.ui = None
         self.ui_keys = set()
         self.learning = None  # device_id we're capturing a button for
@@ -233,12 +274,32 @@ class Bridge:
                 self.capture(did, dev, ev.code)
                 continue  # swallow the learned press
             action = code2action.get(ev.code)
-            out_code = ACTION_KEY[action] if action else ev.code
-            try:
-                self.ui.write(e.EV_KEY, out_code, ev.value)
-                self.ui.syn()
-            except Exception as ex:
-                log("emit failed", out_code, ex)
+            if action:
+                self.emit(ACTION_KEY[action], ev.value)  # remapped -> canonical key
+                continue
+            if ev.code == e.KEY_POWER:
+                # The remote's Power button reaches us over BT as KEY_POWER; never
+                # pass it to the system (logind would power the box off). Act per
+                # the configured policy and swallow it.
+                if ev.value == 1:
+                    self.do_power()
+                continue
+            self.emit(ev.code, ev.value)  # unmapped -> pass through unchanged
+
+    def emit(self, code, value):
+        try:
+            self.ui.write(e.EV_KEY, code, value)
+            self.ui.syn()
+        except Exception as ex:
+            log("emit failed", code, ex)
+
+    def do_power(self):
+        p = self.power
+        if p in (POWER_TV, POWER_TV_AND_BOX):
+            cec_standby()
+        if p == POWER_TV_AND_BOX:
+            poweroff_box()
+        log("power button ->", p)
 
     def capture(self, did, dev, code):
         name = next((n for n, c in vars(e).items() if n.startswith("KEY_") and c == code), str(code))
@@ -256,7 +317,8 @@ class Bridge:
         line = line.strip()
         if line == "reload":
             self.keymaps = load_keymaps()
-            log("config reloaded")
+            self.power = load_power()
+            log("config reloaded (power=%s)" % self.power)
         elif line.startswith("learn ") and len(line) > 6:
             self.learning = line[6:].strip()
             try:

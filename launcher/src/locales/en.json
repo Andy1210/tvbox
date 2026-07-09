@@ -123,6 +123,13 @@
     "default": "default",
     "clear": "Clear",
     "customCount": "{n} custom",
+    "powerTitle": "Power button",
+    "powerWarn": "The box has to be turned back on by hand after this.",
+    "power": {
+      "tv": "Turn off the TV only",
+      "tv_and_box": "Turn off the TV and this box",
+      "ignore": "Do nothing"
+    },
     "action": {
       "up": "Up",
       "down": "Down",

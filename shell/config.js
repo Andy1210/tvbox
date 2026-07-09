@@ -90,12 +90,19 @@ function publicConfig() {
       auto: !(c.update && c.update.auto === false), // default on
     },
     remote: {
-      // Per-device button remap consumed by remote_input_bridge.py. Not a
-      // secret - exposed as-is. Default (no entries) = every remote passes
-      // through unchanged.
+      // Per-device button remap + Power-button policy, consumed by
+      // remote_input_bridge.py. Not a secret - exposed as-is. Default (no
+      // entries) = every remote passes through unchanged.
       devices: sanitizeDevices(c.remote && c.remote.devices),
+      power: sanitizePower(c.remote && c.remote.power),
     },
   };
+}
+
+// What the remote's Power button does (mirrors POWER_VALUES in the bridge).
+const REMOTE_POWER = ["tv", "tv_and_box", "ignore"];
+function sanitizePower(p) {
+  return REMOTE_POWER.includes(p) ? p : "tv"; // default: TV off (CEC) only
 }
 
 // Actions the remap can bind, mirroring ACTION_KEY in remote_input_bridge.py.
@@ -254,12 +261,16 @@ function rawUpdate() {
   return load().update || null;
 }
 
-// Per-device remote button remap (consumed by remote_input_bridge.py). The
-// renderer sends the FULL desired devices map (built from the current config +
-// its edit), so this replaces rather than merges. Stored sanitized.
+// Remote button remap + Power policy (consumed by remote_input_bridge.py).
+// Merges the provided fields so saving devices doesn't wipe power and vice
+// versa; the renderer sends the FULL devices map when it sends devices. Stored
+// sanitized.
 function setRemote(remote) {
   const c = load();
-  c.remote = { devices: sanitizeDevices(remote && remote.devices) };
+  const cur = c.remote && typeof c.remote === "object" ? c.remote : {};
+  const devices = remote && remote.devices !== undefined ? remote.devices : cur.devices;
+  const power = remote && remote.power !== undefined ? remote.power : cur.power;
+  c.remote = { devices: sanitizeDevices(devices), power: sanitizePower(power) };
   save(c);
 }
 function rawRemote() {

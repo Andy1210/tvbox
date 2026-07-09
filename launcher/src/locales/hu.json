@@ -123,6 +123,13 @@
     "default": "alapértelmezett",
     "clear": "Törlés",
     "customCount": "{n} egyéni",
+    "powerTitle": "Power gomb",
+    "powerWarn": "Ezután a boxot kézzel kell visszakapcsolni.",
+    "power": {
+      "tv": "Csak a TV kikapcsolása",
+      "tv_and_box": "A TV és a box kikapcsolása",
+      "ignore": "Ne csináljon semmit"
+    },
     "action": {
       "up": "Fel",
       "down": "Le",

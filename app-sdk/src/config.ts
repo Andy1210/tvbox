@@ -19,6 +19,10 @@ export interface RemoteDeviceConfig {
   name: string;
   keymap: RemoteKeymap;
 }
+// What the remote's Power button does: turn the TV off over CEC only (default),
+// also power the box off, or nothing. The button never reaches the OS (the
+// bridge intercepts it) so it can't accidentally power the box off.
+export type RemotePower = "tv" | "tv_and_box" | "ignore";
 
 // Launcher-side access to the shell config store (secret-free). The parental
 // PIN is verified server-side; the launcher only sees whether one is set.
@@ -33,7 +37,7 @@ export interface PublicConfig {
   spotify: { deviceName: string; hasCredentials: boolean; enabled: boolean };
   ambient: { enabled: boolean; idleMinutes: number; city: string };
   update: { auto: boolean };
-  remote: { devices: Record<string, RemoteDeviceConfig> };
+  remote: { devices: Record<string, RemoteDeviceConfig>; power: RemotePower };
 }
 
 // null = the shell is unreachable - NOT the same as an unconfigured box. The
@@ -97,12 +101,23 @@ export async function saveUpdate(update: { auto: boolean }): Promise<PublicConfi
 }
 
 // Per-device remote button remap. The caller sends the FULL desired devices map
-// (the shell replaces rather than merges) and the shell tells the bridge to reload.
+// (the shell replaces devices, but merges around power) and the shell reloads the bridge.
 export async function saveRemote(devices: Record<string, RemoteDeviceConfig>): Promise<PublicConfig> {
   const res = await fetch("/tvbox/api/config", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ remote: { devices } }),
+  });
+  const data = await res.json();
+  return data.config as PublicConfig;
+}
+
+// Power-button policy (independent of the per-device keymap).
+export async function saveRemotePower(power: RemotePower): Promise<PublicConfig> {
+  const res = await fetch("/tvbox/api/config", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ remote: { power } }),
   });
   const data = await res.json();
   return data.config as PublicConfig;

@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { setFocus } from "@noriginmedia/norigin-spatial-navigation";
-import type { RemoteAction, RemoteDeviceConfig } from "@sdk/config";
+import type { RemoteAction, RemoteDeviceConfig, RemotePower } from "@sdk/config";
 import { useI18n } from "../lib/i18n";
 import { useConfigStore } from "../stores/config";
 import {
@@ -38,11 +38,31 @@ function Chevron({ open }: { open: boolean }) {
   );
 }
 
+function Check() {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2.6"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className="w-[2.2vh] h-[2.2vh] shrink-0 text-[#39c0d6]"
+    >
+      <path d="M5 13l4 4L19 7" />
+    </svg>
+  );
+}
+
+const POWER_OPTS: RemotePower[] = ["tv", "tv_and_box", "ignore"];
+
 export function RemoteRemap() {
   const { t } = useI18n();
   const config = useConfigStore((s) => s.config);
   const setRemote = useConfigStore((s) => s.setRemote);
+  const setRemotePower = useConfigStore((s) => s.setRemotePower);
   const saved = config?.remote?.devices || {};
+  const power: RemotePower = config?.remote?.power || "tv";
 
   const [devices, setDevices] = useState<ConnectedRemote[]>([]);
   const [expanded, setExpanded] = useState<string | null>(null);
@@ -185,6 +205,28 @@ export function RemoteRemap() {
             </div>
           );
         })}
+      </div>
+
+      {/* Power button policy (global, not per-device). The bridge always
+          intercepts KEY_POWER so it can never power off the box unintentionally. */}
+      <div className="mt-[3.5vh]">
+        <div className="text-[2.1vh] font-semibold mb-[0.8vh]">{t("remote.powerTitle")}</div>
+        <div className="flex flex-col gap-[0.8vh] max-w-[70vw]">
+          {POWER_OPTS.map((v) => (
+            <FocusButton
+              key={v}
+              focusKey={"remote-power-" + v}
+              onEnter={() => setRemotePower(v)}
+              className="px-[2vw] py-[1.3vh] rounded-[1.1vh] bg-white/5 flex items-center gap-[1.2vw] min-w-0"
+            >
+              <span className="text-[2vh] flex-1 text-left truncate">{t("remote.power." + v)}</span>
+              {power === v && <Check />}
+            </FocusButton>
+          ))}
+        </div>
+        {power === "tv_and_box" && (
+          <div className="text-[1.7vh] text-[#e0b341] mt-[0.9vh] max-w-[64vw]">{t("remote.powerWarn")}</div>
+        )}
       </div>
     </div>
   );

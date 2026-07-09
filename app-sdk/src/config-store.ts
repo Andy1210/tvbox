@@ -6,10 +6,12 @@ import {
   saveAmbient,
   saveUpdate,
   saveRemote,
+  saveRemotePower,
   type IptvInput,
   type AmbientInput,
   type PublicConfig,
   type RemoteDeviceConfig,
+  type RemotePower,
 } from "./config";
 
 // Single source of truth for the shell config (IPTV source + parental lock +
@@ -26,6 +28,7 @@ interface ConfigState {
   setAmbient: (ambient: AmbientInput) => Promise<void>;
   setUpdate: (update: { auto: boolean }) => Promise<void>;
   setRemote: (devices: Record<string, RemoteDeviceConfig>) => Promise<void>;
+  setRemotePower: (power: RemotePower) => Promise<void>;
 }
 
 export const useConfigStore = create<ConfigState>((set) => ({
@@ -42,4 +45,5 @@ export const useConfigStore = create<ConfigState>((set) => ({
   setAmbient: async (ambient) => set({ config: await saveAmbient(ambient) }),
   setUpdate: async (update) => set({ config: await saveUpdate(update) }),
   setRemote: async (devices) => set({ config: await saveRemote(devices) }),
+  setRemotePower: async (power) => set({ config: await saveRemotePower(power) }),
 }));

@@ -109,6 +109,20 @@ RULES
 udevadm control --reload-rules 2>/dev/null && udevadm trigger 2>/dev/null && ok "udev rules" || warn "udev reload failed (rules apply on reboot)"
 usermod -aG input,video "$TVBOX_USER" && ok "$TVBOX_USER in input+video groups" || bad "usermod failed"
 
+echo "==> logind: a remote's Power button must never power the box off"
+# A BT remote's Power button reaches the box over BT as KEY_POWER. Left to
+# logind (default HandlePowerKey=poweroff) it would shut the whole box down -
+# especially in the brief window before the input bridge grabs a just-woken
+# remote. The remote bridge decides what Power does (TV off over CEC, optionally
+# the box too); logind must stay out of it.
+mkdir -p /etc/systemd/logind.conf.d
+cat > /etc/systemd/logind.conf.d/10-tvbox.conf <<'LOGIND'
+[Login]
+HandlePowerKey=ignore
+HandlePowerKeyLongPress=ignore
+LOGIND
+systemctl reload systemd-logind 2>/dev/null && ok "logind power-key ignored" || warn "logind reload failed (applies on reboot)"
+
 echo "==> polkit: NetworkManager from the box user (WiFi settings UI)"
 # Debian grants active local sessions most NM actions already; this covers the
 # gaps (and headless/SSH debugging) for members of netdev - the group Raspberry
