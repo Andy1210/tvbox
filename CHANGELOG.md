@@ -5,6 +5,16 @@ updates). `scripts/make-release.sh` lifts the current version's `hu`/`en`
 blocks into the OTA feed's `notes` - keep both languages, keep it short, and
 write for the person on the couch (what changes for THEM), not for developers.
 
+## 1.1.1
+
+### hu
+
+- Javítottunk egy ikont, ami a képernyővédő beállításnál és a főképernyő fogaskerék gombján négyzetként jelent meg.
+
+### en
+
+- Fixed an icon that showed as a square in the screensaver settings and on the home settings button.
+
 ## 1.1.0
 
 ### hu

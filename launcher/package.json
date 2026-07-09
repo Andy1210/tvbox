@@ -1,7 +1,7 @@
 {
   "name": "tvbox-launcher",
   "private": true,
-  "version": "1.1.0",
+  "version": "1.1.1",
   "type": "module",
   "description": "tvbox HOME launcher - React/TS 10-foot UI, manifest-driven app tiles, D-pad spatial nav.",
   "license": "MIT",
