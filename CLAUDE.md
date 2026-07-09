@@ -13,11 +13,13 @@ an AI agent** - what runs where and which assumptions burn you.
 ## Architecture in one screen
 
 ```
-TV remote ─HDMI-CEC→ cec_uinput_bridge.py (systemd USER unit tvbox-cec,
-                     /dev/uinput via udev+input group - NO root)
-                        │ uinput key events            ▲ FIFO /tmp/tvbox-cec-cmd
-                        ▼                              │ ("on 0"/"standby 0" only)
+TV remote     ─HDMI-CEC→ cec_uinput_bridge.py    (systemd USER unit tvbox-cec)     ─┐ uinput
+BT/USB remote ─evdev───→ remote_input_bridge.py  (systemd USER unit tvbox-remote) ─┘ key events
+   both write /dev/uinput via the udev grant + `input` group - NO root. tvbox-cec        │
+   forwards CEC keys (+ TV power); tvbox-remote EVIOCGRABs each remote and re-emits its   │
+   keys, applying a PER-DEVICE button remap (unmapped buttons pass straight through).     ▼
 labwc session (autologin) ── respawn loop ── run-shell.sh ── Electron shell (shell/)
+   • control FIFOs: /tmp/tvbox-cec-cmd ("on 0"/"standby 0") · /tmp/tvbox-remote-cmd (reload | learn <id>)
    • HTTP 127.0.0.1:8097 - serves the launcher (/tvbox/), app web/ bundles at /<id>/, JSON API
    • apps = PACKAGES in ~/.tvbox/apps/<id>/ (manifest.json + plugin.js + web/), installed from the registry
    • plugins ship IN the package (~/.tvbox/apps/<id>/plugin.js) - deps-gated, host-process, boot-time only
@@ -48,6 +50,7 @@ Launcher (launcher/) is React+TS+Vite+Tailwind, spatial nav via
 | [deploy/deploy.sh](deploy/deploy.sh)                                                       | Build + rsync + provision + user-space setup. Idempotent.                                                                                                                                                                                                                                  |
 | [deploy/provision.sh](deploy/provision.sh)                                                 | **The ONE root step** (apt baseline, udev/polkit, linger, legacy migration).                                                                                                                                                                                                               |
 | [cec/cec_uinput_bridge.py](cec/cec_uinput_bridge.py)                                       | CEC→uinput bridge (user service). LG quirks documented in its docstring.                                                                                                                                                                                                                   |
+| [remote/remote_input_bridge.py](remote/remote_input_bridge.py)                             | BT/USB remote → uinput bridge (user service `tvbox-remote`): EVIOCGRAB + per-device button remap, learn mode over a FIFO. Keymap in `config.remote.devices`; UI is Settings → Peripherals ([launcher/src/components/RemoteRemap.tsx](launcher/src/components/RemoteRemap.tsx)).            |
 | [docs/app-manifest.md](docs/app-manifest.md)                                               | How to write an app (the extension story).                                                                                                                                                                                                                                                 |
 | [docs/sd-image.md](docs/sd-image.md)                                                       | pi-gen flashable-image recipe (workflow: .github/workflows/image.yml).                                                                                                                                                                                                                     |
 | [docs/updates-and-backup.md](docs/updates-and-backup.md)                                   | OTA + OS updates (never auto-reboot) + phone backup. Release: [scripts/make-release.sh](scripts/make-release.sh) / release.yml.                                                                                                                                                            |
@@ -137,6 +140,18 @@ touched one file, `npx prettier --write <file>` is enough; when in doubt run
 
 ## Sharp edges
 
+- **Two independent uinput bridges feed input**, both user services: `tvbox-cec`
+  (CEC, [cec/cec_uinput_bridge.py](cec/cec_uinput_bridge.py)) and `tvbox-remote`
+  (BT/USB evdev, [remote/remote_input_bridge.py](remote/remote_input_bridge.py)).
+  `tvbox-remote` **EVIOCGRABs** every remote's keyboard node, so if it misbehaves
+  the remotes look dead - `systemctl --user stop tvbox-remote` releases the grabs
+  and they fall straight back to raw keys (the kernel also releases grabs if the
+  process dies, so a crash self-heals). Default is pure pass-through; only buttons
+  the user explicitly remapped (Settings → Peripherals) are rewritten. Device id
+  is the BT MAC (uniq) or USB path; the friendly name has the kernel's
+  " Keyboard"/" Consumer Control" collection suffix stripped. The renderer only
+  ever sees canonical keys - there is deliberately no device identity in DOM key
+  events, which is exactly why the remap lives in the bridge, not the launcher.
 - **CEC is TV-specific.** Every TV forwards a different subset of remote keys
   and quirks its own way - the mapping in `cec_uinput_bridge.py` was tuned
   empirically (e.g. on the LG set it was developed against, Back and Exit share
