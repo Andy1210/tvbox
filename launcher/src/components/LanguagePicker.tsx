@@ -72,7 +72,7 @@ export function LanguagePicker({ size = "md", onPicked }: { size?: "md" | "lg"; 
   };
   return (
     <div
-      className="grid gap-[1.4vh] max-w-[70vw] max-h-full overflow-y-auto no-scrollbar"
+      className="grid gap-[1.4vh] max-w-[70vw] max-h-full overflow-y-auto no-scrollbar px-[1.5vw] -mx-[1.5vw]"
       style={{ gridTemplateColumns: "repeat(auto-fit, minmax(18vw, 1fr))" }}
     >
       {AVAILABLE_LOCALES.map((l) => (

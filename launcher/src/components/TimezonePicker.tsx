@@ -125,7 +125,7 @@ export function TimezonePicker({ onChange, autoFocus }: { onChange?: (tz: string
       {selected === null ? (
         <>
           <div className="text-[1.9vh] text-fg-dim mb-[0.8vh]">{t("region.region")}</div>
-          <div className="flex flex-col gap-[0.8vh] flex-1 min-h-0 overflow-y-auto no-scrollbar max-w-[64vw]">
+          <div className="flex flex-col gap-[0.8vh] flex-1 min-h-0 overflow-y-auto no-scrollbar max-w-[64vw] px-[1.5vw] -mx-[1.5vw]">
             {regions.map((r) => (
               <FocusButton
                 key={r}
@@ -148,7 +148,7 @@ export function TimezonePicker({ onChange, autoFocus }: { onChange?: (tz: string
           <div className="text-[1.9vh] text-fg-dim mb-[0.8vh]">
             {selected} · {t("region.city")}
           </div>
-          <div className="flex flex-col gap-[0.8vh] flex-1 min-h-0 overflow-y-auto no-scrollbar max-w-[64vw]">
+          <div className="flex flex-col gap-[0.8vh] flex-1 min-h-0 overflow-y-auto no-scrollbar max-w-[64vw] px-[1.5vw] -mx-[1.5vw]">
             <FocusButton
               focusKey="tz-city-back"
               onEnter={toRegions}

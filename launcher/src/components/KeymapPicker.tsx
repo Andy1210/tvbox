@@ -98,7 +98,7 @@ export function KeymapPicker({ onChange, autoFocus }: { onChange?: (km: string) 
         </span>
       </div>
       {deferred && <div className="text-[1.9vh] text-[#e0b64a] mb-[1vh]">{t("region.keymapLater")}</div>}
-      <div className="flex flex-col gap-[0.8vh] flex-1 min-h-0 overflow-y-auto no-scrollbar max-w-[64vw]">
+      <div className="flex flex-col gap-[0.8vh] flex-1 min-h-0 overflow-y-auto no-scrollbar max-w-[64vw] px-[1.5vw] -mx-[1.5vw]">
         {codes.map((code) => {
           const friendly = KEYMAP_LABELS[code];
           return (

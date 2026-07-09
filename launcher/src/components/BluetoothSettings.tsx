@@ -119,7 +119,7 @@ export function BluetoothSettings() {
         ) : null}
       </div>
       {status && !status.powered && <div className="text-[1.9vh] text-fg-dim mb-[1vh]">{t("bt.off")}</div>}
-      <div className="flex flex-col gap-[0.8vh] max-w-[70vw] max-h-[46vh] overflow-y-auto no-scrollbar">
+      <div className="flex flex-col gap-[0.8vh] max-w-[70vw] max-h-[46vh] overflow-y-auto no-scrollbar px-[1.5vw] -mx-[1.5vw]">
         {/* Scan is a full-width row (not a small button by the title) so vertical nav lands on it */}
         <FocusButton
           focusKey="bt-scan"
