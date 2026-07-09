@@ -5,6 +5,20 @@ updates). `scripts/make-release.sh` lifts the current version's `hu`/`en`
 blocks into the OTA feed's `notes` - keep both languages, keep it short, and
 write for the person on the couch (what changes for THEM), not for developers.
 
+## 1.1.0
+
+### hu
+
+- Bluetooth távirányítók (pl. Fire TV) párosítása a Beállításokból - és mostantól a Vissza gombjuk is működik.
+- A távirányító gombjai átállíthatók, eszközönként (Beállítások → Perifériák): válaszd ki a távirányítót, és tanítsd be a saját gombjait - a home és a media gombok is.
+- A távirányító Power gombja alapból csak a TV-t kapcsolja le (a box bekapcsolva marad); a Beállításokban átállítható.
+
+### en
+
+- Pair Bluetooth remotes (e.g. Fire TV) from Settings - and their Back button now works too.
+- Remap remote buttons per device (Settings → Peripherals): pick a remote and teach it your own buttons - home and media too.
+- The remote's Power button turns off just the TV by default (the box stays on); configurable in Settings.
+
 ## 1.0.1
 
 ### hu
@@ -13,9 +27,6 @@ write for the person on the couch (what changes for THEM), not for developers.
 - Az időzóna és a billentyűzetkiosztás mostantól a Beállításokban is módosítható.
 - Elnevezheted a boxot (Beállítások → Általános), így több box közül könnyen megkülönbözteted.
 - Gyorsabb, azonnali reagálás a távirányító gombjaira.
-- Bluetooth távirányítók (pl. Fire TV) párosítása a Beállításokból - és mostantól a Vissza gombjuk is működik.
-- A távirányító gombjai átállíthatók, eszközönként (Beállítások → Perifériák): válaszd ki a távirányítót, és tanítsd be a saját gombjait - a home és a media gombok is.
-- A távirányító Power gombja alapból csak a TV-t kapcsolja le (a box bekapcsolva marad); a Beállításokban átállítható.
 
 ### en
 
@@ -23,9 +34,6 @@ write for the person on the couch (what changes for THEM), not for developers.
 - Change the time zone and keyboard layout from Settings, too.
 - Name your box (Settings → General) so several boxes are easy to tell apart.
 - Faster, more immediate response to the remote's buttons.
-- Pair Bluetooth remotes (e.g. Fire TV) from Settings - and their Back button now works too.
-- Remap remote buttons per device (Settings → Peripherals): pick a remote and teach it your own buttons - home and media too.
-- The remote's Power button turns off just the TV by default (the box stays on); configurable in Settings.
 
 ## 1.0.0
 
