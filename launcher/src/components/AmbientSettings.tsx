@@ -82,17 +82,35 @@ export function AmbientSettings() {
           <FocusButton
             focusKey="ambient-idle-down"
             onEnter={() => setIdle(idle - 1)}
-            className="w-[5.4vh] h-[5.4vh] rounded-[1vh] bg-white/5 flex items-center justify-center text-[3vh]"
+            className="w-[5.4vh] h-[5.4vh] rounded-[1vh] bg-white/5 flex items-center justify-center"
           >
-            −
+            <svg
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2.6"
+              strokeLinecap="round"
+              className="w-[2.8vh] h-[2.8vh]"
+            >
+              <path d="M6 12h12" />
+            </svg>
           </FocusButton>
           <span className="text-[2.4vh] font-semibold tabular-nums w-[6vw] text-center">{idle}</span>
           <FocusButton
             focusKey="ambient-idle-up"
             onEnter={() => setIdle(idle + 1)}
-            className="w-[5.4vh] h-[5.4vh] rounded-[1vh] bg-white/5 flex items-center justify-center text-[3vh]"
+            className="w-[5.4vh] h-[5.4vh] rounded-[1vh] bg-white/5 flex items-center justify-center"
           >
-            ＋
+            <svg
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2.6"
+              strokeLinecap="round"
+              className="w-[2.8vh] h-[2.8vh]"
+            >
+              <path d="M12 6v12M6 12h12" />
+            </svg>
           </FocusButton>
         </div>
 
