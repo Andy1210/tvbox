@@ -35,6 +35,62 @@ function Key({
   );
 }
 
+// Inline-SVG key glyphs (shift/arrows/space/backspace/done): the box's Chromium
+// has no guarantee of font coverage for symbol codepoints (same reason the
+// launcher bans emoji), so draw them like every other launcher icon.
+const G = {
+  fill: "none",
+  stroke: "currentColor",
+  strokeWidth: 2,
+  strokeLinecap: "round" as const,
+  strokeLinejoin: "round" as const,
+};
+export function KeyGlyph({
+  name,
+  className,
+}: {
+  name: "shift" | "left" | "right" | "space" | "backspace" | "done";
+  className?: string;
+}) {
+  const cls = className || "w-[2.6vh] h-[2.6vh]";
+  if (name === "shift")
+    return (
+      <svg viewBox="0 0 24 24" {...G} className={cls}>
+        <path d="M12 4l7 8h-4v7h-6v-7H5z" />
+      </svg>
+    );
+  if (name === "left")
+    return (
+      <svg viewBox="0 0 24 24" {...G} className={cls}>
+        <path d="M14 6l-6 6 6 6" />
+      </svg>
+    );
+  if (name === "right")
+    return (
+      <svg viewBox="0 0 24 24" {...G} className={cls}>
+        <path d="M10 6l6 6-6 6" />
+      </svg>
+    );
+  if (name === "space")
+    return (
+      <svg viewBox="0 0 24 24" {...G} className={cls}>
+        <path d="M5 13v3h14v-3" />
+      </svg>
+    );
+  if (name === "backspace")
+    return (
+      <svg viewBox="0 0 24 24" {...G} className={cls}>
+        <path d="M8.5 5h11a1.5 1.5 0 0 1 1.5 1.5v11a1.5 1.5 0 0 1-1.5 1.5h-11L3 12z" />
+        <path d="M12 9.5l5 5M17 9.5l-5 5" />
+      </svg>
+    );
+  return (
+    <svg viewBox="0 0 24 24" {...G} className={cls}>
+      <path d="M5 12.5l4.5 4.5L19 7.5" />
+    </svg>
+  );
+}
+
 export function Osk({
   title,
   initial,
@@ -96,26 +152,26 @@ export function Osk({
           ))}
           <div className="flex gap-[1vw] mt-[0.5vh]">
             <Key focusKey="osk-shift" onEnter={() => setUpper((u) => !u)}>
-              ⇧
+              <KeyGlyph name="shift" />
             </Key>
             <Key focusKey="osk-left" onEnter={left}>
-              ◀
+              <KeyGlyph name="left" />
             </Key>
             <Key focusKey="osk-right" onEnter={right}>
-              ▶
+              <KeyGlyph name="right" />
             </Key>
             <Key focusKey="osk-space" wide onEnter={() => insert(" ")}>
-              ␣
+              <KeyGlyph name="space" />
             </Key>
             <Key focusKey="osk-del" onEnter={backspace}>
-              ⌫
+              <KeyGlyph name="backspace" />
             </Key>
             <FocusButton
               focusKey="osk-done"
               onEnter={() => onDone(text)}
               className="h-[7vh] px-[3vw] rounded-[1vh] bg-white/10 flex items-center justify-center text-[2.6vh] font-semibold"
             >
-              ✓
+              <KeyGlyph name="done" />
             </FocusButton>
           </div>
         </div>

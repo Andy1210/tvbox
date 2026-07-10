@@ -44,11 +44,12 @@ export const CONFIG: PublicConfig = {
     m3u: { url: "https://demo.tvbox.invalid/playlist.m3u", epgUrl: "https://demo.tvbox.invalid/xmltv.xml" },
     configured: true,
   },
-  parental: { pinSet: false, lockedGroups: [] },
+  parental: { pinSet: false, lockedGroups: [], requirePin: false },
   spotify: { deviceName: "tvbox demo", hasCredentials: true, enabled: true },
   ambient: { enabled: true, idleMinutes: 5, city: "Budapest", sleepMinutes: 0 },
-  update: { auto: true },
-  ui: { hourFormat: "auto" },
+  update: { auto: true, appsAuto: true },
+  ui: { hourFormat: "auto", navSounds: true },
+  player: { audioLang: "", subLang: "" },
   remote: { devices: {}, power: "tv" },
 };
 

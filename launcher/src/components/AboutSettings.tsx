@@ -57,13 +57,16 @@ export function AboutSettings() {
     : DASH;
 
   return (
-    <div className="mt-[3vh]">
+    <div className="mt-[3vh] pb-[10vh]">
       <div className="flex items-center gap-[1.5vw] mb-[1.4vh]">
         <div className="text-[2.4vh] font-semibold">{t("about.title")}</div>
         <FocusButton
           focusKey="about-refresh"
           onEnter={refresh}
-          className="px-[2vw] py-[1.2vh] rounded-[1vh] bg-white/5 text-[1.9vh] font-semibold"
+          // scroll-mb: this is the section's ONLY focusable and it sits at the
+          // TOP - without the margin, focusing it scrolls just far enough to
+          // show the button and the diagnostic rows below stay off-screen
+          className="px-[2vw] py-[1.2vh] rounded-[1vh] bg-white/5 text-[1.9vh] font-semibold scroll-mb-[46vh]"
         >
           {t("about.refresh")}
         </FocusButton>

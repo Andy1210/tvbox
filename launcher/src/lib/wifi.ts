@@ -5,6 +5,7 @@ export interface WifiNet {
   signal: number;
   secured: boolean;
   active: boolean;
+  known?: boolean; // has a saved NetworkManager profile → can be forgotten
 }
 export interface EthernetStatus {
   connected: boolean;
@@ -32,13 +33,31 @@ export async function wifiList(): Promise<WifiNet[]> {
   }
 }
 
-export async function wifiConnect(ssid: string, password: string): Promise<{ ok: boolean; error?: string }> {
+export async function wifiConnect(
+  ssid: string,
+  password: string,
+  hidden = false,
+): Promise<{ ok: boolean; error?: string }> {
   try {
     return await (
       await fetch("/tvbox/api/wifi/connect", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ssid, password }),
+        body: JSON.stringify({ ssid, password, hidden }),
+      })
+    ).json();
+  } catch {
+    return { ok: false, error: "network" };
+  }
+}
+
+export async function wifiForget(ssid: string): Promise<{ ok: boolean; error?: string }> {
+  try {
+    return await (
+      await fetch("/tvbox/api/wifi/forget", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ssid }),
       })
     ).json();
   } catch {

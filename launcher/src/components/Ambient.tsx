@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { useI18n } from "../lib/i18n";
 import { fetchWeather, fetchPhotos, photoUrl, weatherGroup, type Weather } from "../lib/ambient";
 import { sleepIfIdle } from "../lib/power";
+import { setSoundsSuppressed } from "../lib/sounds";
 import { useConfigStore } from "../stores/config";
 
 // Idle/ambient screen: a big clock + weather over a photo slideshow (local
@@ -58,12 +59,29 @@ export function WeatherIcon({ group, className }: { group: string; className?: s
   );
 }
 
+// One slideshow frame: the blurred cover fills the screen (no letterbox bars)
+// while the sharp contained copy shows the WHOLE photo without cropping. The
+// opaque backdrop keeps the pair self-contained so a wrapper can crossfade it
+// as a unit without the outgoing photo ghosting through the 50% blur layer.
+function PhotoPair({ src }: { src: string }) {
+  return (
+    <>
+      <div className="absolute inset-0 bg-[#07090d]" />
+      <img src={src} alt="" className="absolute inset-0 w-full h-full object-cover scale-110 blur-[28px] opacity-50" />
+      <img src={src} alt="" className="absolute inset-0 w-full h-full object-contain" />
+    </>
+  );
+}
+
 export function Ambient({ onExit }: { onExit: () => void }) {
   const { t, tag } = useI18n();
   const [now, setNow] = useState(() => new Date());
   const [wx, setWx] = useState<Weather | null>(null);
   const [photos, setPhotos] = useState<string[]>([]);
   const [idx, setIdx] = useState(0);
+  // Incoming photo being crossfaded in on top of the current one; `started`
+  // flips its wrapper from opacity 0 to 1 (the CSS transition does the rest).
+  const [fade, setFade] = useState<{ idx: number; started: boolean } | null>(null);
 
   useEffect(() => {
     const clock = setInterval(() => setNow(new Date()), 15000);
@@ -76,11 +94,52 @@ export function Ambient({ onExit }: { onExit: () => void }) {
     };
   }, []);
 
+  // Slideshow: every 30s preload the next photo off-screen, then fade its
+  // blurred+sharp pair in over ~1s on top of the current pair (opacity-only
+  // transition - Pi-compositor safe, and it never starts before the image has
+  // decoded, so no flash/hitch). The index advances once the fade completes;
+  // the effect below keeps the overlay up a beat longer so the base <img> src
+  // swap underneath is never visible.
   useEffect(() => {
     if (photos.length < 2) return;
-    const id = setInterval(() => setIdx((i) => (i + 1) % photos.length), 30000);
-    return () => clearInterval(id);
-  }, [photos]);
+    let alive = true;
+    const timers: ReturnType<typeof setTimeout>[] = [];
+    const rafs: number[] = [];
+    timers.push(
+      setTimeout(() => {
+        const target = (idx + 1) % photos.length;
+        const im = new Image();
+        im.src = photoUrl(photos[target]);
+        const start = () => {
+          if (!alive) return;
+          setFade({ idx: target, started: false }); // mount the overlay at opacity 0
+          // Double rAF: let the opacity-0 frame commit first, otherwise the
+          // transition never runs and this hard-swaps like the old code.
+          rafs.push(
+            requestAnimationFrame(() => {
+              rafs.push(requestAnimationFrame(() => alive && setFade({ idx: target, started: true })));
+            }),
+          );
+          timers.push(setTimeout(() => alive && setIdx(target), 1100)); // fade done -> advance
+        };
+        im.decode().then(start, start);
+      }, 30000),
+    );
+    return () => {
+      alive = false;
+      timers.forEach(clearTimeout);
+      rafs.forEach(cancelAnimationFrame);
+    };
+  }, [photos, idx]);
+
+  // Drop the overlay only after the base layer has caught up to the same
+  // photo (a short grace period covers the base <img> committing its new
+  // src); at that point overlay and base render identical pixels.
+  useEffect(() => {
+    if (!fade || fade.idx !== idx) return;
+    const id = setTimeout(() => setFade(null), 250);
+    return () => clearTimeout(id);
+  }, [fade, idx]);
 
   // Auto-sleep: after N more minutes on the screensaver, CEC the TV off (the
   // box stays up - same as the power menu's Sleep). 0/unset = never. The shell
@@ -97,6 +156,13 @@ export function Ambient({ onExit }: { onExit: () => void }) {
     id = setTimeout(attempt, sleepMinutes * 60 * 1000);
     return () => clearTimeout(id);
   }, [sleepMinutes]);
+
+  // The wake keypress is swallowed - it must not tick either (the sounds
+  // listener registered earlier, so it runs first on the same capture phase).
+  useEffect(() => {
+    setSoundsSuppressed(true);
+    return () => setSoundsSuppressed(false);
+  }, []);
 
   // Swallow the first key so waking the screen doesn't also trigger a tile.
   useEffect(() => {
@@ -120,14 +186,17 @@ export function Ambient({ onExit }: { onExit: () => void }) {
     <div className="fixed inset-0 z-[60] overflow-hidden bg-[#07090d] text-white" onClick={onExit}>
       {photo ? (
         <>
-          {/* blurred cover fills the screen (no letterbox bars); the sharp
-              contained copy shows the WHOLE photo without cropping */}
-          <img
-            src={photo}
-            alt=""
-            className="absolute inset-0 w-full h-full object-cover scale-110 blur-[28px] opacity-50"
-          />
-          <img src={photo} alt="" className="absolute inset-0 w-full h-full object-contain" />
+          <PhotoPair src={photo} />
+          {/* incoming photo crossfades in on top, then idx catches up and the
+              overlay is dropped (see the slideshow effect) */}
+          {fade && photos[fade.idx] && (
+            <div
+              className="absolute inset-0 transition-opacity duration-1000"
+              style={{ opacity: fade.started ? 1 : 0 }}
+            >
+              <PhotoPair src={photoUrl(photos[fade.idx])} />
+            </div>
+          )}
         </>
       ) : (
         <div className="absolute inset-0 bg-[radial-gradient(120%_120%_at_20%_20%,#1c2740_0%,#0b0f18_55%,#07090d_100%)]" />

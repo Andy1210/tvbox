@@ -5,6 +5,30 @@ updates). `scripts/make-release.sh` lifts the current version's `hu`/`en`
 blocks into the OTA feed's `notes` - keep both languages, keep it short, and
 write for the person on the couch (what changes for THEM), not for developers.
 
+## 1.4.0
+
+### hu
+
+- Az alkalmazások mostantól maguktól frissülnek éjszaka (kikapcsolható a Rendszer beállításoknál) — csak amikor a box tétlen.
+- Wi-Fi: mentett hálózat elfelejtése és csatlakozás rejtett hálózathoz.
+- Navigációs hangok a távirányítóhoz (kikapcsolható a Kép és hang alatt).
+- Választható hangsáv- és feliratnyelv a lejátszáshoz (Kép és hang).
+- A szülői zár mostantól a kényes műveletekre is rátehető: alkalmazás telepítése és törlése PIN-t kérhet.
+- A képernyővédő fotói finom áttűnéssel váltakoznak.
+- A billentyűzet és a PIN-párna gombjai új, minden tévén helyesen megjelenő ikonokat kaptak.
+- A tévé magától bekapcsol, ha videó indul (pl. hangvezérléssel) — kivéve közvetlenül azután, hogy kikapcsoltad.
+
+### en
+
+- Apps now update themselves overnight (can be turned off under System settings) — only while the box is idle.
+- Wi-Fi: forget a saved network and join hidden networks.
+- Navigation sounds for the remote (can be turned off under Picture & sound).
+- Selectable audio and subtitle language for playback (Picture & sound).
+- Parental controls can now cover sensitive actions: installing and uninstalling apps can require the PIN.
+- Screensaver photos change with a smooth crossfade.
+- The keyboard and PIN pad got new icons that render correctly on every TV.
+- The TV turns itself on when video starts (e.g. via voice control) — except right after you turned it off.
+
 ## 1.3.0
 
 ### hu

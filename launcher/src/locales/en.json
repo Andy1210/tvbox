@@ -46,7 +46,12 @@
     "none": "No networks found",
     "passwordFor": "Password - {ssid}",
     "ethernet": "Ethernet",
-    "ethConnected": "connected"
+    "ethConnected": "connected",
+    "forget": "Forget",
+    "forgotten": "{ssid} forgotten",
+    "forgetFailed": "Couldn't forget {ssid}",
+    "hidden": "Join a hidden network…",
+    "hiddenSsid": "Hidden network name (SSID)"
   },
   "display": {
     "title": "Display",
@@ -173,7 +178,13 @@
     "default": "default",
     "volume": "Volume",
     "muted": "muted",
-    "none": "No outputs available"
+    "none": "No outputs available",
+    "navSounds": "Navigation sounds",
+    "trackLang": "Preferred audio language",
+    "trackLangHint": "Streams pick this audio track when available (mpv).",
+    "subLang": "Preferred subtitle language",
+    "subLangHint": "Subtitles turn on when a matching track exists (mpv).",
+    "langAuto": "Stream default"
   },
   "about": {
     "title": "Diagnostics",
@@ -249,7 +260,9 @@
     "osAuto": "Security updates install themselves in the background - no action needed.",
     "rebootNeeded": "A restart is recommended to finish system updates.",
     "rebootNow": "Restart now",
-    "rebootNone": "No restart pending."
+    "rebootNone": "No restart pending.",
+    "appsAuto": "Update apps automatically",
+    "appsAutoHint": "Installs app updates from the store overnight, only while the box is idle."
   },
   "hostname": {
     "title": "Device name",
@@ -337,6 +350,8 @@
     "saved": "PIN saved",
     "cleared": "PIN removed",
     "enterPin": "Enter the PIN",
-    "wrongPin": "Wrong PIN"
+    "wrongPin": "Wrong PIN",
+    "require": "Require PIN for sensitive actions",
+    "requireHint": "Installing and uninstalling apps asks for the PIN."
   }
 }

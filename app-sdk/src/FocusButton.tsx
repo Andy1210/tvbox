@@ -8,17 +8,20 @@ export function FocusButton({
   onEnter,
   className,
   children,
+  label,
 }: {
   focusKey?: string;
   onEnter: () => void;
   className?: string;
   children: ReactNode;
+  label?: string; // accessible name - needed when the visible content is an icon
 }) {
   const { ref, focused } = useFocusableItem({ focusKey, onEnterPress: onEnter }, { block: "nearest" });
   return (
     <div
       ref={ref}
       onClick={onEnter}
+      aria-label={label}
       className={[
         "transition-[transform,background-color,color] duration-150",
         // Focus is the single, unmistakable highlight: a bright fill with dark

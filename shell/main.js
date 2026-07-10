@@ -371,12 +371,21 @@ function handlePost(p, data, res) {
       changed.push("ambient");
     }
     if (data.update) {
-      config.setUpdate({ auto: data.update.auto !== false }); // only the toggle; feed is box-local
+      // only the two toggles; the feed URL stays box-local. Partial saves must
+      // not clobber the other toggle, so pass through only what was sent.
+      const upd = {};
+      if (data.update.auto !== undefined) upd.auto = data.update.auto !== false;
+      if (data.update.appsAuto !== undefined) upd.appsAuto = data.update.appsAuto !== false;
+      config.setUpdate(upd);
       changed.push("update");
     }
     if (data.ui) {
       config.setUi(data.ui); // launcher prefs (clock format) - whitelisted in config.js
       changed.push("ui");
+    }
+    if (data.player) {
+      config.setPlayer(data.player); // mpv track-language defaults - validated in config.js
+      changed.push("player");
     }
     if (data.remote) {
       config.setRemote(data.remote); // per-device button remap (sanitized in config.js)
@@ -525,7 +534,10 @@ function handlePost(p, data, res) {
     return jsonRes(res, { ok: true, removed: apps.removeApp(id) });
   }
   if (p === "/tvbox/api/wifi/connect") {
-    return wifiConnect(String(data.ssid || ""), String(data.password || ""), (r) => jsonRes(res, r));
+    return wifiConnect(String(data.ssid || ""), String(data.password || ""), !!data.hidden, (r) => jsonRes(res, r));
+  }
+  if (p === "/tvbox/api/wifi/forget") {
+    return wifiForget(String(data.ssid || ""), (r) => jsonRes(res, r));
   }
   if (p === "/tvbox/api/system/timezone") {
     return setTimezone(String(data.timezone || ""), (r) => jsonRes(res, r));
@@ -538,6 +550,38 @@ function handlePost(p, data, res) {
   }
   res.writeHead(404, { "Content-Type": "text/plain" });
   res.end("not found");
+}
+
+// Nightly app auto-update (the Fire TV model): in the OTA updater's 03-06h
+// window, when the box is idle and update.appsAuto isn't turned off, install
+// every pending registry update through the EXACT same path as the store's
+// Update button (store.install + provisionFull) - provisionFull's own idle
+// gating handles any service-plugin restart. One app at a time; re-checked
+// between apps so a wake-up aborts the run.
+let appsAutoBusy = false;
+async function appsAutoTick() {
+  const u = config.rawUpdate() || {};
+  if (u.appsAuto === false) return;
+  const h = new Date().getHours();
+  if (h < 3 || h > 5) return;
+  if (appsAutoBusy || installing.size || !boxIdle()) return;
+  appsAutoBusy = true;
+  try {
+    const l = await store.listForUi(config)(true);
+    for (const id of l.updates || []) {
+      // re-checked per app: a user install started during the awaited registry
+      // refresh (or a provisionFull that just scheduled a service restart)
+      // must stop the run - store.install would swap ~/.tvbox/apps/<id> under it
+      if (!boxIdle() || installing.size) break;
+      console.log("[store] nightly app auto-update:", id);
+      const r = await store.install(config, id);
+      if (r && r.ok) await provisionFull(id);
+    }
+  } catch (e) {
+    console.warn("[store] nightly app auto-update failed:", String(e.message || e).slice(0, 160));
+  } finally {
+    appsAutoBusy = false;
+  }
 }
 
 // On-demand bundle install (e.g. Plex's flatpak) triggered from the launcher.
@@ -737,14 +781,25 @@ function wifiList(cb) {
         nets.push({ ssid, signal: Number(m[2]) || 0, secured: !!(m[3] && m[3] !== "--"), active: m[1] === "yes" });
       }
       nets.sort((a, b) => (b.active ? 1 : 0) - (a.active ? 1 : 0) || b.signal - a.signal);
-      cb(nets.slice(0, 30));
+      const top = nets.slice(0, 30);
+      // Mark networks with a saved profile so the UI can offer "forget". Name
+      // match covers profiles our own connect created; the active network always
+      // has a profile regardless of its name.
+      wifiSavedConnections((names) => {
+        const saved = new Set(names);
+        for (const n of top) n.known = n.active || saved.has(n.ssid);
+        cb(top);
+      });
     },
   );
 }
-function wifiConnect(ssid, password, cb) {
+function wifiConnect(ssid, password, hidden, cb) {
   if (!ssid) return cb({ ok: false, error: "no ssid" });
   const args = ["device", "wifi", "connect", ssid];
   if (password) args.push("password", password);
+  // Hidden networks aren't in the scan list, so nmcli must be told to probe for
+  // the SSID instead of matching a scan result.
+  if (hidden) args.push("hidden", "yes");
   execFile("nmcli", args, { timeout: 35000 }, (e, _o, err) => {
     if (!e) return cb({ ok: true });
     execFile("sudo", ["-n", "nmcli", ...args], { timeout: 35000 }, (e2, _o2, err2) => {
@@ -756,6 +811,70 @@ function wifiConnect(ssid, password, cb) {
           .slice(0, 160),
       });
     });
+  });
+}
+// Saved (known) WiFi connection profile names. `nmcli device wifi connect` names
+// the profile after the SSID, so name==ssid is the common case; renamed or
+// NM-suffixed ("MyNet 1") profiles are handled by the SSID lookup in wifiForget.
+function wifiSavedConnections(cb) {
+  execFile("nmcli", ["-t", "-f", "NAME,TYPE", "connection", "show"], { timeout: 8000 }, (e, out) => {
+    if (e) return cb([]);
+    const names = [];
+    for (const raw of (out || "").split("\n")) {
+      if (!raw) continue;
+      // nmcli -t escapes BOTH '\' and ':' inside values ('\\' and '\:');
+      // tokenize both so a name containing a backslash still parses (a lone
+      // '\:'-only pass would eat the field separator after a trailing '\').
+      const line = raw.replace(/\\\\/g, "\u0001").replace(/\\:/g, "\u0000");
+      const m = /^(.*):([^:]*)$/.exec(line);
+      if (!m) continue;
+      if (m[2] !== "802-11-wireless" && m[2] !== "wifi") continue;
+      names.push(m[1].replace(/\u0000/g, ":").replace(/\u0001/g, "\\"));
+    }
+    cb(names);
+  });
+}
+// Forget a saved network: delete every NM profile stored for the SSID - the
+// profile named exactly like the SSID (what our own connect creates) plus any
+// profile whose 802-11-wireless.ssid matches (renamed/suffixed duplicates).
+// Same user-then-passwordless-sudo ladder as wifiConnect.
+function nmcliDeleteConnection(name, cb) {
+  const args = ["connection", "delete", "id", name];
+  execFile("nmcli", args, { timeout: 15000 }, (e) => {
+    if (!e) return cb(true);
+    execFile("sudo", ["-n", "nmcli", ...args], { timeout: 15000 }, (e2) => cb(!e2));
+  });
+}
+function wifiForget(ssid, cb) {
+  if (!ssid) return cb({ ok: false, error: "no ssid" });
+  wifiSavedConnections((names) => {
+    const direct = names.filter((n) => n === ssid);
+    const rest = names.filter((n) => n !== ssid);
+    const delAll = (targets) => {
+      if (!targets.length) return cb({ ok: false, error: "no saved network: " + ssid.slice(0, 64) });
+      let okAny = false,
+        i = 0;
+      const step = () => {
+        if (i >= targets.length) return cb(okAny ? { ok: true } : { ok: false, error: "delete failed" });
+        nmcliDeleteConnection(targets[i++], (ok) => {
+          okAny = okAny || ok;
+          step();
+        });
+      };
+      step();
+    };
+    // Check the differently-named profiles' stored SSID one by one (sequential:
+    // a box has a handful of profiles at most).
+    const matchRest = (i, acc) => {
+      if (i >= rest.length) return delAll(direct.concat(acc));
+      execFile("nmcli", ["-g", "802-11-wireless.ssid", "connection", "show", rest[i]], { timeout: 8000 }, (e, out) => {
+        const v = String(out || "")
+          .trim()
+          .replace(/\\:/g, ":");
+        matchRest(i + 1, !e && v === ssid ? acc.concat(rest[i]) : acc);
+      });
+    };
+    matchRest(0, []);
   });
 }
 
@@ -1199,6 +1318,13 @@ function launchMpv(url, startPos, pip, rect) {
   // "match content framerate": resample so e.g. 50fps IPTV plays smoothly on a
   // 60Hz output without a display mode switch (user opts in; off by default).
   if (config.rawDisplay() && config.rawDisplay().matchFramerate) args.push("--video-sync=display-resample");
+  // Preferred audio/subtitle language (Settings > Picture & sound). mpv falls
+  // back to the stream default when the language isn't present; subtitles stay
+  // OFF unless a preference is set (--slang alone doesn't enable them, so add
+  // sid=auto to actually select a matching track).
+  const pl = config.rawPlayer() || {};
+  if (/^[a-z]{2,3}$/.test(pl.audioLang || "")) args.push("--alang=" + pl.audioLang);
+  if (/^[a-z]{2,3}$/.test(pl.subLang || "")) args.push("--slang=" + pl.subLang, "--sid=auto");
   // "--" ends option parsing: a URL starting with "-" (or a crafted playlist
   // entry) must always be argv's file position, never an mpv option.
   args.push("--", url);
@@ -1209,6 +1335,12 @@ function launchMpv(url, startPos, pip, rect) {
   }
   mpv = spawn("mpv", args, { env, detached: true, stdio: "ignore" });
   console.log("[player] mpv launched pid", mpv.pid, pip ? "(pip)" : "");
+  // One-touch wake: video starting while the TV sleeps should light it up
+  // (voice/HA "play X" with the TV off). "on 0" is a no-op on a TV that's
+  // already on. The one exception: right after the USER put the TV on standby -
+  // the stop we emit as "finished" can make an app auto-play the next item
+  // (Plex on-deck), which must not switch the TV back on.
+  if (Date.now() - lastTvStandbyAt > 30 * 1000) cecPower(true);
   mpv.on("exit", (code, sig) => {
     console.log("[player] mpv exited code", code, "sig", sig);
     emit({ type: "finished" });
@@ -1282,7 +1414,9 @@ function observeMpv() {
 // TV turned off (signalled by the CEC bridge): stop active playback so a stream
 // doesn't keep running after the screen is off. Only the playback is stopped,
 // nothing is killed; the app's UI updates via the "finished" event.
+let lastTvStandbyAt = 0; // launchMpv suppresses its CEC wake right after this
 function onTvStandby() {
+  lastTvStandbyAt = Date.now();
   if (!mpv) return;
   console.log("[tv] standby -> stop playback");
   playingUrl = null;
@@ -1846,7 +1980,10 @@ app.whenReady().then(() => {
     restoredAt = Date.now();
     setTimeout(() => restartShell("backup restored"), 4000);
   });
-  updater.init({ isIdle: boxIdle, restart: () => restartShell("update applied") });
+  // isIdle includes "no install in flight": the OTA auto-apply must never
+  // restart the shell under a half-finished app provision (store.install has
+  // already swapped the manifest by then, so the nightly would never retry).
+  updater.init({ isIdle: () => boxIdle() && installing.size === 0, restart: () => restartShell("update applied") });
   loadPlugins(); // require plugins + register their routes (deps-gated)
   apps.installAll((s) => console.log("[install]", s));
   serve();
@@ -1914,6 +2051,7 @@ app.whenReady().then(() => {
     updater.onLauncherLoaded();
   });
   updater.startSchedulers(); // boot check + 6h re-check + nightly idle auto-apply
+  setInterval(appsAutoTick, 30 * 60 * 1000); // nightly registry app auto-update (same window)
   // Start plugin daemons once the HDMI sink is the default (librespot needs it).
   ensureAudio(() => startPlugins());
   // MQTT bridge (now-playing publish + HA integration); no-op if not provisioned.

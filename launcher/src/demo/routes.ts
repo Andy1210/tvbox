@@ -66,16 +66,18 @@ const POWER_MSG: Record<string, Record<string, string>> = {
 function applyConfig(body: Record<string, unknown>): void {
   if (body.iptv) config.iptv = { ...config.iptv, configured: true };
   if (body.parental && typeof body.parental === "object") {
-    const p = body.parental as { pin?: string; lockedGroups?: string[] };
+    const p = body.parental as { pin?: string; lockedGroups?: string[]; requirePin?: boolean };
     if (p.pin !== undefined) {
       parentalPin = p.pin;
       config.parental.pinSet = p.pin !== "";
     }
     if (p.lockedGroups) config.parental.lockedGroups = p.lockedGroups;
+    if (p.requirePin !== undefined) config.parental.requirePin = !!p.requirePin;
   }
   if (body.ambient && typeof body.ambient === "object") Object.assign(config.ambient, body.ambient);
   if (body.update && typeof body.update === "object") Object.assign(config.update, body.update);
   if (body.ui && typeof body.ui === "object") Object.assign(config.ui, body.ui);
+  if (body.player && typeof body.player === "object") Object.assign(config.player, body.player);
   if (body.display && typeof body.display === "object") {
     const d = body.display as { matchFramerate?: boolean };
     if (d.matchFramerate !== undefined) display.matchFramerate = d.matchFramerate;

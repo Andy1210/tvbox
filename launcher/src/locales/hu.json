@@ -46,7 +46,12 @@
     "none": "Nincs elérhető hálózat",
     "passwordFor": "Jelszó - {ssid}",
     "ethernet": "Ethernet",
-    "ethConnected": "csatlakoztatva"
+    "ethConnected": "csatlakoztatva",
+    "forget": "Elfelejtés",
+    "forgotten": "{ssid} elfelejtve",
+    "forgetFailed": "Nem sikerült elfelejteni: {ssid}",
+    "hidden": "Csatlakozás rejtett hálózathoz…",
+    "hiddenSsid": "Rejtett hálózat neve (SSID)"
   },
   "display": {
     "title": "Kijelző",
@@ -173,7 +178,13 @@
     "default": "alapértelmezett",
     "volume": "Hangerő",
     "muted": "némítva",
-    "none": "Nincs elérhető kimenet"
+    "none": "Nincs elérhető kimenet",
+    "navSounds": "Navigációs hangok",
+    "trackLang": "Előnyben részesített hangsáv",
+    "trackLangHint": "Ha van ilyen nyelvű hangsáv, azt választja (mpv).",
+    "subLang": "Előnyben részesített felirat",
+    "subLangHint": "Ha van ilyen nyelvű felirat, bekapcsolja (mpv).",
+    "langAuto": "Adás szerinti"
   },
   "about": {
     "title": "Diagnosztika",
@@ -249,7 +260,9 @@
     "osAuto": "A biztonsági frissítések maguktól települnek a háttérben - nincs teendő.",
     "rebootNeeded": "A rendszerfrissítések befejezéséhez újraindítás ajánlott.",
     "rebootNow": "Újraindítás most",
-    "rebootNone": "Nincs függőben újraindítás."
+    "rebootNone": "Nincs függőben újraindítás.",
+    "appsAuto": "Alkalmazások automatikus frissítése",
+    "appsAutoHint": "Éjszaka, csak tétlen boxon telepíti az áruházi frissítéseket."
   },
   "hostname": {
     "title": "Eszköz neve",
@@ -337,6 +350,8 @@
     "saved": "PIN elmentve",
     "cleared": "PIN törölve",
     "enterPin": "Add meg a PIN-kódot",
-    "wrongPin": "Hibás PIN"
+    "wrongPin": "Hibás PIN",
+    "require": "PIN kérése kényes műveletekhez",
+    "requireHint": "Alkalmazás telepítése és törlése PIN-t kér."
   }
 }

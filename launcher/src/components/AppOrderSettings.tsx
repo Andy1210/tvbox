@@ -5,6 +5,7 @@ import { fetchApps, removeApp } from "../lib/api";
 import { useI18n } from "../lib/i18n";
 import { useAppPrefsStore, orderIds } from "../stores/appPrefs";
 import { FocusButton } from "./FocusButton";
+import { usePinGuard } from "../lib/usePinGuard";
 import { Icon } from "./Icon";
 
 // Apps section of the HOME Settings screen: reorder the home-screen apps
@@ -19,6 +20,7 @@ const Chevron = ({ up }: { up?: boolean }) => (
 );
 
 export function AppOrderSettings() {
+  const { guard, gate } = usePinGuard();
   const { t, loc, tag } = useI18n();
   // null = still loading (renders nothing), [] = a real empty list - so the
   // "no apps" copy can't flash before fetchApps resolves (StoreSettings pattern)
@@ -143,7 +145,7 @@ export function AppOrderSettings() {
               {a.installable && a.installed && (
                 <FocusButton
                   focusKey={"apporder-remove-" + a.id}
-                  onEnter={() => uninstall(a)}
+                  onEnter={() => guard(() => uninstall(a), "apporder-remove-" + a.id)}
                   className="px-[1.6vw] h-[5.4vh] rounded-[1vh] bg-red-500/15 text-red-200 flex items-center justify-center text-[1.9vh] font-semibold shrink-0"
                 >
                   {t("appsettings.uninstall")}
@@ -158,6 +160,7 @@ export function AppOrderSettings() {
             {status}
           </div>
         )}
+        {gate}
       </div>
     </div>
   );

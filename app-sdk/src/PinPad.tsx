@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { FocusContext, useFocusable, setFocus } from "@noriginmedia/norigin-spatial-navigation";
 import { useBackspace } from "./useBackspace";
+import { KeyGlyph } from "./Osk";
 import { FocusButton } from "./FocusButton";
 
 // D-pad numeric PIN entry (modal). Auto-submits at 4 digits. Remote Back cancels.
@@ -65,10 +66,11 @@ export function PinPad({
           ))}
           <FocusButton
             focusKey="pin-del"
+            label="delete"
             onEnter={() => setPin((p) => p.slice(0, -1))}
             className="w-[9vw] max-w-[120px] aspect-square rounded-full bg-white/5 flex items-center justify-center text-[3vh]"
           >
-            ⌫
+            <KeyGlyph name="backspace" className="w-[3vh] h-[3vh]" />
           </FocusButton>
           <FocusButton
             focusKey="pin-0"

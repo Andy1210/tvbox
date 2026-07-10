@@ -14,6 +14,8 @@ import {
   type RemotePower,
   saveUi,
   type UiInput,
+  savePlayer,
+  type PlayerInput,
 } from "./config";
 
 // Single source of truth for the shell config (IPTV source + parental lock +
@@ -26,10 +28,11 @@ interface ConfigState {
   error: boolean; // shell unreachable (config stays null) - the UI offers retry
   load: () => Promise<PublicConfig | null>;
   setIptv: (iptv: IptvInput) => Promise<void>;
-  setParental: (p: { pin?: string; lockedGroups?: string[] }) => Promise<void>;
+  setParental: (p: { pin?: string; lockedGroups?: string[]; requirePin?: boolean }) => Promise<void>;
   setAmbient: (ambient: AmbientInput) => Promise<void>;
-  setUpdate: (update: { auto: boolean }) => Promise<void>;
+  setUpdate: (update: { auto?: boolean; appsAuto?: boolean }) => Promise<void>;
   setUi: (ui: UiInput) => Promise<void>;
+  setPlayer: (player: PlayerInput) => Promise<void>;
   setRemote: (devices: Record<string, RemoteDeviceConfig>) => Promise<void>;
   setRemotePower: (power: RemotePower) => Promise<void>;
 }
@@ -48,6 +51,7 @@ export const useConfigStore = create<ConfigState>((set) => ({
   setAmbient: async (ambient) => set({ config: await saveAmbient(ambient) }),
   setUpdate: async (update) => set({ config: await saveUpdate(update) }),
   setUi: async (ui) => set({ config: await saveUi(ui) }),
+  setPlayer: async (player) => set({ config: await savePlayer(player) }),
   setRemote: async (devices) => set({ config: await saveRemote(devices) }),
   setRemotePower: async (power) => set({ config: await saveRemotePower(power) }),
 }));

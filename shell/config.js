@@ -58,6 +58,7 @@ function publicConfig() {
     parental: {
       pinSet: !!(c.parental && c.parental.pinHash),
       lockedGroups: (c.parental && c.parental.lockedGroups) || [],
+      requirePin: !!(c.parental && c.parental.requirePin), // gate installs/sensitive settings in the UI
     },
     spotify: {
       deviceName: (c.spotify && c.spotify.deviceName) || "",
@@ -74,6 +75,11 @@ function publicConfig() {
     audio: {
       sink: (c.audio && c.audio.sink) || null, // manual default-sink override (node.name); null = auto-detect
     },
+    player: {
+      // preferred track languages for the shared mpv player ("" = stream default)
+      audioLang: (c.player && c.player.audioLang) || "",
+      subLang: (c.player && c.player.subLang) || "",
+    },
     ambient: {
       enabled: !(c.ambient && c.ambient.enabled === false), // default on
       idleMinutes: (c.ambient && c.ambient.idleMinutes) || 5,
@@ -89,10 +95,12 @@ function publicConfig() {
     update: {
       // OTA self-update (updater.js); feed URL itself stays box-local
       auto: !(c.update && c.update.auto === false), // default on
+      appsAuto: !(c.update && c.update.appsAuto === false), // nightly registry app updates, default on
     },
     ui: {
       // launcher preferences. hourFormat: "auto" (locale default) | "12" | "24"
       hourFormat: (c.ui && ["12", "24"].includes(c.ui.hourFormat) && c.ui.hourFormat) || "auto",
+      navSounds: !(c.ui && c.ui.navSounds === false), // D-pad ticks, default on
     },
     remote: {
       // Per-device button remap + Power-button policy, consumed by
@@ -153,7 +161,7 @@ function setIptv(iptv) {
   save(c);
 }
 
-function setParental({ pin, lockedGroups }) {
+function setParental({ pin, lockedGroups, requirePin }) {
   const c = load();
   c.parental = c.parental || {};
   if (pin !== undefined) {
@@ -167,6 +175,7 @@ function setParental({ pin, lockedGroups }) {
     }
   }
   if (lockedGroups !== undefined) c.parental.lockedGroups = Array.isArray(lockedGroups) ? lockedGroups : [];
+  if (requirePin !== undefined) c.parental.requirePin = !!requirePin;
   save(c);
 }
 
@@ -266,11 +275,29 @@ function rawUpdate() {
   return load().update || null;
 }
 
+// Shared-player preferences (mpv --alang/--slang). ISO 639 codes or "".
+function setPlayer(player) {
+  const c = load();
+  const norm = (v) => (typeof v === "string" && /^([a-z]{2,3})?$/.test(v) ? v : undefined);
+  const a = norm(player && player.audioLang);
+  const su = norm(player && player.subLang);
+  c.player = {
+    ...c.player,
+    ...(a !== undefined ? { audioLang: a } : {}),
+    ...(su !== undefined ? { subLang: su } : {}),
+  };
+  save(c);
+}
+function rawPlayer() {
+  return load().player || null;
+}
+
 // Launcher UI preferences (clock format). Whitelisted so junk can't persist.
 function setUi(ui) {
   const c = load();
   const hf = ui && ["auto", "12", "24"].includes(ui.hourFormat) ? ui.hourFormat : undefined;
-  c.ui = { ...c.ui, ...(hf ? { hourFormat: hf } : {}) };
+  const ns = ui && typeof ui.navSounds === "boolean" ? ui.navSounds : undefined;
+  c.ui = { ...c.ui, ...(hf ? { hourFormat: hf } : {}), ...(ns !== undefined ? { navSounds: ns } : {}) };
   save(c);
 }
 
@@ -310,6 +337,8 @@ module.exports = {
   setDisplay,
   rawDisplay,
   setUi,
+  setPlayer,
+  rawPlayer,
   setAudio,
   rawAudio,
   setAmbient,

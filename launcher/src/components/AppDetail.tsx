@@ -4,6 +4,7 @@ import { useFocusableItem } from "@sdk/useFocusableItem";
 import { type StoreEntry } from "../lib/api";
 import { useI18n } from "../lib/i18n";
 import { useBackspace } from "../lib/useBackspace";
+import { usePinGuard } from "../lib/usePinGuard";
 import { FocusButton } from "./FocusButton";
 import { Icon } from "./Icon";
 
@@ -98,6 +99,7 @@ export function AppDetail({
   onSetUrl: () => void;
   onExit: () => void;
 }) {
+  const { guard, gate } = usePinGuard();
   const { t, loc } = useI18n();
   const { ref, focusKey } = useFocusable({ focusKey: "app-detail", isFocusBoundary: true });
   const accent = app.accent || "#4152d8";
@@ -177,7 +179,7 @@ export function AppDetail({
                 {!app.installed && (
                   <FocusButton
                     focusKey="detail-install"
-                    onEnter={onInstall}
+                    onEnter={() => guard(onInstall, "detail-install")}
                     className="px-[2.4vw] h-[6vh] rounded-[1.1vh] bg-sky-500/15 text-sky-200 flex items-center justify-center text-[2.1vh] font-semibold"
                   >
                     {t("home.install")}
@@ -195,7 +197,7 @@ export function AppDetail({
                 {app.installed && (
                   <FocusButton
                     focusKey="detail-remove"
-                    onEnter={onRemove}
+                    onEnter={() => guard(onRemove, "detail-remove")}
                     className="px-[2.4vw] h-[6vh] rounded-[1.1vh] bg-red-500/15 text-red-200 flex items-center justify-center text-[2.1vh] font-semibold"
                   >
                     {t("appsettings.uninstall")}
@@ -221,6 +223,7 @@ export function AppDetail({
           </FocusButton>
         </div>
 
+        {gate}
         {status && (
           <div className="text-[1.8vh] text-fg-dim mt-[1.2vh]" role="status" aria-live="polite">
             {status}

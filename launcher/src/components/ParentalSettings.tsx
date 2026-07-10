@@ -16,6 +16,7 @@ type Step = null | "verify-change" | "verify-clear" | "new" | "confirm";
 export function ParentalSettings() {
   const { t } = useI18n();
   const pinSet = useConfigStore((s) => !!s.config?.parental.pinSet);
+  const requirePin = useConfigStore((s) => !!s.config?.parental.requirePin);
   const saveParental = useConfigStore((s) => s.setParental);
   const [step, setStep] = useState<Step>(null);
   const [firstPin, setFirstPin] = useState("");
@@ -102,6 +103,23 @@ export function ParentalSettings() {
               className="px-[2vw] py-[1.5vh] rounded-[1.1vh] bg-white/5 flex items-center justify-between gap-[1.5vw]"
             >
               <span className="text-[2.1vh]">{t("parental.change")}</span>
+            </FocusButton>
+            <FocusButton
+              focusKey="parental-require"
+              onEnter={() => saveParental({ requirePin: !requirePin })}
+              className="px-[2vw] py-[1.5vh] rounded-[1.1vh] bg-white/5 flex items-center justify-between gap-[1.5vw]"
+            >
+              <span className="min-w-0">
+                <span className="text-[2.1vh]">{t("parental.require")}</span>
+                <span className="block text-[1.7vh] text-fg-dim">{t("parental.requireHint")}</span>
+              </span>
+              <span
+                className={["text-[1.9vh] font-semibold shrink-0", requirePin ? "text-accent" : "text-fg-dim"].join(
+                  " ",
+                )}
+              >
+                {requirePin ? t("display.on") : t("display.off")}
+              </span>
             </FocusButton>
             <FocusButton
               focusKey="parental-clear"

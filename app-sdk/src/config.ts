@@ -33,11 +33,12 @@ export interface PublicConfig {
     m3u: { url: string; epgUrl: string } | null;
     configured: boolean;
   };
-  parental: { pinSet: boolean; lockedGroups: string[] };
+  parental: { pinSet: boolean; lockedGroups: string[]; requirePin: boolean };
   spotify: { deviceName: string; hasCredentials: boolean; enabled: boolean };
   ambient: { enabled: boolean; idleMinutes: number; city: string; sleepMinutes: number };
-  ui: { hourFormat: "auto" | "12" | "24" };
-  update: { auto: boolean };
+  ui: { hourFormat: "auto" | "12" | "24"; navSounds: boolean };
+  update: { auto: boolean; appsAuto: boolean };
+  player: { audioLang: string; subLang: string };
   remote: { devices: Record<string, RemoteDeviceConfig>; power: RemotePower };
 }
 
@@ -82,7 +83,11 @@ export async function saveIptv(iptv: IptvInput): Promise<PublicConfig> {
   return postConfig({ iptv });
 }
 
-export async function saveParental(p: { pin?: string; lockedGroups?: string[] }): Promise<PublicConfig> {
+export async function saveParental(p: {
+  pin?: string;
+  lockedGroups?: string[];
+  requirePin?: boolean;
+}): Promise<PublicConfig> {
   return postConfig({ parental: p });
 }
 
@@ -92,13 +97,19 @@ export async function saveAmbient(ambient: AmbientInput): Promise<PublicConfig> 
 }
 
 // Launcher UI preferences (clock format; "auto" = whatever the locale does).
-export type UiInput = Partial<{ hourFormat: "auto" | "12" | "24" }>;
+export type UiInput = Partial<{ hourFormat: "auto" | "12" | "24"; navSounds: boolean }>;
 export async function saveUi(ui: UiInput): Promise<PublicConfig> {
   return postConfig({ ui });
 }
 
+// Shared-player track-language defaults (mpv --alang/--slang; "" = stream default).
+export type PlayerInput = Partial<{ audioLang: string; subLang: string }>;
+export async function savePlayer(player: PlayerInput): Promise<PublicConfig> {
+  return postConfig({ player });
+}
+
 // OTA auto-update toggle (the feed URL itself is box-local, not a UI concern).
-export async function saveUpdate(update: { auto: boolean }): Promise<PublicConfig> {
+export async function saveUpdate(update: { auto?: boolean; appsAuto?: boolean }): Promise<PublicConfig> {
   return postConfig({ update });
 }
 

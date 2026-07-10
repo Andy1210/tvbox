@@ -43,6 +43,7 @@ export function UpdateSettings() {
 
   const working = !!st && st.state !== "idle" && st.state !== "error";
   const auto = config?.update.auto ?? true;
+  const appsAuto = config?.update.appsAuto ?? true;
 
   const onCheck = async () => {
     setBusy(true);
@@ -145,6 +146,17 @@ export function UpdateSettings() {
           </span>
         </FocusButton>
         <div className="text-[1.7vh] text-fg-dim mt-[0.5vh]">{t("update.autoHint")}</div>
+        <FocusButton
+          focusKey="update-apps-auto"
+          onEnter={() => setUpdate({ appsAuto: !appsAuto })}
+          className="mt-[1vh] px-[2vw] py-[1.5vh] rounded-[1.1vh] bg-white/5 flex items-center justify-between gap-[1.5vw] w-full"
+        >
+          <span className="text-[2.1vh]">{t("update.appsAuto")}</span>
+          <span className={["text-[1.9vh] font-semibold", appsAuto ? "text-accent" : "text-fg-dim"].join(" ")}>
+            {appsAuto ? t("display.on") : t("display.off")}
+          </span>
+        </FocusButton>
+        <div className="text-[1.7vh] text-fg-dim mt-[0.5vh]">{t("update.appsAutoHint")}</div>
 
         <div className="text-[2.4vh] font-semibold mt-[3vh] mb-[1vh]">{t("update.osTitle")}</div>
         <div className="text-[1.8vh] text-fg-dim max-w-[60vw]">{t("update.osAuto")}</div>

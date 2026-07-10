@@ -10,12 +10,12 @@ import { setupRemote, placeGrid, remote, setFocus, getCurrentFocusKey, flushFocu
 setupRemote();
 
 // The 3x4 keypad: 1-9, then delete / 0 / (blank).
-function layout(getByText: (t: string) => HTMLElement) {
+function layout(getByText: (t: string) => HTMLElement, getByLabelText: (t: string) => HTMLElement) {
   placeGrid([
     [getByText("1"), getByText("2"), getByText("3")],
     [getByText("4"), getByText("5"), getByText("6")],
     [getByText("7"), getByText("8"), getByText("9")],
-    [getByText("⌫"), getByText("0"), null],
+    [getByLabelText("delete"), getByText("0"), null],
   ]);
 }
 
@@ -27,8 +27,8 @@ describe("PinPad", () => {
   });
 
   it("auto-focuses the first digit on open", async () => {
-    const { getByText } = render(<PinPad title="PIN" onSubmit={() => {}} onCancel={() => {}} />);
-    layout(getByText);
+    const { getByText, getByLabelText } = render(<PinPad title="PIN" onSubmit={() => {}} onCancel={() => {}} />);
+    layout(getByText, getByLabelText);
     act(() => vi.runOnlyPendingTimers()); // the modal's deferred setFocus
     await flushFocus(); // setFocus resolves on the async scheduler
     expect(getCurrentFocusKey()).toBe("pin-1");
@@ -36,8 +36,8 @@ describe("PinPad", () => {
 
   it("enters a 4-digit PIN with the arrows and auto-submits", async () => {
     const onSubmit = vi.fn();
-    const { getByText } = render(<PinPad title="PIN" onSubmit={onSubmit} onCancel={() => {}} />);
-    layout(getByText);
+    const { getByText, getByLabelText } = render(<PinPad title="PIN" onSubmit={onSubmit} onCancel={() => {}} />);
+    layout(getByText, getByLabelText);
     await setFocus("pin-1");
     await remote.ok(); // 1
     await remote.right();
@@ -52,8 +52,8 @@ describe("PinPad", () => {
 
   it("delete removes the last digit before submit", async () => {
     const onSubmit = vi.fn();
-    const { getByText } = render(<PinPad title="PIN" onSubmit={onSubmit} onCancel={() => {}} />);
-    layout(getByText);
+    const { getByText, getByLabelText } = render(<PinPad title="PIN" onSubmit={onSubmit} onCancel={() => {}} />);
+    layout(getByText, getByLabelText);
     await setFocus("pin-1");
     await remote.ok(); // "1"
     await setFocus("pin-2");
@@ -71,8 +71,8 @@ describe("PinPad", () => {
 
   it("does not submit before the 4th digit", async () => {
     const onSubmit = vi.fn();
-    const { getByText } = render(<PinPad title="PIN" onSubmit={onSubmit} onCancel={() => {}} />);
-    layout(getByText);
+    const { getByText, getByLabelText } = render(<PinPad title="PIN" onSubmit={onSubmit} onCancel={() => {}} />);
+    layout(getByText, getByLabelText);
     await setFocus("pin-1");
     await remote.ok();
     await remote.ok(); // OK on the same key twice -> "11" (2 digits)
@@ -83,8 +83,8 @@ describe("PinPad", () => {
 
   it("remote Back cancels", async () => {
     const onCancel = vi.fn();
-    const { getByText } = render(<PinPad title="PIN" onSubmit={() => {}} onCancel={onCancel} />);
-    layout(getByText);
+    const { getByText, getByLabelText } = render(<PinPad title="PIN" onSubmit={() => {}} onCancel={onCancel} />);
+    layout(getByText, getByLabelText);
     await remote.back();
     expect(onCancel).toHaveBeenCalledTimes(1);
   });
