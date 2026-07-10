@@ -85,6 +85,22 @@ const path = require("path");
         ipcRenderer.invoke("player", "pip", { on: !!on, rect: rect || null });
       } catch (e) {}
     };
+    // In-playback track surface: list the stream's audio/subtitle tracks and
+    // switch (id, or "no"/"auto") - backs a player-overlay language picker.
+    window.tvbox.tracks = function () {
+      try {
+        return ipcRenderer.invoke("player", "tracks").then(function (r) {
+          return r && r.tracks ? r.tracks : [];
+        });
+      } catch (e) {
+        return Promise.resolve([]);
+      }
+    };
+    window.tvbox.setTrack = function (type, id) {
+      try {
+        ipcRenderer.invoke("player", "track", { type: type, id: id });
+      } catch (e) {}
+    };
     window.tvbox.onPlayer = function (cb) {
       var h = function (_e, ev) {
         try {
@@ -129,6 +145,21 @@ const path = require("path");
       },
     };
   }
+  // HOME-screen widgets (plugin-driven cards, e.g. Spotify now-playing).
+  window.tvbox.onWidgets = function (cb) {
+    var h = function (_e, list) {
+      try {
+        cb(list || []);
+      } catch (e) {}
+    };
+    ipcRenderer.on("widgets", h);
+    return function () {
+      try {
+        ipcRenderer.removeListener("widgets", h);
+      } catch (e) {}
+    };
+  };
+
   // Remote Home button (CEC double-tap Back -> KEY_HOMEPAGE -> DOM "BrowserHome"):
   // always return to the HOME launcher, from any app.
   window.addEventListener(

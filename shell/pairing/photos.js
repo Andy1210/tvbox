@@ -54,7 +54,9 @@ module.exports = {
         }
       },
     },
-    "GET /photos": (req, res, ctx) => ctx.json(res, { names: ambient.photos() }),
+    // localPhotos: the phone page manages UPLOADS only - the Bing wallpaper
+    // cache is neither previewable nor deletable through it
+    "GET /photos": (req, res, ctx) => ctx.json(res, { names: ambient.localPhotos() }),
     "GET /photo-img": (req, res, ctx) => {
       const p = safePath(ctx.query.get("name"));
       if (!p) {

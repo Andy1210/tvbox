@@ -51,7 +51,10 @@
     "forgotten": "{ssid} forgotten",
     "forgetFailed": "Couldn't forget {ssid}",
     "hidden": "Join a hidden network…",
-    "hiddenSsid": "Hidden network name (SSID)"
+    "hiddenSsid": "Hidden network name (SSID)",
+    "country": "Wi-Fi country",
+    "countryHint": "Regulatory region, applies at the next restart.",
+    "countryAuto": "Default"
   },
   "display": {
     "title": "Display",
@@ -80,7 +83,10 @@
     "confirmRestart": "Restart the box?",
     "confirmShutdown": "Shut down the box?",
     "yes": "Yes",
-    "cancel": "Cancel"
+    "cancel": "Cancel",
+    "sleepTimer": "Sleep timer",
+    "sleepTimerIn": "in {min} min",
+    "sleepTimerHint": "Turns the TV off after the set time (the box stays on)."
   },
   "ambient": {
     "title": "Ambient screen",
@@ -107,9 +113,11 @@
       "storm": "Storm"
     },
     "sleep": "Turn the TV off after",
-    "sleepHint": "On the screensaver, over HDMI-CEC — the box stays on.",
+    "sleepHint": "On the screensaver, over HDMI-CEC. The box stays on.",
     "sleepNever": "Never",
-    "sleepAfter": "{min} min"
+    "sleepAfter": "{min} min",
+    "bing": "Bing daily pictures",
+    "bingHint": "Mix Bing's daily wallpapers into the slideshow"
   },
   "bt": {
     "title": "Bluetooth",
@@ -123,7 +131,9 @@
     "pair": "Pair",
     "remove": "Remove",
     "pairing": "Pairing {name}…",
-    "failed": "Failed: {name}"
+    "failed": "Failed: {name}",
+    "lowBattery": "Remote battery low",
+    "lowBatteryMsg": "{name}: {pct}%. Charge it or replace the batteries soon."
   },
   "remote": {
     "title": "Remote buttons",
@@ -341,7 +351,7 @@
   "parental": {
     "title": "Parental controls",
     "set": "Set a PIN",
-    "hint": "One PIN for the whole box — apps use it to lock content (e.g. Live TV categories).",
+    "hint": "One PIN for the whole box: apps use it to lock content (e.g. Live TV categories).",
     "change": "Change PIN",
     "clear": "Remove PIN",
     "newPin": "Enter a new PIN",
@@ -353,5 +363,18 @@
     "wrongPin": "Wrong PIN",
     "require": "Require PIN for sensitive actions",
     "requireHint": "Installing and uninstalling apps asks for the PIN."
+  },
+  "mqtt": {
+    "title": "MQTT / Home Assistant",
+    "configured": "configured",
+    "notConfigured": "not set up",
+    "hint": "Bridge this box to Home Assistant or any MQTT broker: a now-playing sensor, remote commands and on-screen notifications. Changes apply immediately.",
+    "offHint": "Leave the broker host empty to turn the integration off.",
+    "host": "Broker host",
+    "port": "Port",
+    "username": "Username",
+    "password": "Password",
+    "deviceId": "Device ID",
+    "saveFailed": "Couldn't save the settings."
   }
 }

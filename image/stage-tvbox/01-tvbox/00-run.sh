@@ -72,6 +72,17 @@ NMSTATE="${ROOTFS_DIR}/var/lib/NetworkManager/NetworkManager.state"
 if [ -f "$NMSTATE" ] && grep -q '^WirelessEnabled=' "$NMSTATE"; then
   sed -i 's/^WirelessEnabled=.*/WirelessEnabled=true/' "$NMSTATE"
 fi
+# Root-side country apply: the Settings pick (shell config, rootless) wins,
+# the image default (HU) is the fallback. A separate script because systemd
+# ExecStart would need $$-escaping for the shell substitutions.
+cat > "${ROOTFS_DIR}/usr/local/sbin/tvbox-wifi-country" <<EOF
+#!/bin/sh
+# tvbox: apply the Wi-Fi regulatory country (root - do_wifi_country needs it).
+CC=\$(sed -n 's/.*"country"[[:space:]]*:[[:space:]]*"\([A-Za-z][A-Za-z]\)".*/\1/p' /home/${FIRST_USER_NAME}/.tvbox/config.json 2>/dev/null | head -n1)
+exec /usr/bin/raspi-config nonint do_wifi_country "\${CC:-HU}"
+EOF
+chmod 755 "${ROOTFS_DIR}/usr/local/sbin/tvbox-wifi-country"
+
 cat > "${ROOTFS_DIR}/etc/systemd/system/tvbox-wifi-unblock.service" <<'EOF'
 [Unit]
 Description=tvbox: enable + localise WiFi on a fresh box (radio on, country set, rfkill cleared)
@@ -86,7 +97,7 @@ RemainAfterExit=yes
 # wifi on` when NM is active + clears rfkill); the retry loop is a belt for the
 # case where NM isn't "active" yet when the unit runs.
 ExecStart=-/usr/sbin/rfkill unblock wifi
-ExecStart=-/usr/bin/raspi-config nonint do_wifi_country HU
+ExecStart=-/usr/local/sbin/tvbox-wifi-country
 ExecStart=-/bin/sh -c 'for i in 1 2 3 4 5; do nmcli radio wifi on && exit 0; sleep 2; done; exit 0'
 
 [Install]

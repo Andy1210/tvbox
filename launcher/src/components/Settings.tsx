@@ -7,6 +7,7 @@ import { LanguageSettings } from "./LanguageSettings";
 import { RegionSettings } from "./RegionSettings";
 import { HostnameSettings } from "./HostnameSettings";
 import { WifiSettings } from "./WifiSettings";
+import { MqttSettings } from "./MqttSettings";
 import { DisplaySettings } from "./DisplaySettings";
 import { AudioSettings } from "./AudioSettings";
 import { BluetoothSettings } from "./BluetoothSettings";
@@ -85,7 +86,12 @@ const CATEGORIES: Category[] = [
         <circle cx="12" cy="19" r="1" fill="currentColor" stroke="none" />
       </>,
     ),
-    render: () => <WifiSettings />,
+    render: () => (
+      <>
+        <WifiSettings />
+        <MqttSettings />
+      </>
+    ),
   },
   {
     id: "peripherals",

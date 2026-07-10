@@ -46,7 +46,16 @@ export function NotificationToast() {
   // Entry: the card mounts hidden (translated + transparent); flip `visible` on
   // the next frame so the transition animates it in - same pattern as the HOME
   // status toast, replicated locally because this one must still unmount.
-  const hasContent = !!note && !!(note.title || note.message || note.image);
+  // shell-originated structured notes carry a `kind` instead of display strings
+  // (the shell has no i18n); map them to localized copy here
+  const kindTitle = note?.kind === "lowBattery" ? t("bt.lowBattery") : "";
+  const kindMessage =
+    note?.kind === "lowBattery"
+      ? t("bt.lowBatteryMsg", { name: note.name || "?", pct: String(note.battery ?? 0) })
+      : "";
+  const title = note?.title || kindTitle;
+  const message = note?.message || kindMessage;
+  const hasContent = !!note && !!(title || message || note.image);
   useEffect(() => {
     if (!hasContent) return;
     const raf = requestAnimationFrame(() => setVisible(true));
@@ -78,10 +87,8 @@ export function NotificationToast() {
     >
       {note.image && <img src={note.image} alt="" className="w-full max-h-[46vh] object-cover" />}
       <div className="px-[2.4vw] py-[2vh]">
-        {note.title && <div className="text-[2.6vh] font-bold">{note.title}</div>}
-        {note.message && (
-          <div className="text-[2.1vh] text-white/80 mt-[0.6vh] whitespace-pre-line">{note.message}</div>
-        )}
+        {title && <div className="text-[2.6vh] font-bold">{title}</div>}
+        {message && <div className="text-[2.1vh] text-white/80 mt-[0.6vh] whitespace-pre-line">{message}</div>}
         <div className="text-[1.6vh] text-white/40 mt-[1.2vh]">{t("notify.dismiss")}</div>
       </div>
     </div>

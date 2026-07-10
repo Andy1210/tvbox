@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { FocusContext, useFocusable, setFocus } from "@noriginmedia/norigin-spatial-navigation";
 import { useI18n } from "../lib/i18n";
 import { useBackspace } from "../lib/useBackspace";
+import { useEntryAnim } from "../lib/useEntryAnim";
 import {
   fetchDisplayModes,
   applyDisplayMode,
@@ -31,6 +32,7 @@ function DisplayModePicker({
 }) {
   const { t } = useI18n();
   const { ref, focusKey } = useFocusable({ focusKey: "disp-picker", isFocusBoundary: true });
+  const entryAnim = useEntryAnim();
   const current = modes.find((m) => m.current) || null;
   useEffect(() => {
     setTimeout(() => setFocus(current ? "disp-mode-" + current.key : "disp-close"), 0);
@@ -41,6 +43,7 @@ function DisplayModePicker({
     <FocusContext.Provider value={focusKey}>
       <div
         ref={ref}
+        style={entryAnim}
         className="fixed inset-0 z-[55] bg-black/90 flex flex-col items-center justify-center gap-[1.6vh] px-[6vw]"
       >
         <div className="flex items-center gap-[1.5vw]">

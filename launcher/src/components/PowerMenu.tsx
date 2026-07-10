@@ -2,7 +2,8 @@ import { useEffect, useState } from "react";
 import { FocusContext, useFocusable, setFocus } from "@noriginmedia/norigin-spatial-navigation";
 import { useI18n } from "../lib/i18n";
 import { useBackspace } from "../lib/useBackspace";
-import { power, type PowerAction } from "../lib/power";
+import { useEntryAnim } from "../lib/useEntryAnim";
+import { power, sleepTimer, type PowerAction } from "../lib/power";
 import { FocusButton } from "./FocusButton";
 
 // Power menu overlay (from Home): Sleep (display off via CEC, box stays on),
@@ -11,7 +12,20 @@ import { FocusButton } from "./FocusButton";
 export function PowerMenu({ onClose }: { onClose: () => void }) {
   const { t } = useI18n();
   const { ref, focusKey } = useFocusable({ focusKey: "power", isFocusBoundary: true });
+  const entryAnim = useEntryAnim();
   const [confirm, setConfirm] = useState<PowerAction | null>(null);
+  // sleep timer: cycles Off -> 30 -> 60 -> 90 min; the shell owns the countdown
+  const TIMER_STEPS = [0, 30, 60, 90];
+  const [timerAt, setTimerAt] = useState<number | null>(null);
+  useEffect(() => {
+    sleepTimer().then(setTimerAt);
+  }, []);
+  const timerLeftMin = timerAt ? Math.max(1, Math.round((timerAt - Date.now()) / 60000)) : 0;
+  const cycleTimer = async () => {
+    // pick the next step above what's currently left (or off after the top)
+    const next = TIMER_STEPS.find((m) => m > timerLeftMin) ?? 0;
+    setTimerAt(await sleepTimer(next));
+  };
 
   useEffect(() => {
     setFocus(confirm ? "power-yes" : "power-sleep");
@@ -24,6 +38,7 @@ export function PowerMenu({ onClose }: { onClose: () => void }) {
     <FocusContext.Provider value={focusKey}>
       <div
         ref={ref}
+        style={entryAnim}
         className="fixed inset-0 z-[65] bg-black/85 flex flex-col items-center justify-center gap-[1.4vh] px-[4vw]"
       >
         <div className="text-[2.6vh] font-bold text-fg-dim mb-[1vh]">{t("power.title")}</div>
@@ -69,6 +84,15 @@ export function PowerMenu({ onClose }: { onClose: () => void }) {
               >
                 <span>{t("power.sleep")}</span>
                 <span className="text-[1.7vh] font-normal text-fg-dim">{t("power.sleepHint")}</span>
+              </FocusButton>
+              <FocusButton key="power-timer" focusKey="power-timer" onEnter={cycleTimer} className={item}>
+                <span className="flex items-center justify-between w-full">
+                  <span>{t("power.sleepTimer")}</span>
+                  <span className={["text-[2vh]", timerAt ? "text-accent" : "text-fg-dim"].join(" ")}>
+                    {timerAt ? t("power.sleepTimerIn", { min: String(timerLeftMin) }) : t("display.off")}
+                  </span>
+                </span>
+                <span className="text-[1.7vh] font-normal text-fg-dim">{t("power.sleepTimerHint")}</span>
               </FocusButton>
               <FocusButton
                 key="power-restart"

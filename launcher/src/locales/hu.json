@@ -51,7 +51,10 @@
     "forgotten": "{ssid} elfelejtve",
     "forgetFailed": "Nem sikerült elfelejteni: {ssid}",
     "hidden": "Csatlakozás rejtett hálózathoz…",
-    "hiddenSsid": "Rejtett hálózat neve (SSID)"
+    "hiddenSsid": "Rejtett hálózat neve (SSID)",
+    "country": "Wi-Fi ország",
+    "countryHint": "Rádiós szabályozási régió, a következő újraindításkor lép életbe.",
+    "countryAuto": "Alapértelmezett"
   },
   "display": {
     "title": "Kijelző",
@@ -80,7 +83,10 @@
     "confirmRestart": "Biztosan újraindítod a boxot?",
     "confirmShutdown": "Biztosan kikapcsolod a boxot?",
     "yes": "Igen",
-    "cancel": "Mégse"
+    "cancel": "Mégse",
+    "sleepTimer": "Elalvásidőzítő",
+    "sleepTimerIn": "{min} perc múlva",
+    "sleepTimerHint": "A megadott idő után kikapcsolja a TV-t (a box megy tovább)."
   },
   "ambient": {
     "title": "Képernyővédő",
@@ -107,9 +113,11 @@
       "storm": "Zivatar"
     },
     "sleep": "TV kikapcsolása ennyi idő után",
-    "sleepHint": "A képernyővédőn állva, HDMI-CEC-en — a box bekapcsolva marad.",
+    "sleepHint": "A képernyővédőn állva, HDMI-CEC-en. A box bekapcsolva marad.",
     "sleepNever": "Soha",
-    "sleepAfter": "{min} perc"
+    "sleepAfter": "{min} perc",
+    "bing": "Bing napi képek",
+    "bingHint": "A Bing napi háttérképei is bekerülnek a diavetítésbe"
   },
   "bt": {
     "title": "Bluetooth",
@@ -123,7 +131,9 @@
     "pair": "Párosítás",
     "remove": "Törlés",
     "pairing": "{name} párosítása…",
-    "failed": "Nem sikerült: {name}"
+    "failed": "Nem sikerült: {name}",
+    "lowBattery": "Merül a távirányító",
+    "lowBatteryMsg": "{name}: {pct}%. Hamarosan tölteni vagy elemet cserélni kell."
   },
   "remote": {
     "title": "Távirányító gombok",
@@ -341,7 +351,7 @@
   "parental": {
     "title": "Szülői felügyelet",
     "set": "PIN beállítása",
-    "hint": "Egy PIN az egész boxhoz — az alkalmazások ezzel zárolnak tartalmat (pl. Élő TV kategóriák).",
+    "hint": "Egy PIN az egész boxhoz: az alkalmazások ezzel zárolnak tartalmat (pl. Élő TV kategóriák).",
     "change": "PIN módosítása",
     "clear": "PIN törlése",
     "newPin": "Új PIN megadása",
@@ -353,5 +363,18 @@
     "wrongPin": "Hibás PIN",
     "require": "PIN kérése kényes műveletekhez",
     "requireHint": "Alkalmazás telepítése és törlése PIN-t kér."
+  },
+  "mqtt": {
+    "title": "MQTT / Home Assistant",
+    "configured": "beállítva",
+    "notConfigured": "nincs beállítva",
+    "hint": "A box összeköthető a Home Assistanttal vagy bármilyen MQTT brokerrel: most-játszott szenzor, távoli parancsok és képernyő-értesítések. A módosítások azonnal érvénybe lépnek.",
+    "offHint": "Hagyd üresen a broker címét az integráció kikapcsolásához.",
+    "host": "Broker cím",
+    "port": "Port",
+    "username": "Felhasználónév",
+    "password": "Jelszó",
+    "deviceId": "Eszközazonosító",
+    "saveFailed": "A beállítások mentése nem sikerült."
   }
 }

@@ -46,11 +46,20 @@ export const CONFIG: PublicConfig = {
   },
   parental: { pinSet: false, lockedGroups: [], requirePin: false },
   spotify: { deviceName: "tvbox demo", hasCredentials: true, enabled: true },
-  ambient: { enabled: true, idleMinutes: 5, city: "Budapest", sleepMinutes: 0 },
+  ambient: { enabled: true, idleMinutes: 5, city: "Budapest", sleepMinutes: 0, bing: false },
   update: { auto: true, appsAuto: true },
   ui: { hourFormat: "auto", navSounds: true },
+  wifi: { country: "" },
   player: { audioLang: "", subLang: "" },
   remote: { devices: {}, power: "tv" },
+  mqtt: {
+    configured: true,
+    host: "homeassistant.local",
+    port: null,
+    username: "tvbox",
+    hasPassword: true,
+    deviceId: "tvbox-demo",
+  },
 };
 
 export const WIFI_STATUS: WifiStatus = {

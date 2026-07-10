@@ -35,11 +35,22 @@ export interface PublicConfig {
   };
   parental: { pinSet: boolean; lockedGroups: string[]; requirePin: boolean };
   spotify: { deviceName: string; hasCredentials: boolean; enabled: boolean };
-  ambient: { enabled: boolean; idleMinutes: number; city: string; sleepMinutes: number };
+  ambient: { enabled: boolean; idleMinutes: number; city: string; sleepMinutes: number; bing: boolean };
   ui: { hourFormat: "auto" | "12" | "24"; navSounds: boolean };
   update: { auto: boolean; appsAuto: boolean };
+  wifi: { country: string };
   player: { audioLang: string; subLang: string };
   remote: { devices: Record<string, RemoteDeviceConfig>; power: RemotePower };
+  // MQTT bridge (Home Assistant / any broker). Secret-free: hasPassword says
+  // whether one is stored, never the value. port null = the default (1883).
+  mqtt: {
+    configured: boolean;
+    host: string;
+    port: number | null;
+    username: string;
+    hasPassword: boolean;
+    deviceId: string;
+  };
 }
 
 // null = the shell is unreachable - NOT the same as an unconfigured box. The
@@ -91,9 +102,21 @@ export async function saveParental(p: {
   return postConfig({ parental: p });
 }
 
-export type AmbientInput = Partial<{ enabled: boolean; idleMinutes: number; city: string; sleepMinutes: number }>;
+export type AmbientInput = Partial<{
+  enabled: boolean;
+  idleMinutes: number;
+  city: string;
+  sleepMinutes: number;
+  bing: boolean; // mix Bing's daily wallpapers into the slideshow (shell-cached)
+}>;
 export async function saveAmbient(ambient: AmbientInput): Promise<PublicConfig> {
   return postConfig({ ambient });
+}
+
+// Wi-Fi regulatory country (ISO 3166-1 alpha-2, "" = image default). Applied
+// at the next boot by the root-side unit; the shell only stores it.
+export async function saveWifi(wifi: { country: string }): Promise<PublicConfig> {
+  return postConfig({ wifi });
 }
 
 // Launcher UI preferences (clock format; "auto" = whatever the locale does).
@@ -106,6 +129,21 @@ export async function saveUi(ui: UiInput): Promise<PublicConfig> {
 export type PlayerInput = Partial<{ audioLang: string; subLang: string }>;
 export async function savePlayer(player: PlayerInput): Promise<PublicConfig> {
   return postConfig({ player });
+}
+
+// MQTT broker connection (Home Assistant or any broker). The shell whitelists
+// and sanitizes (config.js setMqtt): an empty host clears the whole section
+// (integration off); an empty password keeps the stored one, so re-saving the
+// other fields never wipes the secret. Applied live - the shell reconnects.
+export type MqttInput = Partial<{
+  host: string;
+  port: number | null;
+  username: string;
+  password: string;
+  deviceId: string;
+}>;
+export async function saveMqtt(mqtt: MqttInput): Promise<PublicConfig> {
+  return postConfig({ mqtt });
 }
 
 // OTA auto-update toggle (the feed URL itself is box-local, not a UI concern).

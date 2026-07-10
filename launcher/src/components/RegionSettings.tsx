@@ -2,6 +2,7 @@ import { useEffect, useState, type ReactNode } from "react";
 import { FocusContext, useFocusable, setFocus } from "@noriginmedia/norigin-spatial-navigation";
 import { useI18n } from "../lib/i18n";
 import { useBackspace } from "../lib/useBackspace";
+import { useEntryAnim } from "../lib/useEntryAnim";
 import { fetchRegion } from "../lib/region";
 import { FocusButton } from "./FocusButton";
 import { useConfigStore } from "../stores/config";
@@ -22,13 +23,14 @@ type Panel = "tz" | "km";
 function PickerOverlay({ title, onClose, children }: { title: string; onClose: () => void; children: ReactNode }) {
   const { t } = useI18n();
   const { ref, focusKey } = useFocusable({ focusKey: "region-overlay", isFocusBoundary: true });
+  const entryAnim = useEntryAnim();
   useBackspace(onClose);
   useEffect(() => {
     setTimeout(() => setFocus("region-overlay-close"), 0);
   }, []);
   return (
     <FocusContext.Provider value={focusKey}>
-      <div ref={ref} className="fixed inset-0 z-[55] bg-black/90 flex flex-col px-[6vw] py-[5vh]">
+      <div ref={ref} style={entryAnim} className="fixed inset-0 z-[55] bg-black/90 flex flex-col px-[6vw] py-[5vh]">
         <div className="text-[2.8vh] font-bold mb-[2vh]">{title}</div>
         <div className="flex-1 min-h-0">{children}</div>
         <FocusButton

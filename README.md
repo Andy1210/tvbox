@@ -340,6 +340,11 @@ Config is edited from the TV (Settings) or by scanning a QR and filling a form
 on your phone. The phone form is on your LAN only and is gated by a code shown
 on the TV, so run pairing on a trusted network.
 
+The box can bridge to Home Assistant (or any MQTT broker): a now-playing
+sensor, remote commands and on-screen notifications. Point it at your broker
+under Settings → Network - topics and examples in
+[docs/mqtt-integration.md](docs/mqtt-integration.md).
+
 Ports: **8097** (shell HTTP, `127.0.0.1`) and **8099** (on-demand phone-pairing
 server, LAN, only while pairing).
 

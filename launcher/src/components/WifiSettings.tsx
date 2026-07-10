@@ -4,13 +4,111 @@ import { useI18n } from "../lib/i18n";
 import { FocusButton } from "./FocusButton";
 import { Osk } from "./Osk";
 import { wifiStatus, wifiList, wifiConnect, wifiForget, type WifiNet, type WifiStatus } from "../lib/wifi";
+import { FocusContext, useFocusable } from "@noriginmedia/norigin-spatial-navigation";
+import { useBackspace } from "../lib/useBackspace";
+import { useConfigStore } from "../stores/config";
 
 // WiFi section of the HOME Settings screen: shows the current network + connected
 // state, scans, connects (password via the on-screen keyboard for secured
 // networks), forgets saved networks and joins hidden ones (SSID via the OSK).
 // Renders its focusable rows inside the parent Settings FocusContext.
+// Wi-Fi regulatory countries offered (ISO 3166-1 alpha-2); "" = image default.
+// Names come from Intl.DisplayNames in the UI language - zero i18n per country.
+const WIFI_COUNTRIES = [
+  "",
+  "HU",
+  "DE",
+  "AT",
+  "CH",
+  "GB",
+  "US",
+  "FR",
+  "IT",
+  "ES",
+  "NL",
+  "BE",
+  "PL",
+  "CZ",
+  "SK",
+  "RO",
+  "HR",
+  "RS",
+  "SI",
+  "UA",
+  "SE",
+  "NO",
+  "DK",
+  "FI",
+  "PT",
+  "IE",
+  "GR",
+  "TR",
+];
+
+function countryName(tag: string, code: string, autoLabel: string): string {
+  if (!code) return autoLabel;
+  try {
+    return new Intl.DisplayNames([tag], { type: "region" }).of(code) || code;
+  } catch {
+    return code;
+  }
+}
+
+function CountryPicker({
+  value,
+  onPick,
+  onClose,
+}: {
+  value: string;
+  onPick: (code: string) => void;
+  onClose: () => void;
+}) {
+  const { t, tag } = useI18n();
+  const { ref, focusKey } = useFocusable({ focusKey: "wifi-country-picker", isFocusBoundary: true });
+  useBackspace(onClose);
+  useEffect(() => {
+    setTimeout(() => setFocus("wcc-" + (WIFI_COUNTRIES.includes(value) && value ? value : "auto")), 0);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  return (
+    <FocusContext.Provider value={focusKey}>
+      <div
+        ref={ref}
+        className="fixed inset-0 z-[55] bg-black/90 flex flex-col items-center justify-center gap-[1.6vh] px-[6vw]"
+      >
+        <div className="text-[2.8vh] font-bold">{t("wifi.country")}</div>
+        <div className="flex flex-col gap-[0.8vh] w-[32.3vw] max-h-[68vh] overflow-y-auto no-scrollbar">
+          {WIFI_COUNTRIES.map((code) => (
+            <FocusButton
+              key={code || "auto"}
+              focusKey={"wcc-" + (code || "auto")}
+              onEnter={() => onPick(code)}
+              className="px-[2vw] py-[1.5vh] rounded-[1.1vh] bg-white/5 flex items-center justify-between gap-[1.5vw]"
+            >
+              <span className="text-[2.1vh]">{countryName(tag, code, t("wifi.countryAuto"))}</span>
+              {value === code && (
+                <span className="flex items-center gap-[0.6vw] text-[1.7vh] text-accent shrink-0">
+                  <span className="w-[1.2vh] h-[1.2vh] rounded-full bg-accent shrink-0" />
+                  {t("display.active")}
+                </span>
+              )}
+            </FocusButton>
+          ))}
+          <FocusButton
+            focusKey="wcc-cancel"
+            onEnter={onClose}
+            className="px-[2vw] py-[1.5vh] rounded-[1.1vh] bg-white/10 text-[2.1vh] font-semibold text-center"
+          >
+            {t("power.cancel")}
+          </FocusButton>
+        </div>
+      </div>
+    </FocusContext.Provider>
+  );
+}
+
 export function WifiSettings() {
-  const { t } = useI18n();
+  const { t, tag } = useI18n();
   const [status, setStatus] = useState<WifiStatus | null>(null);
   const [nets, setNets] = useState<WifiNet[]>([]);
   const [scanning, setScanning] = useState(true);
@@ -19,6 +117,9 @@ export function WifiSettings() {
   const [pwFor, setPwFor] = useState<string | null>(null); // ssid awaiting a password
   const [pwHidden, setPwHidden] = useState(false); // the pwFor flow targets a hidden network
   const [hiddenSsid, setHiddenSsid] = useState(false); // OSK open for a hidden network's SSID
+  const [countryOpen, setCountryOpen] = useState(false);
+  const country = useConfigStore((st) => st.config?.wifi.country) || "";
+  const setWifiCfg = useConfigStore((st) => st.setWifi);
   const [msg, setMsg] = useState("");
 
   const refresh = () => {
@@ -202,7 +303,36 @@ export function WifiSettings() {
           </svg>
           <span className="text-[2.1vh]">{t("wifi.hidden")}</span>
         </FocusButton>
+
+        <FocusButton
+          focusKey="wifi-country"
+          onEnter={() => setCountryOpen(true)}
+          className="px-[2vw] py-[1.5vh] rounded-[1.1vh] bg-white/5 flex items-center justify-between gap-[1.5vw]"
+        >
+          <span className="min-w-0">
+            <span className="text-[2.1vh]">{t("wifi.country")}</span>
+            <span className="block text-[1.7vh] text-fg-dim">{t("wifi.countryHint")}</span>
+          </span>
+          <span className="text-[1.9vh] font-semibold text-fg-dim shrink-0">
+            {countryName(tag, country, t("wifi.countryAuto"))}
+          </span>
+        </FocusButton>
       </div>
+
+      {countryOpen && (
+        <CountryPicker
+          value={country}
+          onPick={(code) => {
+            setCountryOpen(false);
+            void setWifiCfg({ country: code });
+            setTimeout(() => setFocus("wifi-country"), 0);
+          }}
+          onClose={() => {
+            setCountryOpen(false);
+            setTimeout(() => setFocus("wifi-country"), 0);
+          }}
+        />
+      )}
     </div>
   );
 }

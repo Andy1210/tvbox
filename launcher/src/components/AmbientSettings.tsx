@@ -21,8 +21,12 @@ export function AmbientSettings() {
   const enabled = a?.enabled ?? true;
   const idle = a?.idleMinutes ?? 5;
   const city = a?.city || "";
+  const bing = a?.bing ?? false;
 
-  const refreshPhotos = () => fetchPhotos().then(setPhotos);
+  // Manage/count/clear only cover the user's uploads: cached Bing wallpapers
+  // come back as "bing/<file>" names, are not deletable via the photo API and
+  // prune themselves shell-side, so they stay out of this list.
+  const refreshPhotos = () => fetchPhotos().then((list) => setPhotos(list.filter((n) => !n.startsWith("bing/"))));
   useEffect(() => {
     refreshPhotos();
   }, []);
@@ -138,6 +142,24 @@ export function AmbientSettings() {
           </span>
           <span className="text-[1.9vh] font-semibold shrink-0 text-fg-dim tabular-nums">
             {sleep ? t("ambient.sleepAfter", { min: String(sleep) }) : t("ambient.sleepNever")}
+          </span>
+        </FocusButton>
+
+        <FocusButton
+          focusKey="ambient-bing"
+          onEnter={() => {
+            // refresh after the save: listing photos with bing on also kicks
+            // the shell's lazy wallpaper download in the background
+            void save({ bing: !bing }).then(refreshPhotos);
+          }}
+          className="px-[2vw] py-[1.5vh] rounded-[1.1vh] bg-white/5 flex items-center justify-between gap-[1.5vw]"
+        >
+          <span className="min-w-0">
+            <span className="text-[2.1vh]">{t("ambient.bing")}</span>
+            <span className="block text-[1.7vh] text-fg-dim">{t("ambient.bingHint")}</span>
+          </span>
+          <span className={["text-[1.9vh] font-semibold shrink-0", bing ? "text-accent" : "text-fg-dim"].join(" ")}>
+            {bing ? t("display.on") : t("display.off")}
           </span>
         </FocusButton>
 

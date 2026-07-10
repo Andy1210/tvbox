@@ -12,7 +12,23 @@ import { Ambient } from "./components/Ambient";
 import { NotificationToast } from "./components/NotificationToast";
 import { InstallWatcher } from "./components/InstallWatcher";
 import { useIdle } from "./lib/useIdle";
+import { useEntryAnim } from "./lib/useEntryAnim";
 import { applyPendingRestore } from "./lib/backup";
+
+// Entry transition for the main screen swaps (Home/Settings/Catalog): App keys
+// this per view, so a swap remounts it and replays the ~150ms fade (mount-only;
+// re-renders inside a view don't animate). Plain full-height wrapper - the
+// views size themselves with h-full. The Ambient screensaver mounts later as a
+// child, by which point the wrapper is transform-free (see useEntryAnim), so
+// its fixed positioning and its own crossfade are unaffected.
+function ScreenTransition({ children }: { children: ReactNode }) {
+  const entryAnim = useEntryAnim();
+  return (
+    <div className="h-full" style={entryAnim}>
+      {children}
+    </div>
+  );
+}
 
 // First launch: language picker (no locale) -> HOME. Apps are packages
 // installed from the store (Kodi model), so a fresh box goes straight to an
@@ -91,14 +107,24 @@ export function App() {
     );
   } else if (config === null)
     content = null; // config loading (brief)
-  else if (view === "settings") content = <Settings onExit={home} />;
-  else if (view === "catalog") content = <Catalog onExit={home} />;
+  else if (view === "settings")
+    content = (
+      <ScreenTransition key="settings">
+        <Settings onExit={home} />
+      </ScreenTransition>
+    );
+  else if (view === "catalog")
+    content = (
+      <ScreenTransition key="catalog">
+        <Catalog onExit={home} />
+      </ScreenTransition>
+    );
   else
     content = (
-      <>
+      <ScreenTransition key="home">
         <Home />
         {idle && ambientEnabled && <Ambient onExit={wake} />}
-      </>
+      </ScreenTransition>
     );
 
   return (

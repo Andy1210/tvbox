@@ -26,7 +26,7 @@ labwc session (autologin) ── respawn loop ── run-shell.sh ── Electro
    • mpv: lazy shared player BEHIND the transparent window (JSON IPC /tmp/tvbox-mpv.sock)
    • local app UI → main window (/<id>/, full preload SDK); remote apps (YouTube) → hardened sandbox window
    • pairing server 0.0.0.0:8099 - phone forms, only while pairing, code-gated
-   • MQTT (optional, ~/.tvbox/config.json) - now-playing / commands / notify (HA)
+   • MQTT (optional; Settings → Network or ~/.tvbox/config.json) - now-playing / commands / notify (HA) - docs/mqtt-integration.md
 ```
 
 Launcher (launcher/) is React+TS+Vite+Tailwind, spatial nav via

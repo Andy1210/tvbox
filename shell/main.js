@@ -387,6 +387,15 @@ function handlePost(p, data, res) {
       config.setPlayer(data.player); // mpv track-language defaults - validated in config.js
       changed.push("player");
     }
+    if (data.wifi) {
+      config.setWifi(data.wifi); // regulatory country - applied by the root boot unit
+      changed.push("wifi");
+    }
+    if (data.mqtt) {
+      config.setMqtt(data.mqtt); // whitelisted/sanitized in config.js; empty host clears = integration off
+      applyMqttConfig(); // reconnect the bridge to the new broker right away
+      changed.push("mqtt");
+    }
     if (data.remote) {
       config.setRemote(data.remote); // per-device button remap (sanitized in config.js)
       remoteBridgeCmd("reload"); // tell the bridge to re-read the keymap
@@ -513,6 +522,7 @@ function handlePost(p, data, res) {
   if (p === "/tvbox/api/store/uninstall") {
     const id = String(data.id || "");
     if (currentAppId === id) showLauncher();
+    setWidget(id, null);
     return jsonRes(res, store.uninstall(id));
   }
   if (p === "/tvbox/api/config/app") {
@@ -536,6 +546,9 @@ function handlePost(p, data, res) {
   if (p === "/tvbox/api/wifi/connect") {
     return wifiConnect(String(data.ssid || ""), String(data.password || ""), !!data.hidden, (r) => jsonRes(res, r));
   }
+  if (p === "/tvbox/api/power/sleep-timer") {
+    return jsonRes(res, setSleepTimer(data.minutes)); // 0/absent = cancel
+  }
   if (p === "/tvbox/api/wifi/forget") {
     return wifiForget(String(data.ssid || ""), (r) => jsonRes(res, r));
   }
@@ -550,6 +563,23 @@ function handlePost(p, data, res) {
   }
   res.writeHead(404, { "Content-Type": "text/plain" });
   res.end("not found");
+}
+
+// Low-battery warning for connected BT remotes - a dead remote is a bricked
+// TV, so surface it while there's still charge. One toast per device per day;
+// the launcher localizes the { kind: "lowBattery" } payload itself.
+const btWarned = new Map(); // mac -> day stamp
+function btBatteryTick() {
+  bluetooth.list({ ...process.env }, (devices) => {
+    const day = new Date().toDateString();
+    for (const d of devices || []) {
+      if (!d.connected || d.battery == null || d.battery > 15) continue;
+      if (btWarned.get(d.mac) === day) continue;
+      btWarned.set(d.mac, day);
+      console.log("[bt] low battery:", d.name, d.battery + "%");
+      handleTvNotify({ kind: "lowBattery", name: d.name, battery: d.battery });
+    }
+  });
 }
 
 // Nightly app auto-update (the Fire TV model): in the OTA updater's 03-06h
@@ -958,6 +988,31 @@ function applyDisplayMode(mode, res) {
 // desktop shutdown buttons work), so no root is needed; passwordless sudo is
 // kept only as a fallback for exotic setups. On reboot/poweroff the box goes
 // down, so the JSON response may never reach the client - that's fine.
+// User-set sleep timer ("turn the TV off in N minutes") - unconditional by
+// design (the user explicitly asked for it), unlike the screensaver auto-sleep.
+let sleepTimerAt = null;
+let sleepTimerId = null;
+function setSleepTimer(minutes) {
+  if (sleepTimerId) clearTimeout(sleepTimerId);
+  sleepTimerId = null;
+  sleepTimerAt = null;
+  const min = Number(minutes);
+  if (Number.isFinite(min) && min > 0 && min <= 24 * 60) {
+    sleepTimerAt = Date.now() + min * 60 * 1000;
+    sleepTimerId = setTimeout(
+      () => {
+        sleepTimerId = null;
+        sleepTimerAt = null;
+        console.log("[power] sleep timer fired");
+        showLauncher();
+        cecPower(false);
+      },
+      min * 60 * 1000,
+    );
+  }
+  return { ok: true, at: sleepTimerAt };
+}
+
 function handlePower(action, res) {
   if (action === "sleep" || action === "sleep_if_idle") {
     // sleep_if_idle = the screensaver's auto-sleep: refuse while anything plays
@@ -1181,6 +1236,14 @@ function serve() {
     // launcher's app list. Manifests are re-read on every call (a handful of
     // small JSON files) so a dropped-in ~/.tvbox/apps manifest appears as a
     // tile live - no shell restart. Plugins/services still load at boot only.
+    if (p === "/tvbox/api/power/sleep-timer") {
+      jsonRes(res, { at: sleepTimerAt });
+      return;
+    }
+    if (p === "/tvbox/api/widgets") {
+      jsonRes(res, { widgets: widgetList() });
+      return;
+    }
     if (p === "/tvbox/api/apps") {
       apps.loadManifests();
       res.writeHead(200, { "Content-Type": "application/json" });
@@ -1244,6 +1307,51 @@ function serve() {
 function emit(ev) {
   if (win && !win.isDestroyed()) win.webContents.send("player-event", ev);
 }
+// One request/response round-trip on the mpv IPC socket (mpvCmd is fire-and-
+// forget). Resolves null on any failure - callers treat that as "no tracks".
+function mpvQuery(command) {
+  return new Promise((resolve) => {
+    const s = net.connect(IPC);
+    const to = setTimeout(() => {
+      try {
+        s.destroy();
+      } catch (e) {}
+      resolve(null);
+    }, 2500);
+    s.on("error", () => {
+      clearTimeout(to);
+      resolve(null);
+    });
+    let buf = "";
+    s.on("connect", () => {
+      try {
+        s.write(JSON.stringify({ command, request_id: 77 }) + "\n");
+      } catch (e) {}
+    });
+    s.on("data", (d) => {
+      buf += d;
+      let nl;
+      while ((nl = buf.indexOf("\n")) >= 0) {
+        const line = buf.slice(0, nl);
+        buf = buf.slice(nl + 1);
+        let m;
+        try {
+          m = JSON.parse(line);
+        } catch (e) {
+          continue;
+        }
+        if (m.request_id === 77) {
+          clearTimeout(to);
+          try {
+            s.end();
+          } catch (e) {}
+          return resolve(m.error === "success" ? m.data : null);
+        }
+      }
+    });
+  });
+}
+
 function mpvCmd(obj) {
   const s = net.connect(IPC);
   s.on("error", () => {});
@@ -1667,6 +1775,20 @@ function readBridgeJson(name, fallback) {
   }
 }
 
+// (Re)start the MQTT bridge from the saved config. mqtt.js stop() publishes a
+// best-effort retained "offline" and force-ends the module-level client, so
+// calling it before init is safe (and a no-op when not started). rawMqtt() is
+// null unless host AND username are set - a cleared config turns the bridge off.
+function applyMqttConfig() {
+  mqttBridge.stop();
+  mqttCtl = null;
+  const mcfg = config.rawMqtt();
+  if (mcfg) mqttCtl = mqttBridge.init(mcfg, { onNotify: handleTvNotify, onCommand: handleTvCommand });
+  // re-seed retained now-playing on the (possibly new) broker; the mqtt client
+  // queues QoS-0 publishes made before "connect", so this is safe immediately
+  if (mqttCtl && nowPlaying) mqttCtl.publish("nowplaying", nowPlaying, { retain: true });
+}
+
 // A control command arrived over MQTT (tvbox/<id>/cmd) - the assistant's
 // tv_control tool (voice) or a HA automation. Shell-native actions here; media
 // transport is also forwarded to the launcher so the active app (e.g. Spotify)
@@ -1741,6 +1863,19 @@ function navTo(dest) {
   }
   const m = apps.manifestById(dest);
   if (!m || m.status !== "ready") return;
+  // Switching apps silences the one being replaced: its UI is going away
+  // (page swap / hidden window), and a plugin foregrounding its app on a cast
+  // (Spotify Connect) must stop e.g. the IPTV stream it takes over from.
+  // Called only on paths that WILL navigate - an unconfigured remote app must
+  // not cost the current stream (review F3).
+  const stopPrevPlayback = () => {
+    if (mpv && currentAppId !== m.id) {
+      playingUrl = null;
+      stopMpv();
+      setVideoMode(false);
+      emit({ type: "finished" });
+    }
+  };
   if (m.type === "webclient") {
     const rt = m.runtime || {};
     if (rt.serve === "remote") {
@@ -1751,8 +1886,10 @@ function navTo(dest) {
       // isn't configured yet; the launcher gates that (tile.configured) so here
       // we just no-op rather than open a blank window.
       const url = resolveRemoteUrl(m);
-      if (url) openRemoteApp(m, url);
-      else console.warn("[nav] remote app not configured:", m.id);
+      if (url) {
+        stopPrevPlayback();
+        openRemoteApp(m, url);
+      } else console.warn("[nav] remote app not configured:", m.id);
       return;
     }
     // local bundle -> the main (privileged) window, which gets the full
@@ -1760,6 +1897,7 @@ function navTo(dest) {
     // PACKAGE app (serve:"local") serves its own web/ at /<id>/; the legacy
     // single root-mounted bundle (serve:"static", mount:"root", e.g. Plex) is
     // at /. Curated apps run privileged (review is the trust boundary).
+    stopPrevPlayback();
     closeRemoteApp();
     if (!win || win.isDestroyed()) return;
     currentAppId = m.id; // set BEFORE load so the new page's preload reads the right caps
@@ -1842,7 +1980,26 @@ ipcMain.handle("player", (_e, action, payload) => {
     stopMpv();
     setVideoMode(false);
   } else if (action === "seek") mpvCmd({ command: ["seek", payload.posSec || 0, "absolute"] });
-  else if (action === "pip") {
+  else if (action === "tracks") {
+    // audio/subtitle tracks of the playing stream, for an in-playback picker
+    return mpvQuery(["get_property", "track-list"]).then((list) => ({
+      ok: Array.isArray(list),
+      tracks: (Array.isArray(list) ? list : [])
+        .filter((t) => t && (t.type === "audio" || t.type === "sub"))
+        .map((t) => ({
+          type: t.type,
+          id: t.id,
+          lang: t.lang || "",
+          title: t.title || "",
+          selected: !!t.selected,
+        })),
+    }));
+  } else if (action === "track") {
+    // { type: "audio"|"sub", id: <track id> | "no" | "auto" } - aid/sid switch
+    const prop = payload.type === "sub" ? "sid" : "aid";
+    const v = payload.id === "no" || payload.id === "auto" ? payload.id : Number(payload.id);
+    if (typeof v === "string" || Number.isFinite(v)) mpvCmd({ command: ["set_property", prop, v] });
+  } else if (action === "pip") {
     // Toggle the current channel between a PiP (at the launcher-measured rect) and
     // fullscreen. PiP needs the window transparent (so mpv behind shows through the
     // hole); fullscreen starts opaque and observeMpv reveals on the first frame.
@@ -1853,6 +2010,29 @@ ipcMain.handle("player", (_e, action, payload) => {
   }
   return { ok: true };
 });
+
+// ---- home-screen widgets (plugin-driven) ----
+// A service plugin (the only sanctioned background code) can put ONE card on
+// the HOME screen - e.g. Spotify's now-playing while a cast is active. The
+// plugin pushes state, the launcher renders it, Enter opens the app; renderer
+// apps stay strictly foreground-only. Sanitized here; cleared on uninstall.
+const widgets = new Map(); // appId -> { title, subtitle }
+function setWidget(appId, w) {
+  if (!w || typeof w !== "object" || (!w.title && !w.subtitle)) widgets.delete(appId);
+  else
+    widgets.set(appId, {
+      title: String(w.title || "").slice(0, 120),
+      subtitle: String(w.subtitle || "").slice(0, 160),
+    });
+  if (win && !win.isDestroyed()) {
+    try {
+      win.webContents.send("widgets", widgetList());
+    } catch (e) {}
+  }
+}
+function widgetList() {
+  return [...widgets.entries()].map(([id, w]) => ({ id, ...w }));
+}
 
 // ---- plugin host API + loader ----
 // The scoped surface a plugin gets. Deliberately small: config + pairing + a
@@ -1913,7 +2093,12 @@ function loadOnePlugin(m) {
     return null;
   }
   try {
-    const plugin = require(path.join(m._dir, "plugin.js"))(host) || {};
+    const plugin =
+      require(path.join(m._dir, "plugin.js"))({
+        ...host,
+        // per-app widget slot - a plugin can only ever write its OWN card
+        widget: { set: (w) => setWidget(m.id, w), clear: () => setWidget(m.id, null) },
+      }) || {};
     loadedPlugins.push(plugin);
     loadedPluginIds.add(m.id);
     console.log("[plugin] loaded", m.id, "(" + name + ")");
@@ -2052,12 +2237,13 @@ app.whenReady().then(() => {
   });
   updater.startSchedulers(); // boot check + 6h re-check + nightly idle auto-apply
   setInterval(appsAutoTick, 30 * 60 * 1000); // nightly registry app auto-update (same window)
+  setTimeout(btBatteryTick, 5 * 60 * 1000); // early check after boot, then half-hourly
+  setInterval(btBatteryTick, 30 * 60 * 1000);
   // Start plugin daemons once the HDMI sink is the default (librespot needs it).
   ensureAudio(() => startPlugins());
   // MQTT bridge (now-playing publish + HA integration); no-op if not provisioned.
   // (The command handler is added by the voice-control work.)
-  const mcfg = config.rawMqtt();
-  if (mcfg) mqttCtl = mqttBridge.init(mcfg, { onNotify: handleTvNotify, onCommand: handleTvCommand });
+  applyMqttConfig();
   console.log("[main] window up");
 });
 

@@ -6,6 +6,7 @@ import { fetchSinks, setDefaultSink, setSinkVolume, type AudioState } from "../l
 import { FocusButton } from "./FocusButton";
 import { useConfigStore } from "../stores/config";
 import { useBackspace } from "../lib/useBackspace";
+import { useEntryAnim } from "../lib/useEntryAnim";
 
 // Audio section of the HOME Settings screen: pick the output sink (a manual
 // override of the HDMI auto-detect, persisted) and set the default sink's
@@ -122,6 +123,7 @@ function LangPicker({
 }) {
   const { t, tag } = useI18n();
   const { ref, focusKey } = useFocusable({ focusKey: "lang-picker", isFocusBoundary: true });
+  const entryAnim = useEntryAnim();
   useBackspace(onClose);
   useEffect(() => {
     // unknown stored code (hand-edited config): land on "auto" - focusing a
@@ -133,6 +135,7 @@ function LangPicker({
     <FocusContext.Provider value={focusKey}>
       <div
         ref={ref}
+        style={entryAnim}
         className="fixed inset-0 z-[55] bg-black/90 flex flex-col items-center justify-center gap-[1.6vh] px-[6vw]"
       >
         <div className="text-[2.8vh] font-bold">{title}</div>

@@ -4,6 +4,7 @@ import { useFocusableItem } from "@sdk/useFocusableItem";
 import { type StoreEntry } from "../lib/api";
 import { useI18n } from "../lib/i18n";
 import { useBackspace } from "../lib/useBackspace";
+import { useEntryAnim } from "../lib/useEntryAnim";
 import { usePinGuard } from "../lib/usePinGuard";
 import { FocusButton } from "./FocusButton";
 import { Icon } from "./Icon";
@@ -102,6 +103,7 @@ export function AppDetail({
   const { guard, gate } = usePinGuard();
   const { t, loc } = useI18n();
   const { ref, focusKey } = useFocusable({ focusKey: "app-detail", isFocusBoundary: true });
+  const entryAnim = useEntryAnim();
   const accent = app.accent || "#4152d8";
   const changelog = app.changelog || [];
 
@@ -127,6 +129,7 @@ export function AppDetail({
     <FocusContext.Provider value={focusKey}>
       <div
         ref={ref}
+        style={entryAnim}
         className="fixed inset-0 z-50 bg-bg-0 flex flex-col px-[6vw] py-[5vh] overflow-y-auto no-scrollbar"
       >
         {/* header */}

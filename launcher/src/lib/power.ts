@@ -32,3 +32,22 @@ export async function sleepIfIdle(): Promise<boolean> {
     return false;
   }
 }
+
+// Sleep timer: POST minutes (0 = cancel) or query with no args. Returns the
+// epoch-ms the TV will turn off at, or null when no timer is armed.
+export async function sleepTimer(minutes?: number): Promise<number | null> {
+  try {
+    const res =
+      minutes === undefined
+        ? await fetch("/tvbox/api/power/sleep-timer", { cache: "no-store" })
+        : await fetch("/tvbox/api/power/sleep-timer", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ minutes }),
+          });
+    const d = await res.json();
+    return d.at || null;
+  } catch {
+    return null;
+  }
+}

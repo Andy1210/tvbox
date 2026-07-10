@@ -162,6 +162,37 @@ polkit.addRule(function(action, subject) {
 RULES
 ok "polkit rule (timezone + keymap + hostname)"
 
+echo "==> Wi-Fi regulatory country (root apply of the Settings pick at every boot)"
+# The shell stores wifi.country in ~/.tvbox/config.json (rootless); this
+# root-side oneshot applies it at boot via raspi-config. Mirrors the SD
+# image's tvbox-wifi-unblock.service - KEEP IN SYNC (image 00-run.sh).
+cat > /usr/local/sbin/tvbox-wifi-country <<WCEOF
+#!/bin/sh
+# tvbox: apply the Wi-Fi regulatory country (root - do_wifi_country needs it).
+CC=\$(sed -n 's/.*"country"[[:space:]]*:[[:space:]]*"\([A-Za-z][A-Za-z]\)".*/\1/p' /home/$TVBOX_USER/.tvbox/config.json 2>/dev/null | head -n1)
+[ -n "\$CC" ] || exit 0 # nothing picked -> leave the OS setting alone
+command -v raspi-config >/dev/null || exit 0
+exec raspi-config nonint do_wifi_country "\$CC"
+WCEOF
+chmod 755 /usr/local/sbin/tvbox-wifi-country
+cat > /etc/systemd/system/tvbox-wifi-country.service <<WCEOF
+[Unit]
+Description=tvbox: apply the Wi-Fi regulatory country picked in Settings
+After=NetworkManager.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=-/usr/local/sbin/tvbox-wifi-country
+
+[Install]
+WantedBy=multi-user.target
+WCEOF
+systemctl daemon-reload 2>/dev/null || true
+systemctl enable tvbox-wifi-country.service >/dev/null 2>&1 && ok "wifi country unit" || warn "wifi country unit enable failed"
+# apply immediately too - provision runs as root anyway
+/usr/local/sbin/tvbox-wifi-country && ok "wifi country applied" || warn "wifi country apply failed (raspi-config missing?)"
+
 echo "==> user-service lingering (CEC bridge starts at boot, before login)"
 loginctl enable-linger "$TVBOX_USER" 2>/dev/null && ok "linger enabled for $TVBOX_USER" || warn "enable-linger failed"
 

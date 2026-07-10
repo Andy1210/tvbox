@@ -78,6 +78,30 @@ function applyConfig(body: Record<string, unknown>): void {
   if (body.update && typeof body.update === "object") Object.assign(config.update, body.update);
   if (body.ui && typeof body.ui === "object") Object.assign(config.ui, body.ui);
   if (body.player && typeof body.player === "object") Object.assign(config.player, body.player);
+  if (body.wifi && typeof body.wifi === "object") Object.assign(config.wifi, body.wifi);
+  if (body.mqtt && typeof body.mqtt === "object") {
+    // mirrors shell config.setMqtt: an empty host clears the section (integration
+    // off); an empty password keeps the stored one, a non-empty one replaces it
+    const m = body.mqtt as {
+      host?: string;
+      port?: number | null;
+      username?: string;
+      password?: string;
+      deviceId?: string;
+    };
+    const host = (m.host ?? "").trim();
+    if (!host) {
+      config.mqtt = { configured: false, host: "", port: null, username: "", hasPassword: false, deviceId: "" };
+    } else {
+      const port = Number(m.port);
+      config.mqtt.host = host;
+      config.mqtt.port = Number.isInteger(port) && port >= 1 && port <= 65535 ? port : null;
+      config.mqtt.username = (m.username ?? "").trim();
+      config.mqtt.deviceId = (m.deviceId ?? "").trim().replace(/[^a-zA-Z0-9_-]/g, "_");
+      if (m.password) config.mqtt.hasPassword = true;
+      config.mqtt.configured = !!(config.mqtt.host && config.mqtt.username);
+    }
+  }
   if (body.display && typeof body.display === "object") {
     const d = body.display as { matchFramerate?: boolean };
     if (d.matchFramerate !== undefined) display.matchFramerate = d.matchFramerate;

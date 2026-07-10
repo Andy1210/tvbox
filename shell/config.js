@@ -85,17 +85,27 @@ function publicConfig() {
       idleMinutes: (c.ambient && c.ambient.idleMinutes) || 5,
       city: (c.ambient && c.ambient.city) || "",
       sleepMinutes: (c.ambient && c.ambient.sleepMinutes) || 0, // 0 = never; N = CEC TV-off after N min on the screensaver
+      bing: !!(c.ambient && c.ambient.bing), // mix Bing's daily wallpapers into the slideshow (opt-in)
     },
     mqtt: {
       // secret-free: never expose the broker password to the launcher
       configured: !!(c.mqtt && c.mqtt.host && c.mqtt.username),
       host: (c.mqtt && c.mqtt.host) || "",
+      port: (c.mqtt && c.mqtt.port) || null, // null = the default (1883)
+      username: (c.mqtt && c.mqtt.username) || "",
+      hasPassword: !!(c.mqtt && c.mqtt.password), // whether one is stored, never the value
       deviceId: (c.mqtt && c.mqtt.deviceId) || "",
     },
     update: {
       // OTA self-update (updater.js); feed URL itself stays box-local
       auto: !(c.update && c.update.auto === false), // default on
       appsAuto: !(c.update && c.update.appsAuto === false), // nightly registry app updates, default on
+    },
+    wifi: {
+      // Wi-Fi regulatory country (ISO 3166-1 alpha-2). Applied at boot by the
+      // root-side tvbox-wifi-country service (the shell has no root); "" = the
+      // image default.
+      country: (c.wifi && c.wifi.country) || "",
     },
     ui: {
       // launcher preferences. hourFormat: "auto" (locale default) | "12" | "24"
@@ -235,11 +245,42 @@ function rawAmbient() {
 }
 
 // MQTT broker connection (host/port/username/password/deviceId) - the full,
-// secret-bearing config for the mqtt client. Provisioned out-of-band (a `tvbox`
-// broker user), not via the launcher UI.
+// secret-bearing config for the mqtt client. Set from Settings → Network (or by
+// hand in config.json); the bridge only starts once host AND username are set.
 function rawMqtt() {
   const m = load().mqtt;
   return m && m.host && m.username ? m : null;
+}
+
+// MQTT broker settings from the launcher UI. Whitelisted like setUi: only the
+// known fields persist, sanitized. An empty host clears the whole section
+// (integration off). An empty password keeps the stored one, so re-saving the
+// other fields never wipes the secret; a non-empty password replaces it.
+function setMqtt(mqtt) {
+  const c = load();
+  const str = (v, max) => (typeof v === "string" ? v.trim().slice(0, max) : "");
+  const host = str(mqtt && mqtt.host, 200);
+  if (!host) {
+    delete c.mqtt;
+    save(c);
+    return;
+  }
+  const prev = c.mqtt && typeof c.mqtt === "object" ? c.mqtt : {};
+  const port = Number(mqtt && mqtt.port);
+  const username = str(mqtt && mqtt.username, 200);
+  // the deviceId becomes an MQTT topic segment - keep it topic/discovery-safe
+  // (same character class as mqtt.js safeId, so topics match the discovery id)
+  const deviceId = str(mqtt && mqtt.deviceId, 200).replace(/[^a-zA-Z0-9_-]/g, "_");
+  const password =
+    mqtt && typeof mqtt.password === "string" && mqtt.password ? mqtt.password.slice(0, 200) : prev.password;
+  c.mqtt = {
+    host,
+    ...(Number.isInteger(port) && port >= 1 && port <= 65535 ? { port } : {}),
+    ...(username ? { username } : {}),
+    ...(password ? { password } : {}),
+    ...(deviceId ? { deviceId } : {}),
+  };
+  save(c);
 }
 
 // Generic reader/writer for a config-driven remote web-app whose URL is stored
@@ -292,6 +333,17 @@ function rawPlayer() {
   return load().player || null;
 }
 
+// Wi-Fi regulatory country - two uppercase letters or "" (clear).
+function setWifi(wifi) {
+  const c = load();
+  const cc = wifi && typeof wifi.country === "string" ? wifi.country.toUpperCase() : undefined;
+  if (cc !== undefined && /^([A-Z]{2})?$/.test(cc)) c.wifi = { ...c.wifi, country: cc };
+  save(c);
+}
+function rawWifi() {
+  return load().wifi || null;
+}
+
 // Launcher UI preferences (clock format). Whitelisted so junk can't persist.
 function setUi(ui) {
   const c = load();
@@ -339,11 +391,14 @@ module.exports = {
   setUi,
   setPlayer,
   rawPlayer,
+  setWifi,
+  rawWifi,
   setAudio,
   rawAudio,
   setAmbient,
   rawAmbient,
   rawMqtt,
+  setMqtt,
   setUpdate,
   rawUpdate,
   setRemote,

@@ -3,6 +3,8 @@ import { FocusContext, useFocusable, setFocus } from "@noriginmedia/norigin-spat
 import type { AppManifest } from "../lib/types";
 import { fetchApps } from "../lib/api";
 import { launchApp } from "../lib/shell";
+import { fetchWidgets, subscribeWidgets, type HomeWidget } from "../lib/widgets";
+import { Icon } from "./Icon";
 import { useI18n } from "../lib/i18n";
 import { useNavStore } from "../stores/nav";
 import { useAppPrefsStore, orderIds } from "../stores/appPrefs";
@@ -22,6 +24,7 @@ export function Home() {
   const hidden = useAppPrefsStore((s) => s.hidden);
   const getMoreHidden = useAppPrefsStore((s) => s.getMoreHidden);
   const [apps, setApps] = useState<AppManifest[]>([]);
+  const [widgets, setWidgets] = useState<HomeWidget[]>([]);
   const [powerOpen, setPowerOpen] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -34,6 +37,19 @@ export function Home() {
     });
     return () => {
       alive = false;
+    };
+  }, []);
+
+  // plugin-pushed HOME cards (e.g. Spotify now-playing): initial fetch + live push
+  useEffect(() => {
+    let alive = true;
+    fetchWidgets().then((w) => {
+      if (alive) setWidgets(w);
+    });
+    const off = subscribeWidgets(setWidgets);
+    return () => {
+      alive = false;
+      off();
     };
   }, []);
 
@@ -159,6 +175,33 @@ export function Home() {
           />
         )}
         <main className="flex-1 flex flex-col justify-center px-[4vw]">
+          {widgets.length > 0 && (
+            <div className="flex gap-[1.5vw] mb-[3vh]">
+              {widgets.map((w) => {
+                const app = apps.find((a) => a.id === w.id);
+                if (!app) return null;
+                return (
+                  <FocusButton
+                    key={w.id}
+                    focusKey={"widget-" + w.id}
+                    onEnter={() => onSelect(app)}
+                    className="px-[1.6vw] py-[1.4vh] rounded-[1.4vh] bg-white/5 flex items-center gap-[1.2vw] max-w-[34vw]"
+                  >
+                    <span
+                      className="w-[5vh] h-[5vh] rounded-[1vh] shrink-0 flex items-center justify-center overflow-hidden"
+                      style={{ background: app.accent ? app.accent + "22" : undefined }}
+                    >
+                      <Icon svg={app.icon} className="w-[3.6vh] h-[3.6vh]" />
+                    </span>
+                    <span className="min-w-0">
+                      <span className="block text-[2vh] font-semibold truncate">{w.title}</span>
+                      {w.subtitle && <span className="block text-[1.7vh] text-fg-dim truncate">{w.subtitle}</span>}
+                    </span>
+                  </FocusButton>
+                );
+              })}
+            </div>
+          )}
           <h1 className="text-[2vh] font-semibold text-fg-dim mb-[2.4vh] tracking-wide">{t("home.apps")}</h1>
           {/* overflow-x:auto forces vertical clipping too (overflow-y:visible is
               not honoured next to auto), so give the focused tile's scale+shadow

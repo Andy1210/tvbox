@@ -7,6 +7,9 @@ export interface PlayerEvent {
 }
 
 export interface TvNotification {
+  kind?: string; // shell-originated structured notes the launcher localizes (e.g. "lowBattery")
+  name?: string; // lowBattery: device name
+  battery?: number; // lowBattery: %
   title?: string;
   message?: string;
   image?: string; // e.g. a doorbell camera snapshot URL
@@ -27,6 +30,7 @@ export interface TvboxBridge {
   onNotify?(cb: (n: TvNotification) => void): () => void;
   // media commands forwarded from the shell (MQTT tv_control) for the active app
   onCommand?(cb: (cmd: { action: string; app?: string }) => void): () => void;
+  onWidgets?(cb: (widgets: { id: string; title: string; subtitle: string }[]) => void): () => void;
 }
 
 declare global {

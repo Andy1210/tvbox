@@ -5,37 +5,61 @@ updates). `scripts/make-release.sh` lifts the current version's `hu`/`en`
 blocks into the OTA feed's `notes` - keep both languages, keep it short, and
 write for the person on the couch (what changes for THEM), not for developers.
 
+## 1.5.0
+
+### hu
+
+- Home Assistant / MQTT beállítás a Beállításokban: a box bármilyen brokerhez beköthető (most-játszott szenzor, távoli parancsok, képernyő-értesítések).
+- Zene castolásakor a főképernyőn kártya mutatja, mi szól (a Spotify apppal), és app-váltáskor a régi lejátszás leáll.
+- Hangsáv és felirat váltása lejátszás közben (Élő TV: OK gomb a sávon, majd még egyszer).
+- Elalvásidőzítő a főképernyő energia menüjében (30/60/90 perc).
+- Wi-Fi országbeállítás (a rádiós szabályozáshoz, pl. Németországban DE).
+- A képernyővédő a Bing napi képeit is tudja forgatni (bekapcsolható).
+- Figyelmeztetés, ha merül a Bluetooth-távirányító eleme.
+- Finom megjelenési animációk a képernyők és menük váltásánál.
+
+### en
+
+- Home Assistant / MQTT setup in Settings: connect the box to any broker (now-playing sensor, remote commands, on-screen notifications).
+- When music is cast, a card on the home screen shows what's playing (with the Spotify app), and switching apps stops the previous playback.
+- Switch audio track and subtitles during playback (Live TV: OK on the banner, then OK again).
+- Sleep timer in the home screen's power menu (30/60/90 minutes).
+- Wi-Fi country setting (for radio regulations, e.g. DE in Germany).
+- The screensaver can rotate Bing's daily pictures too (opt-in).
+- A warning when the Bluetooth remote's battery runs low.
+- Subtle entry animations when switching screens and menus.
+
 ## 1.4.0
 
 ### hu
 
-- Az alkalmazások mostantól maguktól frissülnek éjszaka (kikapcsolható a Rendszer beállításoknál) — csak amikor a box tétlen.
+- Az alkalmazások mostantól maguktól frissülnek éjszaka (kikapcsolható a Rendszer beállításoknál), csak amikor a box tétlen.
 - Wi-Fi: mentett hálózat elfelejtése és csatlakozás rejtett hálózathoz.
 - Navigációs hangok a távirányítóhoz (kikapcsolható a Kép és hang alatt).
 - Választható hangsáv- és feliratnyelv a lejátszáshoz (Kép és hang).
 - A szülői zár mostantól a kényes műveletekre is rátehető: alkalmazás telepítése és törlése PIN-t kérhet.
 - A képernyővédő fotói finom áttűnéssel váltakoznak.
 - A billentyűzet és a PIN-párna gombjai új, minden tévén helyesen megjelenő ikonokat kaptak.
-- A tévé magától bekapcsol, ha videó indul (pl. hangvezérléssel) — kivéve közvetlenül azután, hogy kikapcsoltad.
+- A tévé magától bekapcsol, ha videó indul (pl. hangvezérléssel), kivéve közvetlenül azután, hogy kikapcsoltad.
 
 ### en
 
-- Apps now update themselves overnight (can be turned off under System settings) — only while the box is idle.
+- Apps now update themselves overnight (can be turned off under System settings), only while the box is idle.
 - Wi-Fi: forget a saved network and join hidden networks.
 - Navigation sounds for the remote (can be turned off under Picture & sound).
 - Selectable audio and subtitle language for playback (Picture & sound).
 - Parental controls can now cover sensitive actions: installing and uninstalling apps can require the PIN.
 - Screensaver photos change with a smooth crossfade.
 - The keyboard and PIN pad got new icons that render correctly on every TV.
-- The TV turns itself on when video starts (e.g. via voice control) — except right after you turned it off.
+- The TV turns itself on when video starts (e.g. via voice control), except right after you turned it off.
 
 ## 1.3.0
 
 ### hu
 
 - Időjárás a főképernyőn (a képernyővédőnél megadott város alapján).
-- Automatikus TV-kikapcsolás: a képernyővédő után beállítható idővel a TV magától kikapcsol (HDMI-CEC) — zene lejátszása közben soha.
-- Szülői felügyelet a Beállításokban: PIN beállítása, módosítása, törlése — ugyanazt a PIN-t használja minden alkalmazás (pl. az Élő TV zárolt kategóriái).
+- Automatikus TV-kikapcsolás: a képernyővédő után beállítható idővel a TV magától kikapcsol (HDMI-CEC), zene lejátszása közben soha.
+- Szülői felügyelet a Beállításokban: PIN beállítása, módosítása, törlése, ugyanazt a PIN-t használja minden alkalmazás (pl. az Élő TV zárolt kategóriái).
 - A felbontásválasztó jelöli a TV alapértelmezett módját, így könnyű visszaállni rá.
 - Választható óraformátum (automatikus / 12 / 24 órás).
 - A Bluetooth-eszközöknél látszik a távirányító töltöttsége.
@@ -45,8 +69,8 @@ write for the person on the couch (what changes for THEM), not for developers.
 ### en
 
 - Weather on the home screen (based on the city set for the screensaver).
-- Auto power-off: after a configurable time on the screensaver the TV turns itself off (HDMI-CEC) — never while music is playing.
-- Parental controls in Settings: set, change or remove the PIN — the same PIN is used by every app (e.g. Live TV's locked categories).
+- Auto power-off: after a configurable time on the screensaver the TV turns itself off (HDMI-CEC), never while music is playing.
+- Parental controls in Settings: set, change or remove the PIN, the same PIN is used by every app (e.g. Live TV's locked categories).
 - The resolution picker marks the TV's default mode, so it's easy to switch back.
 - Selectable time format (automatic / 12-hour / 24-hour).
 - Bluetooth devices show the remote's battery level.
