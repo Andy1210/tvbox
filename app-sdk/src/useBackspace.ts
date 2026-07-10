@@ -14,6 +14,14 @@ import { useEffect, useRef } from "react";
 // some remotes report Back as Escape. We accept all of them so Back works no
 // matter how the box is being driven, without the user having to remap it.
 const BACK_KEYS = new Set(["Backspace", "BrowserBack", "GoBack", "Escape"]);
+
+// For raw keydown handlers OUTSIDE the useBackspace stack (e.g. a fullscreen
+// playback view with no focusable UI): accept the same Back key set instead of
+// re-hardcoding one key - that is how livetv's playback Back missed Escape.
+export function isBackKey(e: Pick<KeyboardEvent, "key">): boolean {
+  return BACK_KEYS.has(e.key);
+}
+
 let seq = 0;
 const handlers = new Map<number, () => void>();
 let listening = false;

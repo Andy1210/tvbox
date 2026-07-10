@@ -15,17 +15,21 @@ install -d "${ROOTFS_DIR}${USER_HOME}/.tvbox"
 cp -r files/shell "${ROOTFS_DIR}${USER_HOME}/.tvbox/"
 # A fresh image starts with an EMPTY home - no apps installed. Apps are added
 # from the registry via HOME -> "Get more apps" (the Kodi model).
-install -m 755 files/run-shell.sh files/tvbox files/cec_uinput_bridge.py files/cursor_idle_hide.py \
-  files/remote_input_bridge.py \
-  "${ROOTFS_DIR}${USER_HOME}/.tvbox/"
-# cec_vendor_shim.c is source the CEC bridge compiles on the box (LG SIMPLINK
-# vendor identity - see the bridge docstring); tvbox-remote.service is the BT/USB
-# remote bridge's user unit. Both come from deploy/infra.list now, so they ship
-# on flashed boxes the same as on dev deploys / OTA.
-install -m 644 files/labwc-autostart files/provision.sh files/tvbox-cec.service files/tvbox-remote.service \
-  files/cec_vendor_shim.c \
-  files/tvbox-flatpak-update.service files/tvbox-flatpak-update.timer \
-  "${ROOTFS_DIR}${USER_HOME}/.tvbox/"
+# Infra files: files/ was assembled from deploy/infra.list by copy-infra.sh
+# (build-image.sh locally, image.yml in CI) - install EVERYTHING in it rather
+# than a hand-kept name list, so a new infra.list entry can't silently skip
+# flashed images (the v1.1.0 drift class: dev deploy + OTA had the BT-remote
+# bridge, the image didn't). Exec bits mirror the old explicit lines: the two
+# direct executables + the python bridges/helpers 755, the rest (units,
+# labwc-autostart, provision.sh, cec_vendor_shim.c source) 644.
+for f in files/*; do
+  [ -d "$f" ] && continue # shell/ - copied above
+  case "$(basename "$f")" in
+    run-shell.sh | tvbox | *.py) mode=755 ;;
+    *) mode=644 ;;
+  esac
+  install -m "$mode" "$f" "${ROOTFS_DIR}${USER_HOME}/.tvbox/"
+done
 
 # 2) device access + polkit + OS auto-updates (no auto-reboot) - see conf/
 install -m 644 conf/99-tvbox.rules "${ROOTFS_DIR}/etc/udev/rules.d/"

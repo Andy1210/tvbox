@@ -75,6 +75,17 @@ const USER_UNITS = [
   "tvbox-flatpak-update.timer",
 ];
 const EXECUTABLE = ["run-shell.sh", "tvbox"];
+// Where each shipped user unit gets its "enable" symlink (its [Install]
+// WantedBy). syncInfra creates these directly - same trick as the image build:
+// a box that only ever updates via OTA must still START a newly shipped unit
+// on the next boot; daemon-reload alone leaves it disabled forever (exactly
+// how OTA-only boxes got tvbox-remote.service on disk but never running).
+// A unit absent here (tvbox-flatpak-update.service) is timer/dep-activated.
+const UNIT_WANTS = {
+  "tvbox-cec.service": "default.target.wants",
+  "tvbox-remote.service": "default.target.wants",
+  "tvbox-flatpak-update.timer": "timers.target.wants",
+};
 
 let hooks = { isIdle: () => true, restart: null }; // main.js provides both; the CLI neither
 let state = "idle"; // idle | checking | downloading | installing | restarting | error
@@ -253,6 +264,22 @@ async function download(url, dest) {
   const ctl = new AbortController();
   const t = setTimeout(() => ctl.abort(), TARBALL_TIMEOUT_MS);
   const out = fs.createWriteStream(dest);
+  // A WriteStream 'error' with no listener is an uncaught exception - it would
+  // kill the whole shell (there is deliberately no uncaughtException handler).
+  // freeBytes() is a single preflight check, so ENOSPC/EIO MID-download is a
+  // real path; surface it into the await chain so it fails THIS update instead
+  // of the process. The noop .catch marks the promise handled for the stretches
+  // where no await is racing it (e.g. while awaiting fetch).
+  let writeErr = null;
+  let failWrite;
+  const writeFailed = new Promise((_, reject) => {
+    failWrite = (e) => {
+      writeErr = e;
+      reject(e);
+    };
+  });
+  writeFailed.catch(() => {});
+  out.on("error", failWrite);
   try {
     const res = await fetch(url, { signal: ctl.signal, redirect: "follow" });
     if (!res.ok) throw new Error("HTTP " + res.status);
@@ -263,14 +290,16 @@ async function download(url, dest) {
     if (Number(res.headers.get("content-length")) > TARBALL_MAX_BYTES) throw new Error("tarball too large");
     let total = 0;
     for await (const chunk of res.body || []) {
+      if (writeErr) throw writeErr;
       total += chunk.length;
       if (total > TARBALL_MAX_BYTES) {
         ctl.abort(); // stop the transfer, not just the file write
         throw new Error("tarball too large");
       }
-      if (!out.write(chunk)) await new Promise((r) => out.once("drain", r));
+      // race the drain against a write error - an errored stream never drains
+      if (!out.write(chunk)) await Promise.race([writeFailed, new Promise((r) => out.once("drain", r))]);
     }
-    await new Promise((resolve, reject) => out.end((e) => (e ? reject(e) : resolve())));
+    await Promise.race([writeFailed, new Promise((resolve, reject) => out.end((e) => (e ? reject(e) : resolve())))]);
   } catch (e) {
     out.destroy();
     fs.rmSync(dest, { force: true }); // never leave a truncated tarball behind
@@ -406,6 +435,18 @@ function syncInfra(rel) {
     const f = path.join(src, name);
     if (fs.existsSync(f)) {
       fs.copyFileSync(f, path.join(unitDir, name));
+      // "enable" = the WantedBy symlink; keep whatever `systemctl enable`
+      // (deploy.sh) or the image build already created, add it if missing.
+      const wants = UNIT_WANTS[name];
+      if (wants) {
+        const link = path.join(unitDir, wants, name);
+        fs.mkdirSync(path.dirname(link), { recursive: true });
+        try {
+          fs.symlinkSync(path.join("..", name), link);
+        } catch (e) {
+          if (e.code !== "EEXIST") throw e;
+        }
+      }
       units = true;
     }
   }
@@ -462,4 +503,5 @@ module.exports = {
   // exported for updater.test.js - the deploy/infra.list cross-check
   INFRA_FILES,
   USER_UNITS,
+  UNIT_WANTS,
 };

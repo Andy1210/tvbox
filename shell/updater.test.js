@@ -50,3 +50,53 @@ test("every USER_UNIT is an INFRA_FILE (a unit must ship to be installable)", ()
     assert.ok(updater.INFRA_FILES.includes(unit), unit + " is in USER_UNITS but not INFRA_FILES");
   }
 });
+
+// The reverse direction of the drift check: a file ADDED to the infra source
+// dirs but forgotten from infra.list ships in NO channel (deploy/OTA/image all
+// read the list now) - fail the build instead. NOT_SHIPPED is the conscious
+// exclusion set: extend it only for files that genuinely must not ship.
+test("every file in the infra source dirs is listed in infra.list or consciously excluded", () => {
+  const NOT_SHIPPED = new Set([
+    "deploy.sh", // the dev-deploy driver itself
+    "infra.list", // the list itself
+  ]);
+  const listed = new Set(infraListBasenames());
+  const repo = path.join(__dirname, "..");
+  for (const dir of ["deploy", "cec", "remote"]) {
+    for (const name of fs.readdirSync(path.join(repo, dir))) {
+      if (!fs.statSync(path.join(repo, dir, name)).isFile()) continue; // __pycache__ etc.
+      if (NOT_SHIPPED.has(name)) continue;
+      assert.ok(
+        listed.has(name),
+        dir +
+          "/" +
+          name +
+          " is not in deploy/infra.list - it ships in NO channel " +
+          "(add it to the list, or to this test's NOT_SHIPPED set if that is intentional)",
+      );
+    }
+  }
+});
+
+// OTA "enable": syncInfra creates the WantedBy symlink from UNIT_WANTS - if
+// that map drifts from the units' real [Install] sections, an OTA-shipped unit
+// lands on disk but never starts (exactly the v1.2.0 tvbox-remote gap).
+test("UNIT_WANTS mirrors each user unit's [Install] WantedBy", () => {
+  for (const unit of updater.USER_UNITS) {
+    const text = fs.readFileSync(path.join(__dirname, "..", "deploy", unit), "utf8");
+    const m = text.match(/^WantedBy=(\S+)/m);
+    if (m) {
+      assert.equal(
+        updater.UNIT_WANTS[unit],
+        m[1] + ".wants",
+        unit + " wants " + m[1] + " but UNIT_WANTS says " + updater.UNIT_WANTS[unit],
+      );
+    } else {
+      assert.equal(
+        updater.UNIT_WANTS[unit],
+        undefined,
+        unit + " has no [Install] WantedBy - it must not be in UNIT_WANTS",
+      );
+    }
+  }
+});

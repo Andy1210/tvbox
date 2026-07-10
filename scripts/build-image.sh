@@ -96,6 +96,10 @@ fi
 echo "==> assembling stage-tvbox/files"
 F="$TVBOX/image/stage-tvbox/01-tvbox/files"
 mkdir -p "$F"
+# clear previously assembled flat infra files first - 00-run.sh installs
+# EVERYTHING flat in files/, so a file dropped from infra.list must not keep
+# shipping from a stale local assembly (CI always assembles into a clean tree)
+find "$F" -maxdepth 1 -type f -delete
 rsync -a --delete --exclude node_modules --exclude apps-data --exclude '*.log' "$TVBOX/shell" "$F/"
 # The infra files come from the ONE shared list (deploy/infra.list) via
 # copy-infra.sh - byte-for-byte the same set image.yml assembles, so a local
@@ -110,16 +114,22 @@ if [ "$FRESH" = 1 ]; then
   docker rm -f pigen_work >/dev/null 2>&1 || true
   rm -rf "$PIGEN"
 fi
+# Pinned for reproducible builds: pi-gen's `arm64` branch is a moving target,
+# so two builds weeks apart could otherwise bootstrap different base images.
+# PIGEN_REF is the arm64 head verified with the current stage (bump it
+# deliberately, and keep it in sync with .github/workflows/image.yml). We clone
+# the branch (full history so the ref stays reachable after arm64 advances)
+# then detach onto the exact commit.
+PIGEN_REF="ca8aeed0ae300c2a89f55ce9617d5f96a27e99e5" # pi-gen arm64 @ 2026-07
 if [ ! -d "$PIGEN/.git" ]; then
-  # Pinned for reproducible builds: pi-gen's `arm64` branch is a moving target,
-  # so two builds weeks apart could otherwise bootstrap different base images.
-  # PIGEN_REF is the arm64 head verified with the current stage (bump it
-  # deliberately, and keep it in sync with .github/workflows/image.yml). We clone
-  # the branch (full history so the ref stays reachable after arm64 advances)
-  # then detach onto the exact commit.
-  PIGEN_REF="ca8aeed0ae300c2a89f55ce9617d5f96a27e99e5" # pi-gen arm64 @ 2026-07
   echo "==> cloning pi-gen (arm64 @ ${PIGEN_REF})"
   git clone --branch arm64 https://github.com/RPi-Distro/pi-gen.git "$PIGEN"
+fi
+# apply the pin to REUSED checkouts too - a clone from before a pin bump would
+# otherwise silently keep building the old base until someone runs --fresh
+if [ "$(git -C "$PIGEN" rev-parse HEAD)" != "$PIGEN_REF" ]; then
+  echo "==> pinning pi-gen checkout to ${PIGEN_REF}"
+  git -C "$PIGEN" fetch origin arm64
   git -C "$PIGEN" checkout --detach "$PIGEN_REF"
 fi
 rm -rf "$PIGEN/stage-tvbox"

@@ -39,7 +39,7 @@ rsync -az --delete \
 # scripts/copy-infra.sh). Basenames land flat in ~/.tvbox/, same as before.
 # Fail-closed: a listed-but-missing file makes rsync (under set -e) abort.
 INFRA_SRCS=()
-while IFS= read -r line; do
+while IFS= read -r line || [ -n "$line" ]; do # || guard: keep a final unterminated line
   line="${line%$'\r'}"
   case "$line" in
     ''|'#'*) continue ;;
