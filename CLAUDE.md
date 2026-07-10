@@ -222,6 +222,16 @@ message, line, src)` signature.
 - **`wlr-randr` (not `wlrctl`) backs the resolution picker.** `shell/display.js`
   shells out to `wlr-randr`; it must be in the apt lists (provision.sh HARD +
   image 00-packages). Missing it = an empty resolution list, silently.
+- **OTA can NEVER install apt packages** (user-space by design, root lives only
+  in provision/image). A release that adds a new system-package dependency
+  reaches OTA-only boxes as code WITHOUT its dependency and there is no SSH on
+  an end-user box to fix it - exactly how 1.2.0's resolution picker stayed
+  empty on OTA-updated boxes (`wlr-randr` never arrived). When a feature needs
+  a new binary: either make it degrade with a clear on-TV message AND accept it
+  only works on freshly flashed/provisioned boxes, or ship the binary
+  Kodi-style like librespot (sha256-pinned no-root download into
+  `~/.tvbox/bin`, see `requires.download` / `installDownload`). Flag the
+  decision in the release notes.
 - Nothing on the box ever reboots it or restarts the shell on its own while
   something plays: OS updates run with `Automatic-Reboot "false"` (Settings
   shows the reboot hint), and the OTA auto-apply is gated on `boxIdle()` +

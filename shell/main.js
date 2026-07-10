@@ -1420,10 +1420,19 @@ function openRemoteApp(m, url) {
     wc.executeJavaScript(IDLEHIDE_JS).catch(() => {});
   });
   // Remote Home key (CEC double-tap Back -> BrowserHome) returns to the launcher.
+  // BrowserBack/GoBack (a BT remote's Back button) -> re-injected as Backspace,
+  // same translation as the main window: a remote site (YouTube leanback) only
+  // handles the key the CEC remote would send, not the browser navigation keys.
   wc.on("before-input-event", (e, input) => {
     if (input.type === "keyDown" && input.key === "BrowserHome") {
       e.preventDefault();
       showLauncher();
+      return;
+    }
+    if (input.key === "BrowserBack" || input.key === "GoBack") {
+      e.preventDefault();
+      if (input.type !== "keyDown" && input.type !== "keyUp") return;
+      wc.sendInputEvent({ type: input.type === "keyDown" ? "keyDown" : "keyUp", keyCode: "Backspace" });
     }
   });
   // If this window goes away for ANY reason while it's still the active app
@@ -1855,6 +1864,21 @@ app.whenReady().then(() => {
       ev.message,
       ev.sourceId ? "(" + ev.sourceId + ":" + ev.lineNumber + ")" : "",
     );
+  });
+  // BT remotes (e.g. Fire TV) send Back as KEY_BACK -> DOM BrowserBack/GoBack.
+  // The launcher/sdk accept those directly, but a webclient app's own UI (the
+  // Plex HTPC client) only understands the CEC remote's form (Backspace). While
+  // an app owns this window, swallow the browser key and re-inject a real
+  // Backspace through the input pipeline (a trusted event - synthetic DOM
+  // events are not guaranteed to be honored). Never while the launcher is
+  // showing (currentAppId null) - it handles BrowserBack itself. The injected
+  // Backspace re-enters this handler but doesn't match, so no loop.
+  win.webContents.on("before-input-event", (e, input) => {
+    if (!currentAppId || (input.key !== "BrowserBack" && input.key !== "GoBack")) return;
+    e.preventDefault();
+    if (input.type !== "keyDown" && input.type !== "keyUp") return;
+    if (input.type === "keyDown") console.log("[input] " + input.key + " -> Backspace (app " + currentAppId + ")");
+    win.webContents.sendInputEvent({ type: input.type === "keyDown" ? "keyDown" : "keyUp", keyCode: "Backspace" });
   });
   win.loadURL(BASE + "/tvbox/"); // boot into the HOME launcher
   win.focus();
