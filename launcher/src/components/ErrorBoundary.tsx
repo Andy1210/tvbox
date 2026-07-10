@@ -32,7 +32,7 @@ export class ErrorBoundary extends Component<{ children: ReactNode }, State> {
         <button
           autoFocus
           onClick={() => window.location.reload()}
-          className="mt-[2vh] px-[3vw] py-[2vh] rounded-[1.4vh] bg-white/10 text-[2.4vh] font-semibold focus:outline focus:outline-[3px] focus:outline-[var(--color-focus)]"
+          className="mt-[2vh] px-[3vw] py-[2vh] rounded-[1.4vh] bg-white/10 text-[2.4vh] font-semibold transition-[background-color,color] duration-150 focus:outline-none focus:bg-white focus:text-[#06090d]"
         >
           Restart · Újraindítás
         </button>

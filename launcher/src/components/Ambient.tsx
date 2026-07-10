@@ -1,12 +1,14 @@
 import { useEffect, useState } from "react";
 import { useI18n } from "../lib/i18n";
 import { fetchWeather, fetchPhotos, photoUrl, weatherGroup, type Weather } from "../lib/ambient";
+import { sleepIfIdle } from "../lib/power";
+import { useConfigStore } from "../stores/config";
 
 // Idle/ambient screen: a big clock + weather over a photo slideshow (local
 // ~/.tvbox/ambient/ photos, blurred in the Spotify now-playing aesthetic) or an
 // elegant gradient when there are none. Any key exits (App's useIdle wakes on
 // keydown; we also swallow that first key so it doesn't activate a tile).
-function WeatherIcon({ group, className }: { group: string; className?: string }) {
+export function WeatherIcon({ group, className }: { group: string; className?: string }) {
   const p = {
     fill: "none",
     stroke: "currentColor",
@@ -80,6 +82,22 @@ export function Ambient({ onExit }: { onExit: () => void }) {
     return () => clearInterval(id);
   }, [photos]);
 
+  // Auto-sleep: after N more minutes on the screensaver, CEC the TV off (the
+  // box stays up - same as the power menu's Sleep). 0/unset = never. The shell
+  // gates it on boxIdle() - background audio (Spotify Connect) keeps the TV on;
+  // while blocked we retry every 5 minutes until the music stops or the user
+  // wakes the screen (unmount clears the chain).
+  const sleepMinutes = useConfigStore((s) => s.config?.ambient.sleepMinutes) || 0;
+  useEffect(() => {
+    if (!sleepMinutes) return;
+    let id: ReturnType<typeof setTimeout>;
+    const attempt = async () => {
+      if (!(await sleepIfIdle())) id = setTimeout(attempt, 5 * 60 * 1000);
+    };
+    id = setTimeout(attempt, sleepMinutes * 60 * 1000);
+    return () => clearTimeout(id);
+  }, [sleepMinutes]);
+
   // Swallow the first key so waking the screen doesn't also trigger a tile.
   useEffect(() => {
     const swallow = (e: KeyboardEvent) => {
@@ -91,7 +109,10 @@ export function Ambient({ onExit }: { onExit: () => void }) {
     return () => window.removeEventListener("keydown", swallow, true);
   }, [onExit]);
 
-  const time = new Intl.DateTimeFormat(tag, { hour: "2-digit", minute: "2-digit" }).format(now);
+  const hf = useConfigStore((s) => s.config?.ui.hourFormat) || "auto";
+  const hour12 = hf === "12" ? true : hf === "24" ? false : undefined;
+  const time = new Intl.DateTimeFormat(tag, { hour: "2-digit", minute: "2-digit", hour12 }).format(now);
+  // no `capitalize` on the date: it title-cases every word (wrong hu orthography)
   const date = new Intl.DateTimeFormat(tag, { weekday: "long", month: "long", day: "numeric" }).format(now);
   const photo = photos.length ? photoUrl(photos[idx]) : null;
 
@@ -117,7 +138,7 @@ export function Ambient({ onExit }: { onExit: () => void }) {
         <div className="text-[16vh] font-bold leading-[0.9] tabular-nums drop-shadow-[0_0.4vh_2vh_rgba(0,0,0,0.6)]">
           {time}
         </div>
-        <div className="text-[3vh] text-white/80 mt-[1vh] capitalize">{date}</div>
+        <div className="text-[3vh] text-white/80 mt-[1vh]">{date}</div>
         {wx && wx.tempC != null && (
           <div className="flex items-center gap-[1.4vw] mt-[2.4vh] text-white/90">
             <WeatherIcon group={weatherGroup(wx.code)} className="w-[5vh] h-[5vh]" />

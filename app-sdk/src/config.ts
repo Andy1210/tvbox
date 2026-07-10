@@ -35,7 +35,8 @@ export interface PublicConfig {
   };
   parental: { pinSet: boolean; lockedGroups: string[] };
   spotify: { deviceName: string; hasCredentials: boolean; enabled: boolean };
-  ambient: { enabled: boolean; idleMinutes: number; city: string };
+  ambient: { enabled: boolean; idleMinutes: number; city: string; sleepMinutes: number };
+  ui: { hourFormat: "auto" | "12" | "24" };
   update: { auto: boolean };
   remote: { devices: Record<string, RemoteDeviceConfig>; power: RemotePower };
 }
@@ -85,9 +86,15 @@ export async function saveParental(p: { pin?: string; lockedGroups?: string[] })
   return postConfig({ parental: p });
 }
 
-export type AmbientInput = Partial<{ enabled: boolean; idleMinutes: number; city: string }>;
+export type AmbientInput = Partial<{ enabled: boolean; idleMinutes: number; city: string; sleepMinutes: number }>;
 export async function saveAmbient(ambient: AmbientInput): Promise<PublicConfig> {
   return postConfig({ ambient });
+}
+
+// Launcher UI preferences (clock format; "auto" = whatever the locale does).
+export type UiInput = Partial<{ hourFormat: "auto" | "12" | "24" }>;
+export async function saveUi(ui: UiInput): Promise<PublicConfig> {
+  return postConfig({ ui });
 }
 
 // OTA auto-update toggle (the feed URL itself is box-local, not a UI concern).

@@ -374,6 +374,10 @@ function handlePost(p, data, res) {
       config.setUpdate({ auto: data.update.auto !== false }); // only the toggle; feed is box-local
       changed.push("update");
     }
+    if (data.ui) {
+      config.setUi(data.ui); // launcher prefs (clock format) - whitelisted in config.js
+      changed.push("ui");
+    }
     if (data.remote) {
       config.setRemote(data.remote); // per-device button remap (sanitized in config.js)
       remoteBridgeCmd("reload"); // tell the bridge to re-read the keymap
@@ -783,6 +787,16 @@ function deviceModel() {
     return "";
   }
 }
+// SD-card space for About - installs/OTA fail invisibly on a full disk otherwise.
+function diskInfo() {
+  try {
+    const s = fs.statfsSync(os.homedir());
+    return { freeBytes: s.bavail * s.bsize, totalBytes: s.blocks * s.bsize };
+  } catch (e) {
+    return null;
+  }
+}
+
 function systemInfo(cb) {
   const info = {
     version: pkg.version || "",
@@ -792,6 +806,7 @@ function systemInfo(cb) {
     uptimeSec: Math.round(os.uptime()),
     cpuTempC: cpuTempC(),
     mem: memInfo(),
+    disk: diskInfo(),
     wifi: { ssid: "", signal: null }, // empty on Ethernet
   };
   execFile("nmcli", ["-t", "-f", "ACTIVE,SIGNAL,SSID", "device", "wifi"], { timeout: 8000 }, (e, out) => {
@@ -825,10 +840,15 @@ function applyDisplayMode(mode, res) {
 // kept only as a fallback for exotic setups. On reboot/poweroff the box goes
 // down, so the JSON response may never reach the client - that's fine.
 function handlePower(action, res) {
-  if (action === "sleep") {
+  if (action === "sleep" || action === "sleep_if_idle") {
+    // sleep_if_idle = the screensaver's auto-sleep: refuse while anything plays
+    // (Spotify Connect streams with the launcher sitting idle on Home, so
+    // "screensaver is up" does NOT imply "nothing is playing"). The power
+    // menu's manual Sleep stays unconditional.
+    if (action === "sleep_if_idle" && !boxIdle()) return jsonRes(res, { ok: true, slept: false });
     showLauncher(); // stop playback / leave any remote app, back to Home
     cecPower(false); // TV off via CEC
-    return jsonRes(res, { ok: true });
+    return jsonRes(res, { ok: true, slept: true });
   }
   const sub = action === "reboot" || action === "poweroff" ? action : null;
   if (!sub) return jsonRes(res, { ok: false, error: "bad action" });

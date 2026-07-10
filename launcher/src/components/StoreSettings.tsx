@@ -188,7 +188,7 @@ export function StoreSettings() {
 
       {error && (
         <div className="flex items-center gap-[1.5vw] mb-[1.4vh]">
-          <span className="text-[1.9vh] text-amber-200">
+          <span className="text-[1.9vh] text-warn">
             {t(error === "network" ? "app.shellUnreachable" : "store.registryError")}
           </span>
           <FocusButton
@@ -223,11 +223,10 @@ export function StoreSettings() {
                 <div className="text-[2.1vh] truncate">{loc(e.name)}</div>
                 <div className="text-[1.6vh] text-fg-dim truncate">{subtitle}</div>
               </div>
+              {/* fixed emerald (same as AppDetail's Update button) - the manifest
+                  accent can be arbitrarily dark and unreadable */}
               {e.updateAvailable && (
-                <span
-                  className="text-[1.6vh] font-semibold shrink-0 whitespace-nowrap"
-                  style={{ color: e.accent || undefined }}
-                >
+                <span className="text-[1.6vh] font-semibold shrink-0 whitespace-nowrap text-emerald-200">
                   {t("store.updateAvailableBadge")} · v{e.version}
                 </span>
               )}

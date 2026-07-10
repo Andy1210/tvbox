@@ -52,6 +52,9 @@ export function AboutSettings() {
   const wifi = info && info.wifi.ssid ? `${info.wifi.ssid} · ${info.wifi.signal ?? DASH}%` : DASH;
   const temp = info && info.cpuTempC != null ? `${info.cpuTempC.toFixed(1)} °C` : DASH;
   const mem = info ? `${fmtGb(info.mem.availableKb)} / ${fmtGb(info.mem.totalKb)} GB` : DASH;
+  const disk = info?.disk
+    ? `${(info.disk.freeBytes / 1e9).toFixed(1)} / ${(info.disk.totalBytes / 1e9).toFixed(1)} GB`
+    : DASH;
 
   return (
     <div className="mt-[3vh]">
@@ -73,6 +76,7 @@ export function AboutSettings() {
         <Row label={t("about.cpuTemp")} value={temp} />
         <Row label={t("about.uptime")} value={info ? fmtUptime(info.uptimeSec, units) : DASH} />
         <Row label={t("about.memory")} value={mem} />
+        <Row label={t("about.storage")} value={disk} />
       </div>
     </div>
   );

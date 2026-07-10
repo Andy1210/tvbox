@@ -75,6 +75,7 @@ function applyConfig(body: Record<string, unknown>): void {
   }
   if (body.ambient && typeof body.ambient === "object") Object.assign(config.ambient, body.ambient);
   if (body.update && typeof body.update === "object") Object.assign(config.update, body.update);
+  if (body.ui && typeof body.ui === "object") Object.assign(config.ui, body.ui);
   if (body.display && typeof body.display === "object") {
     const d = body.display as { matchFramerate?: boolean };
     if (d.matchFramerate !== undefined) display.matchFramerate = d.matchFramerate;

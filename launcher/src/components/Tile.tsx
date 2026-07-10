@@ -26,7 +26,7 @@ export function Tile({ app, onSelect }: { app: AppManifest; onSelect: (app: AppM
       data-id={app.id}
       onClick={() => onSelect(app)}
       className={[
-        "relative flex-none w-[22vw] max-w-[320px] aspect-[16/10] rounded-[1.6vh] overflow-hidden",
+        "relative flex-none w-[16.7vw] aspect-[16/10] rounded-[1.6vh] overflow-hidden",
         "flex flex-col justify-end p-[2vh] transition-[transform,box-shadow,outline-color] duration-150",
         "outline outline-[3px] outline-transparent outline-offset-[3px]",
         ready ? "" : "opacity-55",
@@ -41,21 +41,23 @@ export function Tile({ app, onSelect }: { app: AppManifest; onSelect: (app: AppM
       </div>
 
       {!ready ? (
-        <div className="absolute top-[1.4vh] right-[1.4vh] text-[1.2vh] font-bold tracking-wide uppercase bg-white/15 px-[1vh] py-[0.5vh] rounded-[1vh]">
+        <div className="absolute top-[1.4vh] right-[1.4vh] text-[1.7vh] font-bold tracking-wide uppercase bg-white/15 px-[1.2vh] py-[0.5vh] rounded-[1.2vh]">
           {t("home.comingSoonBadge")}
         </div>
       ) : app.installing ? (
-        <div className="absolute top-[1.4vh] right-[1.4vh] text-[1.2vh] font-bold tracking-wide bg-white/15 px-[1vh] py-[0.5vh] rounded-[1vh]">
+        <div className="absolute top-[1.4vh] right-[1.4vh] text-[1.7vh] font-bold tracking-wide bg-white/15 px-[1.2vh] py-[0.5vh] rounded-[1.2vh]">
           {t("home.installingBadge")}
         </div>
       ) : app.installable && !app.installed ? (
-        <div className="absolute top-[1.4vh] right-[1.4vh] text-[1.2vh] font-bold tracking-wide bg-sky-500/25 text-sky-200 px-[1vh] py-[0.5vh] rounded-[1vh]">
+        <div className="absolute top-[1.4vh] right-[1.4vh] text-[1.7vh] font-bold tracking-wide bg-sky-500/25 text-sky-200 px-[1.2vh] py-[0.5vh] rounded-[1.2vh]">
           {t("home.install")}
         </div>
       ) : null}
 
-      <div className="relative z-10 text-[2.2vh] font-bold leading-tight">{loc(app.name)}</div>
-      {app.tagline && <div className="relative z-10 text-[1.5vh] text-white/70 mt-[0.3vh]">{loc(app.tagline)}</div>}
+      <div className="relative z-10 text-[2.2vh] font-bold leading-tight line-clamp-2">{loc(app.name)}</div>
+      {app.tagline && (
+        <div className="relative z-10 text-[1.7vh] text-white/70 mt-[0.3vh] truncate">{loc(app.tagline)}</div>
+      )}
     </div>
   );
 }

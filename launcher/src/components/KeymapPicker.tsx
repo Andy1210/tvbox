@@ -103,7 +103,7 @@ export function KeymapPicker({ onChange, autoFocus }: { onChange?: (km: string) 
           ) : null}
         </span>
       </div>
-      {deferred && <div className="text-[1.9vh] text-[#e0b64a] mb-[1vh]">{t("region.keymapLater")}</div>}
+      {deferred && <div className="text-[1.9vh] text-warn mb-[1vh]">{t("region.keymapLater")}</div>}
       <div className="flex flex-col gap-[0.8vh] flex-1 min-h-0 overflow-y-auto no-scrollbar max-w-[64vw] px-[1.5vw] -mx-[1.5vw]">
         {codes.map((code) => {
           const named = NAMED_KEYMAPS.has(code);
@@ -117,7 +117,7 @@ export function KeymapPicker({ onChange, autoFocus }: { onChange?: (km: string) 
               <span className="text-[2.1vh]">{keymapLabel(t, code)}</span>
               <span className="flex items-center gap-[1.2vw] shrink-0 text-fg-dim">
                 {named && <span className="text-[1.8vh] tabular-nums">{code}</span>}
-                {code === active && <span className="w-[1.2vh] h-[1.2vh] rounded-full bg-[#39c0d6] shrink-0" />}
+                {code === active && <span className="w-[1.2vh] h-[1.2vh] rounded-full bg-accent shrink-0" />}
               </span>
             </FocusButton>
           );

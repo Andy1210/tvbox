@@ -7,6 +7,7 @@ export interface BtDevice {
   type: string; // audio | keyboard | mouse | gamepad | phone | computer | ""
   paired: boolean;
   connected: boolean;
+  battery: number | null; // % from BlueZ BAS (HID remotes); null = not reported
 }
 export interface BtStatus {
   powered: boolean;

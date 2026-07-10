@@ -5,6 +5,7 @@ export * from "./useBackspace";
 export * from "./useFocusableItem";
 export * from "./FocusButton";
 export * from "./PinPad";
+export * from "./PinGate";
 export * from "./Osk";
 export * from "./nowplaying";
 export * from "./config";

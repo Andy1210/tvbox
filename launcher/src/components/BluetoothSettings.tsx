@@ -52,7 +52,7 @@ function BtGlyph({ type }: { type: string }) {
 export function BluetoothSettings() {
   const { t } = useI18n();
   const [status, setStatus] = useState<BtStatus | null>(null);
-  const [devices, setDevices] = useState<BtDevice[]>([]);
+  const [devices, setDevices] = useState<BtDevice[] | null>(null); // null = first fetch in flight
   const [scanning, setScanning] = useState(false);
   const [busy, setBusy] = useState<string | null>(null); // mac being acted on
   const [msg, setMsg] = useState("");
@@ -112,7 +112,7 @@ export function BluetoothSettings() {
       <div className="flex items-center gap-[1.5vw] mb-[1.4vh]">
         <div className="text-[2.4vh] font-semibold">{t("bt.title")}</div>
         {busy ? (
-          <span className="text-[1.9vh] text-[#39c0d6]">{msg || t("bt.working")}</span>
+          <span className="text-[1.9vh] text-accent">{msg || t("bt.working")}</span>
         ) : msg ? (
           <span className="text-[1.9vh] text-fg-dim">{msg}</span>
         ) : null}
@@ -139,7 +139,7 @@ export function BluetoothSettings() {
             <path d="M21 21l-4.3-4.3" />
           </svg>
         </FocusButton>
-        {devices.map((d) => (
+        {(devices || []).map((d) => (
           <div key={d.mac} className="flex items-center gap-[1vw]">
             <FocusButton
               focusKey={"bt-dev-" + d.mac}
@@ -148,7 +148,10 @@ export function BluetoothSettings() {
             >
               <BtGlyph type={d.type} />
               <span className="text-[2.1vh] truncate flex-1 min-w-0 text-left">{d.name}</span>
-              <span className={["text-[1.7vh] shrink-0", d.connected ? "text-[#39c0d6]" : "text-fg-dim"].join(" ")}>
+              {d.battery != null && (
+                <span className="text-[1.7vh] text-fg-dim shrink-0 tabular-nums">{d.battery}%</span>
+              )}
+              <span className={["text-[1.7vh] shrink-0", d.connected ? "text-accent" : "text-fg-dim"].join(" ")}>
                 {d.connected ? t("bt.connected") : d.paired ? t("bt.paired") : t("bt.pair")}
               </span>
             </FocusButton>
@@ -163,7 +166,7 @@ export function BluetoothSettings() {
             )}
           </div>
         ))}
-        {!devices.length && <div className="text-[1.9vh] text-fg-dim">{t("bt.none")}</div>}
+        {devices && !devices.length && <div className="text-[1.9vh] text-fg-dim">{t("bt.none")}</div>}
       </div>
     </div>
   );

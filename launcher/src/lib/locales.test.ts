@@ -29,9 +29,10 @@ const isDynamic = (k: string) => DYNAMIC.some((d) => (d.endsWith(".") ? k.starts
 
 const en = JSON.parse(fs.readFileSync(path.join(LOCALES, "en.json"), "utf8"));
 const hu = JSON.parse(fs.readFileSync(path.join(LOCALES, "hu.json"), "utf8"));
-const source = walk(SRC)
-  .map((f) => fs.readFileSync(f, "utf8"))
-  .join("\n");
+// app-sdk components the launcher renders (PinGate) reference launcher locale
+// keys too - scan the sdk source as well so those keys don't read as dead.
+const SDK = path.resolve(HERE, "../../../app-sdk/src");
+const source = [...walk(SRC), ...walk(SDK)].map((f) => fs.readFileSync(f, "utf8")).join("\n");
 
 describe("locale hygiene", () => {
   it("en and hu define identical key sets", () => {

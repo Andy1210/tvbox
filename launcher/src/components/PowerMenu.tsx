@@ -27,7 +27,7 @@ export function PowerMenu({ onClose }: { onClose: () => void }) {
         className="fixed inset-0 z-[65] bg-black/85 flex flex-col items-center justify-center gap-[1.4vh] px-[4vw]"
       >
         <div className="text-[2.6vh] font-bold text-fg-dim mb-[1vh]">{t("power.title")}</div>
-        <div className="w-[52vw] max-w-[560px] flex flex-col gap-[1.2vh]">
+        <div className="w-[29.2vw] flex flex-col gap-[1.2vh]">
           {/* key= mirrors focusKey: useFocusable registers its key mount-only, so a
               FocusButton instance reused across the confirm flip keeps the stale key
               and the whole overlay goes focus-dead. Keys force a remount. */}

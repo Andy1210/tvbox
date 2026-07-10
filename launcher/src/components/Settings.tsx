@@ -14,6 +14,7 @@ import { RemoteRemap } from "./RemoteRemap";
 import { AppOrderSettings } from "./AppOrderSettings";
 import { StoreSettings } from "./StoreSettings";
 import { AmbientSettings } from "./AmbientSettings";
+import { ParentalSettings } from "./ParentalSettings";
 import { AboutSettings } from "./AboutSettings";
 import { UpdateSettings } from "./UpdateSettings";
 import { BackupSettings } from "./BackupSettings";
@@ -55,6 +56,7 @@ const CATEGORIES: Category[] = [
       <>
         <LanguageSettings />
         <RegionSettings />
+        <ParentalSettings />
         <HostnameSettings />
         <AboutSettings />
       </>

@@ -46,12 +46,12 @@ function DisplayModePicker({
         <div className="flex items-center gap-[1.5vw]">
           <div className="text-[2.8vh] font-bold">{t("display.choose")}</div>
           {applying ? (
-            <span className="text-[1.9vh] text-[#39c0d6]">{t("display.applying")}</span>
+            <span className="text-[1.9vh] text-accent">{t("display.applying")}</span>
           ) : msg ? (
             <span className="text-[1.9vh] text-fg-dim">{msg}</span>
           ) : null}
         </div>
-        <div className="flex flex-col gap-[0.8vh] w-[60vw] max-w-[620px] max-h-[68vh] overflow-y-auto no-scrollbar">
+        <div className="flex flex-col gap-[0.8vh] w-[32.3vw] max-h-[68vh] overflow-y-auto no-scrollbar">
           {modes.map((m) => (
             <FocusButton
               key={m.key}
@@ -60,12 +60,16 @@ function DisplayModePicker({
               className="px-[2vw] py-[1.5vh] rounded-[1.1vh] bg-white/5 flex items-center justify-between gap-[1.5vw]"
             >
               <span className="text-[2.1vh] tabular-nums">{label(m)}</span>
-              {m.current && (
-                <span className="flex items-center gap-[0.6vw] text-[1.7vh] text-[#39c0d6] shrink-0">
-                  <span className="w-[1.2vh] h-[1.2vh] rounded-full bg-[#39c0d6] shrink-0" />
-                  {t("display.active")}
-                </span>
-              )}
+              <span className="flex items-center gap-[1.2vw] shrink-0">
+                {/* the TV's EDID-preferred mode - the safe "put it back" choice */}
+                {m.preferred && <span className="text-[1.7vh] text-fg-dim">{t("display.default")}</span>}
+                {m.current && (
+                  <span className="flex items-center gap-[0.6vw] text-[1.7vh] text-accent">
+                    <span className="w-[1.2vh] h-[1.2vh] rounded-full bg-accent shrink-0" />
+                    {t("display.active")}
+                  </span>
+                )}
+              </span>
             </FocusButton>
           ))}
           {!modes.length && <div className="text-[1.9vh] text-fg-dim">{t("display.none")}</div>}
@@ -159,7 +163,7 @@ export function DisplaySettings() {
             <span className="text-[2.1vh]">{t("display.matchFramerate")}</span>
             <span className="block text-[1.7vh] text-fg-dim">{t("display.matchHint")}</span>
           </span>
-          <span className={["text-[1.9vh] font-semibold shrink-0", fps ? "text-[#39c0d6]" : "text-fg-dim"].join(" ")}>
+          <span className={["text-[1.9vh] font-semibold shrink-0", fps ? "text-accent" : "text-fg-dim"].join(" ")}>
             {fps ? t("display.on") : t("display.off")}
           </span>
         </FocusButton>

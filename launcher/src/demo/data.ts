@@ -46,8 +46,9 @@ export const CONFIG: PublicConfig = {
   },
   parental: { pinSet: false, lockedGroups: [] },
   spotify: { deviceName: "tvbox demo", hasCredentials: true, enabled: true },
-  ambient: { enabled: true, idleMinutes: 5, city: "Budapest" },
+  ambient: { enabled: true, idleMinutes: 5, city: "Budapest", sleepMinutes: 0 },
   update: { auto: true },
+  ui: { hourFormat: "auto" },
   remote: { devices: {}, power: "tv" },
 };
 
@@ -65,9 +66,16 @@ export const WIFI_NETWORKS: WifiNet[] = [
 ];
 
 export const BT_DEVICES: BtDevice[] = [
-  { mac: "F4:73:35:8A:11:02", name: "Living Room Speaker", type: "audio", paired: true, connected: true },
-  { mac: "DC:2C:26:0F:44:9B", name: "TV Keyboard", type: "keyboard", paired: true, connected: false },
-  { mac: "A8:9C:ED:71:23:D4", name: "Demo Phone", type: "phone", paired: false, connected: false },
+  {
+    mac: "F4:73:35:8A:11:02",
+    name: "Living Room Speaker",
+    type: "audio",
+    paired: true,
+    connected: true,
+    battery: null,
+  },
+  { mac: "DC:2C:26:0F:44:9B", name: "TV Keyboard", type: "keyboard", paired: true, connected: false, battery: 72 },
+  { mac: "A8:9C:ED:71:23:D4", name: "Demo Phone", type: "phone", paired: false, connected: false, battery: null },
 ];
 
 export const BT_SCAN_EXTRA: BtDevice = {
@@ -76,6 +84,7 @@ export const BT_SCAN_EXTRA: BtDevice = {
   type: "audio",
   paired: false,
   connected: false,
+  battery: null,
 };
 
 export const AUDIO: AudioState = {
@@ -122,6 +131,7 @@ export const SYSTEM_INFO: SystemInfo = {
   uptimeSec: 5 * 24 * 3600 + 7 * 3600,
   cpuTempC: 47.8,
   mem: { totalKb: 8244768, availableKb: 6083112 },
+  disk: { freeBytes: 21.4e9, totalBytes: 31.1e9 },
   wifi: { ssid: "tvbox-demo", signal: 86 },
 };
 

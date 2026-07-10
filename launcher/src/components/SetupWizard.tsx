@@ -116,7 +116,7 @@ export function SetupWizard({ onDone }: { onDone: () => void }) {
   else
     control = (
       <div className="h-full flex flex-col items-center justify-center text-center gap-[2vh]">
-        <span className="w-[10vh] h-[10vh] text-[#39c0d6]">{check}</span>
+        <span className="w-[10vh] h-[10vh] text-accent">{check}</span>
         <div className="text-[2.4vh] text-fg-dim max-w-[52vw]">{t("region.allSetHint")}</div>
       </div>
     );

@@ -4,6 +4,7 @@ import { useI18n } from "../lib/i18n";
 import { useBackspace } from "../lib/useBackspace";
 import { fetchRegion } from "../lib/region";
 import { FocusButton } from "./FocusButton";
+import { useConfigStore } from "../stores/config";
 import { TimezonePicker } from "./TimezonePicker";
 import { KeymapPicker, keymapLabel } from "./KeymapPicker";
 
@@ -57,6 +58,14 @@ export function RegionSettings() {
     });
   }, []);
 
+  // clock format: auto (locale) -> 12h -> 24h, persisted in shell config (ui.hourFormat)
+  const hourFormat = useConfigStore((st) => st.config?.ui.hourFormat) || "auto";
+  const setUi = useConfigStore((st) => st.setUi);
+  const cycleHourFormat = () => {
+    const order = ["auto", "12", "24"] as const;
+    setUi({ hourFormat: order[(order.indexOf(hourFormat as (typeof order)[number]) + 1) % order.length] });
+  };
+
   const close = (which: Panel) => {
     setPanel(null);
     setTimeout(() => setFocus(which === "tz" ? "region-tz-open" : "region-km-open"), 0);
@@ -81,6 +90,20 @@ export function RegionSettings() {
         >
           <span className="text-[2.1vh]">{t("region.keyboard")}</span>
           <span className="text-[1.9vh] text-fg-dim">{km ? keymapLabel(t, km) : "-"}</span>
+        </FocusButton>
+        <FocusButton
+          focusKey="region-hour-format"
+          onEnter={cycleHourFormat}
+          className="px-[2vw] py-[1.5vh] rounded-[1.1vh] bg-white/5 flex items-center justify-between gap-[1.5vw]"
+        >
+          <span className="text-[2.1vh]">{t("region.hourFormat")}</span>
+          <span className="text-[1.9vh] text-fg-dim">
+            {hourFormat === "12"
+              ? t("region.hourFormat_12")
+              : hourFormat === "24"
+                ? t("region.hourFormat_24")
+                : t("region.hourFormat_auto")}
+          </span>
         </FocusButton>
       </div>
 

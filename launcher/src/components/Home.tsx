@@ -176,7 +176,7 @@ export function Home() {
           className={[
             "fixed left-1/2 -translate-x-1/2 bottom-[6vh] px-[3vw] py-[1.6vh] rounded-[1.2vh]",
             "bg-[rgba(20,26,36,0.96)] text-[2vh] font-semibold shadow-[0_1vh_3vh_rgba(0,0,0,0.5)]",
-            "transition-[opacity,transform] duration-200",
+            "transition-[opacity,translate] duration-200",
             toast ? "opacity-100 translate-y-0" : "opacity-0 translate-y-[2vh] pointer-events-none",
           ].join(" ")}
           role="status"

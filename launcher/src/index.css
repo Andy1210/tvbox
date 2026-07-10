@@ -13,6 +13,9 @@
   --color-fg: #f4f6fa;
   --color-fg-dim: #8a96a6;
   --color-focus: #ffffff;
+  --color-accent: #39c0d6; /* active / on / progress */
+  --color-warn: #e0b64a; /* deferred / needs-attention notes */
+  --color-success: #3fb950; /* completed action confirmations */
   --font-sans: "Inter", "Segoe UI", system-ui, -apple-system, Roboto, sans-serif;
 }
 

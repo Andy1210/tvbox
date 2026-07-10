@@ -70,7 +70,7 @@ export function WifiSettings() {
             strokeWidth="1.7"
             strokeLinecap="round"
             strokeLinejoin="round"
-            className="w-[2.4vh] h-[2.4vh] text-[#39c0d6]"
+            className="w-[2.4vh] h-[2.4vh] text-accent"
           >
             <rect x="3" y="9" width="18" height="10" rx="1.5" />
             <path d="M7 9V6h10v3M9 19v2M15 19v2M12 19v2" />
@@ -97,7 +97,7 @@ export function WifiSettings() {
           {scanning ? t("wifi.scanning") : t("wifi.rescan")}
         </FocusButton>
         {connecting ? (
-          <span className="text-[1.9vh] text-[#39c0d6]">{t("wifi.connecting", { ssid: connecting })}</span>
+          <span className="text-[1.9vh] text-accent">{t("wifi.connecting", { ssid: connecting })}</span>
         ) : msg ? (
           <span className="text-[1.9vh] text-fg-dim">{msg}</span>
         ) : null}
@@ -120,8 +120,8 @@ export function WifiSettings() {
             </span>
             <span className="flex items-center gap-[1.2vw] shrink-0">
               {n.active && (
-                <span className="flex items-center gap-[0.6vw] text-[1.7vh] text-[#39c0d6]">
-                  <span className="w-[1.2vh] h-[1.2vh] rounded-full bg-[#39c0d6] shrink-0" />
+                <span className="flex items-center gap-[0.6vw] text-[1.7vh] text-accent">
+                  <span className="w-[1.2vh] h-[1.2vh] rounded-full bg-accent shrink-0" />
                   {t("wifi.active")}
                 </span>
               )}

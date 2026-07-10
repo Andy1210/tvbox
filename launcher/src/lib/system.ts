@@ -9,6 +9,7 @@ export interface SystemInfo {
   uptimeSec: number;
   cpuTempC: number | null;
   mem: { totalKb: number | null; availableKb: number | null };
+  disk: { freeBytes: number; totalBytes: number } | null;
   wifi: { ssid: string; signal: number | null };
 }
 

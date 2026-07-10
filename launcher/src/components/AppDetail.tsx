@@ -148,11 +148,10 @@ export function AppDetail({
               ? t("store.installedLatest", { installed: app.installedVersion, latest: app.version })
               : t("store.version", { v: "v" + app.version })}
           </span>
+          {/* fixed emerald (same as the Update button) - the manifest accent
+              can be arbitrarily dark and unreadable */}
           {app.updateAvailable && (
-            <span
-              className="text-[1.7vh] font-semibold px-[1.2vw] py-[0.5vh] rounded-[0.8vh]"
-              style={{ backgroundColor: accent + "22", color: accent }}
-            >
+            <span className="text-[1.7vh] font-semibold px-[1.2vw] py-[0.5vh] rounded-[0.8vh] bg-emerald-500/15 text-emerald-200">
               {t("store.updateAvailableBadge")}
             </span>
           )}
@@ -164,7 +163,7 @@ export function AppDetail({
           </div>
         )}
 
-        {hints.length > 0 && <div className="text-[1.7vh] text-amber-200 mb-[1.6vh]">{hints.join(" · ")}</div>}
+        {hints.length > 0 && <div className="text-[1.7vh] text-warn mb-[1.6vh]">{hints.join(" · ")}</div>}
 
         {/* actions - while an install runs, the progress indicator takes the
             place of Install/Update/Remove (Back stays focusable throughout) */}

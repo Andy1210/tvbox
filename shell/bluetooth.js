@@ -45,11 +45,15 @@ function status(env, cb) {
 function info(env, mac, cb) {
   bt(env, ["info", mac], 5000, (out) => {
     if (/not available/i.test(out)) return cb(null); // out of range / cache gone
+    // BlueZ prints "Battery Percentage: 0x32 (50)" for HID devices that expose
+    // BAS - the decimal in parens is the level. Absent line = unknown (null).
+    const bat = /Battery Percentage:.*\((\d+)\)/.exec(out);
     cb({
       name: (/Name:\s*(.*)/.exec(out) || [])[1] || "",
       type: typeFromIcon(((/Icon:\s*(.*)/.exec(out) || [])[1] || "").trim()),
       paired: /Paired:\s*yes/i.test(out),
       connected: /Connected:\s*yes/i.test(out),
+      battery: bat ? Number(bat[1]) : null,
     });
   });
 }
@@ -74,6 +78,7 @@ function list(env, cb) {
               type: (i && i.type) || "",
               paired: paired.has(d.mac) || !!(i && i.paired),
               connected: connected.has(d.mac) || !!(i && i.connected),
+              battery: i && i.battery != null ? i.battery : null,
             });
             if (--pending === 0) {
               result.sort(

@@ -22,7 +22,7 @@
   "settings": {
     "title": "Beállítások",
     "language": "Nyelv",
-    "wifi": "WiFi"
+    "wifi": "Wi-Fi"
   },
   "settingsCat": {
     "general": "Általános",
@@ -59,7 +59,8 @@
     "matchFramerate": "Igazítás a tartalom képfrissítéséhez",
     "matchHint": "Az 50 fps-es adást simábban játssza 60 Hz-en (mpv).",
     "on": "Be",
-    "off": "Ki"
+    "off": "Ki",
+    "default": "alapértelmezett"
   },
   "notify": {
     "dismiss": "Vissza a bezáráshoz"
@@ -99,13 +100,17 @@
       "rain": "Esős",
       "snow": "Havas",
       "storm": "Zivatar"
-    }
+    },
+    "sleep": "TV kikapcsolása ennyi idő után",
+    "sleepHint": "A képernyővédőn állva, HDMI-CEC-en — a box bekapcsolva marad.",
+    "sleepNever": "Soha",
+    "sleepAfter": "{min} perc"
   },
   "bt": {
     "title": "Bluetooth",
     "scan": "Keresés",
     "scanning": "Keresés…",
-    "working": "Dolgozom…",
+    "working": "Folyamatban…",
     "none": "Nincs eszköz - indíts keresést",
     "off": "A Bluetooth ki van kapcsolva",
     "connected": "csatlakoztatva",
@@ -124,7 +129,7 @@
     "default": "alapértelmezett",
     "clear": "Törlés",
     "customCount": "{n} egyéni",
-    "powerTitle": "Power gomb",
+    "powerTitle": "Bekapcsológomb",
     "powerWarn": "Ezután a boxot kézzel kell visszakapcsolni.",
     "power": {
       "tv": "Csak a TV kikapcsolása",
@@ -176,13 +181,14 @@
     "version": "Verzió",
     "device": "Eszköz",
     "ip": "IP-cím",
-    "wifi": "WiFi",
+    "wifi": "Wi-Fi",
     "cpuTemp": "CPU hőmérséklet",
     "uptime": "Működési idő",
     "memory": "Memória (szabad/össz.)",
     "unitD": "n",
     "unitH": "ó",
-    "unitM": "p"
+    "unitM": "p",
+    "storage": "Tárhely (szabad/össz.)"
   },
   "app": {
     "shellUnreachable": "A box nem elérhető",
@@ -191,10 +197,10 @@
   },
   "store": {
     "title": "Alkalmazásbolt",
-    "hint": "Közösségi appok a tvbox-apps registryből. A telepítés felteszi az appot a főképernyőre.",
-    "loading": "Registry betöltése…",
-    "registryError": "Az alkalmazás-registry nem elérhető",
-    "empty": "Még nincs app a registryben",
+    "hint": "Közösségi alkalmazások a tvbox áruházból. A telepítés felteszi az appot a főképernyőre.",
+    "loading": "Áruház betöltése…",
+    "registryError": "Az áruház nem érhető el",
+    "empty": "Még nincs alkalmazás az áruházban",
     "builtin": "Beépített",
     "setUrl": "Cím megadása",
     "urlPrompt": "{name} szerver címe",
@@ -266,7 +272,11 @@
     "allSet": "Minden kész",
     "allSetHint": "A boxod készen áll. Jó szórakozást!",
     "keymapLater": "Elmentve - a billentyűzetkiosztás a box következő frissítése után lép életbe.",
-    "tzLater": "Elmentve - az időzóna a box következő frissítése után lép életbe."
+    "tzLater": "Elmentve - az időzóna a box következő frissítése után lép életbe.",
+    "hourFormat": "Időformátum",
+    "hourFormat_auto": "Automatikus",
+    "hourFormat_12": "12 órás",
+    "hourFormat_24": "24 órás"
   },
   "keymap": {
     "gb": "Angol (Egyesült Királyság)",
@@ -314,5 +324,19 @@
     "done": "Kész",
     "restored": "Visszaállítva - a box most újraindul…",
     "error": "Nem sikerült elindítani a telefonos munkamenetet"
+  },
+  "parental": {
+    "title": "Szülői felügyelet",
+    "set": "PIN beállítása",
+    "hint": "Egy PIN az egész boxhoz — az alkalmazások ezzel zárolnak tartalmat (pl. Élő TV kategóriák).",
+    "change": "PIN módosítása",
+    "clear": "PIN törlése",
+    "newPin": "Új PIN megadása",
+    "confirmPin": "Add meg még egyszer",
+    "mismatch": "A két PIN nem egyezik",
+    "saved": "PIN elmentve",
+    "cleared": "PIN törölve",
+    "enterPin": "Add meg a PIN-kódot",
+    "wrongPin": "Hibás PIN"
   }
 }

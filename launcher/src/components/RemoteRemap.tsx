@@ -47,7 +47,7 @@ function Check() {
       strokeWidth="2.6"
       strokeLinecap="round"
       strokeLinejoin="round"
-      className="w-[2.2vh] h-[2.2vh] shrink-0 text-[#39c0d6]"
+      className="w-[2.2vh] h-[2.2vh] shrink-0 text-accent"
     >
       <path d="M5 13l4 4L19 7" />
     </svg>
@@ -64,7 +64,9 @@ export function RemoteRemap() {
   const saved = config?.remote?.devices || {};
   const power: RemotePower = config?.remote?.power || "tv";
 
-  const [devices, setDevices] = useState<ConnectedRemote[]>([]);
+  // null = first poll still in flight (renders nothing), [] = really no remotes -
+  // so the "none connected" copy can't flash before the list arrives
+  const [devices, setDevices] = useState<ConnectedRemote[] | null>(null);
   const [expanded, setExpanded] = useState<string | null>(null);
   const [learning, setLearning] = useState<{ id: string; action: RemoteAction } | null>(null);
   const learningRef = useRef(learning);
@@ -121,7 +123,7 @@ export function RemoteRemap() {
     return out;
   };
   const save = async (id: string, action: RemoteAction, code: number) => {
-    const name = devices.find((d) => d.id === id)?.name || saved[id]?.name || id;
+    const name = (devices ?? []).find((d) => d.id === id)?.name || saved[id]?.name || id;
     const next = cloneSaved();
     const dev = next[id] || (next[id] = { name, keymap: {} });
     dev.name = name;
@@ -148,9 +150,9 @@ export function RemoteRemap() {
     <div className="mt-[4vh]">
       <div className="text-[2.4vh] font-semibold mb-[0.6vh]">{t("remote.title")}</div>
       <div className="text-[1.8vh] text-fg-dim mb-[1.4vh] max-w-[64vw]">{t("remote.hint")}</div>
-      {!devices.length && <div className="text-[1.9vh] text-fg-dim">{t("remote.none")}</div>}
+      {devices !== null && !devices.length && <div className="text-[1.9vh] text-fg-dim">{t("remote.none")}</div>}
       <div className="flex flex-col gap-[0.8vh] max-w-[70vw]">
-        {devices.map((d) => {
+        {(devices ?? []).map((d) => {
           const km = d.keymap || {};
           const custom = Object.keys(km).length;
           const open = expanded === d.id;
@@ -163,7 +165,7 @@ export function RemoteRemap() {
               >
                 <span className="text-[2.1vh] flex-1 text-left truncate">{d.name}</span>
                 {custom > 0 && (
-                  <span className="text-[1.7vh] text-[#39c0d6] shrink-0">{t("remote.customCount", { n: custom })}</span>
+                  <span className="text-[1.7vh] text-accent shrink-0">{t("remote.customCount", { n: custom })}</span>
                 )}
                 <Chevron open={open} />
               </FocusButton>
@@ -181,9 +183,9 @@ export function RemoteRemap() {
                         >
                           <span className="text-[2vh] flex-1 text-left truncate">{t("remote.action." + a)}</span>
                           {isLearning ? (
-                            <span className="text-[1.8vh] text-[#39c0d6] shrink-0">{t("remote.press")}</span>
+                            <span className="text-[1.8vh] text-accent shrink-0">{t("remote.press")}</span>
                           ) : bound ? (
-                            <span className="text-[1.7vh] text-[#39c0d6] shrink-0">{t("remote.custom")}</span>
+                            <span className="text-[1.7vh] text-accent shrink-0">{t("remote.custom")}</span>
                           ) : (
                             <span className="text-[1.7vh] text-fg-dim shrink-0">{t("remote.default")}</span>
                           )}
@@ -225,7 +227,7 @@ export function RemoteRemap() {
           ))}
         </div>
         {power === "tv_and_box" && (
-          <div className="text-[1.7vh] text-[#e0b341] mt-[0.9vh] max-w-[64vw]">{t("remote.powerWarn")}</div>
+          <div className="text-[1.7vh] text-warn mt-[0.9vh] max-w-[64vw]">{t("remote.powerWarn")}</div>
         )}
       </div>
     </div>

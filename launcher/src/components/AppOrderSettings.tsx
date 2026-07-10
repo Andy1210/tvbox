@@ -20,7 +20,9 @@ const Chevron = ({ up }: { up?: boolean }) => (
 
 export function AppOrderSettings() {
   const { t, loc, tag } = useI18n();
-  const [apps, setApps] = useState<AppManifest[]>([]);
+  // null = still loading (renders nothing), [] = a real empty list - so the
+  // "no apps" copy can't flash before fetchApps resolves (StoreSettings pattern)
+  const [apps, setApps] = useState<AppManifest[] | null>(null);
   const order = useAppPrefsStore((s) => s.order);
   const hidden = useAppPrefsStore((s) => s.hidden);
   const setOrder = useAppPrefsStore((s) => s.setOrder);
@@ -38,10 +40,11 @@ export function AppOrderSettings() {
 
   // full list (incl. hidden) in the effective order, so reordering is stable
   const ordered = useMemo(() => {
-    const byId = new Map(apps.map((a) => [a.id, a]));
+    const list = apps ?? [];
+    const byId = new Map(list.map((a) => [a.id, a]));
     const byName = (x: string, y: string) => loc(byId.get(x)!.name).localeCompare(loc(byId.get(y)!.name), tag);
     return orderIds(
-      apps.map((a) => a.id),
+      list.map((a) => a.id),
       order,
       byName,
     ).map((id) => byId.get(id)!);
@@ -149,7 +152,7 @@ export function AppOrderSettings() {
             </div>
           );
         })}
-        {!ordered.length && <div className="text-[1.9vh] text-fg-dim">{t("appsettings.none")}</div>}
+        {apps !== null && !ordered.length && <div className="text-[1.9vh] text-fg-dim">{t("appsettings.none")}</div>}
         {status && (
           <div className="text-[1.8vh] text-fg-dim mt-[0.6vh]" role="status" aria-live="polite">
             {status}

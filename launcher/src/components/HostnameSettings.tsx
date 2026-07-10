@@ -58,7 +58,7 @@ export function HostnameSettings() {
     <div className="mt-[3vh]">
       <div className="text-[2.4vh] font-semibold mb-[0.6vh]">{t("hostname.title")}</div>
       <div className="text-[1.9vh] text-fg-dim mb-[1.4vh] max-w-[70vw]">{t("hostname.hint")}</div>
-      {deferred && <div className="text-[1.9vh] text-[#e0b64a] mb-[1vh] max-w-[70vw]">{t("hostname.later")}</div>}
+      {deferred && <div className="text-[1.9vh] text-warn mb-[1vh] max-w-[70vw]">{t("hostname.later")}</div>}
       <FocusButton
         focusKey="hostname-open"
         onEnter={() => setEditing(true)}

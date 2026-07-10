@@ -91,7 +91,7 @@ export function UpdateSettings() {
         <div
           className={[
             "py-[0.7vh] text-[2.1vh] font-semibold",
-            st?.state === "error" ? "text-red-400" : st?.available ? "text-[#39c0d6]" : "",
+            st?.state === "error" ? "text-red-400" : st?.available ? "text-accent" : "",
           ].join(" ")}
         >
           {statusLine}
@@ -103,7 +103,7 @@ export function UpdateSettings() {
           </div>
         )}
         {st?.failed && (
-          <div className="text-[1.8vh] text-amber-400 max-w-[60vw] mb-[0.6vh]">
+          <div className="text-[1.8vh] text-warn max-w-[60vw] mb-[0.6vh]">
             {t("update.failedRollback", { version: st.failed.to })}
           </div>
         )}
@@ -124,7 +124,7 @@ export function UpdateSettings() {
               onEnter={() => {
                 if (!busy) onInstall();
               }}
-              className="px-[2vw] py-[1.3vh] rounded-[1vh] bg-[#1f6feb] text-[1.9vh] font-bold"
+              className="px-[2vw] py-[1.3vh] rounded-[1vh] bg-accent text-bg-1 text-[1.9vh] font-bold"
             >
               {t("update.install")}
             </FocusButton>
@@ -140,7 +140,7 @@ export function UpdateSettings() {
           className="mt-[1.4vh] w-full px-[2vw] py-[1.5vh] rounded-[1.1vh] bg-white/5 flex items-center justify-between gap-[1.5vw]"
         >
           <span className="text-[2.1vh]">{t("update.auto")}</span>
-          <span className={["text-[1.9vh] font-semibold", auto ? "text-[#39c0d6]" : "text-fg-dim"].join(" ")}>
+          <span className={["text-[1.9vh] font-semibold", auto ? "text-accent" : "text-fg-dim"].join(" ")}>
             {auto ? t("display.on") : t("display.off")}
           </span>
         </FocusButton>
@@ -150,7 +150,7 @@ export function UpdateSettings() {
         <div className="text-[1.8vh] text-fg-dim max-w-[60vw]">{t("update.osAuto")}</div>
         {st?.os.rebootRequired ? (
           <>
-            <div className="text-[2vh] text-amber-400 mt-[1vh] max-w-[60vw]">{t("update.rebootNeeded")}</div>
+            <div className="text-[2vh] text-warn mt-[1vh] max-w-[60vw]">{t("update.rebootNeeded")}</div>
             {st.os.packages.length > 0 && (
               <div className="text-[1.7vh] text-fg-dim mt-[0.4vh] break-words">{st.os.packages.join(", ")}</div>
             )}

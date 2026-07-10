@@ -22,7 +22,7 @@
   "settings": {
     "title": "Settings",
     "language": "Language",
-    "wifi": "WiFi"
+    "wifi": "Wi-Fi"
   },
   "settingsCat": {
     "general": "General",
@@ -59,7 +59,8 @@
     "matchFramerate": "Match content framerate",
     "matchHint": "Plays 50fps content more smoothly on 60Hz (mpv).",
     "on": "On",
-    "off": "Off"
+    "off": "Off",
+    "default": "default"
   },
   "notify": {
     "dismiss": "Back to dismiss"
@@ -99,7 +100,11 @@
       "rain": "Rain",
       "snow": "Snow",
       "storm": "Storm"
-    }
+    },
+    "sleep": "Turn the TV off after",
+    "sleepHint": "On the screensaver, over HDMI-CEC — the box stays on.",
+    "sleepNever": "Never",
+    "sleepAfter": "{min} min"
   },
   "bt": {
     "title": "Bluetooth",
@@ -176,13 +181,14 @@
     "version": "Version",
     "device": "Device",
     "ip": "IP address",
-    "wifi": "WiFi",
+    "wifi": "Wi-Fi",
     "cpuTemp": "CPU temperature",
     "uptime": "Uptime",
     "memory": "Memory (free/total)",
     "unitD": "d",
     "unitH": "h",
-    "unitM": "m"
+    "unitM": "m",
+    "storage": "Storage (free/total)"
   },
   "app": {
     "shellUnreachable": "Can't reach the box",
@@ -191,10 +197,10 @@
   },
   "store": {
     "title": "App Store",
-    "hint": "Community apps from the tvbox-apps registry. Installing adds the app to your home screen.",
-    "loading": "Loading the registry…",
-    "registryError": "The app registry is unreachable",
-    "empty": "No apps in the registry yet",
+    "hint": "Community apps from the tvbox store. Installing adds the app to your home screen.",
+    "loading": "Loading the store…",
+    "registryError": "The app store is unreachable",
+    "empty": "No apps in the store yet",
     "builtin": "Built in",
     "setUrl": "Set address",
     "urlPrompt": "Server address for {name}",
@@ -266,7 +272,11 @@
     "allSet": "All set",
     "allSetHint": "Your box is ready. Enjoy.",
     "keymapLater": "Saved - the keyboard layout applies after the next box update.",
-    "tzLater": "Saved - the time zone applies after the next box update."
+    "tzLater": "Saved - the time zone applies after the next box update.",
+    "hourFormat": "Time format",
+    "hourFormat_auto": "Automatic",
+    "hourFormat_12": "12-hour",
+    "hourFormat_24": "24-hour"
   },
   "keymap": {
     "gb": "English (UK)",
@@ -314,5 +324,19 @@
     "done": "Done",
     "restored": "Restored - the box restarts now…",
     "error": "Couldn't start the phone session"
+  },
+  "parental": {
+    "title": "Parental controls",
+    "set": "Set a PIN",
+    "hint": "One PIN for the whole box — apps use it to lock content (e.g. Live TV categories).",
+    "change": "Change PIN",
+    "clear": "Remove PIN",
+    "newPin": "Enter a new PIN",
+    "confirmPin": "Enter it again",
+    "mismatch": "The two PINs don't match",
+    "saved": "PIN saved",
+    "cleared": "PIN removed",
+    "enterPin": "Enter the PIN",
+    "wrongPin": "Wrong PIN"
   }
 }

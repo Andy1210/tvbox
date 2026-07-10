@@ -113,14 +113,14 @@ export function TimezonePicker({ onChange, autoFocus }: { onChange?: (tz: string
             strokeWidth="2.4"
             strokeLinecap="round"
             strokeLinejoin="round"
-            className="w-[2.4vh] h-[2.4vh] text-[#39c0d6]"
+            className="w-[2.4vh] h-[2.4vh] text-accent"
             aria-hidden
           >
             <path d="M5 12.5l4.5 4.5L19 7" />
           </svg>
         )}
       </div>
-      {deferred && <div className="text-[1.9vh] text-[#e0b64a] mb-[1vh]">{t("region.tzLater")}</div>}
+      {deferred && <div className="text-[1.9vh] text-warn mb-[1vh]">{t("region.tzLater")}</div>}
 
       {selected === null ? (
         <>
@@ -135,7 +135,7 @@ export function TimezonePicker({ onChange, autoFocus }: { onChange?: (tz: string
               >
                 <span className="text-[2.1vh]">{r}</span>
                 <span className="flex items-center gap-[1.2vw] shrink-0 text-[1.7vh] text-fg-dim">
-                  {r === currentRegion && <span className="w-[1.2vh] h-[1.2vh] rounded-full bg-[#39c0d6] shrink-0" />}
+                  {r === currentRegion && <span className="w-[1.2vh] h-[1.2vh] rounded-full bg-accent shrink-0" />}
                   {byRegion.get(r)?.length}
                 </span>
               </FocusButton>
@@ -182,13 +182,13 @@ export function TimezonePicker({ onChange, autoFocus }: { onChange?: (tz: string
                     stroke="currentColor"
                     strokeWidth="2.4"
                     strokeLinecap="round"
-                    className="w-[2.2vh] h-[2.2vh] shrink-0 animate-spin text-[#39c0d6]"
+                    className="w-[2.2vh] h-[2.2vh] shrink-0 animate-spin text-accent"
                     aria-hidden
                   >
                     <path d="M12 3a9 9 0 1 0 9 9" />
                   </svg>
                 ) : (
-                  c.tz === active && <span className="w-[1.2vh] h-[1.2vh] rounded-full bg-[#39c0d6] shrink-0" />
+                  c.tz === active && <span className="w-[1.2vh] h-[1.2vh] rounded-full bg-accent shrink-0" />
                 )}
               </FocusButton>
             ))}

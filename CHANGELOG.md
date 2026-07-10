@@ -5,6 +5,30 @@ updates). `scripts/make-release.sh` lifts the current version's `hu`/`en`
 blocks into the OTA feed's `notes` - keep both languages, keep it short, and
 write for the person on the couch (what changes for THEM), not for developers.
 
+## 1.3.0
+
+### hu
+
+- Időjárás a főképernyőn (a képernyővédőnél megadott város alapján).
+- Automatikus TV-kikapcsolás: a képernyővédő után beállítható idővel a TV magától kikapcsol (HDMI-CEC) — zene lejátszása közben soha.
+- Szülői felügyelet a Beállításokban: PIN beállítása, módosítása, törlése — ugyanazt a PIN-t használja minden alkalmazás (pl. az Élő TV zárolt kategóriái).
+- A felbontásválasztó jelöli a TV alapértelmezett módját, így könnyű visszaállni rá.
+- Választható óraformátum (automatikus / 12 / 24 órás).
+- A Bluetooth-eszközöknél látszik a távirányító töltöttsége.
+- A Névjegy mutatja a szabad tárhelyet.
+- Sok apró szépítés: olvashatóbb feliratok a csempéken, finomabb animációk, egységes színek, helyes magyar dátumírás.
+
+### en
+
+- Weather on the home screen (based on the city set for the screensaver).
+- Auto power-off: after a configurable time on the screensaver the TV turns itself off (HDMI-CEC) — never while music is playing.
+- Parental controls in Settings: set, change or remove the PIN — the same PIN is used by every app (e.g. Live TV's locked categories).
+- The resolution picker marks the TV's default mode, so it's easy to switch back.
+- Selectable time format (automatic / 12-hour / 24-hour).
+- Bluetooth devices show the remote's battery level.
+- About shows free storage.
+- Lots of small polish: more readable tile labels, smoother animations, consistent colors, correct Hungarian date formatting.
+
 ## 1.2.2
 
 ### hu

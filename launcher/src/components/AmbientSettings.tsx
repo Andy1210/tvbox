@@ -28,6 +28,10 @@ export function AmbientSettings() {
   }, []);
 
   const setIdle = (n: number) => save({ idleMinutes: Math.max(1, Math.min(60, n)) });
+  // auto-sleep steps (minutes on the screensaver before CEC TV-off; 0 = never)
+  const SLEEP_STEPS = [0, 15, 30, 60, 120];
+  const sleep = a?.sleepMinutes ?? 0;
+  const cycleSleep = () => save({ sleepMinutes: SLEEP_STEPS[(SLEEP_STEPS.indexOf(sleep) + 1) % SLEEP_STEPS.length] });
   const removePhoto = (name: string) => {
     deletePhoto(name).then(refreshPhotos);
     setTimeout(() => setFocus("ambient-photos-upload"), 0);
@@ -72,7 +76,7 @@ export function AmbientSettings() {
           className="px-[2vw] py-[1.5vh] rounded-[1.1vh] bg-white/5 flex items-center justify-between gap-[1.5vw]"
         >
           <span className="text-[2.1vh]">{t("ambient.enable")}</span>
-          <span className={["text-[1.9vh] font-semibold", enabled ? "text-[#39c0d6]" : "text-fg-dim"].join(" ")}>
+          <span className={["text-[1.9vh] font-semibold", enabled ? "text-accent" : "text-fg-dim"].join(" ")}>
             {enabled ? t("display.on") : t("display.off")}
           </span>
         </FocusButton>
@@ -121,6 +125,20 @@ export function AmbientSettings() {
         >
           <span className="text-[2.1vh]">{t("ambient.city")}</span>
           <span className="text-[1.9vh] text-fg-dim truncate">{city || t("ambient.notSet")}</span>
+        </FocusButton>
+
+        <FocusButton
+          focusKey="ambient-sleep"
+          onEnter={cycleSleep}
+          className="px-[2vw] py-[1.5vh] rounded-[1.1vh] bg-white/5 flex items-center justify-between gap-[1.5vw]"
+        >
+          <span className="min-w-0">
+            <span className="text-[2.1vh]">{t("ambient.sleep")}</span>
+            <span className="block text-[1.7vh] text-fg-dim">{t("ambient.sleepHint")}</span>
+          </span>
+          <span className="text-[1.9vh] font-semibold shrink-0 text-fg-dim tabular-nums">
+            {sleep ? t("ambient.sleepAfter", { min: String(sleep) }) : t("ambient.sleepNever")}
+          </span>
         </FocusButton>
 
         <div className="flex items-center gap-[1.5vw]">

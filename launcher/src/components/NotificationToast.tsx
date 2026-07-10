@@ -9,25 +9,49 @@ import type { TvNotification } from "../lib/shell";
 export function NotificationToast() {
   const { t } = useI18n();
   const [note, setNote] = useState<TvNotification | null>(null);
+  const [visible, setVisible] = useState(false); // drives the HOME-toast-style slide/fade
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const hideTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  // Slide out first, then unmount once the transition has run - the keydown
+  // swallow and MQTT cleanup semantics stay exactly as before.
   const dismiss = () => {
-    setNote(null);
+    setVisible(false);
     if (timer.current) {
       clearTimeout(timer.current);
       timer.current = null;
     }
+    if (hideTimer.current) clearTimeout(hideTimer.current);
+    hideTimer.current = setTimeout(() => {
+      setNote(null);
+      hideTimer.current = null;
+    }, 250);
   };
 
   useEffect(() => {
     if (!window.tvbox?.onNotify) return;
     return window.tvbox.onNotify((n) => {
+      if (hideTimer.current) {
+        // a new note arrived mid-exit-animation: keep it mounted
+        clearTimeout(hideTimer.current);
+        hideTimer.current = null;
+      }
       setNote(n || {});
       if (timer.current) clearTimeout(timer.current);
       const dur = n && typeof n.duration === "number" ? n.duration : 8000;
-      timer.current = dur > 0 ? setTimeout(() => setNote(null), dur) : null;
+      timer.current = dur > 0 ? setTimeout(dismiss, dur) : null;
     });
   }, []);
+
+  // Entry: the card mounts hidden (translated + transparent); flip `visible` on
+  // the next frame so the transition animates it in - same pattern as the HOME
+  // status toast, replicated locally because this one must still unmount.
+  const hasContent = !!note && !!(note.title || note.message || note.image);
+  useEffect(() => {
+    if (!hasContent) return;
+    const raf = requestAnimationFrame(() => setVisible(true));
+    return () => cancelAnimationFrame(raf);
+  }, [note, hasContent]);
 
   useEffect(() => {
     if (!note) return;
@@ -42,9 +66,16 @@ export function NotificationToast() {
     return () => window.removeEventListener("keydown", onKey, true);
   }, [note]);
 
-  if (!note || (!note.title && !note.message && !note.image)) return null;
+  if (!hasContent) return null;
   return (
-    <div className="fixed top-[4vh] left-1/2 -translate-x-1/2 z-[70] w-auto max-w-[64vw] rounded-[1.6vh] bg-[rgba(12,16,22,0.97)] shadow-[0_1.2vh_4vh_rgba(0,0,0,0.6)] ring-[0.2vh] ring-white/10 overflow-hidden">
+    <div
+      className={[
+        "fixed top-[4vh] left-1/2 -translate-x-1/2 z-[70] w-auto max-w-[64vw] rounded-[1.6vh]",
+        "bg-[rgba(12,16,22,0.97)] shadow-[0_1.2vh_4vh_rgba(0,0,0,0.6)] ring-[0.2vh] ring-white/10 overflow-hidden",
+        "transition-[opacity,translate] duration-200",
+        visible ? "opacity-100 translate-y-0" : "opacity-0 -translate-y-[2vh] pointer-events-none",
+      ].join(" ")}
+    >
       {note.image && <img src={note.image} alt="" className="w-full max-h-[46vh] object-cover" />}
       <div className="px-[2.4vw] py-[2vh]">
         {note.title && <div className="text-[2.6vh] font-bold">{note.title}</div>}

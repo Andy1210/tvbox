@@ -78,6 +78,7 @@ function publicConfig() {
       enabled: !(c.ambient && c.ambient.enabled === false), // default on
       idleMinutes: (c.ambient && c.ambient.idleMinutes) || 5,
       city: (c.ambient && c.ambient.city) || "",
+      sleepMinutes: (c.ambient && c.ambient.sleepMinutes) || 0, // 0 = never; N = CEC TV-off after N min on the screensaver
     },
     mqtt: {
       // secret-free: never expose the broker password to the launcher
@@ -88,6 +89,10 @@ function publicConfig() {
     update: {
       // OTA self-update (updater.js); feed URL itself stays box-local
       auto: !(c.update && c.update.auto === false), // default on
+    },
+    ui: {
+      // launcher preferences. hourFormat: "auto" (locale default) | "12" | "24"
+      hourFormat: (c.ui && ["12", "24"].includes(c.ui.hourFormat) && c.ui.hourFormat) || "auto",
     },
     remote: {
       // Per-device button remap + Power-button policy, consumed by
@@ -261,6 +266,14 @@ function rawUpdate() {
   return load().update || null;
 }
 
+// Launcher UI preferences (clock format). Whitelisted so junk can't persist.
+function setUi(ui) {
+  const c = load();
+  const hf = ui && ["auto", "12", "24"].includes(ui.hourFormat) ? ui.hourFormat : undefined;
+  c.ui = { ...c.ui, ...(hf ? { hourFormat: hf } : {}) };
+  save(c);
+}
+
 // Remote button remap + Power policy (consumed by remote_input_bridge.py).
 // Merges the provided fields so saving devices doesn't wipe power and vice
 // versa; the renderer sends the FULL devices map when it sends devices. Stored
@@ -296,6 +309,7 @@ module.exports = {
   rawStore,
   setDisplay,
   rawDisplay,
+  setUi,
   setAudio,
   rawAudio,
   setAmbient,
