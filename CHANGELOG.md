@@ -5,6 +5,16 @@ updates). `scripts/make-release.sh` lifts the current version's `hu`/`en`
 blocks into the OTA feed's `notes` - keep both languages, keep it short, and
 write for the person on the couch (what changes for THEM), not for developers.
 
+## 1.5.1
+
+### hu
+
+- Az áruházban a telepítve/eltávolítva üzenet többé nem jelenik meg egy másik alkalmazás adatlapján.
+
+### en
+
+- In the store, the installed/removed message no longer shows up on a different app's detail page.
+
 ## 1.5.0
 
 ### hu
