@@ -32,7 +32,10 @@ export function StoreSettings() {
   const { t, loc } = useI18n();
   const [entries, setEntries] = useState<StoreEntry[] | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [status, setStatus] = useState<string | null>(null);
+  // status is scoped to the app it's about, so a "X removed" / "Y installed"
+  // message can never leak onto a different app's detail view (it did: the
+  // status lingered and showed the last-acted app's name on every app you opened).
+  const [status, setStatus] = useState<{ id: string; text: string } | null>(null);
   const [urlEdit, setUrlEdit] = useState<StoreEntry | null>(null); // OSK open for this app
   const [detailId, setDetailId] = useState<string | null>(null); // AppDetail open for this app
 
@@ -94,7 +97,7 @@ export function StoreSettings() {
         pending.current.delete(id);
         if (e) {
           const key = e.installed ? (kind === "update" ? "store.updated" : "store.installed") : "store.failed";
-          setStatus(t(key, { name: loc(e.name) }));
+          setStatus({ id: e.id, text: t(key, { name: loc(e.name) }) });
           if (detailId === id) setTimeout(() => setFocus(e.installed ? "detail-remove" : "detail-install"), 0);
         }
       }
@@ -112,7 +115,7 @@ export function StoreSettings() {
     const ok = await storeInstall(e.id);
     if (!ok) {
       pending.current.delete(e.id);
-      setStatus(t("store.failed", { name: loc(e.name) }));
+      setStatus({ id: e.id, text: t("store.failed", { name: loc(e.name) }) });
       setTimeout(() => setFocus(kind === "update" ? "detail-update" : "detail-install"), 0);
       return;
     }
@@ -129,7 +132,7 @@ export function StoreSettings() {
   const update = (e: StoreEntry) => kickoff(e, "update");
   const remove = async (e: StoreEntry) => {
     const ok = await storeUninstall(e.id);
-    setStatus(t(ok ? "store.removed" : "store.failed", { name: loc(e.name) }));
+    setStatus({ id: e.id, text: t(ok ? "store.removed" : "store.failed", { name: loc(e.name) }) });
     if (ok) await load();
     setTimeout(() => setFocus(ok ? "detail-install" : "detail-remove"), 0);
   };
@@ -137,7 +140,10 @@ export function StoreSettings() {
     setUrlEdit(null);
     if (e.urlConfig) {
       const ok = await saveAppUrl(e.urlConfig, value.trim());
-      setStatus(ok ? t("store.urlSaved", { name: loc(e.name) }) : t("store.failed", { name: loc(e.name) }));
+      setStatus({
+        id: e.id,
+        text: ok ? t("store.urlSaved", { name: loc(e.name) }) : t("store.failed", { name: loc(e.name) }),
+      });
       if (ok) await load();
     }
     setTimeout(() => setFocus("detail-url"), 0);
@@ -153,7 +159,7 @@ export function StoreSettings() {
       <>
         <AppDetail
           app={detailApp}
-          status={status}
+          status={status && status.id === detailApp.id ? status.text : null}
           onInstall={() => install(detailApp)}
           onUpdate={() => update(detailApp)}
           onRemove={() => remove(detailApp)}
@@ -239,7 +245,7 @@ export function StoreSettings() {
         )}
         {status && (
           <div className="text-[1.8vh] text-fg-dim mt-[0.6vh]" role="status" aria-live="polite">
-            {status}
+            {status.text}
           </div>
         )}
       </div>
