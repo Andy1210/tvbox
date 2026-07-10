@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { act, render } from "@testing-library/react";
+import { render } from "@testing-library/react";
 import { FocusContext, useFocusable } from "@noriginmedia/norigin-spatial-navigation";
 import { FocusButton } from "../components/FocusButton";
 import { setupRemote, place, placeRow, placeCol, remote, setFocus, getCurrentFocusKey } from "./remote";
@@ -24,7 +24,7 @@ function Group({ focusKey, children }: { focusKey: string; children: React.React
 
 describe("horizontal menu", () => {
   const onC = vi.fn();
-  beforeEach(() => {
+  beforeEach(async () => {
     onC.mockClear();
     const { getByText } = render(
       <Group focusKey="menu">
@@ -40,47 +40,47 @@ describe("horizontal menu", () => {
       </Group>,
     );
     placeRow([getByText("A"), getByText("B"), getByText("C")]);
-    act(() => setFocus("a"));
+    await setFocus("a");
   });
 
-  it("right/left walk the row", () => {
+  it("right/left walk the row", async () => {
     expect(getCurrentFocusKey()).toBe("a");
-    remote.right();
+    await remote.right();
     expect(getCurrentFocusKey()).toBe("b");
-    remote.right();
+    await remote.right();
     expect(getCurrentFocusKey()).toBe("c");
-    remote.left();
+    await remote.left();
     expect(getCurrentFocusKey()).toBe("b");
   });
 
-  it("stops at the edges instead of wrapping", () => {
-    remote.left(); // already leftmost
+  it("stops at the edges instead of wrapping", async () => {
+    await remote.left(); // already leftmost
     expect(getCurrentFocusKey()).toBe("a");
-    remote.right();
-    remote.right();
-    remote.right(); // past the rightmost
+    await remote.right();
+    await remote.right();
+    await remote.right(); // past the rightmost
     expect(getCurrentFocusKey()).toBe("c");
   });
 
-  it("up/down do nothing in a single row", () => {
-    remote.down();
-    remote.up();
+  it("up/down do nothing in a single row", async () => {
+    await remote.down();
+    await remote.up();
     expect(getCurrentFocusKey()).toBe("a");
   });
 
-  it("OK fires the focused item only", () => {
-    remote.right();
-    remote.right();
-    remote.ok();
+  it("OK fires the focused item only", async () => {
+    await remote.right();
+    await remote.right();
+    await remote.ok();
     expect(onC).toHaveBeenCalledTimes(1);
-    remote.left();
-    remote.ok(); // B has no handler; C must not fire again
+    await remote.left();
+    await remote.ok(); // B has no handler; C must not fire again
     expect(onC).toHaveBeenCalledTimes(1);
   });
 });
 
 describe("vertical menu", () => {
-  it("down/up walk the column", () => {
+  it("down/up walk the column", async () => {
     const { getByText } = render(
       <Group focusKey="col">
         <FocusButton focusKey="v0" onEnter={() => {}}>
@@ -95,20 +95,20 @@ describe("vertical menu", () => {
       </Group>,
     );
     placeCol([getByText("Wifi"), getByText("Display"), getByText("Audio")]);
-    act(() => setFocus("v0"));
-    remote.down();
+    await setFocus("v0");
+    await remote.down();
     expect(getCurrentFocusKey()).toBe("v1");
-    remote.down();
+    await remote.down();
     expect(getCurrentFocusKey()).toBe("v2");
-    remote.down();
+    await remote.down();
     expect(getCurrentFocusKey()).toBe("v2"); // bottom edge
-    remote.up();
+    await remote.up();
     expect(getCurrentFocusKey()).toBe("v1");
   });
 });
 
 describe("2D grid", () => {
-  it("navigates in all four directions", () => {
+  it("navigates in all four directions", async () => {
     const { getByText } = render(
       <Group focusKey="grid">
         {["1", "2", "3", "4", "5", "6"].map((n) => (
@@ -122,20 +122,20 @@ describe("2D grid", () => {
     const cell = (n: string) => getByText(n);
     placeRow(["1", "2", "3"].map(cell), { originY: 0 });
     placeRow(["4", "5", "6"].map(cell), { originY: 64 });
-    act(() => setFocus("g1"));
-    remote.right();
+    await setFocus("g1");
+    await remote.right();
     expect(getCurrentFocusKey()).toBe("g2"); // 1 -> 2
-    remote.down();
+    await remote.down();
     expect(getCurrentFocusKey()).toBe("g5"); // 2 -> 5
-    remote.left();
+    await remote.left();
     expect(getCurrentFocusKey()).toBe("g4"); // 5 -> 4
-    remote.up();
+    await remote.up();
     expect(getCurrentFocusKey()).toBe("g1"); // 4 -> 1
   });
 });
 
 describe("modal focus boundary", () => {
-  it("traps focus inside the modal even when a target exists outside", () => {
+  it("traps focus inside the modal even when a target exists outside", async () => {
     function Modal({ focusKey, children }: { focusKey: string; children: React.ReactNode }) {
       const { ref, focusKey: fk } = useFocusable({ focusKey, isFocusBoundary: true });
       return (
@@ -166,17 +166,17 @@ describe("modal focus boundary", () => {
     place(getByText("Cancel").parentElement!, 0, 0, 200, 40); // modal container
     place(getByText("Cancel"), 0, 0);
     place(getByText("OK"), 100, 0);
-    act(() => setFocus("m0"));
-    remote.right();
+    await setFocus("m0");
+    await remote.right();
     expect(getCurrentFocusKey()).toBe("m1");
-    remote.right(); // would reach "Outside" without the boundary
+    await remote.right(); // would reach "Outside" without the boundary
     expect(getCurrentFocusKey()).toBe("m1");
     expect(getCurrentFocusKey()).not.toBe("outside");
   });
 });
 
 describe("grouped panes (Settings sidebar <-> content)", () => {
-  it("crosses from the sidebar column into the content pane and back", () => {
+  it("crosses from the sidebar column into the content pane and back", async () => {
     const { getByText } = render(
       <Group focusKey="settings">
         <Group focusKey="sidebar">
@@ -205,13 +205,13 @@ describe("grouped panes (Settings sidebar <-> content)", () => {
     place(getByText("Screen"), 0, 64);
     place(getByText("Toggle"), 300, 0);
     place(getByText("Save"), 300, 64);
-    act(() => setFocus("cat-net"));
+    await setFocus("cat-net");
 
-    remote.right(); // sidebar -> content, lands on the closest item
+    await remote.right(); // sidebar -> content, lands on the closest item
     expect(getCurrentFocusKey()).toBe("opt-a");
-    remote.down();
+    await remote.down();
     expect(getCurrentFocusKey()).toBe("opt-b");
-    remote.left(); // content -> sidebar
+    await remote.left(); // content -> sidebar
     expect(["cat-net", "cat-disp"]).toContain(getCurrentFocusKey());
   });
 });

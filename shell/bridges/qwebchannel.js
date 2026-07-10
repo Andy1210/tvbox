@@ -136,6 +136,26 @@ module.exports.setup = function setup(ctx) {
         } catch (e) {}
       }
 
+      // system.exit / quit / closeApp -> leave the app, back to the HOME launcher.
+      // A Plex-HTPC-style client's "Exit?" confirmation calls one of these over
+      // QWebChannel expecting the host to tear the app down; without this it hit
+      // the generic no-op below, so the dialog's OK did nothing. Anything else
+      // under system.* is logged (not acted on) so an unknown exit verb on a new
+      // client is visible in ~/.tvbox/shell.log and easy to wire up.
+      if (path.indexOf("system.") === 0) {
+        var leaf = path.slice("system.".length);
+        if (leaf === "exit" || leaf === "quit" || leaf === "closeApp" || leaf === "close") {
+          try {
+            ipcRenderer.send("nav", "home");
+          } catch (e) {}
+          if (hasCb) cb({ errorCode: Success, result: {} });
+          return;
+        }
+        try {
+          ipcRenderer.send("plog", path, "(system call, not handled)");
+        } catch (e) {}
+      }
+
       // player -> the shell's mpv service
       if (has("player") && path.indexOf("player.") === 0) {
         try {

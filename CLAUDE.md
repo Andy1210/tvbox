@@ -44,11 +44,13 @@ Launcher (launcher/) is React+TS+Vite+Tailwind, spatial nav via
 | [app-sdk/](app-sdk/)                                                                       | `@tvbox/app-sdk` - the shared 10-foot UI SDK (spatial-nav focus components, OSK, PIN pad, i18n, config/capability clients). The launcher AND every app package consume it as source via the `@sdk` Vite alias.                                                                             |
 | `~/.tvbox/apps/<id>/`                                                                      | Where installed app PACKAGES live (manifest.json + plugin.js + web/), fetched from the [tvbox-apps registry](https://github.com/Andy1210/tvbox-apps). No in-shell first-party slot - the shell ships only the SDK. Schema: [docs/app-manifest.schema.json](docs/app-manifest.schema.json). |
 | [shell/appfetch.js](shell/appfetch.js) + [shell/appdata.js](shell/appdata.js)              | Capability brokers: `fetch` (origin-locked SSRF-guarded data proxy) + `storage` (per-app kv). See [docs/capabilities.md](docs/capabilities.md).                                                                                                                                            |
+| [shell/netguard.js](shell/netguard.js)                                                     | **Single** network-trust classifier (loopback/RFC1918/link-local/metadata/IPv4-mapped-IPv6). `appfetch`'s SSRF logic is the reference; `updater`/`main`/`install`/`pairing` all import from here so the guards can't drift apart.                                                          |
 | [shell/preload-app.js](shell/preload-app.js)                                               | Sandbox-safe contextBridge preload for **capability apps** in the isolated window (vs [shell/preload.js](shell/preload.js) for the main/Node-capable window).                                                                                                                              |
 | [tvbox-apps AUTHORING.md](https://github.com/Andy1210/tvbox-apps/blob/main/AUTHORING.md)   | How to write an app package (layout, manifest, web/ UI via `@tvbox/app-sdk`, host plugin, deps + platform baseline). The launcher no longer compiles in any app view.                                                                                                                      |
 | [launcher/src/lib/i18n.tsx](launcher/src/lib/i18n.tsx) + [locales/](launcher/src/locales/) | i18n; en+hu key parity is test-enforced.                                                                                                                                                                                                                                                   |
 | [deploy/deploy.sh](deploy/deploy.sh)                                                       | Build + rsync + provision + user-space setup. Idempotent.                                                                                                                                                                                                                                  |
 | [deploy/provision.sh](deploy/provision.sh)                                                 | **The ONE root step** (apt baseline, udev/polkit, linger, legacy migration).                                                                                                                                                                                                               |
+| [deploy/infra.list](deploy/infra.list) + [scripts/copy-infra.sh](scripts/copy-infra.sh)    | **Single source of truth** for every non-`shell/` file that must ship. All four channels (dev deploy, OTA tarball, SD image, CI) copy from it; `shell/updater.js`'s `INFRA_FILES` allowlist is cross-checked against it by `shell/updater.test.js`. Add a file here → it ships everywhere. |
 | [cec/cec_uinput_bridge.py](cec/cec_uinput_bridge.py)                                       | CEC→uinput bridge (user service). LG quirks documented in its docstring.                                                                                                                                                                                                                   |
 | [remote/remote_input_bridge.py](remote/remote_input_bridge.py)                             | BT/USB remote → uinput bridge (user service `tvbox-remote`): EVIOCGRAB + per-device button remap, learn mode over a FIFO. Keymap in `config.remote.devices`; UI is Settings → Peripherals ([launcher/src/components/RemoteRemap.tsx](launcher/src/components/RemoteRemap.tsx)).            |
 | [docs/app-manifest.md](docs/app-manifest.md)                                               | How to write an app (the extension story).                                                                                                                                                                                                                                                 |
@@ -207,6 +209,19 @@ touched one file, `npx prettier --write <file>` is enough; when in doubt run
   symlink flip-back). Keep it dependency-free POSIX sh; a release's infra
   files (incl. run-shell.sh itself) are only installed AFTER the new shell's
   first healthy boot (updater.js `onLauncherLoaded`), never before.
+- **`deploy/infra.list` is the ONE list of shipped infra files.** It used to be
+  hand-copied in five places (deploy.sh, make-release.sh, build-image.sh,
+  image.yml, updater.js) which silently drifted - the v1.1.0 BT-remote bridge
+  reached only dev deploys, not OTA/image. Now the copiers all read `infra.list`
+  via `scripts/copy-infra.sh`, and `updater.test.js` fails the build if
+  `INFRA_FILES` drifts from it. Never re-hardcode an infra path in a channel.
+- **Electron is pinned at 43** (`shell/package.json`). The `console-message`
+  webContents event uses the ≥37 `(event, details)` shape (details.level is a
+  string) - see `shell/main.js`. Don't revert to the old positional `(e, level,
+message, line, src)` signature.
+- **`wlr-randr` (not `wlrctl`) backs the resolution picker.** `shell/display.js`
+  shells out to `wlr-randr`; it must be in the apt lists (provision.sh HARD +
+  image 00-packages). Missing it = an empty resolution list, silently.
 - Nothing on the box ever reboots it or restarts the shell on its own while
   something plays: OS updates run with `Automatic-Reboot "false"` (Settings
   shows the reboot hint), and the OTA auto-apply is gated on `boxIdle()` +

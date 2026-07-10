@@ -45,10 +45,11 @@ jobs:
           F=image/stage-tvbox/01-tvbox/files
           mkdir -p "$F"
           rsync -a --delete --exclude node_modules --exclude apps-data --exclude '*.log' shell "$F/"
-          cp cec/cec_uinput_bridge.py deploy/run-shell.sh deploy/labwc-autostart \
-             deploy/cursor_idle_hide.py \
-             deploy/tvbox deploy/tvbox-cec.service deploy/provision.sh \
-             deploy/tvbox-flatpak-update.service deploy/tvbox-flatpak-update.timer "$F/"
+          # Infra files come from the ONE shared list (deploy/infra.list) via
+          # copy-infra.sh - byte-for-byte the same step build-image.sh runs, so
+          # a local image and this CI image ship an identical infra payload
+          # (remote_input_bridge.py, tvbox-remote.service, cec_vendor_shim.c…).
+          scripts/copy-infra.sh "$F"
 
       # pi-gen + the in-chroot Electron install need ~20 GB of scratch space.
       # Deliberately NOT the action's increase-runner-disk-size: that purges a
@@ -85,7 +86,13 @@ jobs:
       - name: pi-gen build
         run: |
           set -e
-          git clone --depth 1 --branch arm64 https://github.com/RPi-Distro/pi-gen.git
+          # Pinned for reproducible builds (keep in sync with scripts/build-image.sh):
+          # pi-gen's arm64 branch moves, so CI could otherwise bootstrap a different
+          # base image over time. Clone the branch (full history so the ref stays
+          # reachable after arm64 advances), then detach onto the exact commit.
+          PIGEN_REF="ca8aeed0ae300c2a89f55ce9617d5f96a27e99e5" # pi-gen arm64 @ 2026-07
+          git clone --branch arm64 https://github.com/RPi-Distro/pi-gen.git
+          git -C pi-gen checkout --detach "$PIGEN_REF"
           cp -r image/stage-tvbox pi-gen/
           cp image/config pi-gen/config
           touch pi-gen/stage2/SKIP_IMAGES   # export only the tvbox stage's image

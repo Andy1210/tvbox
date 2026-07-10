@@ -67,6 +67,10 @@ export function Home() {
     toastTimer.current = setTimeout(() => setToast(null), 2200);
   }, []);
 
+  // Clear a pending toast timer on unmount so it can't fire setState after the
+  // component is gone (cf. InstallWatcher).
+  useEffect(() => () => clearTimeout(toastTimer.current ?? undefined), []);
+
   // Every HOME tile is a ready, launchable app now - installing is entirely the
   // store's job (Settings → Store / the catalog show progress there). So onSelect
   // just launches, with the synthetic "Get more" tile, coming-soon and

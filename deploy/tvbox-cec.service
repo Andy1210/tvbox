@@ -9,6 +9,11 @@ Description=tvbox CEC remote -> uinput bridge
 ExecStart=/usr/bin/python3 %h/.tvbox/cec_uinput_bridge.py
 Restart=always
 RestartSec=3
+# Free hardening: the bridge never needs to gain privileges (device access is
+# via group membership; poweroff/standby go through logind D-Bus, not setuid).
+# Heavier sandboxing (ProtectSystem etc.) would break the shared /tmp FIFOs, so
+# keep it to this one knob.
+NoNewPrivileges=yes
 
 [Install]
 WantedBy=default.target

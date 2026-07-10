@@ -76,7 +76,6 @@ export function BluetoothSettings() {
       if (!busyRef.current && !scanningRef.current) refresh();
     }, 4000);
     return () => clearInterval(iv);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const scan = async () => {

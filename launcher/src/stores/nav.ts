@@ -1,10 +1,12 @@
 import { create } from "zustand";
 
-// Top-level launcher view: "home", "settings", "catalog" or "ambient". Apps are
-// launched by the shell and replace the window, so they're not views here.
+// Top-level launcher view. Ambient is an idle overlay rendered on top of Home,
+// not a view here; apps are launched by the shell and replace the window, so
+// they aren't views either.
+export type NavView = "home" | "settings" | "catalog";
 interface NavState {
-  view: string;
-  open: (view: string) => void;
+  view: NavView;
+  open: (view: NavView) => void;
   home: () => void;
 }
 

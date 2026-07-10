@@ -54,73 +54,56 @@ export async function fetchConfig(): Promise<PublicConfig | null> {
   }
 }
 
+// POST a partial config patch and return the fresh PublicConfig the shell echoes
+// back. Every save funnels through here so failure handling is uniform: a
+// non-2xx response (or a body missing `config`) THROWS rather than resolving
+// with `undefined`, which would corrupt useConfigStore.config. This mirrors
+// fetchConfig's "don't silently write garbage into the store" contract - the
+// store's setters await these, so a throw surfaces as a rejected save the caller
+// can catch, instead of a store quietly holding an invalid config.
+async function postConfig(patch: Record<string, unknown>): Promise<PublicConfig> {
+  const res = await fetch("/tvbox/api/config", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(patch),
+  });
+  if (!res.ok) throw new Error("config save failed: HTTP " + res.status);
+  const data = await res.json();
+  if (!data || !data.config) throw new Error("config save failed: no config in response");
+  return data.config as PublicConfig;
+}
+
 export type IptvInput =
   | { mode: "xtream"; xtream: { base: string; user: string; pass: string } }
   | { mode: "m3u"; m3u: { url: string; epgUrl: string } };
 
 export async function saveIptv(iptv: IptvInput): Promise<PublicConfig> {
-  const res = await fetch("/tvbox/api/config", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ iptv }),
-  });
-  const data = await res.json();
-  return data.config as PublicConfig;
+  return postConfig({ iptv });
 }
 
 export async function saveParental(p: { pin?: string; lockedGroups?: string[] }): Promise<PublicConfig> {
-  const res = await fetch("/tvbox/api/config", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ parental: p }),
-  });
-  const data = await res.json();
-  return data.config as PublicConfig;
+  return postConfig({ parental: p });
 }
 
 export type AmbientInput = Partial<{ enabled: boolean; idleMinutes: number; city: string }>;
 export async function saveAmbient(ambient: AmbientInput): Promise<PublicConfig> {
-  const res = await fetch("/tvbox/api/config", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ ambient }),
-  });
-  const data = await res.json();
-  return data.config as PublicConfig;
+  return postConfig({ ambient });
 }
 
 // OTA auto-update toggle (the feed URL itself is box-local, not a UI concern).
 export async function saveUpdate(update: { auto: boolean }): Promise<PublicConfig> {
-  const res = await fetch("/tvbox/api/config", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ update }),
-  });
-  const data = await res.json();
-  return data.config as PublicConfig;
+  return postConfig({ update });
 }
 
 // Per-device remote button remap. The caller sends the FULL desired devices map
 // (the shell replaces devices, but merges around power) and the shell reloads the bridge.
 export async function saveRemote(devices: Record<string, RemoteDeviceConfig>): Promise<PublicConfig> {
-  const res = await fetch("/tvbox/api/config", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ remote: { devices } }),
-  });
-  const data = await res.json();
-  return data.config as PublicConfig;
+  return postConfig({ remote: { devices } });
 }
 
 // Power-button policy (independent of the per-device keymap).
 export async function saveRemotePower(power: RemotePower): Promise<PublicConfig> {
-  const res = await fetch("/tvbox/api/config", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ remote: { power } }),
-  });
-  const data = await res.json();
-  return data.config as PublicConfig;
+  return postConfig({ remote: { power } });
 }
 
 export async function verifyPin(pin: string): Promise<boolean> {

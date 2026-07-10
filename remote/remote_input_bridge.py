@@ -31,6 +31,7 @@ Files (all under ~/.tvbox):
 import json
 import os
 import select
+import stat
 import subprocess
 import sys
 import time
@@ -187,6 +188,15 @@ class Bridge:
         self.ui = None
         self.ui_keys = set()
         self.learning = None  # device_id we're capturing a button for
+        # Last content written to remote-devices.json; seed from disk so a
+        # restart with an unchanged device set writes nothing. write_devices()
+        # (called from rescan() every 2s) only rewrites when this changes -
+        # avoids ~43k idle SD-card writes/day.
+        try:
+            with open(DEVICES_OUT) as f:
+                self._devices_json = f.read()
+        except OSError:
+            self._devices_json = None
         self.rescan()
 
     # ---- uinput output (declares the union of every managed device's keys) ----
@@ -213,17 +223,24 @@ class Bridge:
                 dev = InputDevice(path)
             except Exception:
                 continue
+            # Every InputDevice() opens an fd; close the ones we don't keep
+            # (not a remote, already managed, or grab failed) instead of leaving
+            # them to CPython refcount GC - rescan runs every 2s.
             if not manageable(dev):
+                dev.close()
                 continue
             seen.add(path)
-            if path not in self.devices:
-                try:
-                    dev.grab()
-                except Exception as ex:
-                    log("grab failed for", dev.name, ex)
-                    continue
-                self.devices[path] = dev
-                log("managing", dev.name, "id=", dev_key(dev), path)
+            if path in self.devices:
+                dev.close()  # already managing this path via the stored handle
+                continue
+            try:
+                dev.grab()
+            except Exception as ex:
+                log("grab failed for", dev.name, ex)
+                dev.close()
+                continue
+            self.devices[path] = dev
+            log("managing", dev.name, "id=", dev_key(dev), path)
         for path in list(self.devices):
             if path not in seen:
                 self.drop(path)
@@ -252,10 +269,14 @@ class Bridge:
                 continue
             seen.add(i)
             out.append({"id": i, "name": friendly_name(d)})
+        data = json.dumps({"devices": out})
+        if data == self._devices_json:
+            return  # unchanged since the last write - skip the SD-card write
         tmp = DEVICES_OUT + ".tmp"
         with open(tmp, "w") as f:
-            json.dump({"devices": out}, f)
-        os.replace(tmp, DEVICES_OUT)
+            f.write(data)
+        os.replace(tmp, DEVICES_OUT)  # still atomic when we DO write
+        self._devices_json = data
 
     # ---- event handling ----
     def handle(self, dev):
@@ -331,9 +352,21 @@ class Bridge:
 
 
 def open_fifo():
+    # Mirror the CEC bridge (cec_uinput_bridge.py cmd_reader): a pre-existing
+    # node must be a FIFO we own, else replace it; force 0600 (bridge and shell
+    # run as the same user, so the command FIFO stays private).
     try:
-        if not os.path.exists(CMD_FIFO):
-            os.mkfifo(CMD_FIFO)
+        st = None
+        try:
+            st = os.stat(CMD_FIFO)
+        except FileNotFoundError:
+            pass
+        if st is not None and (not stat.S_ISFIFO(st.st_mode) or st.st_uid != os.getuid()):
+            os.unlink(CMD_FIFO)
+            st = None
+        if st is None:
+            os.mkfifo(CMD_FIFO, 0o600)
+        os.chmod(CMD_FIFO, 0o600)
     except OSError as ex:
         log("fifo:", ex)
     # O_RDWR keeps the fifo readable without blocking and without EOF churn.

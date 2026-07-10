@@ -11,10 +11,10 @@
 // via register() - core registers the built-in ones, plugins register theirs.
 // A provider is { page(ctx) -> html, routes: { "METHOD /sub": handler | {handler,maxBody} } }.
 const http = require("http");
-const os = require("os");
 const fs = require("fs");
 const path = require("path");
 const crypto = require("crypto");
+const netguard = require("../netguard"); // shared lanIp (the QR must show the box's LAN address)
 
 const PORT = 8099;
 const TTL_MS = 5 * 60 * 1000;
@@ -37,20 +37,6 @@ let fails = 0;
 let activeKind = null;
 let activeLocale = "en";
 let pageOpened = false; // the phone has loaded the current session's page (e.g. to auto-advance the TV)
-
-function lanIp() {
-  const ifs = os.networkInterfaces();
-  let fallback = null;
-  for (const name of Object.keys(ifs)) {
-    for (const a of ifs[name] || []) {
-      if (a.family === "IPv4" && !a.internal) {
-        if (/^(192\.168\.|10\.|172\.(1[6-9]|2\d|3[01])\.)/.test(a.address)) return a.address;
-        fallback = fallback || a.address;
-      }
-    }
-  }
-  return fallback || "127.0.0.1";
-}
 
 function armTimeout() {
   if (timer) clearTimeout(timer);
@@ -177,7 +163,7 @@ function start(locale, kind) {
     server.listen(PORT, "0.0.0.0", () => console.log("[pairing] listening on :" + PORT));
   }
   armTimeout();
-  const ip = lanIp();
+  const ip = netguard.lanIp() || "127.0.0.1"; // no external IPv4: a useless-but-valid QR beats a broken one
   return { url: `http://${ip}:${PORT}/?c=${code}`, shortUrl: `http://${ip}:${PORT}`, ip, port: PORT, code };
 }
 

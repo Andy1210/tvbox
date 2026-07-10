@@ -5,6 +5,22 @@ updates). `scripts/make-release.sh` lifts the current version's `hu`/`en`
 blocks into the OTA feed's `notes` - keep both languages, keep it short, and
 write for the person on the couch (what changes for THEM), not for developers.
 
+## 1.2.0
+
+### hu
+
+- A Kép és hang beállításoknál a felbontásválasztó most már felsorolja és váltani is tudja a felbontásokat (korábban üres maradt).
+- A Bluetooth távirányítók (pl. Fire TV) Vissza gombja már alapból működik, betanítás nélkül.
+- A Plexből a főképernyőn a Vissza gombbal most tényleg vissza lehet lépni a box főképernyőjére.
+- Motorháztető alatt: frissített, biztonságosabb alkalmazásmotor és sok apró javítás.
+
+### en
+
+- The resolution picker (Settings → Picture & sound) now lists and switches resolutions (it was empty before).
+- Bluetooth remotes' (e.g. Fire TV) Back button now works out of the box, without remapping.
+- Backing out of Plex from its home screen with Back now returns you to the box's home screen.
+- Under the hood: an updated, more secure app engine and lots of small fixes.
+
 ## 1.1.1
 
 ### hu

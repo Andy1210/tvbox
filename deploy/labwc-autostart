@@ -3,7 +3,11 @@
 # Replaces the LXDE-pi desktop session: no panel, no file-manager, no Kodi -
 # just the tvbox Electron shell.
 command -v kanshi >/dev/null 2>&1 && kanshi 2>/dev/null &      # keep output/HDMI config (optional)
-sh "$HOME/.tvbox/shell/audio-default.sh" >/dev/null 2>&1 &   # route audio to HDMI
+# route audio to HDMI - honour the OTA `current` symlink (like deploy/tvbox and
+# run-shell.sh) so an OTA release's audio-default.sh wins over the dev tree.
+AUDIO_SH="$HOME/.tvbox/current/shell/audio-default.sh"
+[ -f "$AUDIO_SH" ] || AUDIO_SH="$HOME/.tvbox/shell/audio-default.sh"
+sh "$AUDIO_SH" >/dev/null 2>&1 &
 
 # Solid-black background layer BEHIND the Electron shell. The shell is fullscreen
 # always-on-top, so this is normally hidden - but when the shell restarts (e.g.

@@ -2,8 +2,10 @@
 //  - shell/ (+ registry scripts): plain CommonJS Node - the compact,
 //    callback-y Electron host. Empty catches and unused handler args are
 //    idiomatic there, so they're allowed; everything else is eslint:recommended.
-//  - launcher/: TS + React 10-foot UI - typescript-eslint recommended +
-//    react-hooks rules.
+//  - launcher/ + app-sdk/: TS + React 10-foot UI - typescript-eslint
+//    recommended + react-hooks rules. app-sdk is the shared SDK the launcher
+//    (and every app package) consume as source, so it lints under the same
+//    profile as the launcher that imports it.
 // Formatting is Prettier's job (see .prettierrc); eslint-config-prettier
 // switches every stylistic rule off so the two never fight.
 import js from "@eslint/js";
@@ -47,9 +49,9 @@ export default tseslint.config(
     languageOptions: { globals: { ...globals.node, ...globals.browser } },
   },
 
-  // ---- launcher (TS + React) ----
+  // ---- launcher + app-sdk (TS + React) ----
   {
-    files: ["launcher/**/*.{ts,tsx}"],
+    files: ["launcher/**/*.{ts,tsx}", "app-sdk/**/*.{ts,tsx}"],
     extends: [...tseslint.configs.recommended],
     plugins: { "react-hooks": reactHooks },
     languageOptions: { globals: { ...globals.browser } },

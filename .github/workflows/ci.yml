@@ -80,6 +80,9 @@ jobs:
           sudo apt-get update -qq && sudo apt-get install -y -qq shellcheck
           # -S error: the scripts use intentional word-splitting (apt lists);
           # gate CI on real errors, not style
-          shellcheck -S error deploy/deploy.sh deploy/provision.sh deploy/run-shell.sh deploy/labwc-autostart shell/audio-default.sh
-      - name: python syntax (CEC bridge)
-        run: python3 -m py_compile cec/cec_uinput_bridge.py
+          shellcheck -S error \
+            deploy/deploy.sh deploy/provision.sh deploy/run-shell.sh deploy/labwc-autostart deploy/tvbox \
+            scripts/copy-infra.sh scripts/make-release.sh scripts/build-image.sh \
+            shell/audio-default.sh
+      - name: python syntax (input bridges + helpers)
+        run: python3 -m py_compile cec/cec_uinput_bridge.py remote/remote_input_bridge.py deploy/cursor_idle_hide.py

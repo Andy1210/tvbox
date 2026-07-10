@@ -10,9 +10,10 @@ import { useEffect, useRef } from "react";
 //
 // "Back" arrives as different DOM keys depending on the remote: the CEC bridge
 // maps its Back code to Backspace, while a Bluetooth remote (e.g. the Fire TV
-// remote) sends its own Back button as the consumer key BrowserBack/GoBack. We
-// accept all of them so Back works no matter how the box is being driven.
-const BACK_KEYS = new Set(["Backspace", "BrowserBack", "GoBack"]);
+// remote) sends its own Back button as the consumer key BrowserBack/GoBack, and
+// some remotes report Back as Escape. We accept all of them so Back works no
+// matter how the box is being driven, without the user having to remap it.
+const BACK_KEYS = new Set(["Backspace", "BrowserBack", "GoBack", "Escape"]);
 let seq = 0;
 const handlers = new Map<number, () => void>();
 let listening = false;

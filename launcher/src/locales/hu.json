@@ -90,6 +90,7 @@
     "photosTitle": "Háttérképek feltöltése",
     "photosHint": "Olvasd be a QR-kódot a telefonoddal, és válaszd ki a fotókat - átméretezve feltöltődnek.",
     "photosDone": "Kész",
+    "photosCode": "Kód",
     "dismiss": "Nyomj meg egy gombot a kilépéshez",
     "wx": {
       "clear": "Derült",
@@ -183,12 +184,6 @@
     "unitH": "ó",
     "unitM": "p"
   },
-  "livetv": {
-    "error": "Nem sikerült betölteni a csatornákat",
-    "phoneSetupTitle": "Beállítás telefonról",
-    "phoneSetupHint": "Olvasd be a QR-kódot a telefonoddal (vagy nyisd meg a címet böngészőben), és add meg az IPTV-adataidat.",
-    "phoneSetupCode": "Kód"
-  },
   "app": {
     "shellUnreachable": "A box nem elérhető",
     "shellUnreachableHint": "A tvbox szolgáltatás nem válaszolt. Lehet, hogy még indul - próbáld újra kicsit később.",
@@ -273,6 +268,42 @@
     "keymapLater": "Elmentve - a billentyűzetkiosztás a box következő frissítése után lép életbe.",
     "tzLater": "Elmentve - az időzóna a box következő frissítése után lép életbe."
   },
+  "keymap": {
+    "gb": "Angol (Egyesült Királyság)",
+    "us": "Angol (USA)",
+    "hu": "Magyar",
+    "de": "Német",
+    "fr": "Francia",
+    "es": "Spanyol",
+    "it": "Olasz",
+    "pt": "Portugál",
+    "br": "Portugál (Brazília)",
+    "nl": "Holland",
+    "pl": "Lengyel",
+    "cz": "Cseh",
+    "sk": "Szlovák",
+    "ro": "Román",
+    "hr": "Horvát",
+    "si": "Szlovén",
+    "rs": "Szerb",
+    "ru": "Orosz",
+    "ua": "Ukrán",
+    "bg": "Bolgár",
+    "gr": "Görög",
+    "tr": "Török",
+    "se": "Svéd",
+    "no": "Norvég",
+    "dk": "Dán",
+    "fi": "Finn",
+    "is": "Izlandi",
+    "ch": "Svájci",
+    "at": "Német (Ausztria)",
+    "be": "Belga",
+    "ie": "Ír",
+    "ca": "Kanadai",
+    "jp": "Japán",
+    "kr": "Koreai"
+  },
   "backup": {
     "title": "Mentés és visszaállítás",
     "hint": "A box beállításait (csatornák, fiókok, app-elrendezés) jelszóval titkosított fájlként mentheted a telefonodra - és onnan vissza is töltheted, akár egy újratelepített boxra.",
@@ -280,6 +311,7 @@
     "phoneTitle": "Mentés a telefonodon",
     "phoneHint": "Olvasd be a QR-kódot a telefonoddal. Az oldalon letölthetsz egy titkosított mentést, vagy kiválaszthatsz egy korábbi fájlt a visszaállításhoz.",
     "code": "Kód",
+    "done": "Kész",
     "restored": "Visszaállítva - a box most újraindul…",
     "error": "Nem sikerült elindítani a telefonos munkamenetet"
   }

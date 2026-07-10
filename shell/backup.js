@@ -107,7 +107,7 @@ function decrypt(envelope, password) {
   try {
     text = Buffer.concat([decipher.update(Buffer.from(envelope.data, "base64")), decipher.final()]).toString("utf8");
   } catch (e) {
-    throw new Error("wrong password");
+    throw new Error("wrong password", { cause: e });
   } // GCM auth failure
   const payload = JSON.parse(text);
   if (payload.format !== FORMAT) throw new Error("bad backup payload");

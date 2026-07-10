@@ -9,7 +9,7 @@ import { FocusButton } from "./FocusButton";
 // Ambient wallpaper upload: starts the "photos" phone-pairing server, shows a QR
 // (+ short URL + code) to scan, and live-counts photos as they arrive (the phone
 // page downscales + uploads them into ~/.tvbox/ambient/). Done/Back closes and
-// stops the server. Mirrors Live TV's PhoneConfig.
+// stops the server. Same phone-pairing overlay shape as Backup's phone screen.
 export function AmbientPhotos({ onClose }: { onClose: () => void }) {
   const { t, locale } = useI18n();
   const { ref, focusKey } = useFocusable({ focusKey: "ambient-photos", isFocusBoundary: true });
@@ -65,7 +65,7 @@ export function AmbientPhotos({ onClose }: { onClose: () => void }) {
             <img src={qr} alt="QR" className="w-[30vh] h-[30vh] rounded-[1.4vh] bg-white p-[1vh]" />
             <div className="text-[2.2vh] font-semibold tabular-nums">{info?.shortUrl}</div>
             <div className="text-[2vh] text-fg-dim">
-              {t("livetv.phoneSetupCode")}:{" "}
+              {t("ambient.photosCode")}:{" "}
               <span className="font-bold text-fg tabular-nums tracking-[0.3vw]">{info?.code}</span>
             </div>
           </>

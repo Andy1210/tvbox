@@ -1,0 +1,20 @@
+# The ONE list of "infra" files - everything outside shell/ that a box needs.
+# Repo-relative paths; basenames land flat in ~/.tvbox/ (and in a release
+# tarball's infra/). Consumed by:
+#   deploy/deploy.sh              dev deploy rsync
+#   scripts/copy-infra.sh         shared copier (make-release.sh, build-image.sh, image.yml)
+#   shell/updater.js              INFRA_FILES allowlist - cross-checked by shell/updater.test.js
+# Add a file here and it ships in EVERY channel; the updater test fails if
+# updater.js's allowlist drifts from this list.
+cec/cec_uinput_bridge.py
+cec/cec_vendor_shim.c
+remote/remote_input_bridge.py
+deploy/run-shell.sh
+deploy/labwc-autostart
+deploy/cursor_idle_hide.py
+deploy/tvbox
+deploy/provision.sh
+deploy/tvbox-cec.service
+deploy/tvbox-remote.service
+deploy/tvbox-flatpak-update.service
+deploy/tvbox-flatpak-update.timer

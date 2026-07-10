@@ -119,7 +119,12 @@ export function WifiSettings() {
               <span className="text-[2.1vh] truncate">{n.ssid}</span>
             </span>
             <span className="flex items-center gap-[1.2vw] shrink-0">
-              {n.active && <span className="text-[1.7vh] text-[#39c0d6]">● {t("wifi.active")}</span>}
+              {n.active && (
+                <span className="flex items-center gap-[0.6vw] text-[1.7vh] text-[#39c0d6]">
+                  <span className="w-[1.2vh] h-[1.2vh] rounded-full bg-[#39c0d6] shrink-0" />
+                  {t("wifi.active")}
+                </span>
+              )}
               <span className="text-[1.6vh] text-fg-dim tabular-nums">{n.signal}%</span>
             </span>
           </FocusButton>

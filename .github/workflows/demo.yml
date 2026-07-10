@@ -7,6 +7,7 @@ on:
     branches: [main, master]
     paths:
       - "launcher/**"
+      - "app-sdk/**"
       - "docs/config/**"
       - ".github/workflows/demo.yml"
   workflow_dispatch:

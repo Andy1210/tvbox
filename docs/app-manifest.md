@@ -101,11 +101,12 @@ nothing crash-loops:
 `install` - the bundle recipe for `type: webclient` + `serve: static` (runs
 user-space from the UI or `tvbox install <id>`):
 
-| Field         | What                                                                                                                                                 |
-| ------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `source.type` | `flatpak` (ref installed `--user` from flathub) \| `url` (.tar.gz/.zip) \| `git` (shallow clone).                                                    |
-| `extract`     | Subpath inside the source that holds the web client.                                                                                                 |
-| `patch`       | `[{ "op": "strip-script", "match": … }]` - remove `<script>` tags matching a substring from the entry HTML (e.g. Plex's Qt-only qwebchannel loader). |
+| Field                             | What                                                                                                                                                                                                                                         |
+| --------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `source.type`                     | `flatpak` (ref installed `--user` from flathub) \| `url` (.tar.gz/.zip) \| `git` (shallow clone).                                                                                                                                            |
+| `source.sha256` / `source.commit` | Optional but recommended pins: `url` sources may carry the archive's sha256 (verified before extraction); `git` sources a full commit sha (checked out after clone). `url`/`git` sources must be https, or plain http to a private/LAN host. |
+| `extract`                         | Subpath inside the source that holds the web client.                                                                                                                                                                                         |
+| `patch`                           | `[{ "op": "strip-script", "match": … }]` - remove `<script>` tags matching a substring from the entry HTML (e.g. Plex's Qt-only qwebchannel loader).                                                                                         |
 
 `runtime` - how it's served and what it may touch:
 

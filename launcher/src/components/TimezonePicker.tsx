@@ -135,7 +135,7 @@ export function TimezonePicker({ onChange, autoFocus }: { onChange?: (tz: string
               >
                 <span className="text-[2.1vh]">{r}</span>
                 <span className="flex items-center gap-[1.2vw] shrink-0 text-[1.7vh] text-fg-dim">
-                  {r === currentRegion && <span className="text-[#39c0d6]">●</span>}
+                  {r === currentRegion && <span className="w-[1.2vh] h-[1.2vh] rounded-full bg-[#39c0d6] shrink-0" />}
                   {byRegion.get(r)?.length}
                 </span>
               </FocusButton>
@@ -188,7 +188,7 @@ export function TimezonePicker({ onChange, autoFocus }: { onChange?: (tz: string
                     <path d="M12 3a9 9 0 1 0 9 9" />
                   </svg>
                 ) : (
-                  c.tz === active && <span className="text-[1.7vh] text-[#39c0d6] shrink-0">●</span>
+                  c.tz === active && <span className="w-[1.2vh] h-[1.2vh] rounded-full bg-[#39c0d6] shrink-0" />
                 )}
               </FocusButton>
             ))}

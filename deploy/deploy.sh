@@ -23,8 +23,10 @@ HERE="$(cd "$(dirname "$0")" && pwd)"   # tvbox/deploy
 TVBOX="$(dirname "$HERE")"              # tvbox/
 
 echo "==> building launcher (React/Vite) -> shell/launcher-dist"
-( cd "$TVBOX/launcher" && npm install --no-audit --no-fund >/dev/null 2>&1 && npm run build >/dev/null 2>&1 ) \
-  || { echo "   launcher build FAILED - fix it before deploying"; exit 1; }
+# Quiet stdout, but let stderr THROUGH: a broken build must be diagnosable, not
+# a bare "FAILED" with the compiler errors swallowed.
+( cd "$TVBOX/launcher" && npm install --no-audit --no-fund >/dev/null && npm run build >/dev/null ) \
+  || { echo "   launcher build FAILED (see the errors above) - fix it before deploying"; exit 1; }
 
 echo "==> syncing tvbox/shell -> $PI:~/.tvbox/shell"
 ssh "$PI" 'mkdir -p ~/.tvbox'
@@ -32,11 +34,19 @@ ssh "$PI" 'mkdir -p ~/.tvbox'
 rsync -az --delete \
   --exclude node_modules --exclude '*.log' --exclude apps-data --exclude electron-web-client \
   "$TVBOX/shell" "$PI:.tvbox/"
-rsync -az "$TVBOX/cec/cec_uinput_bridge.py" "$TVBOX/cec/cec_vendor_shim.c" \
-  "$TVBOX/remote/remote_input_bridge.py" \
-  "$HERE/run-shell.sh" "$HERE/labwc-autostart" "$HERE/cursor_idle_hide.py" \
-  "$HERE/tvbox" "$HERE/provision.sh" "$HERE/tvbox-cec.service" "$HERE/tvbox-remote.service" \
-  "$HERE/tvbox-flatpak-update.service" "$HERE/tvbox-flatpak-update.timer" "$PI:.tvbox/"
+# Infra files come from the ONE shared list (deploy/infra.list), so the dev
+# deploy can never drift from the OTA tarball / SD image (they read it too, via
+# scripts/copy-infra.sh). Basenames land flat in ~/.tvbox/, same as before.
+# Fail-closed: a listed-but-missing file makes rsync (under set -e) abort.
+INFRA_SRCS=()
+while IFS= read -r line; do
+  line="${line%$'\r'}"
+  case "$line" in
+    ''|'#'*) continue ;;
+  esac
+  INFRA_SRCS+=("$TVBOX/$line")
+done < "$TVBOX/deploy/infra.list"
+rsync -az "${INFRA_SRCS[@]}" "$PI:.tvbox/"
 
 # ---- the ONE root step: provision (apt baseline, udev/polkit, groups) ----
 # ssh -t gives sudo a TTY so it can prompt for the password; on a box with
@@ -63,7 +73,7 @@ flatpak remote-add --user --if-not-exists flathub https://flathub.org/repo/flath
 
 echo "==> Electron (npm install)"
 ( cd ~/.tvbox/shell && npm install --no-audit --no-fund >/dev/null 2>&1 ) && ok "electron deps" || bad "npm install (shell) failed"
-chmod +x ~/.tvbox/run-shell.sh ~/.tvbox/shell/audio-default.sh ~/.tvbox/shell/spotify_event_hook.sh ~/.tvbox/tvbox 2>/dev/null || true
+chmod +x ~/.tvbox/run-shell.sh ~/.tvbox/shell/audio-default.sh ~/.tvbox/tvbox 2>/dev/null || true
 
 echo "==> dev deploy wins over OTA (drop the \`current\` symlink + update markers)"
 # An OTA update flips ~/.tvbox/current at a release under versions/; while it
@@ -124,10 +134,11 @@ cp ~/.tvbox/labwc-autostart ~/.config/labwc/autostart && chmod +x ~/.config/labw
 echo
 if [ "$FAIL" = 0 ]; then
   echo "==> tvbox deployed OK. Reboot to boot into the shell:  sudo reboot"
-  echo "    Apps are opt-in - only YouTube works out of the box. Enable others on the box:"
-  echo "      tvbox deps livetv    # installs mpv        (then set the IPTV source in the UI)"
-  echo "      tvbox deps spotify   # installs librespot  (Spotify Connect target)"
-  echo "      tvbox deps plex      # installs mpv        (then install the Plex bundle from the UI)"
+  echo "    Apps come from the curated registry and show up as tiles. Install them from"
+  echo "    the on-box Store (Settings -> Apps), or from an SSH shell:"
+  echo "      tvbox list                 # what the registry offers + install state"
+  echo "      tvbox install <id>         # add an app (e.g. livetv, spotify, plex, jellyfin)"
+  echo "      tvbox deps <id>            # fetch its binary dep (mpv / librespot), no root"
 else
   echo "==> tvbox deploy FAILED on one or more hard steps (see [FAIL] above) - fix and re-run."
 fi

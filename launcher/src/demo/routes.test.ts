@@ -48,7 +48,7 @@ describe("demo shell API", () => {
     const started = (await post("/tvbox/api/pairing/start", { kind: "iptv", locale: "hu" })) as { url: string };
     expect(started.url).toContain("pair/?kind=iptv&lang=hu&c=");
     // while the iptv pairing runs, the box must NOT look configured - that is
-    // what keeps PhoneConfig's QR on screen instead of self-dismissing
+    // what keeps the pairing QR on screen instead of self-dismissing
     let config = (await get("/tvbox/api/config")) as PublicConfig;
     expect(config.iptv.configured).toBe(false);
     await post("/tvbox/api/pairing/stop");

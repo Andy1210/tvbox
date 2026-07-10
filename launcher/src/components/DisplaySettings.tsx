@@ -60,7 +60,12 @@ function DisplayModePicker({
               className="px-[2vw] py-[1.5vh] rounded-[1.1vh] bg-white/5 flex items-center justify-between gap-[1.5vw]"
             >
               <span className="text-[2.1vh] tabular-nums">{label(m)}</span>
-              {m.current && <span className="text-[1.7vh] text-[#39c0d6] shrink-0">● {t("display.active")}</span>}
+              {m.current && (
+                <span className="flex items-center gap-[0.6vw] text-[1.7vh] text-[#39c0d6] shrink-0">
+                  <span className="w-[1.2vh] h-[1.2vh] rounded-full bg-[#39c0d6] shrink-0" />
+                  {t("display.active")}
+                </span>
+              )}
             </FocusButton>
           ))}
           {!modes.length && <div className="text-[1.9vh] text-fg-dim">{t("display.none")}</div>}

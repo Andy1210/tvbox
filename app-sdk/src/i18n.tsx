@@ -14,7 +14,7 @@ export type LocaleString = string | Record<string, string>;
 
 // Each locale dict must carry a `_meta` { name, tag }: the display name (shown in
 // its own script) and the BCP-47 tag used for Intl date/number formatting.
-type LocaleDict = Record<string, unknown> & { _meta: { name: string; tag: string } };
+export type LocaleDict = Record<string, unknown> & { _meta: { name: string; tag: string } };
 
 export interface LocaleInfo {
   id: string;
@@ -30,8 +30,8 @@ let LOCALE_INFO: LocaleInfo[] = [];
 // Register the locale dictionaries + fallback and derive each locale's {name, tag}
 // from its `_meta`. Call once at startup, before rendering. Replaces the old
 // hardcoded `import hu/en` + `AVAILABLE_LOCALES` const.
-export function configureI18n(locales: Record<string, any>, opts?: { fallback?: string }): void {
-  LOCALES = locales as Record<string, LocaleDict>;
+export function configureI18n(locales: Record<string, LocaleDict>, opts?: { fallback?: string }): void {
+  LOCALES = locales;
   FALLBACK = opts?.fallback ?? Object.keys(locales)[0] ?? "en";
   LOCALE_INFO = Object.entries(LOCALES).map(([id, d]) => ({
     id,

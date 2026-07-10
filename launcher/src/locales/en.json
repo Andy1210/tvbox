@@ -90,6 +90,7 @@
     "photosTitle": "Upload wallpapers",
     "photosHint": "Scan the QR with your phone and pick photos - they upload resized.",
     "photosDone": "Done",
+    "photosCode": "Code",
     "dismiss": "Press any key to exit",
     "wx": {
       "clear": "Clear",
@@ -183,12 +184,6 @@
     "unitH": "h",
     "unitM": "m"
   },
-  "livetv": {
-    "error": "Couldn't load channels",
-    "phoneSetupTitle": "Set up from your phone",
-    "phoneSetupHint": "Scan the QR with your phone (or open the address in a browser), then enter your IPTV details.",
-    "phoneSetupCode": "Code"
-  },
   "app": {
     "shellUnreachable": "Can't reach the box",
     "shellUnreachableHint": "The tvbox service didn't answer. It may still be starting - try again in a moment.",
@@ -273,6 +268,42 @@
     "keymapLater": "Saved - the keyboard layout applies after the next box update.",
     "tzLater": "Saved - the time zone applies after the next box update."
   },
+  "keymap": {
+    "gb": "English (UK)",
+    "us": "English (US)",
+    "hu": "Hungarian",
+    "de": "German",
+    "fr": "French",
+    "es": "Spanish",
+    "it": "Italian",
+    "pt": "Portuguese",
+    "br": "Portuguese (Brazil)",
+    "nl": "Dutch",
+    "pl": "Polish",
+    "cz": "Czech",
+    "sk": "Slovak",
+    "ro": "Romanian",
+    "hr": "Croatian",
+    "si": "Slovenian",
+    "rs": "Serbian",
+    "ru": "Russian",
+    "ua": "Ukrainian",
+    "bg": "Bulgarian",
+    "gr": "Greek",
+    "tr": "Turkish",
+    "se": "Swedish",
+    "no": "Norwegian",
+    "dk": "Danish",
+    "fi": "Finnish",
+    "is": "Icelandic",
+    "ch": "Swiss",
+    "at": "German (Austria)",
+    "be": "Belgian",
+    "ie": "Irish",
+    "ca": "Canadian",
+    "jp": "Japanese",
+    "kr": "Korean"
+  },
   "backup": {
     "title": "Backup & restore",
     "hint": "Save the box's settings (channels, accounts, app layout) to your phone as a password-encrypted file - and restore them from there, even onto a re-flashed box.",
@@ -280,6 +311,7 @@
     "phoneTitle": "Backup on your phone",
     "phoneHint": "Scan the QR with your phone. On the page you can download an encrypted backup, or pick a saved file to restore.",
     "code": "Code",
+    "done": "Done",
     "restored": "Restored - the box restarts now…",
     "error": "Couldn't start the phone session"
   }

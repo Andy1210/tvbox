@@ -37,10 +37,14 @@ warn() { echo "   [warn] $1"; }
 bad()  { echo "   [FAIL] $1"; FAIL=1; }
 
 echo "==> apt baseline"
-apt-get update -qq 2>/dev/null || warn "apt update failed (stale package lists?)"
-# Hard deps: the box is non-functional without these (Electron, remote, audio, focus).
-HARD="cec-utils python3 python3-evdev wlrctl pipewire pipewire-pulse wireplumber nodejs npm"
-apt-get install -y -qq $HARD 2>/dev/null && ok "core deps ($HARD)" || bad "core apt deps - install manually: $HARD"
+# apt stderr is let THROUGH (not sent to /dev/null): a failing install must be
+# diagnosable. -qq already keeps normal output quiet.
+apt-get update -qq || warn "apt update failed (stale package lists?)"
+# Hard deps: the box is non-functional without these (Electron, remote, audio,
+# focus). wlr-randr backs the Settings resolution/refresh picker (shell/display.js);
+# wlrctl is the separate wlroots control tool - they are NOT the same binary.
+HARD="cec-utils python3 python3-evdev wlrctl wlr-randr pipewire pipewire-pulse wireplumber nodejs npm"
+apt-get install -y -qq $HARD && ok "core deps ($HARD)" || bad "core apt deps - install manually: $HARD"
 # Soft deps: on-demand app-install tooling (flatpak/curl/git) + output config.
 # gcc/libc6-dev: the CEC bridge compiles cec/cec_vendor_shim.c on the box (LG
 # SIMPLINK vendor identity - see the bridge docstring); without them LG TV
@@ -52,7 +56,7 @@ apt-get install -y -qq $HARD 2>/dev/null && ok "core deps ($HARD)" || bad "core 
 # grim: Wayland screenshot tool - not used by the box itself, but lets a dev
 # capture the running UI over ssh (`grim ~/shot.png`) to see what's on screen.
 SOFT="jq flatpak kanshi curl git unzip ca-certificates gcc libc6-dev swaybg fonts-dejavu-core grim"
-apt-get install -y -qq $SOFT 2>/dev/null && ok "extra deps ($SOFT)" || warn "some extra deps missing: $SOFT"
+apt-get install -y -qq $SOFT && ok "extra deps ($SOFT)" || warn "some extra deps missing: $SOFT"
 
 # Shared media stack in the core (kept in sync with image/stage-tvbox): mpv is
 # the shared player for Live TV + Plex; libpulse0/libasound2 are the runtime
@@ -61,11 +65,11 @@ apt-get install -y -qq $SOFT 2>/dev/null && ok "extra deps ($SOFT)" || warn "som
 # librespot itself is NOT installed here - the Spotify app pulls it from the UI
 # as a no-root requires.download binary. Other app binaries stay opt-in.
 echo "==> media stack (mpv + audio libs)"
-apt-get install -y -qq mpv libpulse0 2>/dev/null && ok "mpv + libpulse0" || warn "mpv/libpulse0 missing (Live TV/Plex/Spotify need it)"
+apt-get install -y -qq mpv libpulse0 && ok "mpv + libpulse0" || warn "mpv/libpulse0 missing (Live TV/Plex/Spotify need it)"
 # ALSA runtime lib for the librespot/mpv audio path. trixie renamed it to
 # libasound2t64 (64-bit time_t transition); fall back to the old name for a
 # bookworm box. Installed separately so a name miss can't drop mpv/libpulse0.
-apt-get install -y -qq libasound2t64 2>/dev/null || apt-get install -y -qq libasound2 2>/dev/null && ok "libasound2" || warn "libasound2 missing"
+apt-get install -y -qq libasound2t64 || apt-get install -y -qq libasound2 && ok "libasound2" || warn "libasound2 missing"
 
 echo "==> OS auto-updates (unattended-upgrades: install yes, reboot NEVER)"
 # A living-room box must patch itself without anyone SSH-ing in - but it must
@@ -168,7 +172,19 @@ if [ -f /etc/systemd/system/tvbox-cec.service ]; then
   systemctl daemon-reload
   ok "removed legacy root tvbox-cec system unit (replaced by the user unit)"
 fi
-rm -f /tmp/tvbox-cec-cmd 2>/dev/null || true   # old root-owned FIFO; the user bridge recreates it
+# Remove ONLY a stale/foreign CEC command node (e.g. the old root-owned FIFO):
+# a live FIFO owned by the box user belongs to a running bridge, and this script
+# claims to be safe to re-run, so don't unlink it out from under the bridge (it
+# self-heals a replaced node anyway). A standalone `sudo bash provision.sh`
+# re-run thus no longer disrupts CEC.
+CECFIFO=/tmp/tvbox-cec-cmd
+if [ -e "$CECFIFO" ]; then
+  CECOWNER="$(stat -c '%U' "$CECFIFO" 2>/dev/null || echo)"
+  if [ ! -p "$CECFIFO" ] || [ "$CECOWNER" != "$TVBOX_USER" ]; then
+    rm -f "$CECFIFO" 2>/dev/null || true
+    ok "removed stale/foreign /tmp/tvbox-cec-cmd (the user bridge recreates it)"
+  fi
+fi
 if [ -L /usr/local/bin/tvbox ]; then
   rm -f /usr/local/bin/tvbox
   ok "removed legacy /usr/local/bin/tvbox symlink (CLI now lives in ~/.local/bin)"

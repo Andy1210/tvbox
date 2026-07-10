@@ -44,18 +44,19 @@ app packages, shown running on a real box):
 ## How it works
 
 ```
-   TV remote ──HDMI-CEC──▶ cec_uinput_bridge (user service, /dev/uinput) ──▶ Wayland key events
-                                                                          │
-   ┌──────────────────────────────────────────────────────────────────────▼─────────┐
-   │ Electron shell (fullscreen, always-on-top, Wayland)                              │
-   │   • HTTP server on :8097 serves the launcher + app bundles + a small JSON API    │
-   │   • app-package registry + install runner (~/.tvbox/apps/<id>/)                  │
-   │   • mpv control (video plays BEHIND the transparent window)                      │
-   │   • capability-scoped preload bridge per app                                     │
-   │   • plugin loader (host-side plugin.js shipped inside an app package)            │
-   └───────┬───────────────────────────┬──────────────────────────────┬──────────────┘
-           │ serves /tvbox/            │ launches                      │ composites over
-           ▼                           ▼                               ▼
+   TV remote     ──HDMI-CEC─▶ cec_uinput_bridge    (user service) ─┐
+   BT/USB remote ──evdev────▶ remote_input_bridge  (user service) ─┼─▶ both write /dev/uinput ─▶ Wayland key events
+                                                                   │
+   ┌───────────────────────────────────────────────────────────────▼────────────────┐
+   │ Electron shell (fullscreen, always-on-top, Wayland)                            │
+   │   • HTTP server on :8097 serves the launcher + app bundles + a small JSON API  │
+   │   • app-package registry + install runner (~/.tvbox/apps/<id>/)                │
+   │   • mpv control (video plays BEHIND the transparent window)                    │
+   │   • capability-scoped preload bridge per app                                   │
+   │   • plugin loader (host-side plugin.js shipped inside an app package)          │
+   └──────┬───────────────────────────┬──────────────────────────────┬──────────────┘
+          │ serves /tvbox/            │ launches                      │ composites over
+          ▼                           ▼                               ▼
    HOME launcher (React)      web-client / remote apps            mpv (fullscreen / overlay)
 ```
 
@@ -64,6 +65,7 @@ app packages, shown running on a real box):
 | **[shell/](shell/)**       | Electron host: HTTP server, app-package registry + installer, `mpv` control, window/nav, capability-scoped `preload` bridge, plugin loader. ([shell/README.md](shell/README.md)) |
 | **[launcher/](launcher/)** | React 10-foot HOME screen, remote-driven via spatial navigation, built into the shell. ([launcher/README.md](launcher/README.md))                                                |
 | **[cec/](cec/)**           | `cec_uinput_bridge.py`: turns CEC keypresses into Linux input events (the `tvbox-cec` systemd **user** service).                                                                 |
+| **[remote/](remote/)**     | `remote_input_bridge.py`: per-device button remap for BT/USB (evdev) remotes (the `tvbox-remote` systemd **user** service). Optional; CEC works on its own.                      |
 | **[deploy/](deploy/)**     | one-shot provision + deploy script and the session autostart.                                                                                                                    |
 
 An installed app lives in `~/.tvbox/apps/<id>/` as a manifest, a `web/` UI
@@ -79,6 +81,10 @@ per app; the shell launches each one, either as a local bundle composited over
   autologin. The shell is a Wayland client and expects a compositor at login.
 - A TV with **HDMI-CEC** for the remote (LG SIMPLINK, Samsung Anynet+, Sony
   Bravia Sync, etc.). Enable it in the TV's settings.
+- **Optional: a Bluetooth or USB remote.** Any evdev remote works as a second
+  input alongside CEC (or instead of it, e.g. a TV whose CEC is unreliable); its
+  buttons are remappable per-device from the TV (Settings → Peripherals). See
+  [The remote](#the-remote).
 
 > CEC quirks vary by TV. Some sets can't tell Back from Exit, so **Home is a
 > double-tap of Back**. See [The remote](#the-remote).
@@ -219,6 +225,23 @@ For text entry (search, IPTV setup) the launcher shows an on-screen keyboard.
 Long values (URLs, API keys) can be entered by **scanning a QR with your phone**
 and typing there instead of on the TV.
 
+### Bluetooth / USB remotes
+
+A CEC remote isn't the only option: pair a **Bluetooth remote** or plug in a
+**USB one** and it drives the box too. A second user service,
+`tvbox-remote` ([remote/remote_input_bridge.py](remote/remote_input_bridge.py)),
+sits in front of every evdev remote and re-emits its keys through the same
+`/dev/uinput` device as the CEC bridge. With no configuration it's pure
+pass-through, so a "standard" remote (arrows / OK / Back / Home / media) works
+out of the box.
+
+Because a remote can send its own button codes, the layout is **remappable
+per-device** from the TV: **Settings → Peripherals** lists each connected
+remote, and a _learn_ mode captures the next button you press and binds it to an
+action - remapping one remote never touches another. The **Power** button is
+configurable (turn the TV off over CEC, also power the box off, or ignore); it's
+always intercepted by the bridge so it can't accidentally power the box down.
+
 ## The App Store
 
 **Settings → App Store** (also HOME → "Get more apps") lists apps from the
@@ -310,7 +333,7 @@ Everything box-local lives under `~/.tvbox/` (never committed):
 | `~/.tvbox/shell/`                         | the deployed Electron shell (dev tree)                         |
 | `~/.tvbox/versions/` + `~/.tvbox/current` | OTA-installed releases + the active-release symlink            |
 | `~/.tvbox/apps/<id>/`                     | installed app packages (manifest + `web/` UI + `plugin.js`)    |
-| `~/.tvbox/shell/apps-data/<id>/`          | fetched web bundles for `static` apps (e.g. Plex)              |
+| `~/.tvbox/apps-data/<id>/`                | fetched web bundles for `static` apps (e.g. Plex)              |
 | `~/.tvbox/bin/`                           | user-space app binaries from `requires.download` (on PATH)     |
 
 Config is edited from the TV (Settings) or by scanning a QR and filling a form
@@ -377,6 +400,7 @@ tvbox/
   app-sdk/       @tvbox/app-sdk, the shared 10-foot UI SDK the launcher + every app package consume
   launcher/      React 10-foot HOME screen (built into the shell)
   cec/           HDMI-CEC to uinput remote bridge (tvbox-cec systemd service)
+  remote/        BT/USB (evdev) to uinput bridge (tvbox-remote systemd service): per-device button remap
   deploy/        one-shot provision + deploy script, labwc autostart
   docs/          setup guides (Spotify, etc.) + screenshots
 ```
@@ -392,7 +416,3 @@ H.264 decode on the Pi 5, which has no H.264 hardware decoder).
 
 [MIT](LICENSE). Bring your own IPTV/Plex/Spotify accounts and content; this
 project ships no media, credentials, or keys.
-
-```
-
-```

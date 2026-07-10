@@ -97,10 +97,11 @@ echo "==> assembling stage-tvbox/files"
 F="$TVBOX/image/stage-tvbox/01-tvbox/files"
 mkdir -p "$F"
 rsync -a --delete --exclude node_modules --exclude apps-data --exclude '*.log' "$TVBOX/shell" "$F/"
-cp "$TVBOX/cec/cec_uinput_bridge.py" "$TVBOX/deploy/run-shell.sh" "$TVBOX/deploy/labwc-autostart" \
-  "$TVBOX/deploy/cursor_idle_hide.py" \
-  "$TVBOX/deploy/tvbox" "$TVBOX/deploy/tvbox-cec.service" "$TVBOX/deploy/provision.sh" \
-  "$TVBOX/deploy/tvbox-flatpak-update.service" "$TVBOX/deploy/tvbox-flatpak-update.timer" "$F/"
+# The infra files come from the ONE shared list (deploy/infra.list) via
+# copy-infra.sh - byte-for-byte the same set image.yml assembles, so a local
+# build and CI produce identical payloads (this is how remote_input_bridge.py,
+# tvbox-remote.service and cec_vendor_shim.c reach the SD image).
+"$HERE/copy-infra.sh" "$F"
 
 # 3) pi-gen checkout (reused across runs) + our stage/config (re-copied each run
 #    so edits always land, since build-docker.sh re-bakes the source every build)
@@ -110,8 +111,16 @@ if [ "$FRESH" = 1 ]; then
   rm -rf "$PIGEN"
 fi
 if [ ! -d "$PIGEN/.git" ]; then
-  echo "==> cloning pi-gen (arm64 branch)"
-  git clone --depth 1 --branch arm64 https://github.com/RPi-Distro/pi-gen.git "$PIGEN"
+  # Pinned for reproducible builds: pi-gen's `arm64` branch is a moving target,
+  # so two builds weeks apart could otherwise bootstrap different base images.
+  # PIGEN_REF is the arm64 head verified with the current stage (bump it
+  # deliberately, and keep it in sync with .github/workflows/image.yml). We clone
+  # the branch (full history so the ref stays reachable after arm64 advances)
+  # then detach onto the exact commit.
+  PIGEN_REF="ca8aeed0ae300c2a89f55ce9617d5f96a27e99e5" # pi-gen arm64 @ 2026-07
+  echo "==> cloning pi-gen (arm64 @ ${PIGEN_REF})"
+  git clone --branch arm64 https://github.com/RPi-Distro/pi-gen.git "$PIGEN"
+  git -C "$PIGEN" checkout --detach "$PIGEN_REF"
 fi
 rm -rf "$PIGEN/stage-tvbox"
 cp -r "$TVBOX/image/stage-tvbox" "$PIGEN/"

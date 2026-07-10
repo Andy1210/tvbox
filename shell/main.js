@@ -22,6 +22,7 @@ const mqttBridge = require("./mqtt"); // MQTT: now-playing publish + command/not
 const apps = require("./install"); // manifests + install-recipe runner (shared with the tvbox CLI)
 const store = require("./store"); // app-store registry client (manifest-only apps -> ~/.tvbox/apps)
 const appfetch = require("./appfetch"); // capability: scoped server-side fetch (data proxy), origin-locked + SSRF-guarded
+const netguard = require("./netguard"); // shared loopback/LAN/public host classification + lanIp
 const appdata = require("./appdata"); // capability: per-app key/value storage under ~/.tvbox/appdata
 const updater = require("./updater"); // OTA self-update (versions/ + `current` symlink flip)
 const backup = require("./backup"); // encrypted settings backup/restore (phone pairing page)
@@ -72,6 +73,13 @@ app.setPath("userData", path.join(os.homedir(), ".tvbox", "shell-userdata"));
 app.commandLine.appendSwitch("ozone-platform", "wayland");
 app.commandLine.appendSwitch("enable-features", "UseOzonePlatform");
 
+// Electron ≥43 delivers console-message as a details object (the first arg,
+// carrying a STRING `level` of "debug"|"info"|"warning"|"error"; the old
+// numeric-positional signature is gone). Map that level back to the short tags
+// the shell log always used - "debug" takes the old verbose "log" slot, and any
+// unmapped level falls through to "?" at the call site.
+const CONSOLE_TAG = { debug: "log", info: "info", warning: "warn", error: "error" };
+
 const MIME = {
   ".js": "application/javascript",
   ".css": "text/css",
@@ -110,7 +118,7 @@ function boxIdle() {
   return !mpv && !remoteWin && !currentAppId && !(nowPlaying && nowPlaying.state === "playing");
 }
 // Restart the shell in-place: quit cleanly (localStorage flush, plugin stop);
-// lwrespawn relaunches run-shell.sh, which follows the `current` symlink.
+// the labwc respawn loop relaunches run-shell.sh, which follows the `current` symlink.
 function restartShell(why) {
   console.log("[main] restarting shell:", why || "");
   app.quit();
@@ -716,10 +724,10 @@ function wifiList(cb) {
       for (const raw of (out || "").split("\n")) {
         if (!raw) continue;
         // nmcli -t escapes ':' inside values as '\:'. SSID is last (may contain ':').
-        const line = raw.replace(/\\:/g, " ");
+        const line = raw.replace(/\\:/g, "\0");
         const m = /^(yes|no):(\d*):([^:]*):(.*)$/.exec(line);
         if (!m) continue;
-        const ssid = m[4].replace(/ /g, ":");
+        const ssid = m[4].replace(/\0/g, ":");
         if (!ssid || seen.has(ssid)) continue;
         seen.add(ssid);
         nets.push({ ssid, signal: Number(m[2]) || 0, secured: !!(m[3] && m[3] !== "--"), active: m[1] === "yes" });
@@ -748,20 +756,6 @@ function wifiConnect(ssid, password, cb) {
 }
 
 // ---- system info (read-only diagnostics for HOME → Settings → About) ----
-// The box's LAN IPv4 (prefer a private RFC1918 address; skip loopback/virtual).
-function lanIp() {
-  const ifs = os.networkInterfaces();
-  let fallback = "";
-  for (const name of Object.keys(ifs)) {
-    for (const a of ifs[name] || []) {
-      if (a.family === "IPv4" && !a.internal) {
-        if (/^(192\.168\.|10\.|172\.(1[6-9]|2\d|3[01])\.)/.test(a.address)) return a.address;
-        fallback = fallback || a.address;
-      }
-    }
-  }
-  return fallback;
-}
 function cpuTempC() {
   try {
     const n = parseInt(fs.readFileSync("/sys/class/thermal/thermal_zone0/temp", "utf8"), 10);
@@ -794,7 +788,7 @@ function systemInfo(cb) {
     version: pkg.version || "",
     hostname: os.hostname(),
     model: deviceModel(),
-    ip: lanIp(),
+    ip: netguard.lanIp(),
     uptimeSec: Math.round(os.uptime()),
     cpuTempC: cpuTempC(),
     mem: memInfo(),
@@ -857,9 +851,43 @@ function handlePower(action, res) {
   });
 }
 
+// Origins allowed to issue state-changing requests: only our own pages (the
+// launcher and local app bundles are all served by this same server, loaded
+// via BASE=localhost). Browsers attach an Origin header to every cross-origin
+// POST, so a foreign Origin here is some LAN page - e.g. a plain-http remote
+// app (remoteProtoOk allows those) - blind-firing at the control API through
+// the TV's own renderer. Requests WITHOUT an Origin (curl, the CEC bridge, the
+// tvbox CLI, the shell's own Node code) are local tools, not browsers - they
+// stay allowed; the server only listens on 127.0.0.1 anyway.
+const OWN_ORIGINS = new Set(["http://127.0.0.1:" + PORT, "http://localhost:" + PORT]);
+function foreignOrigin(req) {
+  const o = req.headers.origin;
+  return !!o && !OWN_ORIGINS.has(String(o).toLowerCase());
+}
+
 function serve() {
   const server = http.createServer((req, res) => {
-    let p = decodeURIComponent((req.url || "/").split("?")[0]);
+    let p;
+    try {
+      p = decodeURIComponent((req.url || "/").split("?")[0]);
+    } catch (e) {
+      // malformed percent-escape (e.g. "GET /%") throws URIError; without this
+      // guard - and with no uncaughtException handler - one bad URL from any
+      // local client would kill the whole shell process.
+      res.writeHead(400, { "Content-Type": "text/plain" });
+      res.end("bad request");
+      return;
+    }
+    // Same-origin gate for everything state-changing: every non-GET (the POST
+    // API + plugin POST routes) plus the one mutating GET (tv/standby stops
+    // playback). Read-only GETs stay open - they leak nothing a same-LAN
+    // attacker can act on and blocking them would break <img>/no-CORS uses.
+    if ((req.method !== "GET" || p === "/tvbox/api/tv/standby") && foreignOrigin(req)) {
+      console.warn("[main] rejected cross-origin", req.method, p, "from", req.headers.origin);
+      res.writeHead(403, { "Content-Type": "text/plain" });
+      res.end("cross-origin request rejected");
+      return;
+    }
     // POST API (config writes) - read the JSON body then dispatch to a plugin
     // route (e.g. Spotify) or the built-in handler.
     if (req.method === "POST" && p.startsWith("/tvbox/api/")) {
@@ -1060,8 +1088,8 @@ function serve() {
     if (p === "/") p = "/" + entry;
     serveStatic(res, root, p, path.join(root, entry));
   });
-  // A restart races the dying instance for the port (lwrespawn respawns within
-  // ~1s; the old process may not have released :PORT yet). Without a handler
+  // A restart races the dying instance for the port (the labwc respawn loop
+  // restarts us within ~1s; the old process may not have released :PORT yet). Without a handler
   // EADDRINUSE is an uncaught exception and the shell limps on WITHOUT its
   // server (black launcher, dead API) - so retry until the port frees up.
   server.on("error", (e) => {
@@ -1151,7 +1179,9 @@ function launchMpv(url, startPos, pip, rect) {
   // "match content framerate": resample so e.g. 50fps IPTV plays smoothly on a
   // 60Hz output without a display mode switch (user opts in; off by default).
   if (config.rawDisplay() && config.rawDisplay().matchFramerate) args.push("--video-sync=display-resample");
-  args.push(url);
+  // "--" ends option parsing: a URL starting with "-" (or a crafted playlist
+  // entry) must always be argv's file position, never an mpv option.
+  args.push("--", url);
   const env = { ...process.env, ...WL_ENV };
   if (pip) {
     env.DISPLAY = env.DISPLAY || ":0";
@@ -1299,16 +1329,8 @@ function resolveRemoteUrl(m) {
 // Loopback / RFC1918 / link-local / mDNS - a self-hosted LAN service (Home
 // Assistant, Jellyfin, ...) can't be a public untrusted site, so plain http to
 // it is acceptable; public hosts must still be https.
-function isPrivateHost(h) {
-  h = String(h || "").toLowerCase();
-  if (h === "localhost" || h.endsWith(".local") || h.endsWith(".localhost")) return true;
-  if (h === "::1" || /^127\./.test(h)) return true;
-  if (/^10\./.test(h) || /^192\.168\./.test(h) || /^169\.254\./.test(h)) return true;
-  if (/^172\.(1[6-9]|2\d|3[01])\./.test(h)) return true;
-  return false;
-}
 function remoteProtoOk(x) {
-  return x.protocol === "https:" || (x.protocol === "http:" && isPrivateHost(x.hostname));
+  return x.protocol === "https:" || (x.protocol === "http:" && netguard.isLanHost(x.hostname));
 }
 function allowedRemoteHosts(rt, url) {
   const declared = (rt.origins || []).map((s) => String(s).toLowerCase());
@@ -1370,11 +1392,11 @@ function openRemoteApp(m, url) {
   });
   remoteWin.tvboxAppId = m.id; // so capability brokers can identify THIS window's app by sender
   const wc = remoteWin.webContents;
-  wc.on("console-message", (_e, level, message, ln, src) => {
+  wc.on("console-message", (ev) => {
     console.log(
-      "[remote:" + (["log", "info", "warn", "error"][level] || "?") + "]",
-      message,
-      src ? "(" + src + ":" + ln + ")" : "",
+      "[remote:" + (CONSOLE_TAG[ev.level] || "?") + "]",
+      ev.message,
+      ev.sourceId ? "(" + ev.sourceId + ":" + ev.lineNumber + ")" : "",
     );
   });
   const guard = (e, u) => {
@@ -1827,11 +1849,11 @@ app.whenReady().then(() => {
   // Surface the renderer console (launcher + local app pages: livetv/spotify/plex)
   // in the shell log, so an app that fails to render/init is diagnosable over ssh
   // (~/.tvbox/shell.log) instead of showing only a black screen.
-  win.webContents.on("console-message", (_e, level, message, ln, src) => {
+  win.webContents.on("console-message", (ev) => {
     console.log(
-      "[renderer:" + (["log", "info", "warn", "error"][level] || "?") + "]",
-      message,
-      src ? "(" + src + ":" + ln + ")" : "",
+      "[renderer:" + (CONSOLE_TAG[ev.level] || "?") + "]",
+      ev.message,
+      ev.sourceId ? "(" + ev.sourceId + ":" + ev.lineNumber + ")" : "",
     );
   });
   win.loadURL(BASE + "/tvbox/"); // boot into the HOME launcher

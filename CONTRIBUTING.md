@@ -6,16 +6,27 @@ remote over HDMI-CEC.
 
 ## The fastest way to contribute: an app
 
-Most contributions don't need to touch shell or launcher code at all. An app
-is a single JSON manifest - see **[docs/app-manifest.md](docs/app-manifest.md)**
-for the reference and walkthrough, and validate with:
+Most contributions don't need to touch shell or launcher code at all. Apps are
+**self-contained packages** (a manifest plus, where needed, a `web/` UI and a
+host `plugin.js`) that live in the
+**[tvbox-apps registry](https://github.com/Andy1210/tvbox-apps)**, not in this
+repo. The full authoring guide - package layout, manifest reference, the web UI
+via `@tvbox/app-sdk`, the host plugin API - is
+**[AUTHORING.md](https://github.com/Andy1210/tvbox-apps/blob/main/AUTHORING.md)**
+in that registry; the manifest field reference is
+**[docs/app-manifest.md](docs/app-manifest.md)** and the JSON Schema is
+[docs/app-manifest.schema.json](docs/app-manifest.schema.json). Validate a
+manifest with:
 
 ```sh
-npx ajv-cli validate -s docs/app-manifest.schema.json -d shell/apps/my-app.json --spec=draft2020
+npx ajv-cli validate -s docs/app-manifest.schema.json -d my-app/manifest.json --spec=draft2020
 ```
 
-Test it by dropping it into `~/.tvbox/apps/` on your box (appears live), then
-PR it into `shell/apps/` if it's broadly useful.
+Test it privately by dropping the package into `~/.tvbox/apps/<id>/` (or a bare
+`~/.tvbox/apps/<id>.json` manifest) on your box - it appears on HOME live, no
+restart. To publish for everyone, open a PR against the
+[tvbox-apps registry](https://github.com/Andy1210/tvbox-apps) per its
+AUTHORING.md; merge review is the trust boundary.
 
 ## Dev setup
 

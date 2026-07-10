@@ -2,7 +2,7 @@
   "name": "@tvbox/app-sdk",
   "private": true,
   "type": "module",
-  "version": "0.0.0",
+  "version": "1.0.0",
   "peerDependencies": {
     "react": ">=19",
     "react-dom": ">=19",

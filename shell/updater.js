@@ -25,6 +25,7 @@ const path = require("path");
 const crypto = require("crypto");
 const { execFile } = require("child_process");
 const config = require("./config");
+const { isLanUrl } = require("./netguard"); // shared LAN/loopback trust rule (feed may be self-hosted http)
 const pkg = require("./package.json");
 
 const TVBOX = path.join(os.homedir(), ".tvbox");
@@ -49,19 +50,30 @@ const BOOT_GRACE_MS = 10 * 60 * 1000; // no auto-apply right after boot (commit 
 // Files a release's infra/ may install into ~/.tvbox (never anywhere else, and
 // only after the new shell booted healthy - a broken release must not get to
 // replace run-shell.sh, which is the rollback mechanism itself).
+// Must mirror deploy/infra.list (the single source of truth for what ships in
+// every channel) - updater.test.js fails on drift, so a file added to the list
+// can't silently be missing from the OTA channel again (how the v1.1.0 remote
+// bridge went missing).
 const INFRA_FILES = [
   "run-shell.sh",
   "cec_uinput_bridge.py",
   "cec_vendor_shim.c", // the bridge compiles it on start (mtime check)
+  "remote_input_bridge.py", // BT/USB remote bridge (the tvbox-remote user service)
   "cursor_idle_hide.py", // idle mouse-cursor hider (launched from labwc-autostart)
   "tvbox",
   "provision.sh",
   "labwc-autostart",
   "tvbox-cec.service",
+  "tvbox-remote.service",
   "tvbox-flatpak-update.service",
   "tvbox-flatpak-update.timer",
 ];
-const USER_UNITS = ["tvbox-cec.service", "tvbox-flatpak-update.service", "tvbox-flatpak-update.timer"];
+const USER_UNITS = [
+  "tvbox-cec.service",
+  "tvbox-remote.service",
+  "tvbox-flatpak-update.service",
+  "tvbox-flatpak-update.timer",
+];
 const EXECUTABLE = ["run-shell.sh", "tvbox"];
 
 let hooks = { isIdle: () => true, restart: null }; // main.js provides both; the CLI neither
@@ -203,26 +215,6 @@ async function check() {
   return status();
 }
 
-// A self-hosted feed on the LAN (http://192.168…/update.json) is the box
-// owner's own infrastructure - allow plain http there, https everywhere else.
-// Mirrors main.js isPrivateHost (loopback / RFC1918 / link-local / mDNS).
-function isLanUrl(u) {
-  let h;
-  try {
-    const x = new URL(u);
-    if (x.protocol !== "http:") return false;
-    h = x.hostname.toLowerCase();
-  } catch (e) {
-    return false;
-  }
-  return (
-    h === "localhost" ||
-    h.endsWith(".local") ||
-    h === "::1" ||
-    /^(127\.|10\.|192\.168\.|169\.254\.|172\.(1[6-9]|2\d|3[01])\.)/.test(h)
-  );
-}
-
 function sha256File(file) {
   return new Promise((resolve, reject) => {
     const h = crypto.createHash("sha256");
@@ -260,12 +252,29 @@ function freeBytes() {
 async function download(url, dest) {
   const ctl = new AbortController();
   const t = setTimeout(() => ctl.abort(), TARBALL_TIMEOUT_MS);
+  const out = fs.createWriteStream(dest);
   try {
     const res = await fetch(url, { signal: ctl.signal, redirect: "follow" });
     if (!res.ok) throw new Error("HTTP " + res.status);
-    const buf = Buffer.from(await res.arrayBuffer());
-    if (buf.length > TARBALL_MAX_BYTES) throw new Error("tarball too large");
-    fs.writeFileSync(dest, buf);
+    // Enforce the size cap WHILE streaming, not after buffering: reject a
+    // declared-oversize body up front, and count the real bytes as they arrive
+    // so a huge (or lying-Content-Length) response can't exhaust RAM/disk
+    // before a post-hoc check. NaN (absent header) compares false -> streams.
+    if (Number(res.headers.get("content-length")) > TARBALL_MAX_BYTES) throw new Error("tarball too large");
+    let total = 0;
+    for await (const chunk of res.body || []) {
+      total += chunk.length;
+      if (total > TARBALL_MAX_BYTES) {
+        ctl.abort(); // stop the transfer, not just the file write
+        throw new Error("tarball too large");
+      }
+      if (!out.write(chunk)) await new Promise((r) => out.once("drain", r));
+    }
+    await new Promise((resolve, reject) => out.end((e) => (e ? reject(e) : resolve())));
+  } catch (e) {
+    out.destroy();
+    fs.rmSync(dest, { force: true }); // never leave a truncated tarball behind
+    throw e;
   } finally {
     clearTimeout(t);
   }
@@ -306,7 +315,8 @@ async function apply() {
     // re-download, minutes - the UI shows "installing").
     const runningLock = path.join(__dirname, "package-lock.json");
     const stagedLock = path.join(stage, "shell", "package-lock.json");
-    const sameLock = sha256Of(runningLock) && sha256Of(runningLock) === sha256Of(stagedLock);
+    const runningLockSum = sha256Of(runningLock); // hash once, compare once
+    const sameLock = runningLockSum && runningLockSum === sha256Of(stagedLock);
     if (sameLock && fs.existsSync(path.join(__dirname, "node_modules"))) {
       console.log("[updater] lockfile unchanged - hardlinking node_modules");
       await run("cp", ["-al", path.join(__dirname, "node_modules"), path.join(stage, "shell", "node_modules")]);
@@ -439,4 +449,17 @@ function startSchedulers() {
   setInterval(autoTick, AUTO_TICK_MS);
 }
 
-module.exports = { init, status, check, apply, clearFailed, onLauncherLoaded, startSchedulers, cmpVer, DEFAULT_FEED };
+module.exports = {
+  init,
+  status,
+  check,
+  apply,
+  clearFailed,
+  onLauncherLoaded,
+  startSchedulers,
+  cmpVer,
+  DEFAULT_FEED,
+  // exported for updater.test.js - the deploy/infra.list cross-check
+  INFRA_FILES,
+  USER_UNITS,
+};

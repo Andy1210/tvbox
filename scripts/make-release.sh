@@ -58,11 +58,11 @@ trap 'rm -rf "$STAGE"' EXIT
 echo "==> staging release $VERSION"
 rsync -a --exclude node_modules --exclude apps-data --exclude '*.log' \
   --exclude electron-web-client "$TVBOX/shell" "$STAGE/"
-mkdir -p "$STAGE/infra"
-cp "$TVBOX/deploy/run-shell.sh" "$TVBOX/deploy/labwc-autostart" "$TVBOX/deploy/tvbox" \
-   "$TVBOX/deploy/provision.sh" "$TVBOX/deploy/tvbox-cec.service" \
-   "$TVBOX/deploy/tvbox-flatpak-update.service" "$TVBOX/deploy/tvbox-flatpak-update.timer" \
-   "$TVBOX/cec/cec_uinput_bridge.py" "$TVBOX/cec/cec_vendor_shim.c" "$STAGE/infra/"
+# infra/ comes from the ONE shared list (deploy/infra.list) via copy-infra.sh,
+# so the OTA tarball can never drift from the SD image / dev deploy (this is how
+# remote_input_bridge.py + tvbox-remote.service + cursor_idle_hide.py finally
+# reach OTA boxes). Fail-closed: a missing infra file aborts the release.
+"$HERE/copy-infra.sh" "$STAGE/infra"
 GIT_SHA="$(git -C "$TVBOX" rev-parse --short HEAD 2>/dev/null || echo unknown)"
 node -e "
   const fs = require('fs');

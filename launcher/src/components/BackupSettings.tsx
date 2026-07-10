@@ -99,7 +99,7 @@ function BackupPhone({ onClose }: { onClose: () => void }) {
           onEnter={onClose}
           className="px-[3vw] py-[1.5vh] rounded-[1.1vh] bg-white/10 text-[2.1vh] font-semibold"
         >
-          {t("ambient.photosDone")}
+          {t("backup.done")}
         </FocusButton>
       </div>
     </FocusContext.Provider>

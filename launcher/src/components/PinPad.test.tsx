@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { act, render } from "@testing-library/react";
 import { PinPad } from "./PinPad";
-import { setupRemote, placeGrid, remote, setFocus, getCurrentFocusKey } from "../test/remote";
+import { setupRemote, placeGrid, remote, setFocus, getCurrentFocusKey, flushFocus } from "../test/remote";
 
 // The parental PIN pad: a D-pad-driven modal that auto-submits at 4 digits. These
 // drive it the way the remote does - arrow to a digit, OK to enter it - and check
@@ -26,69 +26,70 @@ describe("PinPad", () => {
     vi.useRealTimers();
   });
 
-  it("auto-focuses the first digit on open", () => {
+  it("auto-focuses the first digit on open", async () => {
     const { getByText } = render(<PinPad title="PIN" onSubmit={() => {}} onCancel={() => {}} />);
     layout(getByText);
     act(() => vi.runOnlyPendingTimers()); // the modal's deferred setFocus
+    await flushFocus(); // setFocus resolves on the async scheduler
     expect(getCurrentFocusKey()).toBe("pin-1");
   });
 
-  it("enters a 4-digit PIN with the arrows and auto-submits", () => {
+  it("enters a 4-digit PIN with the arrows and auto-submits", async () => {
     const onSubmit = vi.fn();
     const { getByText } = render(<PinPad title="PIN" onSubmit={onSubmit} onCancel={() => {}} />);
     layout(getByText);
-    act(() => setFocus("pin-1"));
-    remote.ok(); // 1
-    remote.right();
-    remote.ok(); // 2
-    remote.right();
-    remote.ok(); // 3
-    remote.down();
-    remote.ok(); // 6  -> "1236", 4 digits
+    await setFocus("pin-1");
+    await remote.ok(); // 1
+    await remote.right();
+    await remote.ok(); // 2
+    await remote.right();
+    await remote.ok(); // 3
+    await remote.down();
+    await remote.ok(); // 6  -> "1236", 4 digits
     expect(onSubmit).toHaveBeenCalledTimes(1);
     expect(onSubmit).toHaveBeenCalledWith("1236");
   });
 
-  it("delete removes the last digit before submit", () => {
+  it("delete removes the last digit before submit", async () => {
     const onSubmit = vi.fn();
     const { getByText } = render(<PinPad title="PIN" onSubmit={onSubmit} onCancel={() => {}} />);
     layout(getByText);
-    act(() => setFocus("pin-1"));
-    remote.ok(); // "1"
-    act(() => setFocus("pin-2"));
-    remote.ok(); // "12"
-    act(() => setFocus("pin-del"));
-    remote.ok(); // "1"  (2 deleted)
-    act(() => setFocus("pin-3"));
-    remote.ok(); // "13"
-    act(() => setFocus("pin-4"));
-    remote.ok(); // "134"
-    act(() => setFocus("pin-5"));
-    remote.ok(); // "1345" -> submit
+    await setFocus("pin-1");
+    await remote.ok(); // "1"
+    await setFocus("pin-2");
+    await remote.ok(); // "12"
+    await setFocus("pin-del");
+    await remote.ok(); // "1"  (2 deleted)
+    await setFocus("pin-3");
+    await remote.ok(); // "13"
+    await setFocus("pin-4");
+    await remote.ok(); // "134"
+    await setFocus("pin-5");
+    await remote.ok(); // "1345" -> submit
     expect(onSubmit).toHaveBeenCalledWith("1345");
   });
 
-  it("does not submit before the 4th digit", () => {
+  it("does not submit before the 4th digit", async () => {
     const onSubmit = vi.fn();
     const { getByText } = render(<PinPad title="PIN" onSubmit={onSubmit} onCancel={() => {}} />);
     layout(getByText);
-    act(() => setFocus("pin-1"));
-    remote.ok();
-    remote.ok(); // OK on the same key twice -> "11" (2 digits)
-    remote.right();
-    remote.ok(); // "112"
+    await setFocus("pin-1");
+    await remote.ok();
+    await remote.ok(); // OK on the same key twice -> "11" (2 digits)
+    await remote.right();
+    await remote.ok(); // "112"
     expect(onSubmit).not.toHaveBeenCalled();
   });
 
-  it("remote Back cancels", () => {
+  it("remote Back cancels", async () => {
     const onCancel = vi.fn();
     const { getByText } = render(<PinPad title="PIN" onSubmit={() => {}} onCancel={onCancel} />);
     layout(getByText);
-    remote.back();
+    await remote.back();
     expect(onCancel).toHaveBeenCalledTimes(1);
   });
 
-  it("shows an error message when given one", () => {
+  it("shows an error message when given one", async () => {
     const { getByText } = render(<PinPad title="PIN" onSubmit={() => {}} onCancel={() => {}} error="Wrong PIN" />);
     expect(getByText("Wrong PIN")).toBeInTheDocument();
   });

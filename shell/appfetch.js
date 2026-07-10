@@ -33,6 +33,10 @@ const http = require("http");
 const https = require("https");
 const dns = require("dns");
 const net = require("net");
+// The IP/host trust classification lives in netguard.js (shared with the
+// updater/installer/main-process guards); this module re-exports classifyIp +
+// isPrivateName so its API (and appfetch.test.js) stays stable.
+const { normHost, classifyIp, isPrivateName } = require("./netguard");
 
 const MAX_RES_BYTES = 5 * 1024 * 1024; // 5 MB response cap
 const MAX_REQ_BYTES = 256 * 1024; // 256 KB request-body cap
@@ -54,80 +58,6 @@ const RES_HEADER_ALLOW = new Set([
   "date",
   "cache-control",
 ]);
-
-// Normalize a hostname for comparison/classification: lowercase, strip one
-// trailing dot (FQDN root), strip IPv6 brackets and any zone id.
-function normHost(h) {
-  let s = String(h || "").toLowerCase();
-  if (s.endsWith(".")) s = s.slice(0, -1);
-  if (s.startsWith("[") && s.endsWith("]")) s = s.slice(1, -1);
-  const pct = s.indexOf("%");
-  if (pct >= 0) s = s.slice(0, pct);
-  return s;
-}
-
-// Pull the embedded IPv4 out of an IPv4-mapped/-compatible/NAT64 IPv6 address
-// (`::ffff:x`, `::x`, or the `64:ff9b::/96` well-known NAT64 prefix), in dotted
-// OR hex-group form. Returns "a.b.c.d" or null. These ranges aren't publicly
-// routable as-is, so treating any match as its embedded v4 fails closed.
-function embeddedV4(s) {
-  const m = /^(?:::(?:ffff:)?|64:ff9b::)([0-9a-f.:]+)$/i.exec(s);
-  if (!m) return null;
-  const tail = m[1];
-  if (/^(\d{1,3}\.){3}\d{1,3}$/.test(tail)) return tail; // dotted: ::ffff:127.0.0.1
-  const g = tail.split(":");
-  if (g.length === 2 && g.every((h) => /^[0-9a-f]{1,4}$/i.test(h))) {
-    const hi = parseInt(g[0], 16);
-    const lo = parseInt(g[1], 16);
-    return [(hi >> 8) & 255, hi & 255, (lo >> 8) & 255, lo & 255].join("."); // hex: ::ffff:7f00:1
-  }
-  return null;
-}
-
-// Classify a literal IP address into a trust category. Returns one of
-// "loopback" | "linklocal" | "metadata" | "unspecified" | "private" | "public".
-// Non-IP input returns "" (caller treats a name, not an address).
-function classifyIp(ip) {
-  const s = normHost(ip);
-  if (net.isIPv4(s)) {
-    const o = s.split(".").map(Number);
-    if (o[0] === 0) return "unspecified"; // 0.0.0.0/8 "this host"
-    if (o[0] === 127) return "loopback"; // 127.0.0.0/8
-    if (o[0] === 169 && o[1] === 254) return o[2] === 169 && o[3] === 254 ? "metadata" : "linklocal"; // 169.254/16
-    if (o[0] === 10) return "private";
-    if (o[0] === 172 && o[1] >= 16 && o[1] <= 31) return "private";
-    if (o[0] === 192 && o[1] === 168) return "private";
-    if (o[0] === 100 && o[1] >= 64 && o[1] <= 127) return "private"; // 100.64/10 CGNAT
-    return "public";
-  }
-  if (net.isIPv6(s)) {
-    // canonical + fully-expanded / non-canonical zero forms of ::1 and ::
-    if (s === "::1" || /^(0{1,4}:){7}0{0,3}1$/.test(s)) return "loopback";
-    if (s === "::" || /^(0{1,4}:){7}0{1,4}$/.test(s)) return "unspecified";
-    // IPv4-mapped (::ffff:…) / -compatible (::…) / NAT64 (64:ff9b::…) - extract
-    // the embedded IPv4 in ANY form (dotted "::ffff:127.0.0.1" OR hex
-    // "::ffff:7f00:1") and classify it. Missing these would let a hostname
-    // resolving to the encoded loopback/metadata address slip through as public.
-    const v4 = embeddedV4(s);
-    if (v4) return classifyIp(v4);
-    if (/^fe[89ab]/.test(s)) return "linklocal"; // fe80::/10
-    if (/^f[cd]/.test(s)) return "private"; // fc00::/7 unique-local
-    if (/^fec/.test(s)) return "private"; // deprecated site-local, treat as private
-    return "public";
-  }
-  return "";
-}
-
-// A declared literal host that legitimately denotes a private/LAN target the
-// user opted into (a LAN name or a private IP) - but NEVER loopback/localhost,
-// which is only ever the box itself.
-function isPrivateName(host) {
-  const h = normHost(host);
-  if (h === "localhost" || h.endsWith(".localhost")) return false; // loopback alias - never a "LAN server"
-  if (h.endsWith(".local")) return true; // mDNS LAN name
-  const cat = classifyIp(h);
-  return cat === "private"; // a private IP literal (not loopback/linklocal/metadata)
-}
 
 // host matches a declared origin exactly or as a subdomain. Empty/blank origins
 // never match (an "" entry must not become a universal ".<anything>" wildcard).

@@ -1,5 +1,5 @@
-// Shared shell constants. Kept in one place so the HTTP port and the derived
-// Spotify OAuth redirect URI can't drift apart (Spotify's registered redirect
-// must match exactly).
+// Shared shell constants. PORT is the local HTTP server on 127.0.0.1 - the
+// launcher, app web/ bundles, and the JSON control API all hang off it. Kept
+// out of main.js so it can be required without loading Electron.
 const PORT = 8097;
 module.exports = { PORT };

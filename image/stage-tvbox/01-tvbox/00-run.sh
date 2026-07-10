@@ -16,8 +16,14 @@ cp -r files/shell "${ROOTFS_DIR}${USER_HOME}/.tvbox/"
 # A fresh image starts with an EMPTY home - no apps installed. Apps are added
 # from the registry via HOME -> "Get more apps" (the Kodi model).
 install -m 755 files/run-shell.sh files/tvbox files/cec_uinput_bridge.py files/cursor_idle_hide.py \
+  files/remote_input_bridge.py \
   "${ROOTFS_DIR}${USER_HOME}/.tvbox/"
-install -m 644 files/labwc-autostart files/provision.sh files/tvbox-cec.service \
+# cec_vendor_shim.c is source the CEC bridge compiles on the box (LG SIMPLINK
+# vendor identity - see the bridge docstring); tvbox-remote.service is the BT/USB
+# remote bridge's user unit. Both come from deploy/infra.list now, so they ship
+# on flashed boxes the same as on dev deploys / OTA.
+install -m 644 files/labwc-autostart files/provision.sh files/tvbox-cec.service files/tvbox-remote.service \
+  files/cec_vendor_shim.c \
   files/tvbox-flatpak-update.service files/tvbox-flatpak-update.timer \
   "${ROOTFS_DIR}${USER_HOME}/.tvbox/"
 
@@ -25,6 +31,12 @@ install -m 644 files/labwc-autostart files/provision.sh files/tvbox-cec.service 
 install -m 644 conf/99-tvbox.rules "${ROOTFS_DIR}/etc/udev/rules.d/"
 install -m 644 conf/50-tvbox-networkmanager.rules conf/51-tvbox-locale.rules "${ROOTFS_DIR}/etc/polkit-1/rules.d/"
 install -m 644 conf/20auto-upgrades conf/52tvbox-unattended-upgrades "${ROOTFS_DIR}/etc/apt/apt.conf.d/"
+# logind: a BT remote's Power button reaches the box as KEY_POWER; without this
+# drop-in logind would power the whole box off (default HandlePowerKey=poweroff)
+# before the remote bridge can act on it. Same content deploy/provision.sh
+# writes - KEEP IN SYNC (conf/10-tvbox-logind.conf).
+install -d "${ROOTFS_DIR}/etc/systemd/logind.conf.d"
+install -m 644 conf/10-tvbox-logind.conf "${ROOTFS_DIR}/etc/systemd/logind.conf.d/10-tvbox.conf"
 
 # 2b) WiFi usable on a fresh boot with NO ethernet and NO keyboard. This image
 #     has no first-boot config hook (custom.toml is NOT processed - see
@@ -196,6 +208,28 @@ EOF2
   chmod 600 "$KF"
   nmcli con reload 2>/dev/null || true
 fi
+
+# --- Secret hygiene: once PASSWORD / WIFI_PASSWORD have been CONSUMED above,
+# blank ONLY those two value lines in tvbox.conf so the plaintext secrets don't
+# linger indefinitely on the FAT boot partition (world/tv-readable, so any app
+# plugin can read them). Everything else (HOSTNAME, SUDO, WIFI_SSID,
+# SSH_AUTHORIZED_KEY) is preserved, so the documented "the config may stay on
+# the card" re-run behaviour is unchanged: PASSWORD is set-only (already applied
+# via chpasswd; a blank value just no-ops next boot) and WIFI_PASSWORD is only
+# blanked once the NM keyfile exists (the WiFi block above is write-once and
+# no-ops while $KF is present), so we never strip a PSK that was not actually
+# written into a connection. Atomic rewrite via a temp file on the same
+# partition; any failure leaves the original untouched. ---
+SCRUB_WIFI=""
+[ -f "$KF" ] && SCRUB_WIFI="s/^WIFI_PASSWORD=.*/WIFI_PASSWORD=/"
+if [ -f "$CONF" ] && grep -Eq '^(PASSWORD|WIFI_PASSWORD)=.' "$CONF"; then
+  TMP="$CONF.tvbox-scrub.$$"
+  if sed "s/^PASSWORD=.*/PASSWORD=/; $SCRUB_WIFI" "$CONF" > "$TMP" 2>/dev/null && [ -s "$TMP" ]; then
+    mv -f "$TMP" "$CONF"
+  else
+    rm -f "$TMP"
+  fi
+fi
 FIRSTBOOT
 chmod 755 "${ROOTFS_DIR}/usr/local/sbin/tvbox-firstboot"
 cat > "${ROOTFS_DIR}/etc/systemd/system/tvbox-firstboot.service" <<'EOF'
@@ -277,17 +311,22 @@ passwd -l ${FIRST_USER_NAME}
 
 # Electron npm install INSIDE the arm64 chroot - a host-side install would
 # fetch the x86_64 Electron binary. Slowest custom step (~200 MB download).
-su - ${FIRST_USER_NAME} -c 'cd ~/.tvbox/shell && npm install --no-audit --no-fund'
+# `npm ci` (not `npm install`) for a reproducible tree: shell/ ships a committed
+# package-lock.json and node_modules is excluded from the copied tree, so ci
+# installs exactly the locked versions.
+su - ${FIRST_USER_NAME} -c 'cd ~/.tvbox/shell && npm ci --no-audit --no-fund'
 
 # tvbox CLI on PATH
 su - ${FIRST_USER_NAME} -c 'mkdir -p ~/.local/bin && ln -sf ~/.tvbox/tvbox ~/.local/bin/tvbox'
 
 # user units: systemctl --user can't run in a chroot - "enable" by creating
-# the WantedBy symlinks directly (CEC bridge + nightly flatpak-update timer)
+# the WantedBy symlinks directly (CEC bridge + remote-input bridge + nightly
+# flatpak-update timer)
 su - ${FIRST_USER_NAME} -c '
   mkdir -p ~/.config/systemd/user/default.target.wants ~/.config/systemd/user/timers.target.wants
-  cp ~/.tvbox/tvbox-cec.service ~/.tvbox/tvbox-flatpak-update.service ~/.tvbox/tvbox-flatpak-update.timer ~/.config/systemd/user/
+  cp ~/.tvbox/tvbox-cec.service ~/.tvbox/tvbox-remote.service ~/.tvbox/tvbox-flatpak-update.service ~/.tvbox/tvbox-flatpak-update.timer ~/.config/systemd/user/
   ln -sf ../tvbox-cec.service ~/.config/systemd/user/default.target.wants/tvbox-cec.service
+  ln -sf ../tvbox-remote.service ~/.config/systemd/user/default.target.wants/tvbox-remote.service
   ln -sf ../tvbox-flatpak-update.timer ~/.config/systemd/user/timers.target.wants/tvbox-flatpak-update.timer'
 
 # session autostart + flathub user remote (network works in the chroot;

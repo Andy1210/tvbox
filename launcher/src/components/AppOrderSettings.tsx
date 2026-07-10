@@ -47,10 +47,12 @@ export function AppOrderSettings() {
     ).map((id) => byId.get(id)!);
   }, [apps, order, loc, tag]);
 
-  // The panel mounts with NOTHING focusable (the parent Settings focuses its
-  // first child before the fetch resolves), so the initial load must place
-  // focus itself or the D-pad can never enter the list - same convention as
-  // StoreSettings. One-shot: refetches must not steal focus.
+  // The only static focusable at mount is the "Get more apps" toggle above; the
+  // app rows arrive async (fetchApps), and the parent Settings focuses this
+  // panel's first child before that resolves - so the initial load must place
+  // focus on the list itself or the D-pad can never reach it (it would stick on
+  // the toggle) - same convention as StoreSettings. One-shot: refetches must not
+  // steal focus.
   const focusPlaced = useRef(false);
   useEffect(() => {
     if (focusPlaced.current || !ordered.length) return;

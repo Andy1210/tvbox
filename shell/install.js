@@ -7,6 +7,7 @@ const path = require("path");
 const os = require("os");
 const crypto = require("crypto");
 const { execFileSync } = require("child_process");
+const { isLanUrl } = require("./netguard"); // shared self-hosted trust rule (plain http only to LAN hosts)
 
 // Installed web-client BUNDLES live OUTSIDE the shell install so they survive
 // OTA + deploys - an OTA runs the shell from a fresh ~/.tvbox/current/shell (the
@@ -355,7 +356,7 @@ async function installPackage(id, baseUrl, files, log) {
     try {
       pm = JSON.parse(fs.readFileSync(path.join(tmp, "manifest.json"), "utf8"));
     } catch (e) {
-      throw new Error("package manifest.json missing or invalid JSON");
+      throw new Error("package manifest.json missing or invalid JSON", { cause: e });
     }
     if (pm.id !== id) throw new Error("package manifest id '" + pm.id + "' != install id '" + id + "'");
     // Swap in: move any existing install aside first so a crash mid-rename can be
@@ -389,6 +390,13 @@ function installDownloadDeps(m, log) {
   }
   const after = appDeps(m);
   return { ok: after.depsOk, installed: installed, missing: after.missing };
+}
+
+// An install source may be fetched over https from anywhere, or plain http
+// only from the owner's own LAN/loopback infrastructure - the same
+// self-hosted trust rule as the updater feed (netguard.isLanUrl).
+function sourceUrlOk(u) {
+  return /^https:\/\//i.test(u || "") || isLanUrl(u);
 }
 
 // The flatpak app's "active" dir (extract paths like "files/resources/..." are
@@ -434,11 +442,22 @@ function acquireSource(source, log) {
   }
   if (source.type === "url") {
     if (!source.url) throw new Error("url source needs a url");
+    // Every other acquisition path (requires.download, package files, the OTA
+    // tarball) is https + sha256-pinned; hold url sources to the same bar:
+    // https anywhere, plain http only to the owner's own LAN host, and an
+    // optional (recommended) sha256 pin verified before extraction.
+    if (!sourceUrlOk(source.url)) throw new Error("url source must be https (or LAN http)");
+    if (source.sha256 != null && !/^[0-9a-f]{64}$/i.test(source.sha256))
+      throw new Error("url source sha256 must be 64 hex chars");
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "tvbox-"));
     const isZip = /\.zip$/i.test(source.url);
     const file = path.join(tmp, isZip ? "src.zip" : "src.tar.gz");
     log("download " + source.url + " …");
     execFileSync("curl", ["-fsSL", source.url, "-o", file], { stdio: "inherit" });
+    if (source.sha256) {
+      const sum = crypto.createHash("sha256").update(fs.readFileSync(file)).digest("hex");
+      if (sum !== source.sha256.toLowerCase()) throw new Error("url source sha256 mismatch (got " + sum + ")");
+    }
     const out = path.join(tmp, "out");
     fs.mkdirSync(out);
     if (isZip) execFileSync("unzip", ["-q", file, "-d", out], { stdio: "inherit" });
@@ -447,9 +466,20 @@ function acquireSource(source, log) {
   }
   if (source.type === "git") {
     if (!source.url) throw new Error("git source needs a url");
+    if (!sourceUrlOk(source.url)) throw new Error("git source must be https (or LAN http)");
+    if (source.commit != null && !/^[0-9a-f]{40}$/i.test(source.commit))
+      throw new Error("git source commit must be a full 40-hex sha");
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "tvbox-"));
     log("git clone " + source.url + " …");
-    execFileSync("git", ["clone", "--depth", "1", source.url, tmp], { stdio: "inherit" });
+    if (source.commit) {
+      // Pinned: full clone + detached checkout of exactly that commit. The
+      // checkout fails when the sha isn't in the repo, so its success IS the
+      // verification (a sha names its content, like the sha256 on url sources).
+      execFileSync("git", ["clone", source.url, tmp], { stdio: "inherit" });
+      execFileSync("git", ["-C", tmp, "checkout", "--detach", source.commit.toLowerCase()], { stdio: "inherit" });
+    } else {
+      execFileSync("git", ["clone", "--depth", "1", source.url, tmp], { stdio: "inherit" });
+    }
     return tmp;
   }
   throw new Error("unknown source type: " + source.type);

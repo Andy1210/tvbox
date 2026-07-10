@@ -80,7 +80,7 @@ export function RegionSettings() {
           className="px-[2vw] py-[1.5vh] rounded-[1.1vh] bg-white/5 flex items-center justify-between gap-[1.5vw]"
         >
           <span className="text-[2.1vh]">{t("region.keyboard")}</span>
-          <span className="text-[1.9vh] text-fg-dim">{km ? keymapLabel(km) : "-"}</span>
+          <span className="text-[1.9vh] text-fg-dim">{km ? keymapLabel(t, km) : "-"}</span>
         </FocusButton>
       </div>
 

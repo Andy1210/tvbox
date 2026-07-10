@@ -73,10 +73,19 @@ describe("useBackspace", () => {
     expect(() => back()).not.toThrow();
   });
 
-  it("only reacts to Backspace, not other keys", () => {
+  it("only reacts to Back keys, not other keys", () => {
     const cb = vi.fn();
     render(createElement(Layer, { cb }));
     act(() => window.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true })));
     expect(cb).not.toHaveBeenCalled();
+  });
+
+  // The box is driven by several remote transports; each reports Back with its
+  // own DOM key. All must trigger the handler so no remote needs a manual remap.
+  it.each(["Backspace", "BrowserBack", "GoBack", "Escape"])("treats %s as Back", (key) => {
+    const cb = vi.fn();
+    render(createElement(Layer, { cb }));
+    act(() => window.dispatchEvent(new KeyboardEvent("keydown", { key, bubbles: true })));
+    expect(cb).toHaveBeenCalledTimes(1);
   });
 });

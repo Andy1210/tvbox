@@ -31,8 +31,8 @@ describe("AppOrderSettings focus placement", () => {
 
   it("focuses the first row once the slow app list arrives", async () => {
     render(<Settings onExit={() => {}} />);
-    act(() => setFocus("cat-apps"));
-    remote.ok(); // open the Apps panel - fetchApps is still in flight
+    await setFocus("cat-apps");
+    await remote.ok(); // open the Apps panel - fetchApps is still in flight
     await act(() => new Promise((r) => setTimeout(r, 60))); // fetch (20ms) resolves, rows render
     await act(() => new Promise((r) => setTimeout(r, 10))); // the focus-placement timeout flushes
     expect(getCurrentFocusKey()).toBe("apporder-up-alpha"); // first row by name order

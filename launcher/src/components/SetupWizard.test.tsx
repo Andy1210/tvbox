@@ -37,16 +37,16 @@ describe("SetupWizard", () => {
 
     // Language -> WiFi -> Timezone -> Keyboard -> Finish via the primary button.
     for (let s = 0; s < 4; s++) {
-      act(() => setFocus("wizard-primary"));
-      remote.ok();
+      await setFocus("wizard-primary");
+      await remote.ok();
       await flush();
     }
 
-    act(() => setFocus("wizard-primary"));
+    await setFocus("wizard-primary");
     expect(getCurrentFocusKey()).toBe("wizard-primary");
     expect(onDone).not.toHaveBeenCalled();
 
-    remote.ok(); // Finish
+    await remote.ok(); // Finish
     expect(onDone).toHaveBeenCalledTimes(1);
     expect(localStorage.getItem("tvbox.setup.done")).toBe("1");
   });
@@ -56,10 +56,10 @@ describe("SetupWizard", () => {
     await flush();
 
     const first = "lang-" + AVAILABLE_LOCALES[0].id;
-    act(() => setFocus(first));
+    await setFocus(first);
     expect(getCurrentFocusKey()).toBe(first);
 
-    remote.ok(); // picks the language -> onPicked moves focus to the primary button
+    await remote.ok(); // picks the language -> onPicked moves focus to the primary button
     await flush();
     expect(getCurrentFocusKey()).toBe("wizard-primary");
   });

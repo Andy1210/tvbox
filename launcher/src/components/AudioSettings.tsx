@@ -43,9 +43,31 @@ function VolumeRow({ volume, muted, onBump }: { volume: number; muted: boolean; 
     >
       <span className="text-[2.1vh]">{t("audio.volume")}</span>
       <span className="flex items-center gap-[1.2vw] text-[2.2vh] font-semibold tabular-nums">
-        <span className="opacity-60">◀</span>
+        <svg
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2.4"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          className="w-[2.2vh] h-[2.2vh] opacity-60"
+          aria-hidden
+        >
+          <path d="M15 6l-6 6 6 6" />
+        </svg>
         <span className="w-[7vw] text-center">{muted ? t("audio.muted") : Math.round(volume * 100) + "%"}</span>
-        <span className="opacity-60">▶</span>
+        <svg
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2.4"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          className="w-[2.2vh] h-[2.2vh] opacity-60"
+          aria-hidden
+        >
+          <path d="M9 6l6 6-6 6" />
+        </svg>
       </span>
     </div>
   );
@@ -113,7 +135,12 @@ export function AudioSettings() {
             ].join(" ")}
           >
             <span className="text-[2.1vh] truncate">{s.description || s.name}</span>
-            {s.isDefault && <span className="text-[1.7vh] text-[#39c0d6] shrink-0">● {t("audio.default")}</span>}
+            {s.isDefault && (
+              <span className="flex items-center gap-[0.6vw] text-[1.7vh] text-[#39c0d6] shrink-0">
+                <span className="w-[1.2vh] h-[1.2vh] rounded-full bg-[#39c0d6] shrink-0" />
+                {t("audio.default")}
+              </span>
+            )}
           </FocusButton>
         ))}
         {!sinks.length && <div className="text-[1.9vh] text-fg-dim">{t("audio.none")}</div>}
