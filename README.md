@@ -263,6 +263,19 @@ to directly (e.g. the Seeed XIAO Smart IR Mate), or **Home Assistant scripts**
 for anything HA can drive (Broadlink RM4 and friends). Setup recipes:
 [docs/ir-blaster.md](docs/ir-blaster.md).
 
+### Fire TV remote: TV volume/mute/power from the remote itself
+
+A Fire TV / Alexa Voice Remote has its own IR blaster, but it normally only
+learns TV codes when paired to a Fire TV box. tvbox can program it directly:
+pair the remote over Bluetooth, then under **Settings → Peripherals** (it shows
+up under the remote itself, only for a remote that supports this) pick your TV
+brand and save. tvbox looks the codes up in the community
+[irdb](https://github.com/probonopd/irdb) database and writes them to the
+remote over its Bluetooth keymap service, so afterwards the remote drives the
+TV's volume, mute and power on its own, no Fire TV needed. It suggests your TV
+brand automatically from the HDMI EDID. Details and the reverse-engineering
+notes: [docs/firetv-remote-ir.md](docs/firetv-remote-ir.md).
+
 ## The App Store
 
 **Settings → App Store** (also HOME → "Get more apps") lists apps from the
