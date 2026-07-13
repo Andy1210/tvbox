@@ -242,6 +242,18 @@ action - remapping one remote never touches another. The **Power** button is
 configurable (turn the TV off over CEC, also power the box off, or ignore); it's
 always intercepted by the bridge so it can't accidentally power the box down.
 
+### TV volume over an IR blaster
+
+Most TVs ignore CEC volume from a source device, so out of the box the
+remotes' volume keys go nowhere. Point a network **IR blaster** at the TV and
+configure it under **Settings → Peripherals → IR blaster**: from then on the
+remotes' volume up / down / mute (and the same commands over
+[MQTT](docs/mqtt-integration.md), e.g. from a voice assistant) drive the TV's
+real volume. Two backends are supported - an **ESPHome** IR transceiver spoken
+to directly (e.g. the Seeed XIAO Smart IR Mate), or **Home Assistant scripts**
+for anything HA can drive (Broadlink RM4 and friends). Setup recipes:
+[docs/ir-blaster.md](docs/ir-blaster.md).
+
 ## The App Store
 
 **Settings → App Store** (also HOME → "Get more apps") lists apps from the

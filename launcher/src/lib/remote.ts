@@ -4,6 +4,8 @@
 import type { RemoteAction, RemoteKeymap } from "@sdk/config";
 
 // Order shown in the remap UI. Mirrors ACTION_KEY in remote_input_bridge.py.
+// The volume trio doubles as the IR-blaster hook: when config.ir is set, the
+// bridge forwards these to the TV over IR instead of emitting them.
 export const REMOTE_ACTIONS: RemoteAction[] = [
   "up",
   "down",
@@ -18,6 +20,9 @@ export const REMOTE_ACTIONS: RemoteAction[] = [
   "prev",
   "next",
   "stop",
+  "volume_up",
+  "volume_down",
+  "mute",
 ];
 
 export interface ConnectedRemote {

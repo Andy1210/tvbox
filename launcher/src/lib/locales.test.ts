@@ -10,7 +10,17 @@ import { fileURLToPath } from "node:url";
 const HERE = path.dirname(fileURLToPath(import.meta.url)); // launcher/src/lib
 const SRC = path.resolve(HERE, ".."); // launcher/src
 const LOCALES = path.join(SRC, "locales");
-const DYNAMIC = ["_meta.", "greeting.", "ambient.wx.", "settingsCat.", "remote.action.", "remote.power.", "keymap."]; // built at runtime (Clock, Ambient weather, Settings categories, remap actions, power options, keyboard-layout names)
+const DYNAMIC = [
+  "_meta.",
+  "greeting.",
+  "ambient.wx.",
+  "settingsCat.",
+  "remote.action.",
+  "remote.power.",
+  "keymap.",
+  "ir.action.",
+  "ir.backend.",
+]; // built at runtime (Clock, Ambient weather, Settings categories, remap actions, power options, keyboard-layout names, IR blaster actions/backends)
 
 function flatten(obj: Record<string, unknown>, prefix = ""): string[] {
   return Object.entries(obj).flatMap(([k, v]) => {

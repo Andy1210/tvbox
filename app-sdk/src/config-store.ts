@@ -19,6 +19,8 @@ import {
   saveWifi,
   saveMqtt,
   type MqttInput,
+  saveIr,
+  type IrInput,
 } from "./config";
 
 // Single source of truth for the shell config (IPTV source + parental lock +
@@ -38,6 +40,7 @@ interface ConfigState {
   setPlayer: (player: PlayerInput) => Promise<void>;
   setWifi: (wifi: { country: string }) => Promise<void>;
   setMqtt: (mqtt: MqttInput) => Promise<void>;
+  setIr: (ir: IrInput) => Promise<void>;
   setRemote: (devices: Record<string, RemoteDeviceConfig>) => Promise<void>;
   setRemotePower: (power: RemotePower) => Promise<void>;
 }
@@ -59,6 +62,7 @@ export const useConfigStore = create<ConfigState>((set) => ({
   setPlayer: async (player) => set({ config: await savePlayer(player) }),
   setWifi: async (wifi) => set({ config: await saveWifi(wifi) }),
   setMqtt: async (mqtt) => set({ config: await saveMqtt(mqtt) }),
+  setIr: async (ir) => set({ config: await saveIr(ir) }),
   setRemote: async (devices) => set({ config: await saveRemote(devices) }),
   setRemotePower: async (power) => set({ config: await saveRemotePower(power) }),
 }));

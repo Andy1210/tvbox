@@ -19,6 +19,7 @@ const audio = require("./audio"); // wpctl sink list + volume (device audio sett
 const bluetooth = require("./bluetooth"); // bluetoothctl pair/connect (audio + input devices)
 const ambient = require("./ambient"); // weather + local photos for the idle/ambient screen
 const mqttBridge = require("./mqtt"); // MQTT: now-playing publish + command/notify (HA integration)
+const ir = require("./ir"); // IR blaster hub: TV volume/mute over ESPHome or Home Assistant
 const apps = require("./install"); // manifests + install-recipe runner (shared with the tvbox CLI)
 const store = require("./store"); // app-store registry client (manifest-only apps -> ~/.tvbox/apps)
 const appfetch = require("./appfetch"); // capability: scoped server-side fetch (data proxy), origin-locked + SSRF-guarded
@@ -401,6 +402,12 @@ function handlePost(p, data, res) {
       remoteBridgeCmd("reload"); // tell the bridge to re-read the keymap
       changed.push("remote");
     }
+    if (data.ir) {
+      config.setIr(data.ir); // IR blaster backend + action map (sanitized in config.js)
+      ir.applyConfig(); // reconnect the backend right away
+      remoteBridgeCmd("reload"); // the bridge re-reads whether volume keys go to IR
+      changed.push("ir");
+    }
     emitConfigChange(changed); // e.g. Live TV drops its channel/EPG cache on a new IPTV source
     return jsonRes(res, { ok: true, config: config.publicConfig() });
   }
@@ -415,6 +422,15 @@ function handlePost(p, data, res) {
   if (p === "/tvbox/api/audio/volume") {
     return audio.setVolume({ ...process.env, ...WL_ENV }, Number(data.id), Number(data.volume), (ok) =>
       jsonRes(res, { ok }),
+    );
+  }
+  if (p === "/tvbox/api/ir/send") {
+    // IR blaster: abstract TV command (volume_up/volume_down/mute), optionally
+    // repeated (steps). Callers: the remote bridge (BT volume keys) + the
+    // settings UI test buttons. A dead blaster answers ok:false, never a 500.
+    return ir.send(String(data.action || ""), data.steps).then(
+      (r) => jsonRes(res, r),
+      (e) => jsonRes(res, { ok: false, error: String((e && e.message) || e) }),
     );
   }
   if (p === "/tvbox/api/nowplaying") {
@@ -1131,6 +1147,11 @@ function serve() {
       jsonRes(res, { phoneConnected: pairing.phoneConnected() });
       return;
     }
+    // IR blaster backend health for the settings card (connected/lastError)
+    if (p === "/tvbox/api/ir/status") {
+      jsonRes(res, ir.status());
+      return;
+    }
     if (p === "/tvbox/api/wifi/status") {
       wifiStatus((s) => ethernetStatus((eth) => jsonRes(res, { ...s, ethernet: eth })));
       return;
@@ -1831,6 +1852,13 @@ function handleTvCommand(cmd) {
     case "standby":
       cecPower(false);
       break;
+    case "volume_up":
+    case "volume_down":
+    case "mute":
+      // TV volume over the IR blaster (ir.js) - CEC volume doesn't reach every
+      // TV. steps repeats the send ("volume up by 3"); ir.js clamps it.
+      ir.send(action, cmd && cmd.steps).catch((e) => console.warn("[ir]", action, "failed:", (e && e.message) || e));
+      break;
     default:
       console.warn("[mqtt] unknown command:", action);
   }
@@ -2244,6 +2272,7 @@ app.whenReady().then(() => {
   // MQTT bridge (now-playing publish + HA integration); no-op if not provisioned.
   // (The command handler is added by the voice-control work.)
   applyMqttConfig();
+  ir.applyConfig(); // IR blaster hub; no-op if not configured
   console.log("[main] window up");
 });
 

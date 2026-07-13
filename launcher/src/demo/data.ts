@@ -60,6 +60,19 @@ export const CONFIG: PublicConfig = {
     hasPassword: true,
     deviceId: "tvbox-demo",
   },
+  ir: {
+    configured: true,
+    backend: "esphome",
+    esphome: {
+      host: "ir-blaster.local",
+      port: null,
+      hasEncryptionKey: false,
+      select: "signal_select",
+      button: "send",
+      actions: { volume_up: "Signal0", volume_down: "Signal1", mute: "Signal2" },
+    },
+    homeassistant: { url: "", hasToken: false, actions: {} },
+  },
 };
 
 export const WIFI_STATUS: WifiStatus = {

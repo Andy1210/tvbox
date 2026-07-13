@@ -119,6 +119,7 @@ function publicConfig() {
       devices: sanitizeDevices(c.remote && c.remote.devices),
       power: sanitizePower(c.remote && c.remote.power),
     },
+    ir: publicIr(c.ir),
   };
 }
 
@@ -145,6 +146,9 @@ const REMOTE_ACTIONS = [
   "fastforward",
   "prev",
   "next",
+  "volume_up",
+  "volume_down",
+  "mute",
 ];
 function sanitizeDevices(devices) {
   const out = {};
@@ -369,6 +373,151 @@ function rawRemote() {
   return load().remote || null;
 }
 
+// ---- IR blaster (ir.js: TV volume over IR when CEC volume doesn't work) ----
+// Two backends: "esphome" (native API straight to an ESPHome IR transceiver,
+// e.g. the Seeed XIAO Smart IR Mate) and "homeassistant" (each action runs an
+// HA script - covers Broadlink & friends without a vendor protocol here).
+// Actions live per-backend so switching backends keeps both mappings.
+const IR_ACTIONS = ["volume_up", "volume_down", "mute"];
+const IR_BACKENDS = ["esphome", "homeassistant"];
+const ESPHOME_DEFAULT_PORT = 6053;
+
+function sanitizeIrActions(a) {
+  const out = {};
+  if (!a || typeof a !== "object") return out;
+  for (const k of IR_ACTIONS) {
+    const v = typeof a[k] === "string" ? a[k].trim().slice(0, 100) : "";
+    if (v) out[k] = v;
+  }
+  return out;
+}
+// esphome entity object_ids ("signal_select"); junk falls back to the default.
+function objectId(v, dflt) {
+  return typeof v === "string" && /^[a-z0-9_]{1,64}$/.test(v.trim()) ? v.trim() : dflt;
+}
+
+function irConfigured(ir) {
+  if (!ir || typeof ir !== "object") return false;
+  const backend = IR_BACKENDS.includes(ir.backend) ? ir.backend : "esphome";
+  if (backend === "esphome") {
+    const e = ir.esphome;
+    return !!(e && e.host && Object.keys(sanitizeIrActions(e.actions)).length);
+  }
+  const h = ir.homeassistant;
+  return !!(h && h.url && h.token && Object.keys(sanitizeIrActions(h.actions)).length);
+}
+
+// Secret-free view: the encryption key / HA token are write-only (has* flags).
+function publicIr(ir) {
+  const c = ir && typeof ir === "object" ? ir : {};
+  const e = c.esphome && typeof c.esphome === "object" ? c.esphome : {};
+  const h = c.homeassistant && typeof c.homeassistant === "object" ? c.homeassistant : {};
+  return {
+    configured: irConfigured(c),
+    backend: IR_BACKENDS.includes(c.backend) ? c.backend : "esphome",
+    esphome: {
+      host: e.host || "",
+      port: e.port || null, // null = the default (6053)
+      hasEncryptionKey: !!e.encryptionKey,
+      select: objectId(e.select, "signal_select"),
+      button: objectId(e.button, "send"),
+      actions: sanitizeIrActions(e.actions),
+    },
+    homeassistant: {
+      url: h.url || "",
+      hasToken: !!h.token,
+      actions: sanitizeIrActions(h.actions),
+    },
+  };
+}
+
+// The launcher sends the FULL block for the backend it edits (mirrors setMqtt):
+// an empty host/url clears that block, an empty secret keeps the stored one,
+// an omitted block stays untouched. Whitelisted like every other section.
+function setIr(ir) {
+  const c = load();
+  const cur = c.ir && typeof c.ir === "object" ? c.ir : {};
+  const str = (v, max) => (typeof v === "string" ? v.trim().slice(0, max) : "");
+  const next = {
+    backend: IR_BACKENDS.includes(ir && ir.backend)
+      ? ir.backend
+      : IR_BACKENDS.includes(cur.backend)
+        ? cur.backend
+        : "esphome",
+  };
+
+  let esphome = cur.esphome && typeof cur.esphome === "object" ? cur.esphome : null;
+  if (ir && ir.esphome !== undefined) {
+    const p = ir.esphome;
+    const host = str(p && p.host, 200);
+    if (!host) esphome = null;
+    else {
+      const port = Number(p && p.port);
+      const prev = esphome || {};
+      const encryptionKey =
+        p && typeof p.encryptionKey === "string" && p.encryptionKey
+          ? p.encryptionKey.slice(0, 200)
+          : prev.encryptionKey;
+      esphome = {
+        host,
+        ...(Number.isInteger(port) && port >= 1 && port <= 65535 ? { port } : {}),
+        ...(encryptionKey ? { encryptionKey } : {}),
+        ...(prev.password ? { password: prev.password } : {}), // config-file-only legacy auth - never dropped by a UI save
+        select: objectId(p && p.select, "signal_select"),
+        button: objectId(p && p.button, "send"),
+        actions: sanitizeIrActions((p && p.actions) || prev.actions),
+      };
+    }
+  }
+  if (esphome) next.esphome = esphome;
+
+  let ha = cur.homeassistant && typeof cur.homeassistant === "object" ? cur.homeassistant : null;
+  if (ir && ir.homeassistant !== undefined) {
+    const p = ir.homeassistant;
+    const url = str(p && p.url, 300);
+    if (!url) ha = null;
+    else {
+      const prev = ha || {};
+      const token = p && typeof p.token === "string" && p.token ? p.token.slice(0, 500) : prev.token;
+      ha = {
+        url,
+        ...(token ? { token } : {}),
+        actions: sanitizeIrActions((p && p.actions) || prev.actions),
+      };
+    }
+  }
+  if (ha) next.homeassistant = ha;
+
+  if (!next.esphome && !next.homeassistant) delete c.ir;
+  else c.ir = next;
+  save(c);
+}
+
+// Full config (incl. secrets) for ir.js - null unless the SELECTED backend is
+// usable, with defaults applied so ir.js never re-derives them.
+function rawIr() {
+  const c = load().ir;
+  if (!irConfigured(c)) return null;
+  const backend = IR_BACKENDS.includes(c.backend) ? c.backend : "esphome";
+  if (backend === "esphome") {
+    const e = c.esphome;
+    return {
+      backend,
+      esphome: {
+        host: e.host,
+        port: Number.isInteger(e.port) ? e.port : ESPHOME_DEFAULT_PORT,
+        encryptionKey: e.encryptionKey || "",
+        password: e.password || "", // legacy ESPHome API auth; config-file-only (no UI)
+        select: objectId(e.select, "signal_select"),
+        button: objectId(e.button, "send"),
+        actions: sanitizeIrActions(e.actions),
+      },
+    };
+  }
+  const h = c.homeassistant;
+  return { backend, homeassistant: { url: h.url, token: h.token, actions: sanitizeIrActions(h.actions) } };
+}
+
 // Restore path (backup.js): replace the WHOLE config file with the backup's
 // copy - restore is deliberately not a merge, the backup is the truth.
 function replaceAll(cfg) {
@@ -403,5 +552,7 @@ module.exports = {
   rawUpdate,
   setRemote,
   rawRemote,
+  setIr,
+  rawIr,
   replaceAll,
 };

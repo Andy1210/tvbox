@@ -13,7 +13,10 @@ export type RemoteAction =
   | "rewind"
   | "fastforward"
   | "prev"
-  | "next";
+  | "next"
+  | "volume_up"
+  | "volume_down"
+  | "mute";
 export type RemoteKeymap = Partial<Record<RemoteAction, number[]>>;
 export interface RemoteDeviceConfig {
   name: string;
@@ -51,7 +54,28 @@ export interface PublicConfig {
     hasPassword: boolean;
     deviceId: string;
   };
+  // IR blaster (shell ir.js): TV volume/mute over a network IR transceiver.
+  // Secret-free: the ESPHome encryption key / HA token are write-only (has*).
+  // port null = the ESPHome default (6053). Actions map an abstract command
+  // (volume_up/volume_down/mute) to a backend value (signal option / HA script).
+  ir: {
+    configured: boolean;
+    backend: IrBackend;
+    esphome: {
+      host: string;
+      port: number | null;
+      hasEncryptionKey: boolean;
+      select: string;
+      button: string;
+      actions: IrActionMap;
+    };
+    homeassistant: { url: string; hasToken: boolean; actions: IrActionMap };
+  };
 }
+
+export type IrBackend = "esphome" | "homeassistant";
+export type IrAction = "volume_up" | "volume_down" | "mute";
+export type IrActionMap = Partial<Record<IrAction, string>>;
 
 // null = the shell is unreachable - NOT the same as an unconfigured box. The
 // UI must offer retry instead of dropping the user into first-run onboarding
@@ -144,6 +168,25 @@ export type MqttInput = Partial<{
 }>;
 export async function saveMqtt(mqtt: MqttInput): Promise<PublicConfig> {
   return postConfig({ mqtt });
+}
+
+// IR blaster backend + action map. The shell merges like setMqtt: send the FULL
+// block for the backend being edited (an empty host/url clears that block, an
+// empty secret keeps the stored one); an omitted block stays untouched.
+export type IrInput = Partial<{
+  backend: IrBackend;
+  esphome: Partial<{
+    host: string;
+    port: number | null;
+    encryptionKey: string;
+    select: string;
+    button: string;
+    actions: IrActionMap;
+  }>;
+  homeassistant: Partial<{ url: string; token: string; actions: IrActionMap }>;
+}>;
+export async function saveIr(ir: IrInput): Promise<PublicConfig> {
+  return postConfig({ ir });
 }
 
 // OTA auto-update toggle (the feed URL itself is box-local, not a UI concern).

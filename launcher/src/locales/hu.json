@@ -164,7 +164,10 @@
       "fastforward": "Előretekerés",
       "prev": "Előző",
       "next": "Következő",
-      "stop": "Leállítás"
+      "stop": "Leállítás",
+      "volume_up": "Hangerő fel",
+      "volume_down": "Hangerő le",
+      "mute": "Némítás"
     }
   },
   "appsettings": {
@@ -376,5 +379,38 @@
     "password": "Jelszó",
     "deviceId": "Eszközazonosító",
     "saveFailed": "A beállítások mentése nem sikerült."
+  },
+  "ir": {
+    "title": "IR jeladó (TV hangerő)",
+    "configured": "beállítva",
+    "notConfigured": "nincs beállítva",
+    "hint": "Hangerő és némítás küldése a TV-nek hálózati IR jeladón át, ha a TV nem kezeli a CEC hangerőt. A távirányítók hangerő gombjai és az MQTT/hang parancsok is ezt használják.",
+    "offHint": "Hagyd üresen az eszköz címét / URL-jét az integráció kikapcsolásához.",
+    "saveFailed": "A beállítások mentése nem sikerült.",
+    "backendTitle": "Jeladó típusa",
+    "backend": {
+      "esphome": "ESPHome eszköz (XIAO Smart IR Mate, ...)",
+      "homeassistant": "Home Assistant script"
+    },
+    "host": "Eszköz címe",
+    "port": "API port",
+    "encryptionKey": "API titkosítási kulcs",
+    "selectEntity": "Jelválasztó entitás",
+    "buttonEntity": "Küldés gomb entitás",
+    "haUrl": "Home Assistant URL",
+    "haToken": "Hozzáférési token",
+    "actionsTitle": "Parancsok",
+    "actionsHintEsphome": "A parancsonként lejátszandó betanított jel - az eszköz jelválasztójának egyik opciója.",
+    "actionsHintHa": "A parancsonként futtatandó Home Assistant script (script.* entitásazonosító).",
+    "action": {
+      "volume_up": "Hangerő fel",
+      "volume_down": "Hangerő le",
+      "mute": "Némítás"
+    },
+    "notSet": "nincs beállítva",
+    "test": "Teszt",
+    "testOk": "Elküldve.",
+    "testFailed": "Küldés sikertelen: {error}",
+    "disconnected": "A jeladó nem elérhető: {error}"
   }
 }

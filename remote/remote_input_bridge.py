@@ -19,6 +19,9 @@ sets up):
     dead remote.
   * A per-device override maps one of the device's button codes to an ACTION; the
     action is emitted as its canonical key (KEY_UP/ENTER/BACKSPACE/HOMEPAGE/media).
+  * Volume keys are special when an IR blaster is configured (config.ir): they
+    are swallowed and forwarded to the shell (/tvbox/api/ir/send), which relays
+    them to the TV over IR - see shell/ir.js. Without IR config they pass through.
   * Learn mode (driven by the shell over a FIFO): the next button pressed on the
     chosen device is reported to a file the shell reads, and swallowed.
 
@@ -30,11 +33,14 @@ Files (all under ~/.tvbox):
 """
 import json
 import os
+import queue
 import select
 import stat
 import subprocess
 import sys
+import threading
 import time
+import urllib.request
 
 from evdev import InputDevice, UInput, ecodes as e, list_devices
 
@@ -75,7 +81,22 @@ ACTION_KEY = {
     "fastforward": e.KEY_FASTFORWARD,
     "prev": e.KEY_PREVIOUSSONG,
     "next": e.KEY_NEXTSONG,
+    "volume_up": e.KEY_VOLUMEUP,
+    "volume_down": e.KEY_VOLUMEDOWN,
+    "mute": e.KEY_MUTE,
 }
+
+# TV volume over the IR blaster (shell ir.js). When config.ir maps one of these
+# actions, the matching volume key (native OR remapped) is swallowed here and
+# POSTed to the shell instead of reaching the compositor - the remote drives
+# the TV's speakers, not the box. With no IR config they pass through unchanged.
+IR_KEY_ACTION = {
+    e.KEY_VOLUMEUP: "volume_up",
+    e.KEY_VOLUMEDOWN: "volume_down",
+    e.KEY_MUTE: "mute",
+}
+IR_SEND_URL = "http://127.0.0.1:8097/tvbox/api/ir/send"
+IR_REPEAT_S = 0.3  # min gap between sends while a volume key autorepeats
 
 # Only manage things that are actually remotes/keyboards: they must expose at
 # least one of these navigation/select keys. This skips pure pointers, the HDMI
@@ -162,6 +183,28 @@ def load_power():
     return p if p in POWER_VALUES else POWER_TV
 
 
+def load_ir_actions():
+    """Which IR actions the shell can send: the actions mapped under the SELECTED
+    config.ir backend (mirrors config.js irConfigured/rawIr - only presence is
+    checked here, the shell owns the real validation). Empty set = IR off,
+    volume keys pass through like any other key. The whole read is fail-safe:
+    a malformed (hand-edited/restored) config must degrade to "IR off", never
+    crash-loop the bridge and take the remotes with it."""
+    try:
+        with open(CONFIG) as f:
+            cfg = json.load(f)
+        ir = (cfg or {}).get("ir") or {}
+        backend = ir.get("backend") if ir.get("backend") in ("esphome", "homeassistant") else "esphome"
+        block = ir.get(backend) or {}
+        ready = bool(block.get("host")) if backend == "esphome" else bool(block.get("url") and block.get("token"))
+        if not ready:
+            return set()
+        actions = block.get("actions") or {}
+        return {a for a in IR_KEY_ACTION.values() if actions.get(a)}
+    except Exception:
+        return set()
+
+
 def cec_standby():
     """Tell the CEC bridge to put the TV in standby (drop into its FIFO)."""
     try:
@@ -185,6 +228,13 @@ class Bridge:
         self.devices = {}  # path -> InputDevice (grabbed)
         self.keymaps = load_keymaps()
         self.power = load_power()
+        self.ir_actions = load_ir_actions()
+        # IR sends leave the event loop immediately (a slow/dead blaster must
+        # never stall key handling): a tiny queue + one worker preserves order;
+        # a full queue just drops the press (the user can press again).
+        self.ir_q = queue.Queue(maxsize=8)
+        self._ir_last = 0.0  # last enqueue, for the autorepeat throttle
+        threading.Thread(target=self._ir_worker, daemon=True).start()
         self.ui = None
         self.ui_keys = set()
         self.learning = None  # device_id we're capturing a button for
@@ -295,8 +345,14 @@ class Bridge:
                 self.capture(did, dev, ev.code)
                 continue  # swallow the learned press
             action = code2action.get(ev.code)
+            out_code = ACTION_KEY[action] if action else ev.code
+            if IR_KEY_ACTION.get(out_code) in self.ir_actions:
+                # volume key (native or remapped) -> TV volume over the IR
+                # blaster; swallowed like KEY_POWER, never reaches the OS
+                self.ir_press(IR_KEY_ACTION[out_code], ev.value)
+                continue
             if action:
-                self.emit(ACTION_KEY[action], ev.value)  # remapped -> canonical key
+                self.emit(out_code, ev.value)  # remapped -> canonical key
                 continue
             if ev.code == e.KEY_POWER:
                 # The remote's Power button reaches us over BT as KEY_POWER; never
@@ -322,6 +378,31 @@ class Bridge:
             poweroff_box()
         log("power button ->", p)
 
+    # ---- volume keys -> IR blaster (shell /tvbox/api/ir/send) ----
+    def ir_press(self, action, value):
+        # press (1) sends; autorepeat (2) sends throttled so holding the button
+        # ramps the TV volume at a sane pace; release (0) is just swallowed.
+        now = time.monotonic()
+        if value == 1 or (value == 2 and now - self._ir_last >= IR_REPEAT_S):
+            self._ir_last = now
+            try:
+                self.ir_q.put_nowait(action)
+            except queue.Full:
+                pass  # blaster is behind; dropping a repeat is better than lagging keys
+
+    def _ir_worker(self):
+        while True:
+            action = self.ir_q.get()
+            body = json.dumps({"action": action}).encode()
+            req = urllib.request.Request(IR_SEND_URL, data=body, headers={"Content-Type": "application/json"})
+            try:
+                with urllib.request.urlopen(req, timeout=5) as resp:
+                    out = json.loads(resp.read() or b"{}")
+                if not out.get("ok"):
+                    log("ir send failed:", action, out.get("error", "unknown error"))
+            except Exception as ex:  # shell down / blaster unreachable
+                log("ir send failed:", action, ex)
+
     def capture(self, did, dev, code):
         name = next((n for n, c in vars(e).items() if n.startswith("KEY_") and c == code), str(code))
         tmp = LEARNED_OUT + ".tmp"
@@ -339,7 +420,8 @@ class Bridge:
         if line == "reload":
             self.keymaps = load_keymaps()
             self.power = load_power()
-            log("config reloaded (power=%s)" % self.power)
+            self.ir_actions = load_ir_actions()
+            log("config reloaded (power=%s, ir=%s)" % (self.power, sorted(self.ir_actions) or "off"))
         elif line.startswith("learn ") and len(line) > 6:
             self.learning = line[6:].strip()
             try:

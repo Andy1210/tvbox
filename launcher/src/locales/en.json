@@ -164,7 +164,10 @@
       "fastforward": "Fast-forward",
       "prev": "Previous",
       "next": "Next",
-      "stop": "Stop"
+      "stop": "Stop",
+      "volume_up": "Volume up",
+      "volume_down": "Volume down",
+      "mute": "Mute"
     }
   },
   "appsettings": {
@@ -376,5 +379,38 @@
     "password": "Password",
     "deviceId": "Device ID",
     "saveFailed": "Couldn't save the settings."
+  },
+  "ir": {
+    "title": "IR blaster (TV volume)",
+    "configured": "configured",
+    "notConfigured": "not set up",
+    "hint": "Send volume and mute to the TV through a network IR blaster when the TV takes no CEC volume. The remotes' volume buttons and MQTT/voice commands all use it.",
+    "offHint": "Leave the device host / URL empty to turn the integration off.",
+    "saveFailed": "Couldn't save the settings.",
+    "backendTitle": "Blaster type",
+    "backend": {
+      "esphome": "ESPHome device (XIAO Smart IR Mate, ...)",
+      "homeassistant": "Home Assistant script"
+    },
+    "host": "Device host",
+    "port": "API port",
+    "encryptionKey": "API encryption key",
+    "selectEntity": "Signal select entity",
+    "buttonEntity": "Send button entity",
+    "haUrl": "Home Assistant URL",
+    "haToken": "Access token",
+    "actionsTitle": "Commands",
+    "actionsHintEsphome": "The learned signal slot to replay per command - the options of the device's signal select.",
+    "actionsHintHa": "The Home Assistant script to run per command (a script.* entity id).",
+    "action": {
+      "volume_up": "Volume up",
+      "volume_down": "Volume down",
+      "mute": "Mute"
+    },
+    "notSet": "not set",
+    "test": "Test",
+    "testOk": "Sent.",
+    "testFailed": "Send failed: {error}",
+    "disconnected": "Blaster not reachable: {error}"
   }
 }
