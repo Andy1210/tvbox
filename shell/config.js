@@ -178,7 +178,11 @@ function sanitizeDevices(devices) {
       if (Object.keys(keymap).length >= 32) break; // cap per device
     }
     const name = typeof entry.name === "string" ? entry.name.slice(0, 80) : "";
-    if (Object.keys(keymap).length || name) out[id] = { name, keymap };
+    // irPassthrough: this remote blasts the TV with its OWN IR (programmed
+    // Fire TV remote) - the bridge must not divert its volume keys too.
+    const irPassthrough = entry.irPassthrough === true;
+    if (Object.keys(keymap).length || name || irPassthrough)
+      out[id] = { name, keymap, ...(irPassthrough ? { irPassthrough: true } : {}) };
     if (Object.keys(out).length >= 20) break; // cap
   }
   return out;

@@ -72,6 +72,13 @@ class KeyMapTable:
     def add_key(self, key_name, actions):
         self.rows.append((key_name, list(actions))); return self
 
+    def add_row(self, scan_id, actions):
+        """Add a row by explicit scan id (bypasses the name->scan_id lookup) - for
+        scan-id discovery tables where we bind raw ids, not named keys."""
+        name = "#%d" % scan_id
+        self.scan_id[name] = scan_id
+        self.rows.append((name, list(actions))); return self
+
     def compile(self):
         out = _u8(len(self.rows))
         for key, actions in self.rows:

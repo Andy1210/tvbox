@@ -27,6 +27,9 @@ export type RemoteKeymap = Partial<Record<RemoteAction, number[]>>;
 export interface RemoteDeviceConfig {
   name: string;
   keymap: RemoteKeymap;
+  // this remote blasts the TV with its own (programmed) IR - the bridge skips
+  // diverting its volume keys to the box's IR blaster (no double volume)
+  irPassthrough?: boolean;
 }
 // What the remote's Power button does: turn the TV off over CEC only (default),
 // also power the box off, or nothing. The button never reaches the OS (the

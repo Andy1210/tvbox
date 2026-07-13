@@ -59,6 +59,7 @@ test("every file in the infra source dirs is listed in infra.list or consciously
   const NOT_SHIPPED = new Set([
     "deploy.sh", // the dev-deploy driver itself
     "infra.list", // the list itself
+    "ir_protocols_test.py", // unit test - runs in CI, never ships to a box
   ]);
   const listed = new Set(infraListBasenames());
   const repo = path.join(__dirname, "..");

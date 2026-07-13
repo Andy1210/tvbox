@@ -25,6 +25,7 @@ Examples:
 """
 import argparse, asyncio, json, os, sys, uuid as _uuid
 
+import ir_protocols
 import keymap_compile as kc
 
 # Standard GATT bits for identifying the remote (Device Information Service).
@@ -33,11 +34,21 @@ DIS_MANUFACTURER = "00002a29-0000-1000-8000-00805f9b34fb"
 DIS_MODEL        = "00002a24-0000-1000-8000-00805f9b34fb"
 AMAZON_VID       = 0x0171
 
-# Per-PID scan-id maps (key name -> scan id) from BluetoothKeyMapLib. Power/Volume/
-# Mute are identical across every remote, so DEFAULT covers the goal; add entries
-# here only if a specific remote renumbers other keys.
-DEFAULT_SCAN_ID = kc.SCAN_ID
-SCAN_ID_BY_PID = {}  # e.g. {0x0414: {...}}; falls back to DEFAULT_SCAN_ID
+# Per-PID scan-id maps (key name -> the scan id the remote's firmware assigns to
+# that physical key). Most Amazon remotes share the generic map (DEFAULT), but a
+# few renumber Volume/Mute - the ORDER of keys on their keypad matrix differs.
+# These are factual interoperability numbers observed in the Fire OS keymap
+# resources (kml_key_name_scan_id_map_0x<PID>); getting them wrong binds an IR
+# code to the wrong physical button (e.g. Volume-Down firing Mute), which is
+# exactly what a stale/guessed map does. connect() reads the PnP PID and picks
+# the right map here; unknown PIDs fall back to DEFAULT.
+DEFAULT_SCAN_ID = kc.SCAN_ID  # 16-key map: Power=2 VolumeUp=6 VolumeDown=9 Mute=18
+# The 42-key layout (Power=2 VolumeUp=12 VolumeDown=18 Mute=32) used by the
+# larger Alexa Voice Remotes (with number pad / app buttons).
+_SCAN_ID_42 = {"Power": 2, "VolumeUp": 12, "VolumeDown": 18, "Mute": 32,
+               "Up": 1, "Right": 7, "Down": 13, "Left": 25, "Select": 19,
+               "Back": 31, "Home": 14, "Menu": 37, "PlayPause": 6, "Rewind": 20}
+SCAN_ID_BY_PID = {0x0414: _SCAN_ID_42, 0x0415: _SCAN_ID_42, 0x0418: _SCAN_ID_42}
 
 
 def log(*a): print(*a, file=sys.stderr, flush=True)
@@ -58,7 +69,12 @@ def build_actions(spec, scan_id):
         repeat   = int(k.get("repeat", 1))
         pdelay   = int(k.get("post_delay", 1000 if key == "Power" else 0))
         tmask    = int(k.get("toggle_mask", 0))
-        if "nec" in k:                     # {"address":0x04,"command":0x08} - LG & most TVs
+        if "irdb" in k:                    # {"protocol":"NEC1","device":4,"subdevice":-1,"function":2}
+            i = k["irdb"]
+            enc = ir_protocols.encode(i["protocol"], i["device"], i.get("subdevice", -1), i["function"])
+            act = kc.compile_ir_action([enc["raw"]], enc["frequency"], duty,
+                                       max(repeat, enc["repeat"]), pdelay, tmask, "Basic", optional)
+        elif "nec" in k:                   # {"address":0x04,"command":0x08} - LG & most TVs
             n = k["nec"]
             raw = kc.nec_raw(int(n["address"]), int(n["command"]))
             act = kc.compile_ir_action([raw], int(k.get("frequency", 38000)), duty,
@@ -71,7 +87,7 @@ def build_actions(spec, scan_id):
             act = kc.compile_ir_action(seqs, int(k["frequency"]), duty, repeat, pdelay,
                                        tmask, "Sequence" if "raw2" in k else "Basic", optional)
         else:
-            log(f"! key {key!r} has no 'nec'/'pronto'/'raw', skipping"); continue
+            log(f"! key {key!r} has no 'irdb'/'nec'/'pronto'/'raw', skipping"); continue
         actions = [act]
         if k.get("notify_host"):
             actions.append(kc.notify_host_action())
@@ -165,9 +181,51 @@ class Remote:
         await self._write(kc.CHAR_CONTROL, kc.frame_delete_all())
 
 
+async def _device_from_bluez(mac):
+    """Build a BLEDevice straight from BlueZ's D-Bus object for a bonded remote.
+    bleak's connect() only skips its discovery scan when it already has a device
+    PATH - and a remote that's connected as a BT keyboard doesn't advertise, so
+    the scan can never find it. We hand bleak the path from BlueZ's tree
+    directly (the device is right there, GATT already resolved). Linux/BlueZ
+    only; returns None if it can't."""
+    try:
+        from bleak.backends.bluezdbus.manager import get_global_bluez_manager
+        from bleak.backends.device import BLEDevice
+
+        want = mac.upper().replace(":", "_")
+        m = await get_global_bluez_manager()
+        for path, ifaces in m._properties.items():
+            dev = ifaces.get("org.bluez.Device1")
+            if not dev:
+                continue
+            if path.rstrip("/").endswith("dev_" + want):
+                return BLEDevice(dev.get("Address", mac), dev.get("Name") or dev.get("Alias") or mac,
+                                 {"path": path, "props": dev})
+    except Exception as e:
+        log(f"  bluez lookup failed: {e}")
+    return None
+
+
+async def _resolve_device(mac):
+    """Find the remote for bleak. Prefer the bonded BlueZ object (works while the
+    remote is connected as a keyboard, i.e. not advertising); fall back to a
+    normal scan (idle/advertising remote); last resort the bare MAC."""
+    dev = await _device_from_bluez(mac)
+    if dev:
+        return dev
+    try:
+        from bleak import BleakScanner
+        dev = await BleakScanner.find_device_by_address(mac, timeout=8.0)
+        if dev:
+            return dev
+    except Exception as e:
+        log(f"  scan failed: {e}")
+    return mac
+
+
 async def connect(mac):
     from bleak import BleakClient
-    c = BleakClient(mac)
+    c = BleakClient(await _resolve_device(mac))
     await c.connect()
     log(f"connected to {mac}")
     vid, pid, ver = await _read_pnp(c)
@@ -234,11 +292,12 @@ async def cmd_blast(args):
         _dump_table("blast", t, blast=True); return
     c, scan_id, have = await connect(args.mac)
     try:
-        if not have: log("! keymap service missing; aborting"); return
+        if not have: log("! keymap service missing; aborting"); sys.exit(3)
         t = make_blast_table(spec, scan_id, key, args.uuid)
         r = Remote(c); await r.open()
         ok = await r.blast(t)
         log(f"blast {key}: {'OK' if ok else 'FAILED'}")
+        if not ok: sys.exit(1)
     finally:
         await c.disconnect()
 
@@ -250,14 +309,14 @@ async def cmd_program(args):
         t = make_table(spec, scan_id, args.uuid); _dump_table("program", t); return
     c, scan_id, have = await connect(args.mac)
     try:
-        if not have: log("! keymap service missing; aborting"); return
+        if not have: log("! keymap service missing; aborting"); sys.exit(3)
         t = make_table(spec, scan_id, args.uuid)
         r = Remote(c); await r.open()
         if await r.write_table(t):
             await r.switch_table(t.uuid)
             log(f"programmed + activated table {t.uuid} ({len(t.rows)} keys)")
         else:
-            log("write_table failed")
+            log("write_table failed"); sys.exit(1)
     finally:
         await c.disconnect()
 
@@ -266,6 +325,86 @@ async def cmd_erase(args):
     c, scan_id, have = await connect(args.mac)
     try:
         r = Remote(c); await r.open(); await r.erase_all(); log("erased all tables")
+    finally:
+        await c.disconnect()
+
+
+async def cmd_sniff(args):
+    """Subscribe to every notifiable characteristic and print what each button
+    emits, so we learn THIS remote's real key -> scan-id mapping (the guessed
+    DEFAULT_SCAN_ID is per-model and can be wrong). Press one button, note the
+    line(s); the byte that changes per key is its scan id. Emits JSON lines
+    (prefixed EVENT:) so the shell can parse a guided capture."""
+    c, scan_id, have = await connect(args.mac)
+    seen = {}
+    try:
+        def make_cb(uuid):
+            def cb(_char, data):
+                b = bytes(data)
+                print(f"EVENT: {json.dumps({'char': uuid, 'hex': b.hex(), 'bytes': list(b)})}", flush=True)
+            return cb
+
+        subscribed = []
+        for s in c.services:
+            for ch in s.characteristics:
+                props = ch.properties
+                if "notify" in props or "indicate" in props:
+                    try:
+                        await c.start_notify(ch.uuid, make_cb(str(ch.uuid)))
+                        subscribed.append(str(ch.uuid))
+                    except Exception as e:
+                        log(f"  notify {ch.uuid} failed: {e}")
+        log(f"sniffing {len(subscribed)} characteristics; press remote buttons (Ctrl-C to stop)")
+        for u in subscribed:
+            log("  <-", u)
+        await asyncio.sleep(args.seconds)
+    finally:
+        await c.disconnect()
+
+
+async def cmd_discover(args):
+    """Program a NOTIFY_HOST keymap over a range of scan ids, activate it, then
+    sniff: each physical key press fires NOTIFY_HOST -> the remote indicates its
+    scan id, so we learn THIS remote's real key->scan-id map. Restore the IR
+    keymap afterwards with `program`. Emits EVENT: JSON lines for the shell."""
+    c, scan_id, have = await connect(args.mac)
+    try:
+        if not have:
+            log("! keymap service missing; aborting"); sys.exit(3)
+        # The remote rejects a large table (a 48-row NOTIFY_HOST table returns
+        # status 0x03); write in small batches and keep the first that sticks.
+        # BATCH rows at a time still cover a useful id span, and most remotes'
+        # Volume/Mute/Power ids sit low.
+        r = Remote(c)
+        await r.open()
+        wrote = False
+        for start in range(args.min, args.max + 1, args.batch):
+            end = min(start + args.batch - 1, args.max)
+            t = kc.KeyMapTable(args.uuid, dict(kc.SCAN_ID))
+            for sid in range(start, end + 1):
+                t.add_row(sid, [kc.notify_host_action()])
+            if await r.write_table(t):
+                await r.switch_table(t.uuid)
+                log(f"discovery keymap active (scan ids {start}..{end}); press buttons")
+                wrote = True
+                break
+            log(f"  batch {start}..{end} rejected, trying smaller")
+        if not wrote:
+            log("write_table (discovery) failed for every batch"); sys.exit(1)
+        # NOTIFY_HOST fires on the keymap chars; subscribe to everything notifiable.
+        for s in c.services:
+            for ch in s.characteristics:
+                if "notify" in ch.properties or "indicate" in ch.properties:
+                    try:
+                        await c.start_notify(
+                            ch.uuid,
+                            (lambda u: lambda _h, d: print(
+                                f"EVENT: {json.dumps({'char': u, 'hex': bytes(d).hex(), 'bytes': list(bytes(d))})}",
+                                flush=True))(str(ch.uuid)),
+                        )
+                    except Exception:
+                        pass
+        await asyncio.sleep(args.seconds)
     finally:
         await c.disconnect()
 
@@ -303,6 +442,14 @@ def main():
     pp.add_argument("--dry-run", action="store_true"); pp.set_defaults(fn=cmd_program)
 
     pe = sub.add_parser("erase"); pe.add_argument("mac"); pe.set_defaults(fn=cmd_erase)
+
+    ps = sub.add_parser("sniff"); ps.add_argument("mac")
+    ps.add_argument("--seconds", type=int, default=60); ps.set_defaults(fn=cmd_sniff)
+
+    pd = sub.add_parser("discover"); pd.add_argument("mac")
+    pd.add_argument("--min", type=int, default=0); pd.add_argument("--max", type=int, default=31)
+    pd.add_argument("--batch", type=int, default=16); pd.add_argument("--seconds", type=int, default=75)
+    pd.set_defaults(fn=cmd_discover)
 
     args = p.parse_args()
     asyncio.run(args.fn(args))

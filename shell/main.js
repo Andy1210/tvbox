@@ -21,6 +21,7 @@ const ambient = require("./ambient"); // weather + local photos for the idle/amb
 const mqttBridge = require("./mqtt"); // MQTT: now-playing publish + command/notify (HA integration)
 const ir = require("./ir"); // IR blaster hub: TV volume/mute over ESPHome or Home Assistant
 const appwins = require("./appwindows"); // background-apps window registry + hidden-set policy (LRU/RAM guard)
+const firetvir = require("./firetvir"); // Fire TV remote IR programming (venv deps + irdb codesets + BLE tool)
 const apps = require("./install"); // manifests + install-recipe runner (shared with the tvbox CLI)
 const store = require("./store"); // app-store registry client (manifest-only apps -> ~/.tvbox/apps)
 const appfetch = require("./appfetch"); // capability: scoped server-side fetch (data proxy), origin-locked + SSRF-guarded
@@ -497,6 +498,28 @@ function handlePost(p, data, res) {
     if (!appWindow(id)) return jsonRes(res, { ok: false, error: "not running" });
     destroyAppWindow(id);
     return jsonRes(res, { ok: true, id });
+  }
+  // Fire TV remote IR programming (Settings → Peripherals; shell/firetvir.js)
+  if (p === "/tvbox/api/firetvir/deps") {
+    return jsonRes(res, { ok: firetvir.installDeps() }); // progress is polled via /firetvir/status
+  }
+  if (p === "/tvbox/api/firetvir/test") {
+    firetvir.testKey(String(data.mac || ""), String(data.path || ""), String(data.key || ""), (err, r) =>
+      jsonRes(res, err ? { ok: false, error: String(err.message || err).slice(0, 200) } : r),
+    );
+    return;
+  }
+  if (p === "/tvbox/api/firetvir/program") {
+    firetvir.program(String(data.mac || ""), String(data.path || ""), String(data.label || ""), (err, r) =>
+      jsonRes(res, err ? { ok: false, error: String(err.message || err).slice(0, 200) } : r),
+    );
+    return;
+  }
+  if (p === "/tvbox/api/firetvir/erase") {
+    firetvir.erase(String(data.mac || ""), (err, r) =>
+      jsonRes(res, err ? { ok: false, error: String(err.message || err).slice(0, 200) } : r),
+    );
+    return;
   }
   if (p === "/tvbox/api/nowplaying") {
     // launcher pushes the current now-playing (Spotify / Live TV); bridge it to
@@ -1301,6 +1324,28 @@ function serve() {
     if (p === "/tvbox/api/tv/standby") {
       onTvStandby();
       jsonRes(res, { ok: true });
+      return;
+    }
+    // Fire TV remote IR programming (Settings → Peripherals; shell/firetvir.js)
+    if (p === "/tvbox/api/firetvir/status") {
+      firetvir.status((s) => jsonRes(res, s));
+      return;
+    }
+    if (p === "/tvbox/api/firetvir/brands") {
+      firetvir.fetchBrands((err, brands) =>
+        jsonRes(res, err ? { ok: false, error: String(err.message || err).slice(0, 200) } : { ok: true, brands }),
+      );
+      return;
+    }
+    if (p === "/tvbox/api/firetvir/codeset") {
+      const q = (req.url || "").split("?")[1];
+      const csPath = q ? new URLSearchParams(q).get("path") || "" : "";
+      firetvir.fetchCodeset(csPath, (err, cs) => {
+        if (err) return jsonRes(res, { ok: false, error: String(err.message || err).slice(0, 200) });
+        firetvir.checkProtocols(cs.protocols, (perr, supported) =>
+          jsonRes(res, { ok: true, ...cs, supported: perr ? null : supported }),
+        );
+      });
       return;
     }
     // App-store registry (Settings → Store). ?refresh=1 bypasses the 5-min cache.

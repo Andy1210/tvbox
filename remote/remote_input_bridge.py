@@ -228,6 +228,21 @@ def load_ir_actions():
         return set()
 
 
+def load_ir_passthrough():
+    """Device ids with config.remote.devices[<id>].irPassthrough = true: their
+    volume keys are NOT diverted to the IR blaster. Set after the Fire TV
+    remote's own IR buttons are programmed (firetv_remote_ir.py) - the remote
+    then blasts the TV itself, and diverting BT volume too would double every
+    press. Fail-safe like the other loaders."""
+    try:
+        with open(CONFIG) as f:
+            cfg = json.load(f)
+        devices = (((cfg or {}).get("remote") or {}).get("devices")) or {}
+        return {did for did, entry in devices.items() if isinstance(entry, dict) and entry.get("irPassthrough")}
+    except Exception:
+        return set()
+
+
 def load_capture_all_nodes():
     """config.remote.captureAllNodes (default false). When true, we also grab the
     OTHER HID nodes of a remote we already manage - e.g. a Fire TV remote's
@@ -267,6 +282,7 @@ class Bridge:
         self.keymaps = load_keymaps()
         self.power = load_power()
         self.ir_actions = load_ir_actions()
+        self.ir_passthrough = load_ir_passthrough()
         self.capture_all_nodes = load_capture_all_nodes()
         # Shell HTTP calls (IR sends, Settings nav) leave the event loop
         # immediately (a slow shell/blaster must never stall key handling): a
@@ -407,9 +423,11 @@ class Bridge:
                     self.do_special(action)
                 continue
             out_code = ACTION_KEY[action] if action else ev.code
-            if IR_KEY_ACTION.get(out_code) in self.ir_actions:
+            if IR_KEY_ACTION.get(out_code) in self.ir_actions and did not in self.ir_passthrough:
                 # volume key (native or remapped) -> TV volume over the IR
-                # blaster; swallowed like KEY_POWER, never reaches the OS
+                # blaster; swallowed like KEY_POWER, never reaches the OS.
+                # (irPassthrough devices blast the TV with their OWN IR - a
+                # programmed Fire TV remote - so diverting too would double it.)
                 self.ir_press(IR_KEY_ACTION[out_code], ev.value)
                 continue
             if action:
@@ -504,12 +522,14 @@ class Bridge:
             self.keymaps = load_keymaps()
             self.power = load_power()
             self.ir_actions = load_ir_actions()
+            self.ir_passthrough = load_ir_passthrough()
             prev_capture = self.capture_all_nodes
             self.capture_all_nodes = load_capture_all_nodes()
             if self.capture_all_nodes != prev_capture:
                 self.rescan()  # grab/release sibling nodes to match the new setting
-            log("config reloaded (power=%s, ir=%s, captureAllNodes=%s)"
-                % (self.power, sorted(self.ir_actions) or "off", self.capture_all_nodes))
+            log("config reloaded (power=%s, ir=%s, passthrough=%s, captureAllNodes=%s)"
+                % (self.power, sorted(self.ir_actions) or "off",
+                   sorted(self.ir_passthrough) or "-", self.capture_all_nodes))
         elif line.startswith("learn ") and len(line) > 6:
             self.learning = line[6:].strip()
             try:

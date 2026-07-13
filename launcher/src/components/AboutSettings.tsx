@@ -81,6 +81,38 @@ export function AboutSettings() {
         <Row label={t("about.memory")} value={mem} />
         <Row label={t("about.storage")} value={disk} />
       </div>
+
+      {/* Open-source credits. tvbox is MIT and stands on other people's work;
+          say so (some of it, like the irdb IR database, asks to be credited). */}
+      <div className="mt-[3.4vh] max-w-[70vw]">
+        <div className="text-[2.1vh] font-semibold mb-[0.8vh]">{t("about.creditsTitle")}</div>
+        <div className="text-[1.8vh] text-fg-dim mb-[1.4vh]">{t("about.creditsIntro")}</div>
+        <div className="text-[1.6vh] text-fg-dim mb-[1.4vh]">{t("about.trademarks")}</div>
+        <ul className="flex flex-col gap-[0.9vh]">
+          {CREDITS.map((c) => (
+            <li key={c.name} className="text-[1.9vh]">
+              <span className="font-semibold">{c.name}</span>
+              <span className="text-fg-dim"> — {c.what}</span>
+              <span className="block text-[1.6vh] text-fg-dim break-all">
+                {c.url} · {c.license}
+              </span>
+            </li>
+          ))}
+        </ul>
+      </div>
     </div>
   );
 }
+
+// Third-party projects tvbox ships or builds on. Not exhaustive of transitive
+// deps, but the load-bearing ones - and everything whose license asks for a
+// mention (irdb). English-only on purpose (project/license names).
+const CREDITS: { name: string; what: string; url: string; license: string }[] = [
+  { name: "Electron", what: "app shell", url: "electronjs.org", license: "MIT" },
+  { name: "mpv", what: "video player", url: "mpv.io", license: "GPL-2.0+/LGPL" },
+  { name: "libcec", what: "HDMI-CEC remote", url: "libcec.pulse-eight.com", license: "GPL-2.0" },
+  { name: "python-evdev", what: "remote input bridge", url: "github.com/gvalkov/python-evdev", license: "BSD-3" },
+  { name: "Bleak", what: "Bluetooth LE (remote IR programming)", url: "github.com/hbldh/bleak", license: "MIT" },
+  { name: "irdb", what: "TV IR code database", url: "github.com/probonopd/irdb", license: "see repo (attribution)" },
+  { name: "React · Vite · Tailwind", what: "launcher UI", url: "react.dev", license: "MIT" },
+];

@@ -13,6 +13,7 @@ import { AudioSettings } from "./AudioSettings";
 import { BluetoothSettings } from "./BluetoothSettings";
 import { RemoteRemap } from "./RemoteRemap";
 import { IrSettings } from "./IrSettings";
+import { FiretvIrSettings } from "./FiretvIrSettings";
 import { AppOrderSettings } from "./AppOrderSettings";
 import { StoreSettings } from "./StoreSettings";
 import { AmbientSettings } from "./AmbientSettings";
@@ -102,6 +103,7 @@ const CATEGORIES: Category[] = [
         <BluetoothSettings />
         <RemoteRemap />
         <IrSettings />
+        <FiretvIrSettings />
       </>
     ),
   },

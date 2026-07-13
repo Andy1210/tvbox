@@ -25,8 +25,35 @@ write it.
 
 ## 1. TV volume / power / mute from the remote's IR blaster
 
-`~/.tvbox/firetv_remote_ir.py` (with `~/.tvbox/keymap_compile.py`). Needs `bleak`:
-`python3 -m pip install bleak`.
+### The easy way: Settings → Peripherals → "Fire TV remote → TV IR"
+
+The guided on-TV flow does all of the below for you, no SSH:
+
+1. **Install Bluetooth support** — one tap creates a user-space venv at
+   `~/.tvbox/pyenv` and installs `bleak` (+ `dbus-fast`) into it (needs internet;
+   `python3-venv`/`pip` come from `provision.sh`). No root, nothing global.
+2. **Pick the remote** — any BLE-paired remote (it needs a MAC to reach over
+   BLE; pair it under Bluetooth first).
+3. **Pick your TV brand + codeset** — pulled live from the community **irdb**
+   database ([github.com/probonopd/irdb](https://github.com/probonopd/irdb),
+   cached ~30 days under `~/.tvbox/cache/`). tvbox converts the irdb
+   `(protocol, device, subdevice, function)` row into raw IR timings on the box
+   (`remote/ir_protocols.py`: NEC/NECx/RC5/RC6/Sony SIRC/Panasonic; anything
+   else is greyed out honestly instead of blasting garbage).
+4. **Test** — a per-key InstantFire blast (nothing saved yet); point the remote
+   at the TV and confirm it reacts, brand codesets vary.
+5. **Save to the remote** — programs the keymap; then tvbox sets
+   `remote.devices[<mac>].irPassthrough = true` so the bridge stops diverting
+   that remote's BT volume keys to the box's own IR blaster (no double volume).
+
+irdb attribution lives in **Settings → About → Open source**; the flow footer
+credits it too. irdb's license only asks for a mention (issue #53).
+
+### The manual way (SSH)
+
+`~/.tvbox/firetv_remote_ir.py` (with `~/.tvbox/keymap_compile.py` +
+`~/.tvbox/ir_protocols.py`). Needs `bleak` — either the venv the UI made
+(`~/.tvbox/pyenv/bin/python3`) or a plain `python3 -m pip install bleak`.
 
 Codes live in `~/.tvbox/firetv_tv_codes.json` — copy the shipped
 `firetv_tv_codes.example.json` (preset for **LG**, NEC, address `0x04`) and edit:
@@ -42,8 +69,9 @@ Codes live in `~/.tvbox/firetv_tv_codes.json` — copy the shipped
 }
 ```
 
-Per key, one of: `{"nec":{"address":N,"command":M}}` (LG and most TVs),
-`{"pronto":"0000 006D ..."}` (a Pronto/CCF code from an IR database), or
+Per key, one of: `{"irdb":{"protocol":"NEC1","device":4,"subdevice":-1,"function":2}}`
+(an irdb row — what the UI writes), `{"nec":{"address":N,"command":M}}` (LG and
+most TVs), `{"pronto":"0000 006D ..."}` (a Pronto/CCF code), or
 `{"raw":[...],"frequency":38000}` (on/off durations in **10 µs** units).
 
 ```sh
@@ -63,8 +91,8 @@ To check on the real remote: BlueZ usually negotiates a large ATT MTU (needed fo
 the 200-byte chunk writes) automatically; whether the keymap survives the
 remote's deep sleep / re-pairing is remote-firmware-dependent — verify.
 
-> Not yet wired into the Settings UI — SSH tool for now. Once validated on the
-> box we can add a "Program Fire TV remote" action under Settings → Peripherals.
+Shell plumbing for the UI flow is `shell/firetvir.js` (venv + irdb fetch/cache +
+BLE tool runner); endpoints under `/tvbox/api/firetvir/*`.
 
 ## 2. App buttons → apps (or anything)
 

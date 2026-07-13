@@ -223,7 +223,10 @@
     "unitD": "n",
     "unitH": "ó",
     "unitM": "p",
-    "storage": "Tárhely (szabad/össz.)"
+    "storage": "Tárhely (szabad/össz.)",
+    "creditsTitle": "Nyílt forráskód",
+    "creditsIntro": "A tvbox MIT-licencű, és az alábbi projektekre épül:",
+    "trademarks": "Nem áll kapcsolatban az Amazonnal, és nem az Amazon támogatja. A Fire TV és az Alexa az Amazon védjegyei; itt csak a kompatibilitás leírására szolgálnak. A Fire TV távirányító funkció a saját tulajdonú eszközöddel működik együtt, és kísérleti - a használat a saját felelősségedre történik."
   },
   "app": {
     "shellUnreachable": "A box nem elérhető",
@@ -423,5 +426,41 @@
     "testOk": "Elküldve.",
     "testFailed": "Küldés sikertelen: {error}",
     "disconnected": "A jeladó nem elérhető: {error}"
+  },
+  "firetvir": {
+    "title": "Fire TV távirányító → TV IR",
+    "hint": "Taníts be egy párosított Fire TV / Alexa távirányítót, hogy a TV hangerejét, némítását és bekapcsolását a saját infravörös jelével vezérelje - Fire TV doboz nélkül. Hasznos, ha a távirányító power/hangerő gombja egy reset után elnémult.",
+    "depsNeeded": "Ehhez egyszeri Bluetooth-támogatás letöltése kell (internet szükséges).",
+    "installDeps": "Bluetooth-támogatás telepítése",
+    "installing": "Telepítés… ({step})",
+    "depsFailed": "A telepítés nem sikerült: {error}",
+    "noRemote": "Nincs párosított Bluetooth-távirányító. Előbb párosíts egyet a fenti Bluetooth résznél.",
+    "pickRemote": "1. Melyik távirányító?",
+    "pickBrand": "2. A TV márkája",
+    "loading": "TV-lista betöltése…",
+    "brandsError": "Nem sikerült betölteni a TV-listát: {error}.",
+    "retry": "Újra",
+    "filterBrand": "Márka keresése…",
+    "filterIs": "Márka: {q} (módosítás)",
+    "narrow": "Írj tovább a lista szűkítéséhez…",
+    "testTitle": "3. Teszteld a TV-n",
+    "testHint": "Irányítsd a távirányítót a TV-re, és próbáld ki a gombokat - reagálnia kell. A távirányítóra még semmi sem íródik.",
+    "key": {
+      "VolumeUp": "Hangerő +",
+      "VolumeDown": "Hangerő −",
+      "Mute": "Némítás",
+      "Power": "Bekapcsolás"
+    },
+    "testSent": "{key} elküldve - reagált a TV?",
+    "testFailed": "Nem sikerült elküldeni: {error}",
+    "someUnsupported": "Néhány gomb olyan IR-formátumot használ, amit a box még nem tud előállítani - ezek halványak. Próbálj másik kódkészletet a márkádhoz.",
+    "program": "4. Mentés a távirányítóra",
+    "programming": "Mentés…",
+    "programmed": "Kész - a távirányító mostantól közvetlenül vezérli a TV-t. A hangerő gombjait visszakapta.",
+    "programFailed": "Nem sikerült beírni a távirányítóba: {error}",
+    "erase": "Törlés",
+    "erased": "A távirányítóra írt kódok törölve.",
+    "credit": "A TV-kódok a közösségi irdb adatbázisból származnak (github.com/probonopd/irdb). Lásd a Névjegy menüt.",
+    "suggested": "A TV-t {brand} márkájúként ismertük fel - lent javasoljuk."
   }
 }

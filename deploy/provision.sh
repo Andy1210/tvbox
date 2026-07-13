@@ -43,7 +43,11 @@ apt-get update -qq || warn "apt update failed (stale package lists?)"
 # Hard deps: the box is non-functional without these (Electron, remote, audio,
 # focus). wlr-randr backs the Settings resolution/refresh picker (shell/display.js);
 # wlrctl is the separate wlroots control tool - they are NOT the same binary.
-HARD="cec-utils python3 python3-evdev wlrctl wlr-randr pipewire pipewire-pulse wireplumber nodejs npm"
+# python3-venv + pip: the Fire TV remote IR programmer (Settings -> Peripherals)
+# installs bleak into a user-space venv on demand; without these that one
+# feature can't set up (everything else is unaffected). dbus-fast ships an
+# aarch64 wheel, so no compiler is pulled in by it.
+HARD="cec-utils python3 python3-evdev python3-venv python3-pip wlrctl wlr-randr pipewire pipewire-pulse wireplumber nodejs npm"
 apt-get install -y -qq $HARD && ok "core deps ($HARD)" || bad "core apt deps - install manually: $HARD"
 # Soft deps: on-demand app-install tooling (flatpak/curl/git) + output config.
 # gcc/libc6-dev: the CEC bridge compiles cec/cec_vendor_shim.c on the box (LG

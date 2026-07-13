@@ -223,7 +223,10 @@
     "unitD": "d",
     "unitH": "h",
     "unitM": "m",
-    "storage": "Storage (free/total)"
+    "storage": "Storage (free/total)",
+    "creditsTitle": "Open source",
+    "creditsIntro": "tvbox is MIT-licensed and built on these projects:",
+    "trademarks": "Not affiliated with or endorsed by Amazon. Fire TV and Alexa are trademarks of Amazon; used only to describe compatibility. The Fire TV remote feature interoperates with hardware you own and is experimental - use at your own risk."
   },
   "app": {
     "shellUnreachable": "Can't reach the box",
@@ -423,5 +426,41 @@
     "testOk": "Sent.",
     "testFailed": "Send failed: {error}",
     "disconnected": "Blaster not reachable: {error}"
+  },
+  "firetvir": {
+    "title": "Fire TV remote → TV IR",
+    "hint": "Teach a paired Fire TV / Alexa remote to control the TV's volume, mute and power over its own infrared - no Fire TV box needed. Great if the remote's power/volume stopped working after a reset.",
+    "depsNeeded": "This needs a one-time Bluetooth support download (internet required).",
+    "installDeps": "Install Bluetooth support",
+    "installing": "Installing… ({step})",
+    "depsFailed": "Install failed: {error}",
+    "noRemote": "No Bluetooth remote paired. Pair one in Bluetooth above first.",
+    "pickRemote": "1. Which remote?",
+    "pickBrand": "2. Your TV brand",
+    "loading": "Loading TV list…",
+    "brandsError": "Couldn't load the TV list: {error}.",
+    "retry": "Retry",
+    "filterBrand": "Search brand…",
+    "filterIs": "Brand: {q} (change)",
+    "narrow": "Keep typing to narrow the list…",
+    "testTitle": "3. Test it on your TV",
+    "testHint": "Point the remote at the TV and try each button - it should react. Nothing is saved to the remote yet.",
+    "key": {
+      "VolumeUp": "Volume +",
+      "VolumeDown": "Volume −",
+      "Mute": "Mute",
+      "Power": "Power"
+    },
+    "testSent": "Sent {key} - did the TV react?",
+    "testFailed": "Couldn't send: {error}",
+    "someUnsupported": "Some buttons use an IR format this box can't generate yet - they're greyed out. Try another codeset for your brand.",
+    "program": "4. Save to the remote",
+    "programming": "Saving…",
+    "programmed": "Done - the remote now controls the TV directly. Its volume keys were handed back to it.",
+    "programFailed": "Couldn't program the remote: {error}",
+    "erase": "Erase",
+    "erased": "Erased the remote's programmed codes.",
+    "credit": "TV codes from the community irdb database (github.com/probonopd/irdb). See About for credits.",
+    "suggested": "Detected your TV as {brand} - suggested below."
   }
 }

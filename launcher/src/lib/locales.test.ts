@@ -20,7 +20,8 @@ const DYNAMIC = [
   "keymap.",
   "ir.action.",
   "ir.backend.",
-]; // built at runtime (Clock, Ambient weather, Settings categories, remap actions, power options, keyboard-layout names, IR blaster actions/backends)
+  "firetvir.key.",
+]; // built at runtime (Clock, Ambient weather, Settings categories, remap actions, power options, keyboard-layout names, IR blaster actions/backends, Fire TV IR key names)
 
 function flatten(obj: Record<string, unknown>, prefix = ""): string[] {
   return Object.entries(obj).flatMap(([k, v]) => {
