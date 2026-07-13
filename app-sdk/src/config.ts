@@ -16,7 +16,12 @@ export type RemoteAction =
   | "next"
   | "volume_up"
   | "volume_down"
-  | "mute";
+  | "mute"
+  // special: no key emitted - the bridge acts (TV power toggle / open Settings
+  // / launch the app named after the colon)
+  | "power"
+  | "settings"
+  | `app:${string}`;
 export type RemoteKeymap = Partial<Record<RemoteAction, number[]>>;
 export interface RemoteDeviceConfig {
   name: string;

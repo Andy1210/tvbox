@@ -433,6 +433,23 @@ function handlePost(p, data, res) {
       (e) => jsonRes(res, { ok: false, error: String((e && e.message) || e) }),
     );
   }
+  if (p === "/tvbox/api/nav") {
+    // Launcher/app navigation from the remote bridge (remapped "settings" /
+    // "app:<id>" buttons). Settings: launcher already up -> in-page event (no
+    // reload); app fullscreen -> leave it and boot the launcher on the target
+    // view via the #hash. App launch: navTo (no-ops on unknown/not-ready ids).
+    const dest = String(data.dest || "");
+    if (dest === "app") {
+      const id = String(data.app || "");
+      if (!/^[a-z0-9_-]{1,32}$/.test(id)) return jsonRes(res, { ok: false, error: "invalid app id" });
+      navTo(id);
+      return jsonRes(res, { ok: true, dest, app: id });
+    }
+    if (dest !== "home" && dest !== "settings") return jsonRes(res, { ok: false, error: "unknown dest: " + dest });
+    if (currentAppId !== null || remoteWin) showLauncher(dest === "settings" ? "#settings" : "");
+    else if (win && !win.isDestroyed()) win.webContents.send("tvbox-nav", { dest });
+    return jsonRes(res, { ok: true, dest });
+  }
   if (p === "/tvbox/api/nowplaying") {
     // launcher pushes the current now-playing (Spotify / Live TV); bridge it to
     // MQTT (retained) for HA, and remember it for the auto-update idle gate.

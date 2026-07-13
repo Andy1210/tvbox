@@ -83,6 +83,18 @@ export function App() {
     applyPendingRestore();
   }, []);
 
+  // A remapped Settings button on a remote (/tvbox/api/nav). Two delivery paths:
+  // the #settings hash when the shell (re)loads the launcher out of an app, and
+  // the onNav shell event while the launcher is already up (no reload).
+  useEffect(() => {
+    const nav = useNavStore.getState();
+    if (window.location.hash === "#settings") {
+      history.replaceState(null, "", window.location.pathname); // one-shot: a manual reload lands on Home
+      nav.open("settings");
+    }
+    return window.tvbox?.onNav?.((n) => (n.dest === "settings" ? nav.open("settings") : nav.home()));
+  }, []);
+
   // Apps now open as shell windows (webclient), not in-launcher views - the
   // launcher only renders Home/Settings/Catalog/Ambient. The
   // notification overlay is mounted alongside every view, so it can appear on top

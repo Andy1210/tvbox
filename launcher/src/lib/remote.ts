@@ -23,6 +23,9 @@ export const REMOTE_ACTIONS: RemoteAction[] = [
   "volume_up",
   "volume_down",
   "mute",
+  // special: the bridge acts instead of emitting a key
+  "power",
+  "settings",
 ];
 
 export interface ConnectedRemote {

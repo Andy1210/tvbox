@@ -17,6 +17,13 @@ export interface TvNotification {
   raise?: boolean; // bring the launcher window forward (over a remote app)
 }
 
+// Launcher navigation pushed by the shell while the launcher is up (a remapped
+// Settings button on a remote, /tvbox/api/nav). Out of an app the shell reloads
+// the launcher with the #settings hash instead (App.tsx handles both).
+export interface TvNav {
+  dest: "home" | "settings";
+}
+
 export interface TvboxBridge {
   launch(appId: string): void;
   home(): void;
@@ -31,6 +38,7 @@ export interface TvboxBridge {
   // media commands forwarded from the shell (MQTT tv_control) for the active app
   onCommand?(cb: (cmd: { action: string; app?: string }) => void): () => void;
   onWidgets?(cb: (widgets: { id: string; title: string; subtitle: string }[]) => void): () => void;
+  onNav?(cb: (n: TvNav) => void): () => void;
 }
 
 declare global {

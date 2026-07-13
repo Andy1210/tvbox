@@ -167,8 +167,16 @@
       "stop": "Leállítás",
       "volume_up": "Hangerő fel",
       "volume_down": "Hangerő le",
-      "mute": "Némítás"
-    }
+      "mute": "Némítás",
+      "power": "TV ki/be kapcsolás",
+      "settings": "Beállítások megnyitása",
+      "app": "{name} indítása"
+    },
+    "test": "Gombteszt",
+    "testBadge": "mit küldenek a gombok?",
+    "testHint": "Nyomkodd a távirányító gombjait - mindegyik megjelenik itt a küldött billentyűvel. 12 mp gombnyomás nélkül magától kilép.",
+    "testNone": "Még nincs elkapott gomb...",
+    "testStop": "Leállítás"
   },
   "appsettings": {
     "title": "Alkalmazások",

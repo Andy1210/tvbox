@@ -113,7 +113,10 @@ STANDBY_URL = "http://127.0.0.1:8097/tvbox/api/tv/standby"
 # forward it to cec-client's stdin - how "turn the TV on/off" (voice / HA) works.
 # Bridge and shell run as the same user, so the FIFO is private (0600).
 CEC_CMD_FIFO = "/tmp/tvbox-cec-cmd"
-CEC_CMD_ALLOW = {"on 0", "standby 0"}  # only TV (logical addr 0) power; nothing else
+# Only TV (logical addr 0) power; nothing else. "toggle 0" resolves to on/standby
+# from the tracked TV power state (the remote bridge's Power action uses it, so
+# one button both wakes and sleeps the TV - like a TV remote's own power key).
+CEC_CMD_ALLOW = {"on 0", "standby 0", "toggle 0"}
 STDIN_LOCK = threading.Lock()          # keep_active_source + cmd_reader both write proc.stdin
 
 
@@ -186,10 +189,26 @@ def notify_standby() -> None:
 ALL_KEYS = sorted(set(KEYMAP.values()) | {BACK_KEY, HOME_KEY})
 
 
+# After WE command a power change, distrust contradicting power reports this
+# long (the LG this was tuned on keeps answering 'pow' with "on" ~15s into its
+# shutdown). Doubles as the "press again to undo" window for toggle.
+CMD_GRACE_S = 25.0
+
+
 class TVState:
-    """Shared TV power flag; set by the stdout parser, read by the asserter."""
+    """Shared TV power flag; set by the stdout parser, read by the asserter.
+
+    cmd/cmd_ts remember the last power direction WE sent: an LG answers an
+    in-flight 'pow' query with the pre-command state for several seconds while
+    it transitions, and letting that stale report flip the flag back makes the
+    next toggle repeat the same direction instead of undoing it."""
     def __init__(self) -> None:
-        self.on = True
+        # Start as OFF: an ON TV answers the first 'pow' poll within seconds and
+        # corrects this, while a deep-standby LG never answers at all - so True
+        # here would stick forever and send the first toggle the wrong way.
+        self.on = False
+        self.cmd = None      # True=on / False=standby we last commanded, None = never
+        self.cmd_ts = 0.0    # monotonic timestamp of that command
 
 
 class Bridge:
@@ -244,7 +263,7 @@ def keep_active_source(proc: subprocess.Popen, tv: TVState) -> None:
         time.sleep(15)
 
 
-def cmd_reader(proc: subprocess.Popen) -> None:
+def cmd_reader(proc: subprocess.Popen, tv: TVState) -> None:
     """Forward whitelisted CEC power commands the shell writes to CEC_CMD_FIFO into
     cec-client's stdin. The FIFO is opened O_RDWR so it never hits EOF (stays
     writable for the shell). Bridge and shell run as the same user, so it's
@@ -274,6 +293,20 @@ def cmd_reader(proc: subprocess.Popen) -> None:
                     if cmd:
                         print(f"cec cmd ignored: {cmd!r}", flush=True)
                     continue
+                if cmd == "toggle 0":
+                    now = time.monotonic()
+                    if tv.cmd is not None and now - tv.cmd_ts < CMD_GRACE_S:
+                        target_on = not tv.cmd  # quick re-press = undo the last command
+                    else:
+                        target_on = not tv.on
+                    cmd = "on 0" if target_on else "standby 0"
+                    print(f"cec toggle -> {cmd}", flush=True)
+                # Record the commanded direction (also for plain on/standby from
+                # the shell) and set the flag optimistically; the parser ignores
+                # contradicting reports for CMD_GRACE_S.
+                tv.cmd = cmd == "on 0"
+                tv.cmd_ts = time.monotonic()
+                tv.on = tv.cmd
                 try:
                     with STDIN_LOCK:
                         proc.stdin.write(cmd + "\n")
@@ -319,7 +352,7 @@ def main() -> None:
     )
     tv = TVState()
     threading.Thread(target=keep_active_source, args=(proc, tv), daemon=True).start()
-    threading.Thread(target=cmd_reader, args=(proc,), daemon=True).start()
+    threading.Thread(target=cmd_reader, args=(proc, tv), daemon=True).start()
     bridge = Bridge(ui)
     print("bridging keys (tap Back=Esc, double-tap Back=Home)", flush=True)
 
@@ -351,6 +384,8 @@ def main() -> None:
             mpw = RX_PWR.search(line)
             if mpw:
                 on = mpw.group(1) in ("00", "02")  # on / transitioning to on
+                if tv.cmd is not None and on != tv.cmd and time.monotonic() - tv.cmd_ts < CMD_GRACE_S:
+                    continue  # stale answer from before our own power command - ignore
                 if on != tv.on:
                     print(f"TV power -> {'on' if on else 'standby'}", flush=True)
                     if not on:

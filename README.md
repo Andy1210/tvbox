@@ -238,9 +238,17 @@ out of the box.
 Because a remote can send its own button codes, the layout is **remappable
 per-device** from the TV: **Settings → Peripherals** lists each connected
 remote, and a _learn_ mode captures the next button you press and binds it to an
-action - remapping one remote never touches another. The **Power** button is
-configurable (turn the TV off over CEC, also power the box off, or ignore); it's
-always intercepted by the bridge so it can't accidentally power the box down.
+action - remapping one remote never touches another. A **button test** mode
+shows live what key each button sends, so you can see what a remote actually
+emits before binding anything. The **Power** button is configurable (turn the
+TV off over CEC, also power the box off, or ignore); it's always intercepted by
+the bridge so it can't accidentally power the box down.
+
+Beyond the navigation/media actions there are two **special actions** that
+trigger box behavior instead of a key: **TV power** (state-aware on/off toggle
+over CEC - handy for remotes whose own power button never reaches the box, e.g.
+Fire TV remotes send theirs as IR only) and **Open Settings**. Bind them to any
+spare button.
 
 ### TV volume over an IR blaster
 

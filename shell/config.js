@@ -149,7 +149,13 @@ const REMOTE_ACTIONS = [
   "volume_up",
   "volume_down",
   "mute",
+  // special: no key emitted - the bridge acts (TV power toggle / open Settings)
+  "power",
+  "settings",
 ];
+// Dynamic app-launch remap actions ("app:<id>" - launch that app). The id
+// charset mirrors the bridge's APP_ACTION_RE and the nav endpoint's guard.
+const REMOTE_APP_ACTION = /^app:[a-z0-9_-]{1,32}$/;
 function sanitizeDevices(devices) {
   const out = {};
   if (!devices || typeof devices !== "object") return out;
@@ -157,10 +163,12 @@ function sanitizeDevices(devices) {
     if (typeof id !== "string" || !id || id.length > 80 || !entry || typeof entry !== "object") continue;
     const rawkm = entry.keymap && typeof entry.keymap === "object" ? entry.keymap : {};
     const keymap = {};
-    for (const a of REMOTE_ACTIONS) {
+    for (const a of Object.keys(rawkm)) {
+      if (!REMOTE_ACTIONS.includes(a) && !REMOTE_APP_ACTION.test(a)) continue;
       if (!Array.isArray(rawkm[a])) continue;
       const codes = rawkm[a].filter((c) => Number.isInteger(c) && c >= 0 && c < 1024).slice(0, 6);
       if (codes.length) keymap[a] = codes;
+      if (Object.keys(keymap).length >= 32) break; // cap per device
     }
     const name = typeof entry.name === "string" ? entry.name.slice(0, 80) : "";
     if (Object.keys(keymap).length || name) out[id] = { name, keymap };

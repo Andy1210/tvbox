@@ -19,6 +19,9 @@ sets up):
     dead remote.
   * A per-device override maps one of the device's button codes to an ACTION; the
     action is emitted as its canonical key (KEY_UP/ENTER/BACKSPACE/HOMEPAGE/media).
+    SPECIAL actions emit no key at all: "power" runs the Power-button policy (CEC
+    TV toggle) and "settings" opens the launcher's Settings - so a remote without
+    a (working) power button can borrow any spare button for them.
   * Volume keys are special when an IR blaster is configured (config.ir): they
     are swallowed and forwarded to the shell (/tvbox/api/ir/send), which relays
     them to the TV over IR - see shell/ir.js. Without IR config they pass through.
@@ -34,6 +37,7 @@ Files (all under ~/.tvbox):
 import json
 import os
 import queue
+import re
 import select
 import stat
 import subprocess
@@ -97,6 +101,16 @@ IR_KEY_ACTION = {
 }
 IR_SEND_URL = "http://127.0.0.1:8097/tvbox/api/ir/send"
 IR_REPEAT_S = 0.3  # min gap between sends while a volume key autorepeats
+
+# Remap actions that do NOT emit a key: they trigger box behavior instead.
+#   power    - TV on/off toggle via the CEC bridge (per the config.remote.power
+#              policy, same as a real KEY_POWER) - for remotes whose own power
+#              button never reaches us (e.g. Fire TV remotes send it IR-only)
+#   settings - open the launcher's Settings screen (shell /tvbox/api/nav)
+#   app:<id> - launch that app (a remote's dedicated app button -> any tile)
+SPECIAL_ACTIONS = ("power", "settings")
+APP_ACTION_RE = re.compile(r"^app:[a-z0-9_-]{1,32}$")
+NAV_URL = "http://127.0.0.1:8097/tvbox/api/nav"
 
 # Only manage things that are actually remotes/keyboards: they must expose at
 # least one of these navigation/select keys. This skips pure pointers, the HDMI
@@ -162,7 +176,8 @@ def load_keymaps():
         km = (entry or {}).get("keymap") or {}
         code2action = {}
         for action, codes in km.items():
-            if action not in ACTION_KEY or not isinstance(codes, list):
+            known = action in ACTION_KEY or action in SPECIAL_ACTIONS or APP_ACTION_RE.match(action)
+            if not known or not isinstance(codes, list):
                 continue
             for c in codes:
                 if isinstance(c, int):
@@ -205,14 +220,15 @@ def load_ir_actions():
         return set()
 
 
-def cec_standby():
-    """Tell the CEC bridge to put the TV in standby (drop into its FIFO)."""
+def cec_cmd(cmd):
+    """Drop a TV power command into the CEC bridge's FIFO ("standby 0" = off,
+    "toggle 0" = state-aware on/off, resolved by the CEC bridge)."""
     try:
         fd = os.open(CEC_CMD_FIFO, os.O_WRONLY | os.O_NONBLOCK)
-        os.write(fd, b"standby 0\n")
+        os.write(fd, cmd.encode() + b"\n")
         os.close(fd)
     except OSError as ex:
-        log("cec standby failed (bridge running?):", ex)
+        log("cec command failed (bridge running?):", cmd, ex)
 
 
 def poweroff_box():
@@ -229,12 +245,14 @@ class Bridge:
         self.keymaps = load_keymaps()
         self.power = load_power()
         self.ir_actions = load_ir_actions()
-        # IR sends leave the event loop immediately (a slow/dead blaster must
-        # never stall key handling): a tiny queue + one worker preserves order;
-        # a full queue just drops the press (the user can press again).
-        self.ir_q = queue.Queue(maxsize=8)
-        self._ir_last = 0.0  # last enqueue, for the autorepeat throttle
-        threading.Thread(target=self._ir_worker, daemon=True).start()
+        # Shell HTTP calls (IR sends, Settings nav) leave the event loop
+        # immediately (a slow shell/blaster must never stall key handling): a
+        # tiny queue + one worker preserves order; a full queue just drops the
+        # press (the user can press again).
+        self.post_q = queue.Queue(maxsize=8)
+        self._ir_last = 0.0  # last IR enqueue, for the autorepeat throttle
+        self._power_last = 0.0  # last power action, for the debounce
+        threading.Thread(target=self._post_worker, daemon=True).start()
         self.ui = None
         self.ui_keys = set()
         self.learning = None  # device_id we're capturing a button for
@@ -345,6 +363,12 @@ class Bridge:
                 self.capture(did, dev, ev.code)
                 continue  # swallow the learned press
             action = code2action.get(ev.code)
+            if action and (action in SPECIAL_ACTIONS or action.startswith("app:")):
+                # box behavior instead of a key (TV power toggle / open
+                # Settings / launch app): fire on press, swallow press+repeat+release
+                if ev.value == 1:
+                    self.do_special(action)
+                continue
             out_code = ACTION_KEY[action] if action else ev.code
             if IR_KEY_ACTION.get(out_code) in self.ir_actions:
                 # volume key (native or remapped) -> TV volume over the IR
@@ -371,12 +395,29 @@ class Bridge:
             log("emit failed", code, ex)
 
     def do_power(self):
+        # Debounce: a TV takes seconds to visibly react to a power change, and a
+        # "did it work?" double-press mid-transition would just queue an extra
+        # confusing toggle.
+        now = time.monotonic()
+        if now - self._power_last < 2.0:
+            return
+        self._power_last = now
         p = self.power
-        if p in (POWER_TV, POWER_TV_AND_BOX):
-            cec_standby()
-        if p == POWER_TV_AND_BOX:
+        if p == POWER_TV:
+            cec_cmd("toggle 0")  # one button both wakes and sleeps the TV
+        elif p == POWER_TV_AND_BOX:
+            cec_cmd("standby 0")  # the box is about to go down - never wake the TV
             poweroff_box()
         log("power button ->", p)
+
+    # ---- remapped special actions (no key emitted) ----
+    def do_special(self, action):
+        if action == "power":
+            self.do_power()  # same policy path as a real KEY_POWER
+        elif action == "settings":
+            self.shell_post(NAV_URL, {"dest": "settings"})
+        elif APP_ACTION_RE.match(action):  # config is sanitized, but stay strict
+            self.shell_post(NAV_URL, {"dest": "app", "app": action[4:]})
 
     # ---- volume keys -> IR blaster (shell /tvbox/api/ir/send) ----
     def ir_press(self, action, value):
@@ -385,23 +426,26 @@ class Bridge:
         now = time.monotonic()
         if value == 1 or (value == 2 and now - self._ir_last >= IR_REPEAT_S):
             self._ir_last = now
-            try:
-                self.ir_q.put_nowait(action)
-            except queue.Full:
-                pass  # blaster is behind; dropping a repeat is better than lagging keys
+            self.shell_post(IR_SEND_URL, {"action": action})
 
-    def _ir_worker(self):
+    def shell_post(self, url, payload):
+        try:
+            self.post_q.put_nowait((url, payload))
+        except queue.Full:
+            pass  # shell is behind; dropping a press is better than lagging keys
+
+    def _post_worker(self):
         while True:
-            action = self.ir_q.get()
-            body = json.dumps({"action": action}).encode()
-            req = urllib.request.Request(IR_SEND_URL, data=body, headers={"Content-Type": "application/json"})
+            url, payload = self.post_q.get()
+            body = json.dumps(payload).encode()
+            req = urllib.request.Request(url, data=body, headers={"Content-Type": "application/json"})
             try:
                 with urllib.request.urlopen(req, timeout=5) as resp:
                     out = json.loads(resp.read() or b"{}")
                 if not out.get("ok"):
-                    log("ir send failed:", action, out.get("error", "unknown error"))
+                    log("shell call failed:", url, payload, out.get("error", "unknown error"))
             except Exception as ex:  # shell down / blaster unreachable
-                log("ir send failed:", action, ex)
+                log("shell call failed:", url, payload, ex)
 
     def capture(self, did, dev, code):
         name = next((n for n, c in vars(e).items() if n.startswith("KEY_") and c == code), str(code))

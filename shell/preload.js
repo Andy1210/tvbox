@@ -62,6 +62,22 @@ const path = require("path");
         } catch (e) {}
       };
     },
+    // Launcher navigation pushed by the shell while the launcher is already up
+    // (a remapped Settings button on the remote - /tvbox/api/nav). When an app
+    // is fullscreen instead, the shell reloads the launcher with a #hash.
+    onNav: function (cb) {
+      var h = function (_e, n) {
+        try {
+          cb(n);
+        } catch (e) {}
+      };
+      ipcRenderer.on("tvbox-nav", h);
+      return function () {
+        try {
+          ipcRenderer.removeListener("tvbox-nav", h);
+        } catch (e) {}
+      };
+    },
   };
 
   // ---- player control (for built-in apps that hold the "player" capability,

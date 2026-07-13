@@ -167,8 +167,16 @@
       "stop": "Stop",
       "volume_up": "Volume up",
       "volume_down": "Volume down",
-      "mute": "Mute"
-    }
+      "mute": "Mute",
+      "power": "TV power (on/off)",
+      "settings": "Open Settings",
+      "app": "Launch {name}"
+    },
+    "test": "Button test",
+    "testBadge": "what does each button send?",
+    "testHint": "Press buttons on this remote - each one shows up here with the key it sends. Exits by itself after 12 seconds without a press.",
+    "testNone": "No button captured yet...",
+    "testStop": "Stop"
   },
   "appsettings": {
     "title": "Apps",
