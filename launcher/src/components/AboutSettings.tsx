@@ -82,8 +82,6 @@ export function AboutSettings() {
         <Row label={t("about.storage")} value={disk} />
       </div>
 
-      {/* Open-source credits. tvbox is MIT and stands on other people's work;
-          say so (some of it, like the irdb IR database, asks to be credited). */}
       <div className="mt-[3.4vh] max-w-[70vw]">
         <div className="text-[2.1vh] font-semibold mb-[0.8vh]">{t("about.creditsTitle")}</div>
         <div className="text-[1.8vh] text-fg-dim mb-[1.4vh]">{t("about.creditsIntro")}</div>
@@ -99,20 +97,24 @@ export function AboutSettings() {
             </li>
           ))}
         </ul>
+        <div className="text-[1.6vh] text-fg-dim mt-[1.4vh] break-words">{IRDB_NOTICE}</div>
       </div>
     </div>
   );
 }
 
-// Third-party projects tvbox ships or builds on. Not exhaustive of transitive
-// deps, but the load-bearing ones - and everything whose license asks for a
-// mention (irdb). English-only on purpose (project/license names).
 const CREDITS: { name: string; what: string; url: string; license: string }[] = [
   { name: "Electron", what: "app shell", url: "electronjs.org", license: "MIT" },
   { name: "mpv", what: "video player", url: "mpv.io", license: "GPL-2.0+/LGPL" },
   { name: "libcec", what: "HDMI-CEC remote", url: "libcec.pulse-eight.com", license: "GPL-2.0" },
   { name: "python-evdev", what: "remote input bridge", url: "github.com/gvalkov/python-evdev", license: "BSD-3" },
   { name: "Bleak", what: "Bluetooth LE (remote IR programming)", url: "github.com/hbldh/bleak", license: "MIT" },
-  { name: "irdb", what: "TV IR code database", url: "github.com/probonopd/irdb", license: "see repo (attribution)" },
-  { name: "React · Vite · Tailwind", what: "launcher UI", url: "react.dev", license: "MIT" },
+  { name: "React", what: "launcher UI", url: "react.dev", license: "MIT" },
+  { name: "Vite", what: "launcher build", url: "vite.dev", license: "MIT" },
+  { name: "Tailwind CSS", what: "launcher styling", url: "tailwindcss.com", license: "MIT" },
 ];
+
+// Verbatim per irdb LICENSE.md clause 2 - keep as-is.
+const IRDB_NOTICE =
+  "Contains/accesses irdb by Simon Peter and contributors, used under permission. " +
+  "For licensing details and for information on how to contribute to the database, see https://github.com/probonopd/irdb";

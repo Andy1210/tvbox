@@ -1179,10 +1179,14 @@ function serve() {
       return;
     }
     // Same-origin gate for everything state-changing: every non-GET (the POST
-    // API + plugin POST routes) plus the one mutating GET (tv/standby stops
-    // playback). Read-only GETs stay open - they leak nothing a same-LAN
-    // attacker can act on and blocking them would break <img>/no-CORS uses.
-    if ((req.method !== "GET" || p === "/tvbox/api/tv/standby") && foreignOrigin(req)) {
+    // API + plugin POST routes) plus the GETs that have side effects - tv/standby
+    // (stops playback) and the firetvir reads (they spawn a python subprocess /
+    // bluetoothctl and drive outbound GitHub fetches, so they aren't the
+    // side-effect-free reads the open-GET policy assumes). Other read-only GETs
+    // stay open - they leak nothing actionable and blocking them would break
+    // <img>/no-CORS uses.
+    const guardedGet = p === "/tvbox/api/tv/standby" || p.startsWith("/tvbox/api/firetvir/");
+    if ((req.method !== "GET" || guardedGet) && foreignOrigin(req)) {
       console.warn("[main] rejected cross-origin", req.method, p, "from", req.headers.origin);
       res.writeHead(403, { "Content-Type": "text/plain" });
       res.end("cross-origin request rejected");
@@ -1446,12 +1450,18 @@ function serve() {
 // Player events go to every live window: the driving app (own window now) needs
 // them for its UI, the launcher for now-playing state. Listeners that don't
 // care simply have no handler registered.
+// Player events go to the launcher (now-playing state) and the FOREGROUND app
+// only - never a backgrounded app. A hidden app receiving "finished" and
+// auto-advancing would start mpv behind an opaque foreground (invisible video +
+// phantom audio) and keep the box from ever reporting idle.
 function emit(ev) {
-  if (win && !win.isDestroyed()) win.webContents.send("player-event", ev);
-  for (const [, w] of appwins.all()) {
-    try {
-      w.webContents.send("player-event", ev);
-    } catch (e) {}
+  const fg = currentAppId && appWindow(currentAppId);
+  for (const w of new Set([win, fg])) {
+    if (w && !w.isDestroyed()) {
+      try {
+        w.webContents.send("player-event", ev);
+      } catch (e) {}
+    }
   }
 }
 // One request/response round-trip on the mpv IPC socket (mpvCmd is fire-and-
@@ -1944,11 +1954,27 @@ function openLocalApp(m) {
   });
   // Same BT-remote Back translation the main window did while an app owned it
   // (BrowserBack/GoBack -> trusted Backspace; the app UIs only know the CEC form).
+  // Home is ALSO caught main-side here (not only in the renderer) so a hung app
+  // can't trap the box - the renderer's own Home handler still works normally.
   w.webContents.on("before-input-event", (e, input) => {
+    if (input.type === "keyDown" && input.key === "BrowserHome") {
+      e.preventDefault();
+      showLauncher();
+      return;
+    }
     if (input.key !== "BrowserBack" && input.key !== "GoBack") return;
     e.preventDefault();
     if (input.type !== "keyDown" && input.type !== "keyUp") return;
     w.webContents.sendInputEvent({ type: input.type === "keyDown" ? "keyDown" : "keyUp", keyCode: "Backspace" });
+  });
+  // A crashed/gone renderer doesn't emit "closed", so recover to the launcher
+  // explicitly - never leave the box stuck on a dead app window (the launcher
+  // is hidden while an app is up).
+  w.webContents.on("render-process-gone", () => {
+    console.warn("[app:" + m.id + "] render process gone -> launcher");
+    const wasForeground = currentAppId === m.id;
+    destroyAppWindow(m.id); // drop the dead window so a relaunch starts fresh
+    if (wasForeground) showLauncher();
   });
   // Black backdrop + video-reveal CSS, re-armed on every navigation like the
   // main window's did-finish-load handler.
@@ -2255,6 +2281,16 @@ ipcMain.handle("app:storage", (e, action, key, value) => {
 });
 
 ipcMain.handle("player", (e, action, payload) => {
+  // Only the FOREGROUND window may drive the shared mpv, and only if its app
+  // holds the player capability. A backgrounded app must never start/seek
+  // playback - it would play behind an opaque foreground (invisible video +
+  // phantom audio) and keep the box from reporting idle. IPC is async, so a
+  // just-backgrounded app's late play() call arrives here after currentAppId
+  // already moved on, and is rejected.
+  const senderId = windowAppId(e.sender);
+  if (senderId === undefined || senderId !== currentAppId || !capsFor(senderId).includes("player")) {
+    return { ok: false, error: "player not permitted (not the foreground app)" };
+  }
   payload = payload || {};
   console.log("[player] action", action, payload && payload.url ? payload.url.slice(0, 55) : "");
   if (action === "queue") {

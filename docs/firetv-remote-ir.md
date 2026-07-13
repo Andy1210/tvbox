@@ -46,8 +46,13 @@ The guided on-TV flow does all of the below for you, no SSH:
    `remote.devices[<mac>].irPassthrough = true` so the bridge stops diverting
    that remote's BT volume keys to the box's own IR blaster (no double volume).
 
-irdb attribution lives in **Settings → About → Open source**; the flow footer
-credits it too. irdb's license only asks for a mention (issue #53).
+irdb attribution: the verbatim notice its license requires (LICENSE.md clause
+2, "Contains/accesses irdb by Simon Peter and contributors, used under
+permission. …") is shown in **Settings → About → Open source**, and the flow
+footer credits it too. Note the license's **clause 1**: before shipping a
+product that uses irdb you must announce it by opening an issue at
+github.com/probonopd/irdb/issues (a one-time step for whoever distributes a
+build — not a runtime concern).
 
 ### The manual way (SSH)
 

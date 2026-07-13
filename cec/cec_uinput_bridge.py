@@ -246,6 +246,11 @@ def keep_active_source(proc: subprocess.Popen, tv: TVState) -> None:
     wake the TV) and only send active-source ('as') if it reports on. The stdout
     parser flips tv.on (immediately on a <Standby> broadcast, and from the power
     report), so a TV turned off stays off and one turned back on is re-grabbed.
+
+    Right after WE command a standby, the TV can still report "on" for a few
+    seconds (an LG does this for ~15s into shutdown); asserting 'as' then would
+    re-wake it. So we suppress 'as' for CMD_GRACE_S after a standby command,
+    regardless of the (stale) reported state - by then the TV reports off.
     """
     time.sleep(2)
     while proc.poll() is None:
@@ -254,7 +259,8 @@ def keep_active_source(proc: subprocess.Popen, tv: TVState) -> None:
                 proc.stdin.write("pow 0\n")   # refresh TV power state (does not wake it)
                 proc.stdin.flush()
             time.sleep(2.5)                   # let the Report Power Status arrive + parser update
-            if tv.on:
+            recently_off_cmd = tv.cmd is False and time.monotonic() - tv.cmd_ts < CMD_GRACE_S
+            if tv.on and not recently_off_cmd:
                 with STDIN_LOCK:
                     proc.stdin.write("as\n")
                     proc.stdin.flush()
@@ -301,12 +307,14 @@ def cmd_reader(proc: subprocess.Popen, tv: TVState) -> None:
                         target_on = not tv.on
                     cmd = "on 0" if target_on else "standby 0"
                     print(f"cec toggle -> {cmd}", flush=True)
-                # Record the commanded direction (also for plain on/standby from
-                # the shell) and set the flag optimistically; the parser ignores
-                # contradicting reports for CMD_GRACE_S.
+                # Record the commanded direction + time (drives toggle "undo"
+                # within CMD_GRACE_S and the asserter's re-wake guard). We do NOT
+                # set tv.on here: tv.on stays observation-driven so the parser's
+                # standby handler still fires notify_standby() (stop playback)
+                # when the TV actually goes off - setting it optimistically
+                # swallowed that signal.
                 tv.cmd = cmd == "on 0"
                 tv.cmd_ts = time.monotonic()
-                tv.on = tv.cmd
                 try:
                     with STDIN_LOCK:
                         proc.stdin.write(cmd + "\n")
