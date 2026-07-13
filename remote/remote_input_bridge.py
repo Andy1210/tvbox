@@ -108,7 +108,8 @@ IR_REPEAT_S = 0.3  # min gap between sends while a volume key autorepeats
 #              button never reaches us (e.g. Fire TV remotes send it IR-only)
 #   settings - open the launcher's Settings screen (shell /tvbox/api/nav)
 #   app:<id> - launch that app (a remote's dedicated app button -> any tile)
-SPECIAL_ACTIONS = ("power", "settings")
+#   appswitcher - cycle through the RUNNING (background) apps, FireTV-style
+SPECIAL_ACTIONS = ("power", "settings", "appswitcher")
 APP_ACTION_RE = re.compile(r"^app:[a-z0-9_-]{1,32}$")
 NAV_URL = "http://127.0.0.1:8097/tvbox/api/nav"
 
@@ -161,6 +162,13 @@ def manageable(dev):
         return False
     keys = set(dev.capabilities().get(e.EV_KEY, []))
     return bool(keys & NAV_KEYS)
+
+
+def is_pointer(dev):
+    # A remote's trackpad/pointer node - grabbing it would swallow motion. We only
+    # ever want key nodes, so never grab these even in capture-all-nodes mode.
+    caps = dev.capabilities()
+    return bool(caps.get(e.EV_REL) or caps.get(e.EV_ABS))
 
 
 def load_keymaps():
@@ -220,6 +228,20 @@ def load_ir_actions():
         return set()
 
 
+def load_capture_all_nodes():
+    """config.remote.captureAllNodes (default false). When true, we also grab the
+    OTHER HID nodes of a remote we already manage - e.g. a Fire TV remote's
+    "Consumer Control" node that carries the app buttons (Netflix/Prime/...),
+    which has no nav keys and so isn't managed on its own. Off by default so
+    existing setups are untouched; turn on to remap app buttons in the UI."""
+    try:
+        with open(CONFIG) as f:
+            cfg = json.load(f)
+        return bool((((cfg or {}).get("remote") or {}).get("captureAllNodes")))
+    except Exception:
+        return False
+
+
 def cec_cmd(cmd):
     """Drop a TV power command into the CEC bridge's FIFO ("standby 0" = off,
     "toggle 0" = state-aware on/off, resolved by the CEC bridge)."""
@@ -245,6 +267,7 @@ class Bridge:
         self.keymaps = load_keymaps()
         self.power = load_power()
         self.ir_actions = load_ir_actions()
+        self.capture_all_nodes = load_capture_all_nodes()
         # Shell HTTP calls (IR sends, Settings nav) leave the event loop
         # immediately (a slow shell/blaster must never stall key handling): a
         # tiny queue + one worker preserves order; a full queue just drops the
@@ -285,18 +308,32 @@ class Bridge:
 
     # ---- device discovery / grab / drop ----
     def rescan(self):
-        seen = set()
+        # Every InputDevice() opens an fd; we open all once, then close the ones we
+        # don't keep (not a remote, already managed, or grab failed) instead of
+        # leaving them to CPython refcount GC - rescan runs every 2s.
+        opened = []
         for path in list_devices():
             try:
-                dev = InputDevice(path)
+                opened.append(InputDevice(path))
             except Exception:
                 continue
-            # Every InputDevice() opens an fd; close the ones we don't keep
-            # (not a remote, already managed, or grab failed) instead of leaving
-            # them to CPython refcount GC - rescan runs every 2s.
-            if not manageable(dev):
+        # Physical remotes = anything with nav keys. In capture-all-nodes mode we
+        # also keep the OTHER (non-pointer) HID nodes of those same remotes - e.g.
+        # a Fire TV remote's Consumer Control node with the app buttons - so their
+        # keys flow through the same per-device remap/learn pipeline.
+        remote_ids = {dev_key(d) for d in opened if manageable(d)}
+        seen = set()
+        for dev in opened:
+            keep = manageable(dev) or (
+                self.capture_all_nodes
+                and dev_key(dev) in remote_ids
+                and not excluded(dev.name)
+                and not is_pointer(dev)
+            )
+            if not keep:
                 dev.close()
                 continue
+            path = dev.path
             seen.add(path)
             if path in self.devices:
                 dev.close()  # already managing this path via the stored handle
@@ -416,6 +453,8 @@ class Bridge:
             self.do_power()  # same policy path as a real KEY_POWER
         elif action == "settings":
             self.shell_post(NAV_URL, {"dest": "settings"})
+        elif action == "appswitcher":
+            self.shell_post(NAV_URL, {"dest": "switch"})
         elif APP_ACTION_RE.match(action):  # config is sanitized, but stay strict
             self.shell_post(NAV_URL, {"dest": "app", "app": action[4:]})
 
@@ -465,7 +504,12 @@ class Bridge:
             self.keymaps = load_keymaps()
             self.power = load_power()
             self.ir_actions = load_ir_actions()
-            log("config reloaded (power=%s, ir=%s)" % (self.power, sorted(self.ir_actions) or "off"))
+            prev_capture = self.capture_all_nodes
+            self.capture_all_nodes = load_capture_all_nodes()
+            if self.capture_all_nodes != prev_capture:
+                self.rescan()  # grab/release sibling nodes to match the new setting
+            log("config reloaded (power=%s, ir=%s, captureAllNodes=%s)"
+                % (self.power, sorted(self.ir_actions) or "off", self.capture_all_nodes))
         elif line.startswith("learn ") and len(line) > 6:
             self.learning = line[6:].strip()
             try:

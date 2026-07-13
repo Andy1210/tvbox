@@ -18,9 +18,10 @@ export type RemoteAction =
   | "volume_down"
   | "mute"
   // special: no key emitted - the bridge acts (TV power toggle / open Settings
-  // / launch the app named after the colon)
+  // / cycle running apps / launch the app named after the colon)
   | "power"
   | "settings"
+  | "appswitcher"
   | `app:${string}`;
 export type RemoteKeymap = Partial<Record<RemoteAction, number[]>>;
 export interface RemoteDeviceConfig {
@@ -63,6 +64,9 @@ export interface PublicConfig {
   // Secret-free: the ESPHome encryption key / HA token are write-only (has*).
   // port null = the ESPHome default (6053). Actions map an abstract command
   // (volume_up/volume_down/mute) to a backend value (signal option / HA script).
+  // background apps (shell appwindows.js): leaving an app hides its window for
+  // instant resume; false = the old destroy-on-leave behavior
+  apps: { background: boolean };
   ir: {
     configured: boolean;
     backend: IrBackend;

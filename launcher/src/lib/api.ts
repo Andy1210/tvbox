@@ -64,6 +64,21 @@ export async function fetchApps(): Promise<AppManifest[]> {
   }
 }
 
+// Quit a RUNNING (background) app: the shell destroys its window and page
+// state; the next launch is a fresh start. HOME's running-apps row calls this.
+export async function quitApp(id: string): Promise<boolean> {
+  try {
+    const res = await fetch("/tvbox/api/apps/quit", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id }),
+    });
+    return !!((await res.json()) as { ok?: boolean }).ok;
+  } catch {
+    return false;
+  }
+}
+
 // ---- app store (Settings → Store): a git-hosted registry of vetted,
 // manifest-only apps. Install = the shell writes the manifest to
 // ~/.tvbox/apps/<id>.json; the HOME tile appears live. ----

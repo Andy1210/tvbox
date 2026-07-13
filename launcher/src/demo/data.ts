@@ -60,6 +60,7 @@ export const CONFIG: PublicConfig = {
     hasPassword: true,
     deviceId: "tvbox-demo",
   },
+  apps: { background: true },
   ir: {
     configured: true,
     backend: "esphome",

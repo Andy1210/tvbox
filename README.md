@@ -18,6 +18,7 @@ want from the TV. Nothing comes bundled.
 | 🕹️ **TV remote only**      | HDMI-CEC via a uinput bridge, no keyboard or phone for day-to-day use                             |
 | 🧩 **Package apps**        | self-contained, installed from a curated registry, versioned and updated independently of the box |
 | 🎧 **Spotify Connect**     | with the Spotify app installed, the box is a cast target                                          |
+| 🪟 **Background apps**     | leaving an app keeps it running hidden - resume is instant; HOME lists and quits them             |
 | 🔒 **No cloud**            | everything runs on the Pi; credentials stay in `~/.tvbox` (`chmod 600`)                           |
 
 ## Try it in your browser

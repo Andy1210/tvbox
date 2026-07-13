@@ -11,7 +11,9 @@
     "install": "Install",
     "installingBadge": "Installing…",
     "setupNeeded": "{name} needs setup - open Settings",
-    "getMore": "Get more apps"
+    "getMore": "Get more apps",
+    "running": "Running",
+    "quit": "Quit app"
   },
   "greeting": {
     "night": "Good night",
@@ -170,7 +172,8 @@
       "mute": "Mute",
       "power": "TV power (on/off)",
       "settings": "Open Settings",
-      "app": "Launch {name}"
+      "app": "Launch {name}",
+      "appswitcher": "Switch between running apps"
     },
     "test": "Button test",
     "testBadge": "what does each button send?",

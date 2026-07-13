@@ -26,6 +26,7 @@ export const REMOTE_ACTIONS: RemoteAction[] = [
   // special: the bridge acts instead of emitting a key
   "power",
   "settings",
+  "appswitcher",
 ];
 
 export interface ConnectedRemote {

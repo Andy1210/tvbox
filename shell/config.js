@@ -120,6 +120,11 @@ function publicConfig() {
       power: sanitizePower(c.remote && c.remote.power),
     },
     ir: publicIr(c.ir),
+    apps: {
+      // background apps (appwindows.js): leaving an app hides its window for
+      // instant resume; false = the old destroy-on-leave behavior (rollback lever)
+      background: !(c.apps && c.apps.background === false),
+    },
   };
 }
 
@@ -149,9 +154,11 @@ const REMOTE_ACTIONS = [
   "volume_up",
   "volume_down",
   "mute",
-  // special: no key emitted - the bridge acts (TV power toggle / open Settings)
+  // special: no key emitted - the bridge acts (TV power toggle / open Settings
+  // / cycle running apps)
   "power",
   "settings",
+  "appswitcher",
 ];
 // Dynamic app-launch remap actions ("app:<id>" - launch that app). The id
 // charset mirrors the bridge's APP_ACTION_RE and the nav endpoint's guard.
@@ -526,6 +533,17 @@ function rawIr() {
   return { backend, homeassistant: { url: h.url, token: h.token, actions: sanitizeIrActions(h.actions) } };
 }
 
+// Background-apps behavior (appwindows.js reads it via main.js): only the one
+// whitelisted toggle persists.
+function setApps(a) {
+  const c = load();
+  if (a && typeof a.background === "boolean") c.apps = { ...c.apps, background: a.background };
+  save(c);
+}
+function rawApps() {
+  return load().apps || null;
+}
+
 // Restore path (backup.js): replace the WHOLE config file with the backup's
 // copy - restore is deliberately not a merge, the backup is the truth.
 function replaceAll(cfg) {
@@ -562,5 +580,7 @@ module.exports = {
   rawRemote,
   setIr,
   rawIr,
+  setApps,
+  rawApps,
   replaceAll,
 };

@@ -11,7 +11,9 @@
     "install": "Telepítés",
     "installingBadge": "Telepítés…",
     "setupNeeded": "{name} beállítást igényel - nyisd meg a Beállításokat",
-    "getMore": "Továbbiak beszerzése"
+    "getMore": "Továbbiak beszerzése",
+    "running": "Futó appok",
+    "quit": "App bezárása"
   },
   "greeting": {
     "night": "Jó éjszakát",
@@ -170,7 +172,8 @@
       "mute": "Némítás",
       "power": "TV ki/be kapcsolás",
       "settings": "Beállítások megnyitása",
-      "app": "{name} indítása"
+      "app": "{name} indítása",
+      "appswitcher": "Váltás a futó appok között"
     },
     "test": "Gombteszt",
     "testBadge": "mit küldenek a gombok?",

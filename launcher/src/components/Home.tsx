@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { FocusContext, useFocusable, setFocus } from "@noriginmedia/norigin-spatial-navigation";
 import type { AppManifest } from "../lib/types";
-import { fetchApps } from "../lib/api";
+import { fetchApps, quitApp } from "../lib/api";
 import { launchApp } from "../lib/shell";
 import { fetchWidgets, subscribeWidgets, type HomeWidget } from "../lib/widgets";
 import { Icon } from "./Icon";
@@ -30,13 +30,24 @@ export function Home() {
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const { ref, focusKey } = useFocusable({ focusKey: "home-rail" });
 
+  // The launcher window stays loaded across app switches now (background apps),
+  // so HOME can't rely on a remount for fresh data: refetch when the window
+  // becomes visible again (Electron hide/show flips document visibility) - that
+  // also keeps the running-apps row honest after a quit/eviction.
   useEffect(() => {
     let alive = true;
-    fetchApps().then((list) => {
-      if (alive) setApps(list);
-    });
+    const load = () =>
+      fetchApps().then((list) => {
+        if (alive) setApps(list);
+      });
+    load();
+    const onVis = () => {
+      if (!document.hidden) load();
+    };
+    document.addEventListener("visibilitychange", onVis);
     return () => {
       alive = false;
+      document.removeEventListener("visibilitychange", onVis);
     };
   }, []);
 
@@ -200,6 +211,62 @@ export function Home() {
                   </FocusButton>
                 );
               })}
+            </div>
+          )}
+          {apps.some((a) => a.running) && (
+            <div className="mb-[2.6vh]">
+              <h1 className="text-[2vh] font-semibold text-fg-dim mb-[1.4vh] tracking-wide">{t("home.running")}</h1>
+              <div className="flex gap-[1.2vw] flex-wrap">
+                {apps
+                  .filter((a) => a.running)
+                  .map((app) => (
+                    <div key={app.id} className="flex items-center gap-[0.5vw]">
+                      <FocusButton
+                        focusKey={"run-" + app.id}
+                        onEnter={() => onSelect(app)}
+                        className="px-[1.4vw] py-[1.2vh] rounded-l-[1.2vh] rounded-r-[0.3vh] bg-white/5 flex items-center gap-[0.9vw]"
+                      >
+                        <span
+                          className="w-[3.6vh] h-[3.6vh] rounded-[0.8vh] shrink-0 flex items-center justify-center overflow-hidden"
+                          style={{ background: app.accent ? app.accent + "22" : undefined }}
+                        >
+                          <Icon svg={app.icon} className="w-[2.7vh] h-[2.7vh]" />
+                        </span>
+                        <span className="text-[2vh] font-semibold truncate max-w-[16vw]">{loc(app.name)}</span>
+                      </FocusButton>
+                      <FocusButton
+                        focusKey={"runx-" + app.id}
+                        onEnter={() =>
+                          quitApp(app.id).then(() =>
+                            fetchApps().then((list) => {
+                              setApps(list);
+                              // the chip we sat on is gone - land somewhere sane
+                              const still = list.filter((a) => a.running);
+                              setTimeout(() => {
+                                if (still.length) setFocus("run-" + still[0].id);
+                                else if (sorted.length) setFocus(sorted[0].id);
+                                else setFocus("home-settings");
+                              }, 0);
+                            }),
+                          )
+                        }
+                        className="px-[0.9vw] py-[1.2vh] rounded-r-[1.2vh] rounded-l-[0.3vh] bg-white/5 text-[2vh] font-semibold"
+                        aria-label={t("home.quit")}
+                      >
+                        <svg
+                          viewBox="0 0 24 24"
+                          fill="none"
+                          stroke="currentColor"
+                          strokeWidth="2.4"
+                          strokeLinecap="round"
+                          className="w-[2.2vh] h-[2.2vh]"
+                        >
+                          <path d="M6 6l12 12M18 6L6 18" />
+                        </svg>
+                      </FocusButton>
+                    </div>
+                  ))}
+              </div>
             </div>
           )}
           <h1 className="text-[2vh] font-semibold text-fg-dim mb-[2.4vh] tracking-wide">{t("home.apps")}</h1>

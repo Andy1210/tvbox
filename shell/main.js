@@ -20,6 +20,7 @@ const bluetooth = require("./bluetooth"); // bluetoothctl pair/connect (audio + 
 const ambient = require("./ambient"); // weather + local photos for the idle/ambient screen
 const mqttBridge = require("./mqtt"); // MQTT: now-playing publish + command/notify (HA integration)
 const ir = require("./ir"); // IR blaster hub: TV volume/mute over ESPHome or Home Assistant
+const appwins = require("./appwindows"); // background-apps window registry + hidden-set policy (LRU/RAM guard)
 const apps = require("./install"); // manifests + install-recipe runner (shared with the tvbox CLI)
 const store = require("./store"); // app-store registry client (manifest-only apps -> ~/.tvbox/apps)
 const appfetch = require("./appfetch"); // capability: scoped server-side fetch (data proxy), origin-locked + SSRF-guarded
@@ -104,19 +105,31 @@ let win = null;
 let mpv = null;
 let mpvPip = false; // mpv is in PiP (small top-right) mode, not fullscreen
 let playingUrl = null;
-let styleInjected = false;
-let currentAppId = null; // which app is focused (null = launcher); drives capability scoping
+let mpvOwnerId = null; // app id whose player broker call launched mpv (video-mode target)
+let currentAppId = null; // which app is FOREGROUND (null = launcher); drives focus + video-mode targeting
+// Background apps: every app runs in its OWN BrowserWindow; leaving an app
+// hides its window (registry + hidden-set policy live in appwindows.js). A
+// window is destroyed only by the HOME quit affordance, the RAM guard, app
+// uninstall/update, its own crash, or config.apps.background=false (the
+// rollback lever to the old destroy-on-leave behavior).
+function appWindow(id) {
+  return appwins.get(id);
+}
+function foregroundWindow() {
+  return (currentAppId && appWindow(currentAppId)) || (win && !win.isDestroyed() ? win : null);
+}
 let mqttCtl = null; // MQTT bridge control (publish/…) once connected; null if not configured
 let nowPlaying = null; // last launcher-reported now-playing (Spotify/Live TV) - gates auto-update idleness
 let restoredAt = null; // a backup restore just ran; the launcher polls this to show "restarting"
 const queued = { url: null, startPos: 0 };
 
 // The box counts as idle for a self-initiated restart (nightly auto-update)
-// only when nothing is on screen or audible: no mpv, no remote app, launcher
-// focused, and the last now-playing report isn't "playing" (librespot audio
-// has no mpv process to look at).
+// only when nothing is on screen or audible: no mpv, launcher focused, and the
+// last now-playing report isn't "playing" (librespot audio has no mpv process
+// to look at). HIDDEN app windows don't block idleness - they're muted/paused,
+// and the restart simply drops them (they reload on next launch).
 function boxIdle() {
-  return !mpv && !remoteWin && !currentAppId && !(nowPlaying && nowPlaying.state === "playing");
+  return !mpv && !currentAppId && !(nowPlaying && nowPlaying.state === "playing");
 }
 // Restart the shell in-place: quit cleanly (localStorage flush, plugin stop);
 // the labwc respawn loop relaunches run-shell.sh, which follows the `current` symlink.
@@ -257,6 +270,10 @@ function appTiles() {
       status: m.status,
       accent: m.accent,
       icon: m.icon,
+      // background apps: a live (possibly hidden) window exists; HOME shows a
+      // running badge + quit affordance, resume is instant via navTo
+      running: !!appwins.get(m.id),
+      foreground: m.id === currentAppId,
       depsOk,
       missing,
       depsInstallable, // every missing binary is a no-root download dep -> UI-installable (no CLI)
@@ -296,36 +313,51 @@ function rootWebApp() {
 // The app DOM element that must become transparent to reveal mpv (declared per
 // app in the manifest, e.g. Plex's "#media-container"). The shell has no
 // app-specific selector baked in.
-function transparentSelector() {
-  const m = currentAppId && apps.manifestById(currentAppId);
+function transparentSelectorFor(id) {
+  const m = id && apps.manifestById(id);
   return (m && m.runtime && m.runtime.transparentSelector) || null;
 }
 
-// One-time stylesheet; switch between "video mode" (page transparent so the mpv
-// window behind shows through) and idle (opaque black backdrop, never the
-// desktop) by toggling a class SYNCHRONOUSLY in the renderer - avoids the
-// insertCSS/removeInsertedCSS races that left resumed video black.
-async function ensureStyle() {
-  if (styleInjected || !win || win.isDestroyed()) return;
-  styleInjected = true;
-  const sel = transparentSelector();
+// One-time stylesheet per window (each app has its own window now; the flag
+// lives on the window and resets on navigation); switch between "video mode"
+// (page transparent so the mpv window behind shows through) and idle (opaque
+// black backdrop, never the desktop) by toggling a class SYNCHRONOUSLY in the
+// renderer - avoids the insertCSS/removeInsertedCSS races that left resumed
+// video black.
+async function ensureStyle(w) {
+  w = w || win;
+  if (!w || w.isDestroyed() || w.tvboxStyleInjected) return;
+  w.tvboxStyleInjected = true;
+  const sel = transparentSelectorFor(w.tvboxAppId || null);
   const extra = sel ? ",html.tvbox-video " + sel : "";
   try {
-    await win.webContents.insertCSS(
+    await w.webContents.insertCSS(
       "html:not(.tvbox-video)::before{content:'';position:fixed;inset:0;background:#000;z-index:-1;}" +
         "html.tvbox-video,html.tvbox-video body" +
         extra +
         "{background:transparent !important;background-color:transparent !important;}",
     );
   } catch (e) {
-    styleInjected = false;
+    w.tvboxStyleInjected = false;
   }
 }
-function setVideoMode(on) {
-  if (!win || win.isDestroyed()) return;
-  win.webContents
-    .executeJavaScript("document.documentElement.classList." + (on ? "add" : "remove") + "('tvbox-video')")
-    .catch(() => {});
+// Reveal (on=true, targets the mpv owner's window) or restore the opaque
+// backdrop. Clearing without a target clears EVERY live window - teardown
+// paths run after focus/ownership already changed, and the class is
+// idempotent, so blanket-clearing is the race-free option.
+function setVideoMode(on, w) {
+  const flip = (x) => {
+    if (!x || x.isDestroyed()) return;
+    x.webContents
+      .executeJavaScript("document.documentElement.classList." + (on ? "add" : "remove") + "('tvbox-video')")
+      .catch(() => {});
+  };
+  if (on) flip(w || appWindow(mpvOwnerId) || win);
+  else if (w) flip(w);
+  else {
+    flip(win);
+    for (const [, aw] of appwins.all()) flip(aw);
+  }
 }
 
 // ---- HTTP: launcher (/tvbox/), app manifests API, and the root web app (Plex) ----
@@ -408,6 +440,10 @@ function handlePost(p, data, res) {
       remoteBridgeCmd("reload"); // the bridge re-reads whether volume keys go to IR
       changed.push("ir");
     }
+    if (data.apps) {
+      config.setApps(data.apps); // background-apps toggle (whitelisted in config.js)
+      changed.push("apps");
+    }
     emitConfigChange(changed); // e.g. Live TV drops its channel/EPG cache on a new IPTV source
     return jsonRes(res, { ok: true, config: config.publicConfig() });
   }
@@ -445,10 +481,22 @@ function handlePost(p, data, res) {
       navTo(id);
       return jsonRes(res, { ok: true, dest, app: id });
     }
+    if (dest === "switch") {
+      switchApp(); // cycle through running apps (the appswitcher remap action)
+      return jsonRes(res, { ok: true, dest, app: currentAppId });
+    }
     if (dest !== "home" && dest !== "settings") return jsonRes(res, { ok: false, error: "unknown dest: " + dest });
-    if (currentAppId !== null || remoteWin) showLauncher(dest === "settings" ? "#settings" : "");
+    if (currentAppId !== null) showLauncher(dest === "settings" ? "#settings" : "");
     else if (win && !win.isDestroyed()) win.webContents.send("tvbox-nav", { dest });
     return jsonRes(res, { ok: true, dest });
+  }
+  if (p === "/tvbox/api/apps/quit") {
+    // HOME's running-apps row: really exit a background app (its window and
+    // page state are dropped; next launch is a fresh start).
+    const id = String(data.id || "");
+    if (!appWindow(id)) return jsonRes(res, { ok: false, error: "not running" });
+    destroyAppWindow(id);
+    return jsonRes(res, { ok: true, id });
   }
   if (p === "/tvbox/api/nowplaying") {
     // launcher pushes the current now-playing (Spotify / Live TV); bridge it to
@@ -555,6 +603,7 @@ function handlePost(p, data, res) {
   if (p === "/tvbox/api/store/uninstall") {
     const id = String(data.id || "");
     if (currentAppId === id) showLauncher();
+    destroyAppWindow(id); // a background window must not outlive its app
     setWidget(id, null);
     return jsonRes(res, store.uninstall(id));
   }
@@ -574,6 +623,7 @@ function handlePost(p, data, res) {
     if (!m || m.type !== "webclient") return jsonRes(res, { ok: false, error: "not removable" });
     if (installing.has(id)) return jsonRes(res, { ok: false, error: "install in progress" });
     if (currentAppId === id) showLauncher(); // never yank the bundle out from under the running app
+    destroyAppWindow(id); // incl. a hidden background window
     return jsonRes(res, { ok: true, removed: apps.removeApp(id) });
   }
   if (p === "/tvbox/api/wifi/connect") {
@@ -1342,8 +1392,16 @@ function serve() {
 }
 
 // ---- mpv control ----
+// Player events go to every live window: the driving app (own window now) needs
+// them for its UI, the launcher for now-playing state. Listeners that don't
+// care simply have no handler registered.
 function emit(ev) {
   if (win && !win.isDestroyed()) win.webContents.send("player-event", ev);
+  for (const [, w] of appwins.all()) {
+    try {
+      w.webContents.send("player-event", ev);
+    } catch (e) {}
+  }
 }
 // One request/response round-trip on the mpv IPC socket (mpvCmd is fire-and-
 // forget). Resolves null on any failure - callers treat that as "no tracks".
@@ -1401,6 +1459,9 @@ function mpvCmd(obj) {
   });
 }
 function stopMpv() {
+  // (mpvOwnerId is NOT cleared here: launchMpv calls this on relaunch right
+  // after "play" set the owner. Every play re-assigns it, and without a running
+  // mpv no first-frame reveal can consume a stale value.)
   if (mpv) {
     const pid = mpv.pid;
     mpv.removeAllListeners("exit"); // our own kill must NOT signal "finished" to the app
@@ -1571,10 +1632,24 @@ function onTvStandby() {
   emit({ type: "finished" });
 }
 
-// Bring the shell window to the front and hand it focus (also via wlrctl, so the
-// compositor raises us above a just-exited mpv). Shared by playback start and by
-// showLauncher.
+// Bring the FOREGROUND shell window (the active app's own window, or the
+// launcher) to the front and hand it focus (also via wlrctl, so the compositor
+// raises us above a just-exited mpv). Shared by playback start and by
+// showLauncher. All our windows share the Wayland app_id, and only one is
+// visible at a time, so the wlrctl focus lands on the right toplevel.
 function raiseWindow() {
+  const w = foregroundWindow();
+  if (w && w !== win && !w.isDestroyed()) {
+    try {
+      if (w.isMinimized()) w.restore();
+      w.setAlwaysOnTop(true, "screen-saver");
+      w.show();
+      w.focus();
+      w.moveTop();
+    } catch (e) {}
+    execFile("wlrctl", ["toplevel", "focus", "app_id:" + APP_ID], { env: { ...process.env, ...WL_ENV } }, () => {});
+    return;
+  }
   if (!win || win.isDestroyed()) return;
   try {
     if (win.isMinimized()) win.restore();
@@ -1590,14 +1665,54 @@ function raiseWindow() {
 // API - this is how a cast jumps to the Spotify now-playing screen without core
 // knowing anything Spotify-specific.
 function showLauncher(hash) {
-  closeRemoteApp(); // leaving any isolated remote-app window
   if (!win || win.isDestroyed()) return;
+  const leaving = currentAppId;
   currentAppId = null;
   playingUrl = null;
   stopMpv();
   setVideoMode(false);
-  win.loadURL(BASE + "/tvbox/" + (hash || ""));
+  // The launcher page stays loaded permanently now (apps run in their own
+  // windows), so returning home is a show(), not a reload. A hash still forces
+  // a load (plugins use it to open a view, e.g. host.showLauncher("#spotify")),
+  // and a stray non-launcher URL in this window gets reset defensively.
+  if (hash || !String(win.webContents.getURL() || "").startsWith(BASE + "/tvbox/")) {
+    win.loadURL(BASE + "/tvbox/" + (hash || ""));
+  } else {
+    try {
+      win.webContents.send("tvbox-nav", { dest: "home" }); // reset a lingering Settings/Catalog view
+    } catch (e) {}
+  }
   raiseWindow();
+  if (leaving) backgroundApp(leaving); // after the launcher is up - no desktop flash
+  for (const [id, w] of appwins.all()) if (id !== leaving && w.isVisible()) backgroundApp(id);
+}
+
+// ---- per-app windows (background apps) ----
+// Registry + hidden-set policy (mute/pause, LRU cap, RAM guard) live in
+// appwindows.js; here is only the foreground orchestration. The "exactly ONE
+// visible always-on-top toplevel" invariant still holds - hidden windows are
+// unmapped in Wayland, so CEC key routing / stacking stay sane.
+const backgroundApp = (id) => appwins.background(id);
+const destroyAppWindow = (id) => appwins.destroy(id);
+
+// Bring a running app's window back to the foreground (instant resume). The
+// page kept its state; only audio is re-enabled - a paused video stays paused
+// for the app/user to resume.
+function foregroundApp(id) {
+  const w = appWindow(id);
+  if (!w) return false;
+  currentAppId = id;
+  appwins.touch(id);
+  try {
+    w.webContents.setAudioMuted(false);
+  } catch (e) {}
+  w.setAlwaysOnTop(true, "screen-saver");
+  w.show();
+  w.focus();
+  w.moveTop();
+  for (const [oid, ow] of appwins.all()) if (oid !== id && ow.isVisible()) backgroundApp(oid);
+  if (win && !win.isDestroyed()) win.hide(); // exactly one visible toplevel
+  return true;
 }
 
 // ---- isolated window for remote web apps (YouTube etc.) ----
@@ -1607,15 +1722,6 @@ function showLauncher(hash) {
 // preload (so the site can't reach window.tvbox / Node), navigation locked to the
 // manifest's declared `runtime.origins` (https only), and popups denied. Its own
 // persistent partition keeps the site's login across sessions.
-let remoteWin = null;
-function closeRemoteApp() {
-  if (remoteWin && !remoteWin.isDestroyed()) {
-    try {
-      remoteWin.close();
-    } catch (e) {}
-  }
-  remoteWin = null;
-}
 // A remote app's URL is either literal in the manifest (runtime.url, e.g.
 // youtube.com/tv) or config-driven (runtime.urlConfig names a config section
 // holding { baseUrl }, e.g. a user's Home Assistant). Returns "" when a
@@ -1663,20 +1769,15 @@ function openRemoteApp(m, url) {
       return false;
     }
   };
-  closeRemoteApp();
   stopMpv();
   setVideoMode(false); // no mpv behind a remote app; drop any prior session
-  // Commit to this app only AFTER the previous window is gone - otherwise a
-  // closing app's still-live renderer could have a capability call serviced
-  // against the new app's id (confused deputy). Broker handlers additionally
-  // key off the SENDER window (appIdForSender), not just this global.
-  currentAppId = m.id;
+  currentAppId = m.id; // identity is per-window (windowAppId); this global only tracks foreground
   // A capability app (declares caps beyond "nav") gets the sandbox-safe
   // contextBridge preload so it can reach its granted brokers (fetch/storage).
   // A plain remote site (e.g. YouTube declares only nav) gets NO preload,
   // exactly as before, so nothing about the existing untrusted path changes.
   const isCapApp = (rt.capabilities || []).some((c) => c && c !== "nav");
-  remoteWin = new BrowserWindow({
+  const w = new BrowserWindow({
     fullscreen: true,
     frame: false,
     backgroundColor: "#000000",
@@ -1690,8 +1791,8 @@ function openRemoteApp(m, url) {
       ...(isCapApp ? { preload: path.join(__dirname, "preload-app.js") } : {}),
     },
   });
-  remoteWin.tvboxAppId = m.id; // so capability brokers can identify THIS window's app by sender
-  const wc = remoteWin.webContents;
+  appwins.register(m.id, w); // capability brokers identify THIS window's app by sender (tvboxAppId)
+  const wc = w.webContents;
   wc.on("console-message", (ev) => {
     console.log(
       "[remote:" + (CONSOLE_TAG[ev.level] || "?") + "]",
@@ -1741,18 +1842,80 @@ function openRemoteApp(m, url) {
   // desktop. An intentional return (showLauncher) sets currentAppId=null first,
   // so this is a no-op there; likewise when switching straight to another app.
   const thisAppId = m.id;
-  remoteWin.on("closed", () => {
-    remoteWin = null;
+  w.on("closed", () => {
+    if (appwins.get(thisAppId) === w) appwins.destroy(thisAppId);
     if (currentAppId === thisAppId) showLauncher();
   });
-  remoteWin.setAlwaysOnTop(true, "screen-saver");
-  remoteWin.loadURL(url, rt.userAgent ? { userAgent: rt.userAgent } : undefined);
-  remoteWin.focus();
-  remoteWin.moveTop();
-  // Hide the (transparent, always-on-top) launcher window so there's exactly ONE
-  // visible toplevel - otherwise two same-level always-on-top windows have
-  // compositor-dependent stacking and CEC keys could route to the wrong one.
-  // showLauncher() -> raiseWindow() calls win.show() again on return.
+  w.setAlwaysOnTop(true, "screen-saver");
+  w.loadURL(url, rt.userAgent ? { userAgent: rt.userAgent } : undefined);
+  w.focus();
+  w.moveTop();
+  // Hide the (transparent, always-on-top) launcher window and any other visible
+  // app so there's exactly ONE visible toplevel - otherwise two same-level
+  // always-on-top windows have compositor-dependent stacking and CEC keys could
+  // route to the wrong one. showLauncher() re-shows the launcher on return.
+  for (const [oid, ow] of appwins.all()) if (oid !== m.id && ow.isVisible()) backgroundApp(oid);
+  if (win && !win.isDestroyed()) win.hide();
+}
+
+// ---- own window for LOCAL webclient apps (Plex, Live TV, Spotify UI, ...) ----
+// Same trust level as the old model (curated local apps ran in the privileged
+// main window; review is the trust boundary): Node-capable preload,
+// contextIsolation off (the Plex QWebChannel bridge needs it). Transparent +
+// always-on-top like the main window, because mpv plays BEHIND it and the
+// tvbox-video class reveals it (ensureStyle/setVideoMode target this window).
+function openLocalApp(m) {
+  const rt = m.runtime || {};
+  currentAppId = m.id;
+  const w = new BrowserWindow({
+    fullscreen: true,
+    frame: false,
+    transparent: true,
+    backgroundColor: "#00000000",
+    alwaysOnTop: true,
+    skipTaskbar: true,
+    hasShadow: false,
+    webPreferences: {
+      preload: path.join(__dirname, "preload.js"),
+      contextIsolation: false,
+      nodeIntegration: false,
+      sandbox: false,
+    },
+  });
+  appwins.register(m.id, w);
+  w.setAlwaysOnTop(true, "screen-saver");
+  w.webContents.on("console-message", (ev) => {
+    console.log(
+      "[app:" + m.id + ":" + (CONSOLE_TAG[ev.level] || "?") + "]",
+      ev.message,
+      ev.sourceId ? "(" + ev.sourceId + ":" + ev.lineNumber + ")" : "",
+    );
+  });
+  // Same BT-remote Back translation the main window did while an app owned it
+  // (BrowserBack/GoBack -> trusted Backspace; the app UIs only know the CEC form).
+  w.webContents.on("before-input-event", (e, input) => {
+    if (input.key !== "BrowserBack" && input.key !== "GoBack") return;
+    e.preventDefault();
+    if (input.type !== "keyDown" && input.type !== "keyUp") return;
+    w.webContents.sendInputEvent({ type: input.type === "keyDown" ? "keyDown" : "keyUp", keyCode: "Backspace" });
+  });
+  // Black backdrop + video-reveal CSS, re-armed on every navigation like the
+  // main window's did-finish-load handler.
+  w.webContents.on("did-finish-load", () => {
+    w.tvboxStyleInjected = false;
+    ensureStyle(w);
+    setVideoMode(false, w);
+  });
+  const thisAppId = m.id;
+  w.on("closed", () => {
+    if (appwins.get(thisAppId) === w) appwins.destroy(thisAppId);
+    if (currentAppId === thisAppId) showLauncher();
+  });
+  const atRoot = rt.mount === "root";
+  w.loadURL(BASE + (atRoot ? "/" : "/" + m.id + "/"));
+  w.focus();
+  w.moveTop();
+  for (const [oid, ow] of appwins.all()) if (oid !== m.id && ow.isVisible()) backgroundApp(oid);
   if (win && !win.isDestroyed()) win.hide();
 }
 
@@ -1786,6 +1949,14 @@ function forwardCommand(cmd) {
   if (win && !win.isDestroyed()) {
     try {
       win.webContents.send("tv-command", cmd);
+    } catch (e) {}
+  }
+  // The active app runs in its own window now - it gets the transport too
+  // (remote/sandboxed windows deliberately have no tv-command listener).
+  const fg = currentAppId && appWindow(currentAppId);
+  if (fg) {
+    try {
+      fg.webContents.send("tv-command", cmd);
     } catch (e) {}
   }
 }
@@ -1883,14 +2054,31 @@ function handleTvCommand(cmd) {
 
 ipcMain.on("plog", (_e, p, a) => console.log("[plog]", p, a)); // debug: raw player.* calls from an app
 
+// Which window a webContents belongs to: null = the launcher window, an app id
+// = that app's own window, undefined = unknown/stale sender (no identity, no
+// caps). Every identity/capability decision keys off THIS, never the global
+// foreground id - a hidden app keeps ITS OWN identity, so a background call is
+// scoped to its own caps/origins/storage (no confused deputy).
+function windowAppId(sender) {
+  if (win && !win.isDestroyed() && sender === win.webContents) return null;
+  for (const [, w] of appwins.all()) if (sender === w.webContents) return w.tvboxAppId;
+  return undefined;
+}
+
 // Synchronous: the preload asks which app this is, which capabilities it was
 // granted, and which bridge adapter its manifest declared - so it loads only
-// that surface (the security/extensibility boundary).
+// that surface (the security/extensibility boundary). Answered PER SENDER
+// WINDOW - multiple app windows exist now (background apps).
 ipcMain.on("tvbox:app", (e) => {
-  const m = currentAppId && apps.manifestById(currentAppId);
+  const id = windowAppId(e.sender);
+  if (id === undefined) {
+    e.returnValue = { id: null, capabilities: [], bridge: null }; // unknown sender: nothing
+    return;
+  }
+  const m = id && apps.manifestById(id);
   e.returnValue = {
-    id: currentAppId,
-    capabilities: capsFor(currentAppId),
+    id,
+    capabilities: capsFor(id),
     bridge: (m && m.runtime && m.runtime.bridge) || null,
   };
 });
@@ -1898,8 +2086,8 @@ ipcMain.on("tvbox:app", (e) => {
 // Navigate between the HOME launcher and an app. The launcher calls
 // window.tvbox.launch(id); the Home button calls window.tvbox.home() (local apps)
 // or is caught main-side (remote apps) -> back to the launcher, stopping video.
-// Remote (live-site) apps get an isolated window; local/static apps + the launcher
-// share the main privileged window.
+// Every app runs in its own window: a RUNNING app is simply re-shown (instant
+// resume, background apps); a fresh one gets its window created.
 function navTo(dest) {
   console.log("[nav]", dest);
   if (dest === "home") {
@@ -1908,11 +2096,11 @@ function navTo(dest) {
   }
   const m = apps.manifestById(dest);
   if (!m || m.status !== "ready") return;
-  // Switching apps silences the one being replaced: its UI is going away
-  // (page swap / hidden window), and a plugin foregrounding its app on a cast
-  // (Spotify Connect) must stop e.g. the IPTV stream it takes over from.
-  // Called only on paths that WILL navigate - an unconfigured remote app must
-  // not cost the current stream (review F3).
+  // Switching apps silences the one being replaced: its UI is going to the
+  // background, and a plugin foregrounding its app on a cast (Spotify Connect)
+  // must stop e.g. the IPTV stream it takes over from. Called only on paths
+  // that WILL navigate - an unconfigured remote app must not cost the current
+  // stream (review F3).
   const stopPrevPlayback = () => {
     if (mpv && currentAppId !== m.id) {
       playingUrl = null;
@@ -1921,15 +2109,21 @@ function navTo(dest) {
       emit({ type: "finished" });
     }
   };
+  if (appWindow(m.id)) {
+    // already running in the background -> instant resume of its live window
+    stopPrevPlayback();
+    foregroundApp(m.id);
+    return;
+  }
   if (m.type === "webclient") {
     const rt = m.runtime || {};
     if (rt.serve === "remote") {
       // Untrusted live site (e.g. youtube.com/tv) or a config-driven LAN service
       // (e.g. Home Assistant) - loaded in a dedicated isolated window (see
       // openRemoteApp, which sets currentAppId once past its protocol guard), NOT
-      // the Node-capable main window. An unset config-driven URL means the app
-      // isn't configured yet; the launcher gates that (tile.configured) so here
-      // we just no-op rather than open a blank window.
+      // a Node-capable window. An unset config-driven URL means the app isn't
+      // configured yet; the launcher gates that (tile.configured) so here we
+      // just no-op rather than open a blank window.
       const url = resolveRemoteUrl(m);
       if (url) {
         stopPrevPlayback();
@@ -1937,22 +2131,34 @@ function navTo(dest) {
       } else console.warn("[nav] remote app not configured:", m.id);
       return;
     }
-    // local bundle -> the main (privileged) window, which gets the full
-    // preload.js SDK (player/fetch/storage/onCommand/onNotify + bridge). A
-    // PACKAGE app (serve:"local") serves its own web/ at /<id>/; the legacy
-    // single root-mounted bundle (serve:"static", mount:"root", e.g. Plex) is
-    // at /. Curated apps run privileged (review is the trust boundary).
+    // local bundle -> its own privileged window with the full preload.js SDK
+    // (player/fetch/storage/onCommand/onNotify + bridge). A PACKAGE app
+    // (serve:"local") serves its own web/ at /<id>/; the legacy single
+    // root-mounted bundle (serve:"static", mount:"root", e.g. Plex) is at /.
+    // Curated apps run privileged (review is the trust boundary).
     stopPrevPlayback();
-    closeRemoteApp();
-    if (!win || win.isDestroyed()) return;
-    currentAppId = m.id; // set BEFORE load so the new page's preload reads the right caps
-    const atRoot = rt.mount === "root";
-    win.loadURL(BASE + (atRoot ? "/" : "/" + m.id + "/"));
-    raiseWindow();
+    openLocalApp(m);
     return;
   }
   // (No builtin branch: every app is a webclient package now - either a local
   // web/ bundle served at /<id>/ or a remote site - handled above.)
+}
+
+// Cycle foreground through the running apps (the `appswitcher` remap action).
+// From the launcher it foregrounds the most recently used app; from an app it
+// goes to the next running one (wrapping); with nothing running it's a no-op.
+function switchApp() {
+  const running = appwins.all();
+  if (!running.length) return;
+  if (!currentAppId) {
+    running.sort((a, b) => (b[1].tvboxLastShown || 0) - (a[1].tvboxLastShown || 0));
+    navTo(running[0][0]);
+    return;
+  }
+  const ids = running.map(([id]) => id);
+  const next = ids[(ids.indexOf(currentAppId) + 1) % ids.length];
+  if (next === currentAppId) showLauncher();
+  else navTo(next);
 }
 
 // Navigate between the HOME launcher and an app. The launcher calls
@@ -1960,20 +2166,14 @@ function navTo(dest) {
 // or is caught main-side (remote apps) -> back to the launcher, stopping video.
 ipcMain.on("nav", (_e, dest) => navTo(dest));
 
-// Which app a capability call belongs to - by the SENDER window, positively
-// matched to the LIVE foreground window, not just the global currentAppId.
-// Otherwise a static cap-app could `launch()` a remote app (which only HIDES
-// the main window, leaving the static page alive) and then keep calling - the
-// call would be serviced against the now-foreground app's caps/origins/storage
-// (confused deputy across the `storage` isolation). So: when a remote app is
-// up, ONLY its window may call; otherwise ONLY the (foreground) main window may,
-// as its current app. Any stale/background/unknown sender is denied.
+// Which app a capability call belongs to - the SENDER window's own identity
+// (windowAppId), never the global foreground id. Every window is permanently
+// bound to one app, so a BACKGROUND app's call is still scoped to its own
+// caps/origins/storage - there is no window reuse and thus no confused deputy.
+// Unknown/stale senders resolve to null (denied by the cap checks below).
 function appIdForSender(sender) {
-  if (remoteWin && !remoteWin.isDestroyed()) {
-    return sender === remoteWin.webContents ? remoteWin.tvboxAppId || null : null;
-  }
-  if (win && !win.isDestroyed() && sender === win.webContents) return currentAppId;
-  return null;
+  const id = windowAppId(sender);
+  return id || null; // launcher (null) and unknown (undefined) both deny app caps
 }
 
 // ---- capability: scoped server-side fetch (data proxy) ----
@@ -2003,13 +2203,16 @@ ipcMain.handle("app:storage", (e, action, key, value) => {
   return { ok: false, error: "unknown storage action" };
 });
 
-ipcMain.handle("player", (_e, action, payload) => {
+ipcMain.handle("player", (e, action, payload) => {
   payload = payload || {};
   console.log("[player] action", action, payload && payload.url ? payload.url.slice(0, 55) : "");
   if (action === "queue") {
     queued.url = payload.url;
     queued.startPos = payload.startPos || 0;
   } else if (action === "play") {
+    // remember whose window the video belongs to: the first-frame reveal
+    // (setVideoMode(true) in observeMpv) must hit THAT window, not the launcher
+    mpvOwnerId = appIdForSender(e.sender);
     if (mpv && playingUrl === queued.url && !mpvPip) {
       console.log("[player] resume (already loaded)");
       mpvCmd({ command: ["set_property", "pause", false] });
@@ -2275,11 +2478,21 @@ app.whenReady().then(() => {
   // The first successful load is also the OTA health signal: it commits a
   // freshly flipped update (clears the rollback markers, syncs infra files).
   win.webContents.on("did-finish-load", () => {
-    styleInjected = false;
-    ensureStyle();
-    setVideoMode(false);
+    win.tvboxStyleInjected = false;
+    ensureStyle(win);
+    setVideoMode(false, win);
     updater.onLauncherLoaded();
   });
+  // Background-apps policy hooks (registry lives in appwindows.js).
+  appwins.init({
+    enabled: () => {
+      const a = config.rawApps();
+      return !(a && a.background === false);
+    },
+    memInfo,
+    foregroundId: () => currentAppId,
+  });
+  setInterval(() => appwins.ramGuardTick(), 60 * 1000); // evict hidden apps under memory pressure
   updater.startSchedulers(); // boot check + 6h re-check + nightly idle auto-apply
   setInterval(appsAutoTick, 30 * 60 * 1000); // nightly registry app auto-update (same window)
   setTimeout(btBatteryTick, 5 * 60 * 1000); // early check after boot, then half-hourly

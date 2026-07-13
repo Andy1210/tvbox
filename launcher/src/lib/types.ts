@@ -25,4 +25,6 @@ export interface AppManifest {
   configured?: boolean; // false when a config-driven remote app has no URL yet (e.g. Home Assistant)
   ready?: boolean; // launchable: installed + depsOk + configured, not installing. Only ready apps belong on HOME. Absent on dev/demo/fallback apps (which still show).
   progress?: { phase: string } | null; // install phase while installing (deps | bundle | finishing), null otherwise
+  running?: boolean; // a live (possibly hidden) window exists - background apps; resume is instant
+  foreground?: boolean; // it's the currently visible app (never true while HOME is showing)
 }
