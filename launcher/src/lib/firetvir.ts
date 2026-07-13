@@ -33,6 +33,7 @@ export interface ToolResult {
 async function getJson<T>(url: string, fallback: T): Promise<T> {
   try {
     const r = await fetch(url, { cache: "no-store" });
+    if (!r.ok) return fallback; // 404/500 (e.g. the demo's not-mocked routes) -> no data
     return (await r.json()) as T;
   } catch {
     return fallback;

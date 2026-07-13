@@ -44,6 +44,7 @@ export interface LearnedButton {
 async function getJson<T>(url: string, fallback: T): Promise<T> {
   try {
     const r = await fetch(url, { cache: "no-store" });
+    if (!r.ok) return fallback; // a 404/500 (with or without a JSON body) is "no data"
     return (await r.json()) as T;
   } catch {
     return fallback;
@@ -58,7 +59,7 @@ async function post(url: string, body: unknown): Promise<void> {
 }
 
 export async function fetchRemoteDevices(): Promise<ConnectedRemote[]> {
-  return (await getJson<{ devices: ConnectedRemote[] }>("/tvbox/api/remote/devices", { devices: [] })).devices;
+  return (await getJson<{ devices: ConnectedRemote[] }>("/tvbox/api/remote/devices", { devices: [] })).devices ?? [];
 }
 export async function fetchLearned(): Promise<LearnedButton | null> {
   return (await getJson<{ learned: LearnedButton | null }>("/tvbox/api/remote/learned", { learned: null })).learned;

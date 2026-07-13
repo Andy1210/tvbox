@@ -102,6 +102,17 @@ export const BT_DEVICES: BtDevice[] = [
   { mac: "A8:9C:ED:71:23:D4", name: "Demo Phone", type: "phone", paired: false, connected: false, battery: null },
 ];
 
+// A paired BT remote for the button-remap + Fire TV IR demo. Its id is a MAC,
+// and it's marked "programmable" (below) so the Fire TV IR sub-panel shows.
+export const REMOTES = [{ id: "a8:42:a7:c2:3e:ab", name: "Fire TV Remote", keymap: {} }];
+// A few TV brands + one codeset each, mirroring the irdb index shape.
+export const IR_BRANDS = [
+  { brand: "LG", sets: [{ name: "4,-1", path: "codes/LG/TV/4,-1.csv" }] },
+  { brand: "Samsung", sets: [{ name: "7,7", path: "codes/Samsung/TV/7,7.csv" }] },
+  { brand: "Sony", sets: [{ name: "1,-1", path: "codes/Sony/TV/1,-1.csv" }] },
+  { brand: "Panasonic", sets: [{ name: "16,-1", path: "codes/Panasonic/TV/16,-1.csv" }] },
+];
+
 export const BT_SCAN_EXTRA: BtDevice = {
   mac: "5C:EB:68:C2:70:1E",
   name: "Kitchen Soundbar",

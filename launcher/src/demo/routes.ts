@@ -269,6 +269,53 @@ export async function handleApi(
       notifyAll({ title: "tvbox demo", message: msgs[action] ?? msgs.sleep, duration: 4000 });
       return ok;
     }
+
+    // ---- remote remap + Fire TV IR (Settings → Peripherals) ----
+    case "/tvbox/api/remote/devices":
+      return { devices: data.REMOTES };
+    case "/tvbox/api/remote/learned":
+      return { learned: null };
+    case "/tvbox/api/remote/learn":
+    case "/tvbox/api/remote/learn-off":
+      return ok;
+    case "/tvbox/api/firetvir/status":
+      // deps ready, TV brand pre-detected from EDID - so the flow lands straight
+      // on brand/codeset like it would on a box that's already set up.
+      return {
+        toolPresent: true,
+        venvPresent: true,
+        depsOk: true,
+        installing: false,
+        installStep: "",
+        installError: "",
+        configured: null,
+        suggestedBrand: "LG",
+      };
+    case "/tvbox/api/firetvir/programmable":
+      return { macs: data.REMOTES.map((r) => r.id.toLowerCase()) };
+    case "/tvbox/api/firetvir/brands":
+      return { ok: true, brands: data.IR_BRANDS };
+    case "/tvbox/api/firetvir/codeset":
+      return {
+        ok: true,
+        path: "codes/LG/TV/4,-1.csv",
+        keys: {
+          VolumeUp: { functionname: "VOLUME +", protocol: "NEC1" },
+          VolumeDown: { functionname: "VOLUME -", protocol: "NEC1" },
+          Mute: { functionname: "MUTE", protocol: "NEC1" },
+          Power: { functionname: "POWER TOGGLE", protocol: "NEC1" },
+        },
+        protocols: ["NEC1"],
+        supported: { NEC1: true },
+      };
+    case "/tvbox/api/firetvir/deps":
+      return ok;
+    case "/tvbox/api/firetvir/test":
+      return { ok: true, output: "demo: IR sent (no real remote here)" };
+    case "/tvbox/api/firetvir/program":
+      return { ok: true, output: "demo: keymap written to the remote" };
+    case "/tvbox/api/firetvir/erase":
+      return ok;
   }
   return undefined;
 }
