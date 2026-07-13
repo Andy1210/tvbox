@@ -9,6 +9,10 @@
 cec/cec_uinput_bridge.py
 cec/cec_vendor_shim.c
 remote/remote_input_bridge.py
+remote/firetv_remote_ir.py
+remote/keymap_compile.py
+remote/firetv_hid_probe.py
+remote/firetv_tv_codes.example.json
 deploy/run-shell.sh
 deploy/labwc-autostart
 deploy/cursor_idle_hide.py

@@ -59,6 +59,10 @@ const INFRA_FILES = [
   "cec_uinput_bridge.py",
   "cec_vendor_shim.c", // the bridge compiles it on start (mtime check)
   "remote_input_bridge.py", // BT/USB remote bridge (the tvbox-remote user service)
+  "firetv_remote_ir.py", // program a Fire TV remote's IR buttons over BLE (no Fire TV)
+  "keymap_compile.py", // byte-accurate keymap/IR compiler used by firetv_remote_ir.py
+  "firetv_hid_probe.py", // diagnostic: map a Fire TV remote's vendor-HID app buttons to hwdb lines
+  "firetv_tv_codes.example.json", // sample TV code set (LG NEC) for firetv_remote_ir.py
   "cursor_idle_hide.py", // idle mouse-cursor hider (launched from labwc-autostart)
   "tvbox",
   "provision.sh",

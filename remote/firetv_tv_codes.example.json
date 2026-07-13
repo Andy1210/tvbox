@@ -1,0 +1,11 @@
+{
+  "_comment": "Copy to ~/.tvbox/firetv_tv_codes.json and edit. This preset targets an LG TV (NEC protocol, address 0x04) - the addresses/commands below are the standard LG TV IR codes and should work on most LG sets (incl. 2019 models). For a non-LG TV, replace each entry with your TV's code: use {\"nec\":{\"address\":N,\"command\":M}} for NEC TVs, or {\"pronto\":\"0000 006D ...\"} for a Pronto/CCF code from an IR database, or {\"raw\":[..],\"frequency\":38000} for raw on/off durations in units of 10 microseconds.",
+  "name": "LG TV (NEC, address 0x04)",
+  "duty_cycle": 33,
+  "keys": {
+    "VolumeUp": { "nec": { "address": 4, "command": 2 } },
+    "VolumeDown": { "nec": { "address": 4, "command": 3 } },
+    "Mute": { "nec": { "address": 4, "command": 9 } },
+    "Power": { "nec": { "address": 4, "command": 8 }, "optional": true, "post_delay": 1000 }
+  }
+}
