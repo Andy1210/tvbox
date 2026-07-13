@@ -54,6 +54,12 @@ async function postJson<T>(url: string, body: unknown, fallback: T): Promise<T> 
 export function fetchIrStatus(): Promise<FiretvIrStatus | null> {
   return getJson<FiretvIrStatus | null>("/tvbox/api/firetvir/status", null);
 }
+// MACs (lowercase) of connected remotes that are Fire TV / Alexa remotes we can
+// program (they expose the keymap GATT service). The remap UI shows the IR
+// feature ONLY under these, so other remotes don't get the extra menu.
+export function fetchProgrammableRemotes(): Promise<string[]> {
+  return getJson<{ macs?: string[] }>("/tvbox/api/firetvir/programmable", {}).then((d) => d.macs || []);
+}
 export function installIrDeps(): Promise<{ ok: boolean }> {
   return postJson("/tvbox/api/firetvir/deps", {}, { ok: false });
 }

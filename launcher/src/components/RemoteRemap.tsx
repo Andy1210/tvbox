@@ -12,7 +12,9 @@ import {
   type ConnectedRemote,
 } from "../lib/remote";
 import { fetchApps } from "../lib/api";
+import { fetchProgrammableRemotes } from "../lib/firetvir";
 import { FocusButton } from "./FocusButton";
+import { FiretvIrSettings } from "./FiretvIrSettings";
 
 // Per-device button remap (Settings -> Peripherals). Lists the connected remotes;
 // pressing one expands its actions (drill-down), and picking an action then
@@ -79,6 +81,15 @@ export function RemoteRemap() {
   const testingRef = useRef(testing);
   testingRef.current = testing;
   const [testKeys, setTestKeys] = useState<{ name: string; code: number; ts: number }[]>([]);
+  // MACs of connected remotes that are programmable Fire TV / Alexa remotes
+  // (expose the keymap GATT service). Only these show the "TV IR" sub-panel, so
+  // a non-Fire-TV remote's remap menu stays clean. `irOpen` = which device's
+  // IR panel is expanded (lazy: the heavy flow mounts only when opened).
+  const [ftirMacs, setFtirMacs] = useState<string[]>([]);
+  const [irOpen, setIrOpen] = useState<string | null>(null);
+  useEffect(() => {
+    fetchProgrammableRemotes().then(setFtirMacs);
+  }, []);
   // Installed, ready apps become dynamic "app:<id>" launch actions (a remote's
   // dedicated app button -> any tile). Loaded once; installs are rare here.
   const [apps, setApps] = useState<{ id: string; name: string }[]>([]);
@@ -288,6 +299,27 @@ export function RemoteRemap() {
                       </div>
                     );
                   })}
+
+                  {/* Fire TV / Alexa remote: teach its OWN IR blaster the TV's
+                      volume/mute/power. Shown ONLY for remotes that expose the
+                      keymap service, so other remotes don't see it. */}
+                  {ftirMacs.includes(d.id.toLowerCase()) && (
+                    <div className="mt-[0.6vh]">
+                      <FocusButton
+                        focusKey={keyBase(d.id) + "-firetvir"}
+                        onEnter={() => setIrOpen(irOpen === d.id ? null : d.id)}
+                        className="px-[2vw] py-[1.3vh] rounded-[1.1vh] bg-white/5 flex items-center gap-[1.2vw] min-w-0"
+                      >
+                        <span className="text-[2vh] flex-1 text-left truncate">{t("firetvir.entry")}</span>
+                        <Chevron open={irOpen === d.id} />
+                      </FocusButton>
+                      {irOpen === d.id && (
+                        <div className="pl-[1.5vw]">
+                          <FiretvIrSettings device={{ id: d.id, name: d.name }} />
+                        </div>
+                      )}
+                    </div>
+                  )}
                 </div>
               )}
             </div>

@@ -28,14 +28,19 @@ import { Osk } from "./Osk";
 const MAC_RE = /^([0-9a-f]{2}:){5}[0-9a-f]{2}$/i;
 const TEST_KEYS = ["VolumeUp", "VolumeDown", "Mute", "Power"] as const;
 
-export function FiretvIrSettings() {
+// `device`, when given, embeds the flow under one remote in the remap UI (no
+// remote-picker, scoped to that MAC) - so the feature only appears for a remote
+// that is actually a programmable Fire TV / Alexa remote. Standalone (no
+// device) keeps the self-contained picker for direct use/testing.
+export function FiretvIrSettings({ device }: { device?: { id: string; name: string } } = {}) {
   const { t } = useI18n();
   const config = useConfigStore((s) => s.config);
   const setRemote = useConfigStore((s) => s.setRemote);
+  const embedded = !!device;
 
   const [status, setStatus] = useState<FiretvIrStatus | null>(null);
   const [remotes, setRemotes] = useState<ConnectedRemote[]>([]);
-  const [mac, setMac] = useState<string | null>(null);
+  const [mac, setMac] = useState<string | null>(device ? device.id : null);
   const [brands, setBrands] = useState<IrBrand[] | null>(null);
   const [brandsErr, setBrandsErr] = useState("");
   const [brand, setBrand] = useState<IrBrand | null>(null);
@@ -50,11 +55,21 @@ export function FiretvIrSettings() {
 
   useEffect(() => {
     refreshStatus();
-    fetchRemoteDevices().then((d) => setRemotes(d.filter((r) => MAC_RE.test(r.id))));
+    // Standalone mode needs the remote list for its picker; embedded mode is
+    // already scoped to `device`, so skip it.
+    if (!embedded) fetchRemoteDevices().then((d) => setRemotes(d.filter((r) => MAC_RE.test(r.id))));
     return () => {
       if (pollRef.current) clearInterval(pollRef.current);
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Embedded + deps ready: load the brand list once (the picker step normally
+  // triggers this on remote-select, which embedded mode skips).
+  useEffect(() => {
+    if (embedded && status?.depsOk && !brands && !brandsErr) loadBrands();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [embedded, status?.depsOk]);
 
   // While deps install, poll status until it finishes (success or error).
   const startDeps = async () => {
@@ -175,9 +190,11 @@ export function FiretvIrSettings() {
   }
 
   return (
-    <div className="mt-[4vh]">
-      <div className="text-[2.4vh] font-semibold mb-[0.6vh]">{t("firetvir.title")}</div>
-      <div className="text-[1.8vh] text-fg-dim mb-[1.6vh] max-w-[66vw]">{t("firetvir.hint")}</div>
+    <div className={embedded ? "mt-[1.5vh]" : "mt-[4vh]"}>
+      <div className={embedded ? "text-[2vh] font-semibold mb-[0.4vh]" : "text-[2.4vh] font-semibold mb-[0.6vh]"}>
+        {t("firetvir.title")}
+      </div>
+      <div className="text-[1.7vh] text-fg-dim mb-[1.4vh] max-w-[66vw]">{t("firetvir.hint")}</div>
 
       {/* Step 1: Bluetooth support (venv + bleak) */}
       {status && !status.depsOk && (
@@ -193,35 +210,36 @@ export function FiretvIrSettings() {
         </div>
       )}
 
-      {/* Step 2: pick the remote (BT only - it needs a MAC to reach over BLE) */}
+      {/* Step 2: pick the remote (standalone only; embedded is already scoped) */}
       {status && status.depsOk && (
         <>
-          {remotes.length === 0 ? (
-            <div className="text-[1.9vh] text-fg-dim mb-[2vh]">{t("firetvir.noRemote")}</div>
-          ) : (
-            <div className="mb-[2vh]">
-              <div className="text-[2vh] font-semibold mb-[0.8vh]">{t("firetvir.pickRemote")}</div>
-              <div className="flex flex-wrap gap-[0.8vh] max-w-[66vw]">
-                {remotes.map((r) => (
-                  <FocusButton
-                    key={r.id}
-                    focusKey={"ftir-remote-" + r.id.replace(/[^a-z0-9]/gi, "")}
-                    onEnter={() => {
-                      setMac(r.id);
-                      if (!brands) loadBrands();
-                      setTimeout(() => setFocus("ftir-brandfilter"), 0);
-                    }}
-                    className={[
-                      "px-[1.6vw] py-[1.2vh] rounded-[1.1vh] text-[2vh]",
-                      mac === r.id ? "bg-accent text-[#06090d] font-semibold" : "bg-white/5",
-                    ].join(" ")}
-                  >
-                    {r.name || r.id}
-                  </FocusButton>
-                ))}
+          {!embedded &&
+            (remotes.length === 0 ? (
+              <div className="text-[1.9vh] text-fg-dim mb-[2vh]">{t("firetvir.noRemote")}</div>
+            ) : (
+              <div className="mb-[2vh]">
+                <div className="text-[2vh] font-semibold mb-[0.8vh]">{t("firetvir.pickRemote")}</div>
+                <div className="flex flex-wrap gap-[0.8vh] max-w-[66vw]">
+                  {remotes.map((r) => (
+                    <FocusButton
+                      key={r.id}
+                      focusKey={"ftir-remote-" + r.id.replace(/[^a-z0-9]/gi, "")}
+                      onEnter={() => {
+                        setMac(r.id);
+                        if (!brands) loadBrands();
+                        setTimeout(() => setFocus("ftir-brandfilter"), 0);
+                      }}
+                      className={[
+                        "px-[1.6vw] py-[1.2vh] rounded-[1.1vh] text-[2vh]",
+                        mac === r.id ? "bg-accent text-[#06090d] font-semibold" : "bg-white/5",
+                      ].join(" ")}
+                    >
+                      {r.name || r.id}
+                    </FocusButton>
+                  ))}
+                </div>
               </div>
-            </div>
-          )}
+            ))}
 
           {/* Step 3: brand + codeset (irdb) */}
           {mac && (

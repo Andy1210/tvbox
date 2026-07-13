@@ -461,6 +461,7 @@
     "erase": "Erase",
     "erased": "Erased the remote's programmed codes.",
     "credit": "TV codes from the community irdb database (github.com/probonopd/irdb). See About for credits.",
-    "suggested": "Detected your TV as {brand} - suggested below."
+    "suggested": "Detected your TV as {brand} - suggested below.",
+    "entry": "TV IR (this remote's own blaster)"
   }
 }

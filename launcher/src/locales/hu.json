@@ -461,6 +461,7 @@
     "erase": "Törlés",
     "erased": "A távirányítóra írt kódok törölve.",
     "credit": "A TV-kódok a közösségi irdb adatbázisból származnak (github.com/probonopd/irdb). Lásd a Névjegy menüt.",
-    "suggested": "A TV-t {brand} márkájúként ismertük fel - lent javasoljuk."
+    "suggested": "A TV-t {brand} márkájúként ismertük fel - lent javasoljuk.",
+    "entry": "TV IR (a távirányító saját jeladója)"
   }
 }

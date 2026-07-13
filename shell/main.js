@@ -1331,6 +1331,12 @@ function serve() {
       firetvir.status((s) => jsonRes(res, s));
       return;
     }
+    // Which connected remotes are Fire TV / Alexa remotes we can program (expose
+    // the keymap GATT service). The remap UI shows the IR feature ONLY for these.
+    if (p === "/tvbox/api/firetvir/programmable") {
+      firetvir.programmableRemotes((macs) => jsonRes(res, { macs }));
+      return;
+    }
     if (p === "/tvbox/api/firetvir/brands") {
       firetvir.fetchBrands((err, brands) =>
         jsonRes(res, err ? { ok: false, error: String(err.message || err).slice(0, 200) } : { ok: true, brands }),

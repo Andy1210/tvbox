@@ -19,6 +19,22 @@ const path = require("path");
 const os = require("os");
 const https = require("https");
 
+const TVBOX = path.join(os.homedir(), ".tvbox");
+const PYENV = path.join(TVBOX, "pyenv");
+const PY = path.join(PYENV, "bin", "python3");
+const TOOL = path.join(TVBOX, "firetv_remote_ir.py");
+const CODES_FILE = path.join(TVBOX, "firetv_tv_codes.json");
+const CACHE_DIR = path.join(TVBOX, "cache");
+const INDEX_CACHE = path.join(CACHE_DIR, "irdb-tv-index.json");
+const INDEX_TTL_MS = 30 * 24 * 3600 * 1000;
+// The user's "latest deps" stance, but pinned so an install is reproducible;
+// dbus-fast ships aarch64 manylinux wheels, so no compiler is needed on the box.
+const PIP_PACKAGES = ["bleak==3.0.2", "dbus-fast==5.0.22"];
+const INDEX_URL = "https://api.github.com/repos/probonopd/irdb/git/trees/master?recursive=1";
+const RAW_BASE = "https://raw.githubusercontent.com/probonopd/irdb/master/";
+const MAX_INDEX_BYTES = 30e6;
+const MAX_CSV_BYTES = 512e3;
+
 // Wayland env for wlr-randr (the shell inherits it; fill gaps like main.js WL_ENV).
 const WL_ENV = {
   XDG_RUNTIME_DIR: process.env.XDG_RUNTIME_DIR || "/run/user/" + process.getuid(),
@@ -73,21 +89,48 @@ function suggestedBrand(cb) {
   });
 }
 
-const TVBOX = path.join(os.homedir(), ".tvbox");
-const PYENV = path.join(TVBOX, "pyenv");
-const PY = path.join(PYENV, "bin", "python3");
-const TOOL = path.join(TVBOX, "firetv_remote_ir.py");
-const CODES_FILE = path.join(TVBOX, "firetv_tv_codes.json");
-const CACHE_DIR = path.join(TVBOX, "cache");
-const INDEX_CACHE = path.join(CACHE_DIR, "irdb-tv-index.json");
-const INDEX_TTL_MS = 30 * 24 * 3600 * 1000;
-// The user's "latest deps" stance, but pinned so an install is reproducible;
-// dbus-fast ships aarch64 manylinux wheels, so no compiler is needed on the box.
-const PIP_PACKAGES = ["bleak==3.0.2", "dbus-fast==5.0.22"];
-const INDEX_URL = "https://api.github.com/repos/probonopd/irdb/git/trees/master?recursive=1";
-const RAW_BASE = "https://raw.githubusercontent.com/probonopd/irdb/master/";
-const MAX_INDEX_BYTES = 30e6;
-const MAX_CSV_BYTES = 512e3;
+// The keymap GATT service a programmable Amazon remote exposes. Its presence on
+// a bonded device is a precise "this is a Fire TV / Alexa remote we can program"
+// signal (no false positives) - used to show the IR feature ONLY under such a
+// remote in the remap UI, never for other remotes.
+const KEYMAP_SERVICE = "fe151500";
+
+// MACs (lowercase) of currently-connected remotes that expose the keymap
+// service. Cached briefly - bluetoothctl is cheap but this is polled from the UI.
+let progCache = { ts: 0, macs: [] };
+function programmableRemotes(cb) {
+  if (Date.now() - progCache.ts < 8000) return cb(progCache.macs);
+  execFile("bluetoothctl", ["devices", "Connected"], { timeout: 5000 }, (err, out) => {
+    // Fall back to all known devices if "Connected" filter isn't supported.
+    const list = (m) =>
+      (m || "")
+        .split("\n")
+        .map((l) => /Device ([0-9A-F:]{17})/i.exec(l))
+        .filter(Boolean)
+        .map((x) => x[1]);
+    const run = (macs) => {
+      const found = [];
+      let pending = macs.length;
+      if (!pending) {
+        progCache = { ts: Date.now(), macs: found };
+        return cb(found);
+      }
+      macs.forEach((mac) =>
+        execFile("bluetoothctl", ["info", mac], { timeout: 5000 }, (e2, info) => {
+          if (!e2 && /Connected: yes/i.test(info) && new RegExp(KEYMAP_SERVICE, "i").test(info)) {
+            found.push(mac.toLowerCase());
+          }
+          if (--pending === 0) {
+            progCache = { ts: Date.now(), macs: found };
+            cb(found);
+          }
+        }),
+      );
+    };
+    if (!err && list(out).length) return run(list(out));
+    execFile("bluetoothctl", ["devices"], { timeout: 5000 }, (e2, all) => run(list(all)));
+  });
+}
 
 // ---- deps (venv + bleak) --------------------------------------------------------
 let depsState = { running: false, step: "", error: "" };
@@ -394,4 +437,14 @@ function status(cb) {
   });
 }
 
-module.exports = { status, installDeps, fetchBrands, fetchCodeset, checkProtocols, testKey, program, erase };
+module.exports = {
+  status,
+  programmableRemotes,
+  installDeps,
+  fetchBrands,
+  fetchCodeset,
+  checkProtocols,
+  testKey,
+  program,
+  erase,
+};
