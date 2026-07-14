@@ -1,12 +1,14 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useI18n } from "../lib/i18n";
 import { fetchSystemInfo, type SystemInfo } from "../lib/system";
 import { FocusButton } from "./FocusButton";
 
-// Diagnostics / About section of the HOME Settings screen: version, device, IP,
-// WiFi signal, CPU temperature, uptime and free memory. All read-only (shell
-// route GET /tvbox/api/system/info); auto-refreshes while visible so temp/mem
-// stay live. Renders inside the parent Settings FocusContext (Refresh anchor).
+// The About category of Settings: version, device, IP, WiFi signal, CPU
+// temperature, uptime, free memory, plus the open-source credits. All
+// read-only (shell route GET /tvbox/api/system/info); auto-refreshes while
+// visible so temp/mem stay live. The page is longer than the screen but has a
+// single focusable (Refresh), so Up/Down scroll the panel directly instead of
+// moving focus - spatial nav has nowhere to go anyway.
 const DASH = "-";
 
 function fmtUptime(sec: number, u: { d: string; h: string; m: string }): string {
@@ -35,6 +37,7 @@ function Row({ label, value }: { label: string; value: string }) {
 export function AboutSettings() {
   const { t } = useI18n();
   const [info, setInfo] = useState<SystemInfo | null>(null);
+  const rootRef = useRef<HTMLDivElement>(null);
 
   const refresh = () => {
     fetchSystemInfo().then((i) => {
@@ -47,6 +50,21 @@ export function AboutSettings() {
     return () => clearInterval(iv);
   }, []);
 
+  // D-pad scrolling: the content (credits list) extends past the screen with
+  // nothing focusable down there, so arrows scroll the panel container.
+  useEffect(() => {
+    const onKey = (ev: KeyboardEvent) => {
+      if (ev.key !== "ArrowDown" && ev.key !== "ArrowUp") return;
+      const panel = rootRef.current?.closest(".overflow-y-auto");
+      if (!panel) return;
+      ev.preventDefault();
+      ev.stopImmediatePropagation(); // keep spatial nav from also reacting
+      panel.scrollBy({ top: (ev.key === "ArrowDown" ? 1 : -1) * window.innerHeight * 0.35, behavior: "smooth" });
+    };
+    window.addEventListener("keydown", onKey, true);
+    return () => window.removeEventListener("keydown", onKey, true);
+  }, []);
+
   const units = { d: t("about.unitD"), h: t("about.unitH"), m: t("about.unitM") };
   const device = info ? [info.model, info.hostname].filter(Boolean).join(" · ") : DASH;
   const wifi = info && info.wifi.ssid ? `${info.wifi.ssid} · ${info.wifi.signal ?? DASH}%` : DASH;
@@ -57,16 +75,13 @@ export function AboutSettings() {
     : DASH;
 
   return (
-    <div className="mt-[3vh] pb-[10vh]">
+    <div ref={rootRef} className="mt-[3vh] pb-[10vh]">
       <div className="flex items-center gap-[1.5vw] mb-[1.4vh]">
         <div className="text-[2.4vh] font-semibold">{t("about.title")}</div>
         <FocusButton
           focusKey="about-refresh"
           onEnter={refresh}
-          // scroll-mb: this is the section's ONLY focusable and it sits at the
-          // TOP - without the margin, focusing it scrolls just far enough to
-          // show the button and the diagnostic rows below stay off-screen
-          className="px-[2vw] py-[1.2vh] rounded-[1vh] bg-white/5 text-[1.9vh] font-semibold scroll-mb-[46vh]"
+          className="px-[2vw] py-[1.2vh] rounded-[1vh] bg-white/5 text-[1.9vh] font-semibold"
         >
           {t("about.refresh")}
         </FocusButton>
@@ -90,7 +105,7 @@ export function AboutSettings() {
           {CREDITS.map((c) => (
             <li key={c.name} className="text-[1.9vh]">
               <span className="font-semibold">{c.name}</span>
-              <span className="text-fg-dim"> — {c.what}</span>
+              <span className="text-fg-dim"> - {c.what}</span>
               <span className="block text-[1.6vh] text-fg-dim break-all">
                 {c.url} · {c.license}
               </span>

@@ -34,7 +34,8 @@
     "apps": "Alkalmazások",
     "ambient": "Képernyővédő",
     "store": "Alkalmazásbolt",
-    "system": "Rendszer és frissítés"
+    "system": "Rendszer és frissítés",
+    "about": "Névjegy"
   },
   "wifi": {
     "connectedTo": "csatlakozva · {ssid}",
@@ -186,7 +187,8 @@
     "reassignConfirm": "Átrendelés",
     "learnTitle": "Gomb hozzárendelése: „{action}”",
     "learnBody": "Irányítsd a(z) {remote} távirányítót a boxra, és nyomd meg azt a gombot, amit ehhez használni szeretnél.",
-    "learnWarn": "Ezen a távirányítón minden gombnyomás rögzül, még egy nyíl is. A Mégse egy másik távirányítóval (pl. a TV távjával) nyomható, vagy kb. 10 mp után magától megszakad."
+    "learnWarn": "Ezen a távirányítón minden gombnyomás rögzül, még egy nyíl is. A Mégse egy másik távirányítóval (pl. a TV távjával) nyomható, vagy kb. 10 mp után magától megszakad.",
+    "panicHint": "Vésztartalék: ha a távirányító a kiosztás miatt használhatatlanná válik, nyomd meg ugyanazt az átkötött gombot 8-szor gyorsan, és a box visszaállítja ennek a távirányítónak a gombjait."
   },
   "appsettings": {
     "title": "Alkalmazások",

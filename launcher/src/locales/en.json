@@ -34,7 +34,8 @@
     "apps": "Apps",
     "ambient": "Ambient",
     "store": "App Store",
-    "system": "System & updates"
+    "system": "System & updates",
+    "about": "About"
   },
   "wifi": {
     "connectedTo": "connected · {ssid}",
@@ -186,7 +187,8 @@
     "reassignConfirm": "Reassign",
     "learnTitle": "Assign a button to “{action}”",
     "learnBody": "Point the {remote} at the box and press the button you want to use for this.",
-    "learnWarn": "Every press on this remote gets recorded, even an arrow. Cancel with a different remote (e.g. the TV's own), or it times out after about 10s."
+    "learnWarn": "Every press on this remote gets recorded, even an arrow. Cancel with a different remote (e.g. the TV's own), or it times out after about 10s.",
+    "panicHint": "Emergency fallback: if the remote becomes unusable because of its mapping, press the same remapped button 8 times fast and the box resets that remote's buttons."
   },
   "appsettings": {
     "title": "Apps",

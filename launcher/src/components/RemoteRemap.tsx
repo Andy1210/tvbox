@@ -508,15 +508,21 @@ export function RemoteRemap() {
 
                   {/* Reset every remap for this remote - recovery if a mapping
                       makes it hard to use. (The TV's own CEC remote is never
-                      remapped, so it always works as a fallback too.) */}
+                      remapped, so it always works as a fallback too.) The hint
+                      below is the panic gesture's ONLY on-screen documentation:
+                      the user must read it while things still work, so it lives
+                      right where mappings are made. */}
                   {Object.keys(km).length > 0 && (
-                    <FocusButton
-                      focusKey={keyBase(d.id) + "-reset"}
-                      onEnter={() => resetDevice(d.id)}
-                      className="px-[2vw] py-[1.2vh] rounded-[1.1vh] bg-white/5 text-[1.8vh] text-warn font-semibold inline-flex mt-[0.4vh]"
-                    >
-                      {t("remote.resetDevice")}
-                    </FocusButton>
+                    <>
+                      <FocusButton
+                        focusKey={keyBase(d.id) + "-reset"}
+                        onEnter={() => resetDevice(d.id)}
+                        className="px-[2vw] py-[1.2vh] rounded-[1.1vh] bg-white/5 text-[1.8vh] text-warn font-semibold inline-flex mt-[0.4vh]"
+                      >
+                        {t("remote.resetDevice")}
+                      </FocusButton>
+                      <div className="text-[1.7vh] text-fg-dim max-w-[60vw]">{t("remote.panicHint")}</div>
+                    </>
                   )}
 
                   {/* Fire TV / Alexa remote: teach its OWN IR blaster the TV's

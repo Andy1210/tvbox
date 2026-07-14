@@ -60,7 +60,6 @@ const CATEGORIES: Category[] = [
         <RegionSettings />
         <ParentalSettings />
         <HostnameSettings />
-        <AboutSettings />
       </>
     ),
   },
@@ -154,6 +153,17 @@ const CATEGORIES: Category[] = [
         <BackupSettings />
       </>
     ),
+  },
+  {
+    id: "about",
+    icon: svg(
+      <>
+        <circle cx="12" cy="12" r="9" />
+        <path d="M12 11v5" />
+        <path d="M12 7.5h.01" />
+      </>,
+    ),
+    render: () => <AboutSettings />,
   },
 ];
 
