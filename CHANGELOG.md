@@ -5,6 +5,18 @@ updates). `scripts/make-release.sh` lifts the current version's `hu`/`en`
 blocks into the OTA feed's `notes` - keep both languages, keep it short, and
 write for the person on the couch (what changes for THEM), not for developers.
 
+## 1.7.1
+
+### hu
+
+- A Névjegy külön menüpont lett a Beállításokban, és az oldal végre végiggörgethető a nyilakkal (rendszerinformációk és nyílt forráskódú kreditek).
+- A vészhelyzeti gomb-visszaállítás (ugyanaz az átkötött gomb 8-szor gyorsan) mostantól le van írva a képernyőn, a távirányító visszaállítás gombja alatt.
+
+### en
+
+- About is now its own item in Settings, and the page finally scrolls with the arrows (system information and open source credits).
+- The emergency button reset (same remapped button 8 times fast) is now explained on screen, under the remote's reset button.
+
 ## 1.7.0
 
 ### hu
