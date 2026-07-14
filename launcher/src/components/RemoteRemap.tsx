@@ -1,7 +1,9 @@
 import { useEffect, useRef, useState } from "react";
-import { setFocus } from "@noriginmedia/norigin-spatial-navigation";
+import { FocusContext, useFocusable, setFocus } from "@noriginmedia/norigin-spatial-navigation";
 import type { RemoteAction, RemoteDeviceConfig, RemotePower } from "@sdk/config";
 import { useI18n } from "../lib/i18n";
+import { useBackspace } from "../lib/useBackspace";
+import { useEntryAnim } from "../lib/useEntryAnim";
 import { useConfigStore } from "../stores/config";
 import {
   REMOTE_ACTIONS,
@@ -9,6 +11,7 @@ import {
   fetchLearned,
   learnRemote,
   learnRemoteOff,
+  resetRemote,
   type ConnectedRemote,
 } from "../lib/remote";
 import { fetchApps } from "../lib/api";
@@ -59,11 +62,120 @@ function Check() {
 
 const POWER_OPTS: RemotePower[] = ["tv", "tv_and_box", "ignore"];
 
+// While a modal is up, swallow auto-repeated Enter/Space keydowns (capture
+// phase, before spatial-nav sees them): the OK press that OPENED the modal is
+// still physically held for a moment, and Chromium synthesizes repeats for
+// held keys - without this a slightly long press would immediately "press"
+// the modal's default (Cancel) button. Arrows repeat as usual.
+function useSwallowEnterRepeats() {
+  useEffect(() => {
+    const block = (ev: KeyboardEvent) => {
+      if (ev.repeat && (ev.key === "Enter" || ev.key === " ")) {
+        ev.preventDefault();
+        ev.stopImmediatePropagation();
+      }
+    };
+    window.addEventListener("keydown", block, true);
+    return () => window.removeEventListener("keydown", block, true);
+  }, []);
+}
+
+// Learn mode as a real MODAL: the page behind stays mounted (no reflow, the
+// focused row survives) and the focus boundary keeps D-pad focus inside, so a
+// press from another remote can never wander onto e.g. the Bluetooth scan row
+// mid-learn. Cancel needs that OTHER remote (or Back) - every press on the
+// remote being taught is captured by the bridge - and the parent's 10s timeout
+// stays as the single-remote fallback.
+function LearnOverlay({ action, remote, onCancel }: { action: string; remote: string; onCancel: () => void }) {
+  const { t } = useI18n();
+  const { ref, focusKey } = useFocusable({ focusKey: "remote-learn-overlay", isFocusBoundary: true });
+  const entryAnim = useEntryAnim();
+  useEffect(() => {
+    setTimeout(() => setFocus("remote-learn-cancel"), 0);
+  }, []);
+  useSwallowEnterRepeats();
+  useBackspace(onCancel);
+  return (
+    <FocusContext.Provider value={focusKey}>
+      <div
+        ref={ref}
+        style={entryAnim}
+        className="fixed inset-0 z-[55] bg-black/90 flex flex-col items-center justify-center text-center gap-[1.6vh] px-[6vw]"
+      >
+        <div className="text-[2.8vh] font-bold">{t("remote.learnTitle", { action })}</div>
+        <div className="text-[2.1vh] text-fg-dim max-w-[56vw]">{t("remote.learnBody", { remote })}</div>
+        <div className="text-[1.8vh] text-warn max-w-[56vw]">{t("remote.learnWarn")}</div>
+        <FocusButton
+          focusKey="remote-learn-cancel"
+          onEnter={onCancel}
+          className="px-[2.4vw] py-[1.4vh] rounded-[1.1vh] bg-white/5 text-[2vh] font-semibold mt-[1.2vh]"
+        >
+          {t("remote.cancel")}
+        </FocusButton>
+      </div>
+    </FocusContext.Provider>
+  );
+}
+
+// Reassign-confirm as the same kind of modal (it interrupts a learn, so it must
+// be equally impossible to lose focus-wise).
+function ReassignOverlay({
+  from,
+  to,
+  onConfirm,
+  onCancel,
+}: {
+  from: string;
+  to: string;
+  onConfirm: () => void;
+  onCancel: () => void;
+}) {
+  const { t } = useI18n();
+  const { ref, focusKey } = useFocusable({ focusKey: "remote-reassign-overlay", isFocusBoundary: true });
+  const entryAnim = useEntryAnim();
+  useEffect(() => {
+    // default to CANCEL: right after a capture the taught remote may still
+    // send a stray Enter-ish press, and that must not silently confirm
+    setTimeout(() => setFocus("remote-reassign-no"), 0);
+  }, []);
+  useSwallowEnterRepeats();
+  useBackspace(onCancel);
+  return (
+    <FocusContext.Provider value={focusKey}>
+      <div
+        ref={ref}
+        style={entryAnim}
+        className="fixed inset-0 z-[55] bg-black/90 flex flex-col items-center justify-center text-center gap-[1.6vh] px-[6vw]"
+      >
+        <div className="text-[2.8vh] font-bold">{t("remote.reassignTitle")}</div>
+        <div className="text-[2.1vh] text-fg-dim max-w-[56vw]">{t("remote.reassignBody", { from, to })}</div>
+        <div className="flex gap-[1vw] mt-[1.2vh]">
+          <FocusButton
+            focusKey="remote-reassign-yes"
+            onEnter={onConfirm}
+            className="px-[2.4vw] py-[1.4vh] rounded-[1.1vh] bg-accent text-[#06090d] text-[2vh] font-semibold"
+          >
+            {t("remote.reassignConfirm")}
+          </FocusButton>
+          <FocusButton
+            focusKey="remote-reassign-no"
+            onEnter={onCancel}
+            className="px-[2.4vw] py-[1.4vh] rounded-[1.1vh] bg-white/5 text-[2vh] font-semibold"
+          >
+            {t("remote.cancel")}
+          </FocusButton>
+        </div>
+      </div>
+    </FocusContext.Provider>
+  );
+}
+
 export function RemoteRemap() {
   const { t, loc } = useI18n();
   const config = useConfigStore((s) => s.config);
   const setRemote = useConfigStore((s) => s.setRemote);
   const setRemotePower = useConfigStore((s) => s.setRemotePower);
+  const load = useConfigStore((s) => s.load);
   const saved = config?.remote?.devices || {};
   const power: RemotePower = config?.remote?.power || "tv";
 
@@ -81,6 +193,15 @@ export function RemoteRemap() {
   const testingRef = useRef(testing);
   testingRef.current = testing;
   const [testKeys, setTestKeys] = useState<{ name: string; code: number; ts: number }[]>([]);
+  // A learned button that's already bound to another action -> confirm reassign.
+  const [conflict, setConflict] = useState<{
+    id: string;
+    action: RemoteAction;
+    code: number;
+    from: RemoteAction;
+  } | null>(null);
+  const conflictRef = useRef(conflict);
+  conflictRef.current = conflict;
   // MACs of connected remotes that are programmable Fire TV / Alexa remotes
   // (expose the keymap GATT service). Only these show the "TV IR" sub-panel, so
   // a non-Fire-TV remote's remap menu stays clean. `irOpen` = which device's
@@ -105,13 +226,15 @@ export function RemoteRemap() {
       ? t("remote.action.app", { name: apps.find((x) => "app:" + x.id === a)?.name || a.slice(4) })
       : t("remote.action." + a);
 
-  // Poll connected remotes (hotplug + the shell merges in the saved keymap).
-  // Pause polling while learning/testing so the list doesn't churn mid-capture.
+  // Poll connected remotes (hotplug; only presence + names are used from it,
+  // the rendered keymap comes from the config store which updates instantly).
+  // Pause polling while learning/testing/confirming so the row a modal will
+  // restore focus to can't unmount under it (BT sleep mid-dialog).
   useEffect(() => {
     let alive = true;
     const tick = () => fetchRemoteDevices().then((d) => alive && setDevices(d));
     tick();
-    const iv = setInterval(() => !learningRef.current && !testingRef.current && tick(), 3000);
+    const iv = setInterval(() => !learningRef.current && !testingRef.current && !conflictRef.current && tick(), 3000);
     return () => {
       alive = false;
       clearInterval(iv);
@@ -123,6 +246,10 @@ export function RemoteRemap() {
     if (!learning) return;
     const { id, action } = learning;
     let done = false;
+    // Only accept a capture at least this fresh - a leftover remote-learned.json
+    // from a prior session must never be misread as this press (the bridge ts is
+    // whole-second int(time.time()), so floor now to the same unit).
+    const armedAt = Math.floor(Date.now() / 1000);
     void learnRemote(id);
     const finish = () => {
       if (done) return;
@@ -135,12 +262,23 @@ export function RemoteRemap() {
     };
     const poll = setInterval(async () => {
       const lb = await fetchLearned();
-      if (!done && lb && lb.id === id) {
-        await save(id, action, lb.code);
-        finish();
+      if (!done && lb && lb.id === id && lb.ts >= armedAt) {
+        const from = conflictOf(id, action, lb.code);
+        if (from) {
+          // already bound elsewhere - confirm before stealing it
+          done = true;
+          clearInterval(poll);
+          clearTimeout(to);
+          void learnRemoteOff();
+          setLearning(null);
+          setConflict({ id, action, code: lb.code, from });
+        } else {
+          await save(id, action, lb.code);
+          finish();
+        }
       }
-    }, 400);
-    const to = setTimeout(finish, 8000); // no button -> auto-cancel (no keyboard on a remote)
+    }, 250);
+    const to = setTimeout(finish, 10000); // no button -> auto-cancel (no keyboard on a remote)
     return () => {
       done = true;
       clearInterval(poll);
@@ -166,7 +304,14 @@ export function RemoteRemap() {
     void learnRemote(id);
     const poll = setInterval(async () => {
       const lb = await fetchLearned();
-      if (!lb || lb.id !== id) return;
+      if (!lb) {
+        // the re-arm deleted the learned file: reset the dedupe, so the next
+        // capture registers even when it repeats the same whole-second ts and
+        // code (a double-tap of one button inside one second)
+        seen = "";
+        return;
+      }
+      if (lb.id !== id) return;
       const key = lb.ts + ":" + lb.code;
       if (key === seen) return; // still the previous capture
       seen = key;
@@ -180,27 +325,76 @@ export function RemoteRemap() {
       void learnRemoteOff();
       setTimeout(() => setFocus(keyBase(id) + "-test"), 0);
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [testing]);
+
+  // Belt-and-braces: auto-dismiss the reassign dialog after 20s (with focus
+  // restored) so a lost dialog can never trap the screen.
+  useEffect(() => {
+    if (!conflict) return;
+    const c = conflict;
+    const to = setTimeout(() => {
+      setConflict(null);
+      setTimeout(() => setFocus(keyBase(c.id) + "-" + c.action), 0);
+    }, 20000);
+    return () => clearTimeout(to);
+  }, [conflict]);
+
+  // Cancel a learn from the modal (Back or the Cancel button - pressed with a
+  // DIFFERENT remote; the learned one is swallowed by the bridge). The learn
+  // effect's cleanup sends learn-off to the bridge.
+  const cancelLearn = () => {
+    if (!learning) return;
+    const { id, action } = learning;
+    setLearning(null);
+    setTimeout(() => setFocus(keyBase(id) + "-" + action), 0);
+  };
 
   const cloneSaved = (): Record<string, RemoteDeviceConfig> => {
     const out: Record<string, RemoteDeviceConfig> = {};
-    for (const [k, v] of Object.entries(saved)) out[k] = { name: v.name, keymap: { ...v.keymap } };
+    // spread keeps the non-keymap fields (irPassthrough) - a save/clear on any
+    // remote must not strip another remote's flags
+    for (const [k, v] of Object.entries(saved)) out[k] = { ...v, keymap: { ...v.keymap } };
     return out;
+  };
+  // Which OTHER action on this device this code is already bound to (or null).
+  const conflictOf = (id: string, action: RemoteAction, code: number): RemoteAction | null => {
+    const km = saved[id]?.keymap || {};
+    for (const [a, codes] of Object.entries(km)) {
+      if (a !== action && Array.isArray(codes) && codes.includes(code)) return a as RemoteAction;
+    }
+    return null;
   };
   const save = async (id: string, action: RemoteAction, code: number) => {
     const name = (devices ?? []).find((d) => d.id === id)?.name || saved[id]?.name || id;
     const next = cloneSaved();
     const dev = next[id] || (next[id] = { name, keymap: {} });
     dev.name = name;
-    dev.keymap = { ...dev.keymap, [action]: [code] };
+    // Clean reassign: a physical button drives ONE action, so drop this code
+    // from any other action before binding it here (else the bridge sees the
+    // code mapped twice and picks arbitrarily).
+    const km: Record<string, number[]> = {};
+    for (const [a, codes] of Object.entries(dev.keymap)) {
+      const kept = (codes || []).filter((c) => c !== code);
+      if (kept.length) km[a] = kept;
+    }
+    km[action] = [code];
+    dev.keymap = km;
     await setRemote(next);
+  };
+  const resetDevice = async (id: string) => {
+    // through the shell endpoint, which keeps irPassthrough (a client-side
+    // delete of the entry would drop it and double every volume step on a
+    // programmed Fire TV remote); reload the store to pick up the result
+    await resetRemote(id);
+    await load();
+    setTimeout(() => setFocus(keyBase(id) + "-dev"), 0);
   };
   const clearAction = async (id: string, action: RemoteAction) => {
     const next = cloneSaved();
     if (next[id]) {
       delete next[id].keymap[action];
-      if (!Object.keys(next[id].keymap).length) delete next[id];
+      // drop the emptied entry only if it carries nothing else (irPassthrough)
+      if (!Object.keys(next[id].keymap).length && !next[id].irPassthrough) delete next[id];
     }
     await setRemote(next);
     setTimeout(() => setFocus(keyBase(id) + "-" + action), 0);
@@ -212,6 +406,16 @@ export function RemoteRemap() {
     if (next) setTimeout(() => setFocus(keyBase(id) + "-" + REMOTE_ACTIONS[0]), 0);
   };
 
+  const learnRemoteName = learning
+    ? (devices ?? []).find((d) => d.id === learning.id)?.name || saved[learning.id]?.name || learning.id
+    : "";
+  const closeConflict = () => {
+    const c = conflict;
+    if (!c) return;
+    setConflict(null);
+    setTimeout(() => setFocus(keyBase(c.id) + "-" + c.action), 0);
+  };
+
   return (
     <div className="mt-[4vh]">
       <div className="text-[2.4vh] font-semibold mb-[0.6vh]">{t("remote.title")}</div>
@@ -219,7 +423,10 @@ export function RemoteRemap() {
       {devices !== null && !devices.length && <div className="text-[1.9vh] text-fg-dim">{t("remote.none")}</div>}
       <div className="flex flex-col gap-[0.8vh] max-w-[70vw]">
         {(devices ?? []).map((d) => {
-          const km = d.keymap || {};
+          // keymap comes from the config store, NOT the polled device list: a
+          // save/clear updates the store instantly, while the poll (paused
+          // during learn, 3s otherwise) would show the change 1-3s late
+          const km = saved[d.id]?.keymap || {};
           const custom = Object.keys(km).length;
           const open = expanded === d.id;
           return (
@@ -270,7 +477,8 @@ export function RemoteRemap() {
                   </FocusButton>
                   {allActions.map((a) => {
                     const bound = (km[a] || []).length > 0;
-                    const isLearning = learning?.id === d.id && learning?.action === a;
+                    // during a learn the row stays mounted under the modal
+                    // overlay, so focus returns to it when the modal closes
                     return (
                       <div key={a} className="flex items-center gap-[1vw]">
                         <FocusButton
@@ -279,15 +487,13 @@ export function RemoteRemap() {
                           className="flex-1 px-[2vw] py-[1.3vh] rounded-[1.1vh] bg-white/5 flex items-center gap-[1.2vw] min-w-0"
                         >
                           <span className="text-[2vh] flex-1 text-left truncate">{actionLabel(a)}</span>
-                          {isLearning ? (
-                            <span className="text-[1.8vh] text-accent shrink-0">{t("remote.press")}</span>
-                          ) : bound ? (
+                          {bound ? (
                             <span className="text-[1.7vh] text-accent shrink-0">{t("remote.custom")}</span>
                           ) : (
                             <span className="text-[1.7vh] text-fg-dim shrink-0">{t("remote.default")}</span>
                           )}
                         </FocusButton>
-                        {bound && !isLearning && (
+                        {bound && (
                           <FocusButton
                             focusKey={keyBase(d.id) + "-clear-" + a}
                             onEnter={() => clearAction(d.id, a)}
@@ -299,6 +505,19 @@ export function RemoteRemap() {
                       </div>
                     );
                   })}
+
+                  {/* Reset every remap for this remote - recovery if a mapping
+                      makes it hard to use. (The TV's own CEC remote is never
+                      remapped, so it always works as a fallback too.) */}
+                  {Object.keys(km).length > 0 && (
+                    <FocusButton
+                      focusKey={keyBase(d.id) + "-reset"}
+                      onEnter={() => resetDevice(d.id)}
+                      className="px-[2vw] py-[1.2vh] rounded-[1.1vh] bg-white/5 text-[1.8vh] text-warn font-semibold inline-flex mt-[0.4vh]"
+                    >
+                      {t("remote.resetDevice")}
+                    </FocusButton>
+                  )}
 
                   {/* Fire TV / Alexa remote: teach its OWN IR blaster the TV's
                       volume/mute/power. Shown ONLY for remotes that expose the
@@ -348,6 +567,22 @@ export function RemoteRemap() {
           <div className="text-[1.7vh] text-warn mt-[0.9vh] max-w-[64vw]">{t("remote.powerWarn")}</div>
         )}
       </div>
+
+      {learning && (
+        <LearnOverlay action={actionLabel(learning.action)} remote={learnRemoteName} onCancel={cancelLearn} />
+      )}
+      {conflict && (
+        <ReassignOverlay
+          from={actionLabel(conflict.from)}
+          to={actionLabel(conflict.action)}
+          onConfirm={async () => {
+            const c = conflict;
+            await save(c.id, c.action, c.code);
+            closeConflict();
+          }}
+          onCancel={closeConflict}
+        />
+      )}
     </div>
   );
 }

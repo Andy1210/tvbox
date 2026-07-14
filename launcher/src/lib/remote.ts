@@ -70,3 +70,9 @@ export function learnRemote(id: string): Promise<void> {
 export function learnRemoteOff(): Promise<void> {
   return post("/tvbox/api/remote/learn-off", {});
 }
+// Reset one remote's remapping through the shell endpoint (NOT a client-side
+// config rewrite): the endpoint preserves irPassthrough, which a plain
+// devices-map save would drop. Same path the bridge's panic gesture uses.
+export function resetRemote(id: string): Promise<void> {
+  return post("/tvbox/api/remote/reset", { id });
+}

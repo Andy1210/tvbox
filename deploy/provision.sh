@@ -113,6 +113,11 @@ cat > /etc/udev/rules.d/99-tvbox.rules <<'RULES'
 # tvbox: let the box user's CEC->uinput remote bridge run without root
 KERNEL=="uinput", GROUP="input", MODE="0660", OPTIONS+="static_node=uinput"
 SUBSYSTEM=="cec", GROUP="video", MODE="0660"
+# Fire TV / Alexa remotes (Amazon VID 0x0171): their app buttons (Netflix/Prime/
+# ...) arrive as a vendor HID report the kernel maps to no key, so the remote
+# bridge reads them straight from hidraw. Grant the `input` group read on just
+# those remotes' hidraw nodes (parent HID name is <bus>:0171:<pid>.<n>).
+SUBSYSTEM=="hidraw", KERNELS=="0005:0171:*", GROUP="input", MODE="0640"
 RULES
 udevadm control --reload-rules 2>/dev/null && udevadm trigger 2>/dev/null && ok "udev rules" || warn "udev reload failed (rules apply on reboot)"
 usermod -aG input,video "$TVBOX_USER" && ok "$TVBOX_USER in input+video groups" || bad "usermod failed"

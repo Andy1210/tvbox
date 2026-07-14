@@ -3,20 +3,20 @@
 A Fire TV / Alexa Voice Remote is more than a plain BLE keyboard. Two Amazon-only
 behaviours normally need a Fire TV to set up; this box does both without one.
 
-1. **The remote's own IR blaster** — its Volume ± / Mute / Power keys blast IR
+1. **The remote's own IR blaster** - its Volume ± / Mute / Power keys blast IR
    straight at the TV (the remote has the IR LED, the Fire TV Stick doesn't). A
    Fire TV programs a key→IR "keymap" into the remote over a custom BLE service
    during "Equipment Control". We speak that same service from the box.
 2. **The app buttons** (Netflix / Prime Video / Disney+ / Amazon Music / Alexa)
    transmit as **vendor-defined HID usages** that Fire OS decodes via bundled
-   keylayouts. A stock Pi kernel doesn't, so they look dead — we remap them so
+   keylayouts. A stock Pi kernel doesn't, so they look dead - we remap them so
    they become ordinary buttons you can bind to any app or action.
 
 Protocol notes / reverse-engineering: the assistant-stack repo
 `firetv-re/FINDINGS.md` (from Fire OS 7.7.1.3, Fire TV Stick 4K Max / AFTKA).
 
 All tools ship into `~/.tvbox/`. Run them on the box over SSH. The remote must be
-BLE-**paired/bonded** to the box (as you already do for HID) — the keymap
+BLE-**paired/bonded** to the box (as you already do for HID) - the keymap
 characteristics need an encrypted link, but there is **no** Amazon signature or
 auth on the keymap itself (only a SHA-256 integrity hash), so a bonded box may
 write it.
@@ -29,20 +29,20 @@ write it.
 
 The guided on-TV flow does all of the below for you, no SSH:
 
-1. **Install Bluetooth support** — one tap creates a user-space venv at
+1. **Install Bluetooth support** - one tap creates a user-space venv at
    `~/.tvbox/pyenv` and installs `bleak` (+ `dbus-fast`) into it (needs internet;
    `python3-venv`/`pip` come from `provision.sh`). No root, nothing global.
-2. **Pick the remote** — any BLE-paired remote (it needs a MAC to reach over
+2. **Pick the remote** - any BLE-paired remote (it needs a MAC to reach over
    BLE; pair it under Bluetooth first).
-3. **Pick your TV brand + codeset** — pulled live from the community **irdb**
+3. **Pick your TV brand + codeset** - pulled live from the community **irdb**
    database ([github.com/probonopd/irdb](https://github.com/probonopd/irdb),
    cached ~30 days under `~/.tvbox/cache/`). tvbox converts the irdb
    `(protocol, device, subdevice, function)` row into raw IR timings on the box
    (`remote/ir_protocols.py`: NEC/NECx/RC5/RC6/Sony SIRC/Panasonic; anything
    else is greyed out honestly instead of blasting garbage).
-4. **Test** — a per-key InstantFire blast (nothing saved yet); point the remote
+4. **Test** - a per-key InstantFire blast (nothing saved yet); point the remote
    at the TV and confirm it reacts, brand codesets vary.
-5. **Save to the remote** — programs the keymap; then tvbox sets
+5. **Save to the remote** - programs the keymap; then tvbox sets
    `remote.devices[<mac>].irPassthrough = true` so the bridge stops diverting
    that remote's BT volume keys to the box's own IR blaster (no double volume).
 
@@ -52,15 +52,15 @@ permission. …") is shown in **Settings → About → Open source**, and the fl
 footer credits it too. Note the license's **clause 1**: before shipping a
 product that uses irdb you must announce it by opening an issue at
 github.com/probonopd/irdb/issues (a one-time step for whoever distributes a
-build — not a runtime concern).
+build - not a runtime concern).
 
 ### The manual way (SSH)
 
 `~/.tvbox/firetv_remote_ir.py` (with `~/.tvbox/keymap_compile.py` +
-`~/.tvbox/ir_protocols.py`). Needs `bleak` — either the venv the UI made
+`~/.tvbox/ir_protocols.py`). Needs `bleak` - either the venv the UI made
 (`~/.tvbox/pyenv/bin/python3`) or a plain `python3 -m pip install bleak`.
 
-Codes live in `~/.tvbox/firetv_tv_codes.json` — copy the shipped
+Codes live in `~/.tvbox/firetv_tv_codes.json` - copy the shipped
 `firetv_tv_codes.example.json` (preset for **LG**, NEC, address `0x04`) and edit:
 
 ```json
@@ -75,7 +75,7 @@ Codes live in `~/.tvbox/firetv_tv_codes.json` — copy the shipped
 ```
 
 Per key, one of: `{"irdb":{"protocol":"NEC1","device":4,"subdevice":-1,"function":2}}`
-(an irdb row — what the UI writes), `{"nec":{"address":N,"command":M}}` (LG and
+(an irdb row - what the UI writes), `{"nec":{"address":N,"command":M}}` (LG and
 most TVs), `{"pronto":"0000 006D ..."}` (a Pronto/CCF code), or
 `{"raw":[...],"frequency":38000}` (on/off durations in **10 µs** units).
 
@@ -89,55 +89,77 @@ python3 ~/.tvbox/firetv_remote_ir.py program --dry-run         # compile + print
 ```
 
 Start with `blast`: it uses Fire OS's _InstantFire_ path to emit a code on the
-spot without touching the physical keys — point the remote at the TV; if it
+spot without touching the physical keys - point the remote at the TV; if it
 reacts, your code + timing are right. Then `program` makes it stick.
 
 To check on the real remote: BlueZ usually negotiates a large ATT MTU (needed for
 the 200-byte chunk writes) automatically; whether the keymap survives the
-remote's deep sleep / re-pairing is remote-firmware-dependent — verify.
+remote's deep sleep / re-pairing is remote-firmware-dependent - verify.
 
 Shell plumbing for the UI flow is `shell/firetvir.js` (venv + irdb fetch/cache +
 BLE tool runner); endpoints under `/tvbox/api/firetvir/*`.
 
-## 2. App buttons → apps (or anything)
+## 2. App buttons (Netflix / Prime / …) → any action
 
-The app buttons send vendor HID usages the Pi kernel maps to `KEY_UNKNOWN` (all
-alike) or nothing, so they can't be told apart. Fix in three steps:
+The dedicated app buttons don't arrive as normal keys: they're an Amazon
+**vendor HID report** the Linux kernel maps to no keycode at all, so they never
+reach evdev (the button test / learn mode can't see them). The hamburger and
+app-switcher style buttons are similar: their consumer-report usage reaches
+evdev only as `KEY_UNKNOWN` (the same code 240 for all of them, useless). But
+they all DO show up on the remote's **hidraw** node:
 
-**a. See what they emit** (member of `input` group, no root):
-
-```sh
-python3 ~/.tvbox/firetv_hid_probe.py     # press each app button; note scancodes + hwdb lines
+```
+ef a1 00 00 00   # report 0xEF: vendor app buttons (byte[1] = code, 0x00 = release)
+02 33 00 00 00   # report 0x02: consumer buttons (0x33 hamburger, 0x02 app switcher)
+01 4f 00 00      # report 0x01: mirrors the NORMAL keys - ignored (evdev has them)
 ```
 
-It prints the remote's input nodes and, per button, the raw HID `scancode` and
-the key code the kernel produced, plus ready-to-paste `hwdb` lines.
+(Observed on an AFTKA-era remote: 0xA1..0xA4 for the four app buttons; other
+generations use other bytes - the bridge doesn't care which.)
 
-**b. Remap the scancodes to distinct keys** — install the printed block as
-`/etc/udev/hwdb.d/70-tvbox-firetv-remote.hwdb`, then:
+The remote bridge reads that hidraw node directly and injects a virtual
+keycode (a per-report band + the raw byte: 0xEF at 0x300, 0x02 at 0x400, above
+KEY_MAX so it can never collide with a real key) into the SAME per-device
+remap pipeline, so EVERY such button, whatever byte it sends, becomes
+learnable/mappable like any other button:
+**Settings → Peripherals → (remote) → learn a button → pick an action** (launch
+any installed app, `settings`, `appswitcher`, `power`, media/nav, …).
 
-```sh
-sudo systemd-hwdb update && sudo udevadm trigger
-```
+No hwdb, no `captureAllNodes`, no per-box setup: `provision.sh` grants the
+`input` group read on Amazon-VID (0x0171) remotes' hidraw
+(`SUBSYSTEM=="hidraw", KERNELS=="0005:0171:*"`), and the bridge auto-detects the
+node by the remote's MAC. Without the grant the feature is simply inert.
 
-(One-time root setup, like `provision.sh`; not a runtime path. OTA boxes without
-SSH can't do this — it needs a provisioned/dev box.)
+Debug (see EVERYTHING the bridge receives, raw: every evdev key event incl.
+dropped KEY_UNKNOWNs and every hidraw report before filtering): set
+`TVBOX_HIDRAW_DEBUG=1` in the `tvbox-remote` service environment (drop-in:
+`systemctl --user edit tvbox-remote`, `[Service]` /
+`Environment=TVBOX_HIDRAW_DEBUG=1`) and watch `journalctl --user -u
+tvbox-remote -f`. A button that logs nothing on either path doesn't reach the
+box at all (IR-only key or a different BLE service). Ad-hoc (bridge stopped):
+`sudo cat /dev/hidrawN | xxd`.
 
-**c. Grab the app-button node + map it.** App buttons usually sit on a separate
-HID "Consumer Control" node that has no nav keys, so the remote bridge ignores it
-by default. Turn on capture of a managed remote's other nodes — in
-`~/.tvbox/config.json`:
+> Note: the older `firetv_hid_probe.py` (hwdb approach) and
+> `config.remote.captureAllNodes` are kept for other remotes whose extra
+> buttons DO reach evdev, but Amazon app buttons need the hidraw path above.
 
-```json
-{ "remote": { "captureAllNodes": true } }
-```
+## 3. If a remap goes wrong
 
-then `echo reload > /tmp/tvbox-remote-cmd` (or restart `tvbox-remote`). Now the
-app buttons flow through the normal per-device pipeline: **Settings → Peripherals
-→ (remote) → learn a button → pick an action** — including "launch <app>" for any
-installed app, `settings`, `appswitcher`, `power`, or any nav/media key. Off by
-default so existing remotes are untouched; pointer/trackpad nodes are never
-grabbed.
+Remapping is per-device and only overrides the buttons you teach, but you can
+still paint yourself into a corner (e.g. reassign the arrows). Recovery, in
+order:
 
-If a button still shows nothing in the probe, stop the bridge first
-(`systemctl --user stop tvbox-remote`) so its grab doesn't hide it, then re-probe.
+- The **TV's own remote over HDMI-CEC is never remapped** - it always drives
+  the menu, so you can fix the BT remote from there.
+- **Settings → Peripherals → (remote) → "Reset this remote's buttons"** clears
+  all of that remote's remapping.
+- **Panic gesture:** hammer the SAME (remapped) button 8 times rapidly (under
+  0.4s between taps) on the misbehaving remote; the bridge detects the raw
+  taps (before the remap) and resets that remote, even when every button is
+  reassigned. Only buttons remapped to non-repeat-prone actions count (volume,
+  arrows, seek, prev/next and app-cycling are exempt), so normal fast tapping
+  can never wipe a config.
+
+When learning, an already-assigned button prompts a confirm before it's
+reassigned, and the learn modal auto-cancels after 10s (or Cancel/Back with
+another remote).

@@ -112,6 +112,86 @@ IR_REPEAT_S = 0.3  # min gap between sends while a volume key autorepeats
 SPECIAL_ACTIONS = ("power", "settings", "appswitcher")
 APP_ACTION_RE = re.compile(r"^app:[a-z0-9_-]{1,32}$")
 NAV_URL = "http://127.0.0.1:8097/tvbox/api/nav"
+RESET_URL = "http://127.0.0.1:8097/tvbox/api/remote/reset"
+
+# Learn mode arms in reaction to a UI press (Enter on the learn row), over
+# HTTP + FIFO - so the tail of that same interaction (a fast double-press, a
+# late autorepeat) can still be in flight when we arm. Captures inside this
+# window would bind the wrong button, so they are swallowed but NOT captured.
+LEARN_ARM_DELAY_S = 0.3
+# Safety net: learn mode swallows the whole remote, and after a capture it
+# stays armed until the shell's learn-off. If the shell dies mid-learn that
+# learn-off never comes - auto-disarm so a remote can never stay eaten. Longer
+# than the UI's own 10s learn timeout.
+LEARN_TIMEOUT_S = 15.0
+
+# Panic recovery: if a remote gets remapped so badly the user can't navigate the
+# menu to fix it, hammering the SAME physical button PANIC_TAPS times (each tap
+# within PANIC_GAP_S of the previous) resets THAT remote's remapping. Detected
+# on the RAW incoming code, but only for codes that ARE remapped on that device
+# (an unmapped button already works) AND whose action isn't one that normal use
+# legitimately hammers - volume pumping, tap-scrolling a list, seek-stepping,
+# app-cycling must never wipe a config. A stuck remote virtually always has a
+# non-repeat-prone action (ok/back/home/settings/...) remapped somewhere to
+# hammer; failing that, the TV's CEC remote and the on-screen reset remain.
+PANIC_TAPS = 8
+PANIC_GAP_S = 0.4
+PANIC_EXEMPT_ACTIONS = frozenset(
+    ("up", "down", "left", "right", "volume_up", "volume_down",
+     "rewind", "fastforward", "prev", "next", "appswitcher")
+)
+
+# Fire TV / Alexa remotes send several buttons as HID reports that a generic
+# kernel maps to no usable key, so they never reach evdev (or only as the
+# indistinguishable KEY_UNKNOWN, which handle() drops) - the button test can't
+# see them. We read them straight from the remote's hidraw node and inject a
+# VIRTUAL keycode: a per-report-id base + the raw code byte, bands above
+# KEY_MAX (0x2ff) that can never collide with a real evdev key yet stay under
+# the shell config's 2048 code cap. So EVERY such button, whatever byte it
+# sends, flows through the SAME per-device remap/learn pipeline (nothing is
+# hardcoded per button; the set varies by remote generation). Virtual codes
+# are never written to uinput: unmapped ones do nothing (exactly as without
+# the bridge), mapped ones emit their action's canonical key.
+#
+# Report ids (observed on an AFTKA-era "AR" remote):
+#   0xEF - vendor app buttons (Netflix / Prime / Disney+ / Music): byte[1] =
+#          button code (0xA1..), 0x00 = release
+#   0x02 - consumer-control report carrying the hamburger / app-switcher
+#          style buttons (evdev shows them only as KEY_UNKNOWN): byte[1] =
+#          code (e.g. 0x33 hamburger, 0x02 app switcher), 0x00 = release
+#   0x01 - mirrors the ordinary keyboard keys evdev already delivers: MUST
+#          stay ignored or every arrow press would fire twice
+#
+# Reading hidraw needs the udev grant provision.sh adds for Amazon-VID
+# (0x0171) remotes; without it the feature is simply inert (the open fails
+# and is skipped).
+APP_BTN_REPORTS = {0xEF: 0x300, 0x02: 0x400}  # report id -> virtual code base
+APP_BTN_VIRT_BASE = 0x300  # floor of the virtual bands
+
+
+def hidraw_nodes_for(remote_ids):
+    """{ /dev/hidrawN: canonical_id } for hidraw nodes whose remote (sysfs
+    HID_UNIQ) is a currently-managed remote. `remote_ids` maps lowercased id ->
+    the CANONICAL evdev id: the match is case-insensitive (BlueZ formats BLE
+    uniq case differently across stacks) but dispatch must use the exact same
+    id as the evdev path, or learn/keymap lookups silently never match. Only
+    Amazon-VID nodes are actually openable (the provision udev grant), so
+    other remotes are skipped naturally."""
+    out = {}
+    try:
+        names = os.listdir("/sys/class/hidraw")
+    except OSError:
+        return out
+    for name in names:
+        try:
+            with open("/sys/class/hidraw/%s/device/uevent" % name) as f:
+                info = dict(l.split("=", 1) for l in f.read().splitlines() if "=" in l)
+        except OSError:
+            continue
+        mac = (info.get("HID_UNIQ") or "").strip().lower()
+        if mac and mac in remote_ids:
+            out["/dev/" + name] = remote_ids[mac]
+    return out
 
 # Only manage things that are actually remotes/keyboards: they must expose at
 # least one of these navigation/select keys. This skips pure pointers, the HDMI
@@ -123,6 +203,21 @@ EXCLUDE_EXACT = {OUT_NAME, "tvbox-cec-remote", "pwr_button"}
 
 def log(*a):
     print("[remote-bridge]", *a, file=sys.stderr, flush=True)
+
+
+# TVBOX_HIDRAW_DEBUG=1 (service drop-in / env): log EVERY raw input the bridge
+# receives - each evdev key event (incl. the KEY_UNKNOWNs we drop) and each raw
+# hidraw report, before any filtering. This is THE tool to find out what a
+# stubborn button actually sends (or that it sends nothing at all).
+INPUT_DEBUG = bool(os.environ.get("TVBOX_HIDRAW_DEBUG"))
+
+
+def key_name(code):
+    if code >= 0x400:
+        return "CC_%02X" % (code - 0x400)  # hidraw consumer-report button (virtual code)
+    if code >= APP_BTN_VIRT_BASE:
+        return "APP_%02X" % (code - APP_BTN_VIRT_BASE)  # hidraw app button (virtual code)
+    return next((n for n, c in vars(e).items() if n.startswith("KEY_") and c == code), str(code))
 
 
 # The kernel splits a composite HID remote into one input node per collection
@@ -279,6 +374,7 @@ def poweroff_box():
 class Bridge:
     def __init__(self):
         self.devices = {}  # path -> InputDevice (grabbed)
+        self.hidraws = {}  # fd -> {path, mac, last} for Fire TV app-button reports
         self.keymaps = load_keymaps()
         self.power = load_power()
         self.ir_actions = load_ir_actions()
@@ -291,10 +387,20 @@ class Bridge:
         self.post_q = queue.Queue(maxsize=8)
         self._ir_last = 0.0  # last IR enqueue, for the autorepeat throttle
         self._power_last = 0.0  # last power action, for the debounce
+        self._panic = {}  # did -> [code, count, first_ts] for the reset gesture
         threading.Thread(target=self._post_worker, daemon=True).start()
         self.ui = None
         self.ui_keys = set()
         self.learning = None  # device_id we're capturing a button for
+        self.learning_since = 0.0  # when learn mode was armed (monotonic)
+        self.captured = False  # a button was captured; keep swallowing until learn-off
+        # (did, raw_code) -> out_code emitted at press time (None = press was
+        # swallowed). Releases MUST mirror their press even into learn mode: the
+        # Enter that STARTS a learn is pressed before we arm but released after,
+        # and swallowing that release leaves the compositor with a stuck key -
+        # Chromium then autorepeats Enter forever, "pressing" whatever gets
+        # focus (this is exactly the bug that re-armed learn every 10s).
+        self.held = {}
         # Last content written to remote-devices.json; seed from disk so a
         # restart with an unchanged device set writes nothing. write_devices()
         # (called from rescan() every 2s) only rewrites when this changes -
@@ -365,8 +471,37 @@ class Bridge:
         for path in list(self.devices):
             if path not in seen:
                 self.drop(path)
+        # Fire TV app-button hidraw nodes: open the ones belonging to a managed
+        # remote (Amazon-VID, so the udev grant lets us read), close the gone
+        # ones. Failure to open (no grant / not Amazon) is silent - inert.
+        want = hidraw_nodes_for({r.lower(): r for r in remote_ids})
+        have = {h["path"] for h in self.hidraws.values()}
+        for path, mac in want.items():
+            if path in have:
+                continue
+            try:
+                fd = os.open(path, os.O_RDONLY | os.O_NONBLOCK)
+            except OSError:
+                continue
+            self.hidraws[fd] = {"path": path, "mac": mac, "down": set()}
+            log("hidraw app-buttons on", path, "for", mac)
+        for fd in list(self.hidraws):
+            if self.hidraws[fd]["path"] not in want:
+                self.drop_hidraw(fd)
         self.ensure_uinput()
         self.write_devices()
+
+    def drop_hidraw(self, fd):
+        h = self.hidraws.pop(fd, None)
+        if not h:
+            return
+        try:
+            os.close(fd)
+        except OSError:
+            pass
+        for vk in sorted(h["down"]):  # never leave a vanished remote's button held
+            self.dispatch(h["mac"], vk, 0)
+        log("dropped hidraw", h["path"])
 
     def drop(self, path):
         dev = self.devices.pop(path, None)
@@ -380,6 +515,14 @@ class Bridge:
             dev.close()
         except Exception:
             pass
+        # A remote that vanishes mid-press (BT sleep) never sends its release -
+        # close out anything we still hold down for it, or the compositor keeps
+        # autorepeating that key until the remote comes back.
+        did = dev_key(dev)
+        for k in [k for k in self.held if k[0] == did]:
+            out = self.held.pop(k)
+            if out is not None:
+                self.emit(out, 0)
         log("dropped", path)
 
     def write_devices(self):
@@ -408,39 +551,125 @@ class Bridge:
             self.write_devices()
             return
         did = dev_key(dev)
-        code2action = self.keymaps.get(did, {})
         for ev in events:
             if ev.type != e.EV_KEY:
                 continue  # only remap keys; pointer/misc are grabbed away (remotes don't use them)
-            if self.learning and did == self.learning and ev.value == 1:
-                self.capture(did, dev, ev.code)
-                continue  # swallow the learned press
-            action = code2action.get(ev.code)
-            if action and (action in SPECIAL_ACTIONS or action.startswith("app:")):
-                # box behavior instead of a key (TV power toggle / open
-                # Settings / launch app): fire on press, swallow press+repeat+release
-                if ev.value == 1:
-                    self.do_special(action)
+            if INPUT_DEBUG:
+                log("evdev", did, dev.name, key_name(ev.code), "code", ev.code, "value", ev.value)
+            if ev.code == e.KEY_UNKNOWN:
+                # A Fire TV remote's vendor app buttons ALSO surface on this
+                # keyboard node as KEY_UNKNOWN (240) - the SAME code for all of
+                # them, so it's useless (indistinguishable) and would race the
+                # real per-button signal we read from hidraw (handle_hidraw).
+                # Drop it: KEY_UNKNOWN is never a mappable key.
                 continue
-            out_code = ACTION_KEY[action] if action else ev.code
-            if IR_KEY_ACTION.get(out_code) in self.ir_actions and did not in self.ir_passthrough:
-                # volume key (native or remapped) -> TV volume over the IR
-                # blaster; swallowed like KEY_POWER, never reaches the OS.
-                # (irPassthrough devices blast the TV with their OWN IR - a
-                # programmed Fire TV remote - so diverting too would double it.)
-                self.ir_press(IR_KEY_ACTION[out_code], ev.value)
-                continue
-            if action:
-                self.emit(out_code, ev.value)  # remapped -> canonical key
-                continue
-            if ev.code == e.KEY_POWER:
-                # The remote's Power button reaches us over BT as KEY_POWER; never
-                # pass it to the system (logind would power the box off). Act per
-                # the configured policy and swallow it.
-                if ev.value == 1:
-                    self.do_power()
-                continue
-            self.emit(ev.code, ev.value)  # unmapped -> pass through unchanged
+            self.dispatch(did, ev.code, ev.value)
+
+    def handle_hidraw(self, fd):
+        """A Fire TV remote's extra-button reports (APP_BTN_REPORTS): byte[1]
+        is the button code, 0x00 is the release. ANY nonzero byte becomes a
+        virtual keycode in the SAME remap pipeline, so every such button is
+        learnable/mappable - no per-button hardcoding. Presses can overlap and
+        a 0x00 report doesn't say which button it was, so it closes out ALL
+        held ones from that report's band."""
+        h = self.hidraws.get(fd)
+        if not h:
+            return
+        try:
+            data = os.read(fd, 64)
+        except OSError:
+            self.drop_hidraw(fd)  # disconnected mid-read
+            return
+        if not data:
+            return
+        if INPUT_DEBUG:
+            log("hidraw", h["path"], "report", " ".join("%02x" % b for b in data))
+        if len(data) < 2:
+            return
+        base = APP_BTN_REPORTS.get(data[0])
+        if base is None:
+            return
+        code = data[1] | ((data[2] << 8) if len(data) > 2 else 0)
+        if code == 0x00:
+            for vk in sorted(vk for vk in h["down"] if base <= vk < base + 0x100):
+                h["down"].discard(vk)
+                self.dispatch(h["mac"], vk, 0)
+            return
+        if code > 0xFF:
+            # a 16-bit code would collide across bytes when folded - surface it
+            # instead of guessing (never seen; the debug flag shows the raw report)
+            log("hidraw %02x: 16-bit code %04x ignored" % (data[0], code))
+            return
+        vk = base + code
+        if vk in h["down"]:
+            return  # repeated press report while held
+        h["down"].add(vk)
+        self.dispatch(h["mac"], vk, 1)
+
+    def dispatch(self, did, code, value):
+        """One remap decision for a (device, keycode, value), shared by the evdev
+        and hidraw sources: learn-capture / special+app action / IR volume /
+        remap-emit / power / pass-through."""
+        if value != 1 and (did, code) in self.held:
+            # A release/repeat always mirrors its press, no matter what mode we
+            # are in NOW: if the press was emitted, emit the release (else the
+            # compositor is left with a stuck, forever-autorepeating key) and
+            # the repeats; if the press was swallowed (learn capture), swallow
+            # them too - a held volume key must not keep ramping the TV over IR
+            # after its press was captured.
+            out = self.held.pop((did, code)) if value == 0 else self.held[(did, code)]
+            if out is not None:
+                self.emit(out, value)
+            return
+        if value == 1 and self.panic_tap(did, code):
+            return  # the reset gesture completed - swallow this final tap
+        code2action = self.keymaps.get(did, {})
+        if self.learning and did == self.learning:
+            # In learn mode for THIS remote every event is swallowed (press,
+            # repeat AND release) so an already-mapped button can't fire its
+            # action mid-learn. Only the FIRST press is captured - learn stays
+            # armed (still swallowing) until the shell's learn-off, so the
+            # user's "did it register?" second press can't drive the UI behind
+            # the modal - and only after the arm dead-time, so the tail of the
+            # UI interaction that STARTED the learn (a fast double-press of
+            # Enter) can't self-bind.
+            if value == 1:
+                self.held[(did, code)] = None  # swallow this press's release too
+                if not self.captured and time.monotonic() - self.learning_since >= LEARN_ARM_DELAY_S:
+                    self.capture(did, code)
+            return
+        action = code2action.get(code)
+        if action and (action in SPECIAL_ACTIONS or action.startswith("app:")):
+            # box behavior instead of a key (TV power toggle / open Settings /
+            # launch app / app switch): fire on press, swallow repeat+release
+            if value == 1:
+                self.do_special(action)
+            return
+        out_code = ACTION_KEY[action] if action else code
+        if IR_KEY_ACTION.get(out_code) in self.ir_actions and did not in self.ir_passthrough:
+            # volume key (native or remapped) -> TV volume over the IR blaster;
+            # swallowed like KEY_POWER, never reaches the OS. (irPassthrough
+            # devices blast the TV with their OWN IR - a programmed Fire TV
+            # remote - so diverting too would double it.)
+            self.ir_press(IR_KEY_ACTION[out_code], value)
+            return
+        if action:
+            if value == 1:
+                self.held[(did, code)] = out_code
+            self.emit(out_code, value)  # remapped -> canonical key
+            return
+        if code == e.KEY_POWER:
+            # The remote's Power button reaches us over BT as KEY_POWER; never
+            # pass it to the system (logind would power the box off). Act per the
+            # configured policy and swallow it.
+            if value == 1:
+                self.do_power()
+            return
+        if code >= APP_BTN_VIRT_BASE:
+            return  # unmapped virtual app button - hidraw-only, nothing to emit
+        if value == 1:
+            self.held[(did, code)] = code
+        self.emit(code, value)  # unmapped -> pass through unchanged
 
     def emit(self, code, value):
         try:
@@ -448,6 +677,39 @@ class Bridge:
             self.ui.syn()
         except Exception as ex:
             log("emit failed", code, ex)
+
+    def panic_tap(self, did, code):
+        """Count deliberate hammering of the SAME raw button on one remote; on
+        the PANIC_TAPS-th press (each within PANIC_GAP_S of the previous) reset
+        that remote's remapping via the shell, so a user who remapped themselves
+        into a corner can recover without navigating the menu. Only counts
+        buttons that are remapped on this device (an unmapped one already
+        works), never while this remote is being learned, and never for
+        actions normal use legitimately hammers (PANIC_EXEMPT_ACTIONS).
+        Returns True once it fires."""
+        action = self.keymaps.get(did, {}).get(code)
+        if (
+            self.learning == did
+            or action is None
+            or action in PANIC_EXEMPT_ACTIONS
+            or action.startswith("app:")
+        ):
+            self._panic.pop(did, None)
+            return False
+        now = time.monotonic()
+        st = self._panic.get(did)  # [code, count, last_tap_ts]
+        if st and st[0] == code and now - st[2] <= PANIC_GAP_S:
+            st[1] += 1
+            st[2] = now
+        else:
+            st = [code, 1, now]
+            self._panic[did] = st
+        if st[1] >= PANIC_TAPS:
+            self._panic.pop(did, None)
+            log("panic reset gesture on", did)
+            self.shell_post(RESET_URL, {"id": did})
+            return True
+        return False
 
     def do_power(self):
         # Debounce: a TV takes seconds to visibly react to a power change, and a
@@ -504,13 +766,16 @@ class Bridge:
             except Exception as ex:  # shell down / blaster unreachable
                 log("shell call failed:", url, payload, ex)
 
-    def capture(self, did, dev, code):
-        name = next((n for n, c in vars(e).items() if n.startswith("KEY_") and c == code), str(code))
+    def capture(self, did, code):
+        name = key_name(code)
         tmp = LEARNED_OUT + ".tmp"
         with open(tmp, "w") as f:
             json.dump({"id": did, "code": code, "name": name, "ts": int(time.time())}, f)
         os.replace(tmp, LEARNED_OUT)
-        self.learning = None
+        # learn stays ARMED (captured=True keeps further presses swallowed but
+        # uncaptured) until the shell's learn-off / the safety timeout - the
+        # remote must not drive the UI in the gap before the shell polls this.
+        self.captured = True
         log("learned", did, code, name)
 
     # ---- control FIFO from the shell ----
@@ -532,6 +797,8 @@ class Bridge:
                    sorted(self.ir_passthrough) or "-", self.capture_all_nodes))
         elif line.startswith("learn ") and len(line) > 6:
             self.learning = line[6:].strip()
+            self.learning_since = time.monotonic()
+            self.captured = False
             try:
                 os.remove(LEARNED_OUT)
             except OSError:
@@ -539,6 +806,7 @@ class Bridge:
             log("learn mode:", self.learning)
         elif line == "learn-off":
             self.learning = None
+            self.captured = False
 
 
 def open_fifo():
@@ -569,7 +837,7 @@ def main():
     buf = b""
     last_rescan = time.time()
     while True:
-        fds = [d.fd for d in bridge.devices.values()] + [fifo]
+        fds = [d.fd for d in bridge.devices.values()] + list(bridge.hidraws) + [fifo]
         r, _, _ = select.select(fds, [], [], 2.0)
         for fd in r:
             if fd == fifo:
@@ -580,6 +848,8 @@ def main():
                 while b"\n" in buf:
                     line, buf = buf.split(b"\n", 1)
                     bridge.command(line.decode("utf-8", "replace"))
+            elif fd in bridge.hidraws:
+                bridge.handle_hidraw(fd)
             else:
                 dev = next((d for d in bridge.devices.values() if d.fd == fd), None)
                 if dev:
@@ -588,6 +858,11 @@ def main():
         if time.time() - last_rescan > 2.0:
             bridge.rescan()
             last_rescan = time.time()
+        # Learn-mode safety timeout (see LEARN_TIMEOUT_S).
+        if bridge.learning and time.monotonic() - bridge.learning_since > LEARN_TIMEOUT_S:
+            bridge.learning = None
+            bridge.captured = False
+            log("learn mode timed out")
 
 
 if __name__ == "__main__":

@@ -592,6 +592,24 @@ function handlePost(p, data, res) {
     remoteBridgeCmd("learn-off");
     return jsonRes(res, { ok: true });
   }
+  if (p === "/tvbox/api/remote/reset") {
+    // Clear one remote's remapping (id) or ALL (no id) and reload the bridge.
+    // Called by the UI "reset" button and by the bridge's panic gesture (a user
+    // who remapped nav away and can't reach this menu with that remote).
+    // irPassthrough survives a reset: it describes the remote's own programmed
+    // IR hardware, not a button mapping - dropping it would make the bridge
+    // divert volume AGAIN on top of the remote's own IR (double steps).
+    const id = String((data && data.id) || "").trim();
+    const cur = config.rawRemote() || {};
+    const devices = {};
+    for (const [k, v] of Object.entries(cur.devices || {})) {
+      if (id && k !== id) devices[k] = v;
+      else if (v && v.irPassthrough) devices[k] = { name: v.name, keymap: {}, irPassthrough: true };
+    }
+    config.setRemote({ devices });
+    remoteBridgeCmd("reload");
+    return jsonRes(res, { ok: true, cleared: id || "all" });
+  }
   if (p === "/tvbox/api/parental/verify") {
     return jsonRes(res, { ok: config.verifyPin(String(data.pin || "")) });
   }

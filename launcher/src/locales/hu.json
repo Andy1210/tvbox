@@ -141,7 +141,6 @@
     "title": "Távirányító gombok",
     "hint": "A szokásos távirányítók (nyilak / OK / Vissza / Kezdőképernyő) alapból működnek. Egy másik gomb betanításához válaszd ki alatta a műveletet, majd nyomd meg a kívánt gombot a távirányítón. Minden távirányító külön állítható.",
     "none": "Nincs csatlakoztatott távirányító - előbb párosíts vagy ébressz fel egyet.",
-    "press": "Nyomj meg egy gombot…",
     "custom": "egyéni",
     "default": "alapértelmezett",
     "clear": "Törlés",
@@ -179,7 +178,15 @@
     "testBadge": "mit küldenek a gombok?",
     "testHint": "Nyomkodd a távirányító gombjait - mindegyik megjelenik itt a küldött billentyűvel. 12 mp gombnyomás nélkül magától kilép.",
     "testNone": "Még nincs elkapott gomb...",
-    "testStop": "Leállítás"
+    "testStop": "Leállítás",
+    "cancel": "Mégse",
+    "resetDevice": "A távirányító gombjainak visszaállítása",
+    "reassignTitle": "A gomb már hozzá van rendelve",
+    "reassignBody": "Ez a gomb már a(z) „{from}” művelethez tartozik. Átrendeled a(z) „{to}” művelethez?",
+    "reassignConfirm": "Átrendelés",
+    "learnTitle": "Gomb hozzárendelése: „{action}”",
+    "learnBody": "Irányítsd a(z) {remote} távirányítót a boxra, és nyomd meg azt a gombot, amit ehhez használni szeretnél.",
+    "learnWarn": "Ezen a távirányítón minden gombnyomás rögzül, még egy nyíl is. A Mégse egy másik távirányítóval (pl. a TV távjával) nyomható, vagy kb. 10 mp után magától megszakad."
   },
   "appsettings": {
     "title": "Alkalmazások",

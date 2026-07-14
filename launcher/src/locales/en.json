@@ -141,7 +141,6 @@
     "title": "Remote buttons",
     "hint": "Standard remotes (arrows / OK / Back / Home) work as-is. To teach a remote another button, pick an action under it and press that button on the remote. Each remote is remapped on its own.",
     "none": "No remotes connected - pair or wake one first.",
-    "press": "Press a button…",
     "custom": "custom",
     "default": "default",
     "clear": "Clear",
@@ -179,7 +178,15 @@
     "testBadge": "what does each button send?",
     "testHint": "Press buttons on this remote - each one shows up here with the key it sends. Exits by itself after 12 seconds without a press.",
     "testNone": "No button captured yet...",
-    "testStop": "Stop"
+    "testStop": "Stop",
+    "cancel": "Cancel",
+    "resetDevice": "Reset this remote's buttons",
+    "reassignTitle": "Button already mapped",
+    "reassignBody": "That button is already assigned to “{from}”. Reassign it to “{to}”?",
+    "reassignConfirm": "Reassign",
+    "learnTitle": "Assign a button to “{action}”",
+    "learnBody": "Point the {remote} at the box and press the button you want to use for this.",
+    "learnWarn": "Every press on this remote gets recorded, even an arrow. Cancel with a different remote (e.g. the TV's own), or it times out after about 10s."
   },
   "appsettings": {
     "title": "Apps",
