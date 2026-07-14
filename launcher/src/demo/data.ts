@@ -159,7 +159,7 @@ export const DISPLAY: DisplayInfo = {
 };
 
 export const SYSTEM_INFO: SystemInfo = {
-  version: "1.6.0",
+  version: "1.7.0",
   hostname: "tvbox-demo",
   model: "Raspberry Pi 5 Model B Rev 1.0",
   ip: "192.168.1.50",
@@ -171,16 +171,16 @@ export const SYSTEM_INFO: SystemInfo = {
 };
 
 export const UPDATE_STATUS: UpdateStatus = {
-  current: "1.6.0",
-  release: "versions/1.6.0",
+  current: "1.7.0",
+  release: "versions/1.7.0",
   state: "idle",
   error: null,
-  latest: { version: "1.6.0", notes: null },
+  latest: { version: "1.7.0", notes: null },
   available: false,
   lastCheckAt: null,
   auto: true,
   failed: null,
-  last: { from: "1.5.1", to: "1.6.0", at: Date.now() - 3 * 24 * 3600 * 1000 },
+  last: { from: "1.5.1", to: "1.7.0", at: Date.now() - 3 * 24 * 3600 * 1000 },
   os: { rebootRequired: false, packages: [] },
 };
 

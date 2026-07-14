@@ -5,6 +5,20 @@ updates). `scripts/make-release.sh` lifts the current version's `hu`/`en`
 blocks into the OTA feed's `notes` - keep both languages, keep it short, and
 write for the person on the couch (what changes for THEM), not for developers.
 
+## 1.7.0
+
+### hu
+
+- A Fire TV távirányító minden gombja betanítható, az app-gombok (Netflix, Prime), a hamburger és az appváltó gomb is: tehetsz rájuk app-indítást, Beállításokat, TV ki/be kapcsolást vagy appváltást.
+- A gombtanítás rendbe jött: teljes képernyős ablakban zajlik, a gombok elsőre rögzülnek, a felület nem ugrál össze közben, és a betanított gomb azonnal meg is jelenik a listában.
+- A vészhelyzeti visszaállítás (ugyanaz a gomb 8-szor gyorsan) csak átkötött gombra érvényes, így pl. hangerő-nyomkodás közben nem törlődhet véletlenül a kiosztás.
+
+### en
+
+- Every button on a Fire TV remote can now be taught, including the app buttons (Netflix, Prime), the hamburger and the app-switcher button: put an app launch, Settings, TV power or app switching on any of them.
+- Button learning got solid: it runs in a full-screen dialog, presses register on the first try, the screen no longer jumps around while teaching, and a taught button shows up in the list immediately.
+- The emergency reset (same button 8 times fast) now only counts remapped buttons, so mashing volume can never wipe your setup by accident.
+
 ## 1.6.0
 
 ### hu

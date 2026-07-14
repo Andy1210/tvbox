@@ -239,9 +239,13 @@ out of the box.
 Because a remote can send its own button codes, the layout is **remappable
 per-device** from the TV: **Settings → Peripherals** lists each connected
 remote, and a _learn_ mode captures the next button you press and binds it to an
-action - remapping one remote never touches another. A **button test** mode
-shows live what key each button sends, so you can see what a remote actually
-emits before binding anything. The **Power** button is configurable (turn the
+action - remapping one remote never touches another. On Fire TV / Alexa
+remotes this includes the buttons that don't arrive as normal keys at all: the
+dedicated app buttons (Netflix, Prime, ...), the hamburger and the app-switcher
+button are read from the remote's raw HID reports and are just as teachable
+(see [docs/firetv-remote-ir.md](docs/firetv-remote-ir.md)). A **button test**
+mode shows live what key each button sends, so you can see what a remote
+actually emits before binding anything. The **Power** button is configurable (turn the
 TV off over CEC, also power the box off, or ignore); it's always intercepted by
 the bridge so it can't accidentally power the box down.
 
