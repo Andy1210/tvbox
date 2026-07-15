@@ -174,6 +174,10 @@ async function guardedFetch(url, init, impl) {
     const res = await doFetch(target, { ...opts, redirect: "manual" });
     const loc = res.status >= 300 && res.status < 400 && res.headers && res.headers.get("location");
     if (!loc) return res;
+    // release the intermediate redirect body before the next hop (or before
+    // throwing) so undici doesn't keep the connection/stream open until GC -
+    // appfetch.realTransport drains its redirect responses for the same reason.
+    if (res.body) await res.body.cancel().catch(() => {});
     if (hop >= maxRedirects) throw new Error("too many redirects");
     target = new URL(loc, target).toString();
   }

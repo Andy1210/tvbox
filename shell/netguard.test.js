@@ -21,9 +21,15 @@ function fakeFetch(routes) {
       status,
       ok: status >= 200 && status < 300, // mirror real Response.ok (2xx only), not < 400
       headers: { get: (n) => (String(n).toLowerCase() === "location" ? location : null) },
+      body: {
+        cancel: async () => {
+          impl.cancels++;
+        },
+      },
     };
   };
   impl.calls = [];
+  impl.cancels = 0; // how many intermediate redirect bodies were released
   return impl;
 }
 
@@ -55,6 +61,7 @@ test("guardedFetch: follows allowed https redirects to the final response", asyn
     impl.calls.map((c) => c.redirect),
     ["manual", "manual"],
   );
+  assert.equal(impl.cancels, 1); // the 302 body was released; the final 200 body is left for the caller
 });
 
 test("guardedFetch: rejects a redirect onto a public http host", async () => {
