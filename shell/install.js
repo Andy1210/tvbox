@@ -275,10 +275,15 @@ function installDownload(entry, log) {
   try {
     const archive = path.join(tmp, "dl");
     log("download " + spec.url + " …");
-    // bounded: a stalled fetch must not hang the install (leaving the tile stuck)
-    execFileSync("curl", ["-fsSL", "--connect-timeout", "20", "--max-time", "600", spec.url, "-o", archive], {
-      stdio: "inherit",
-    });
+    // bounded: a stalled fetch must not hang the install (leaving the tile stuck).
+    // --proto-redir =https: spec.url is https, but -L would otherwise follow a
+    // redirect down to http - keep redirects https too (github's release
+    // redirects are https->https, so this doesn't break real downloads).
+    execFileSync(
+      "curl",
+      ["-fsSL", "--proto-redir", "=https", "--connect-timeout", "20", "--max-time", "600", spec.url, "-o", archive],
+      { stdio: "inherit" },
+    );
     const sum = crypto.createHash("sha256").update(fs.readFileSync(archive)).digest("hex");
     if (sum !== spec.sha256.toLowerCase()) throw new Error(bin + ": sha256 mismatch (got " + sum + ")");
     let src = archive;
@@ -470,7 +475,11 @@ function acquireSource(source, log) {
     const isZip = /\.zip$/i.test(source.url);
     const file = path.join(tmp, isZip ? "src.zip" : "src.tar.gz");
     log("download " + source.url + " …");
-    execFileSync("curl", ["-fsSL", source.url, "-o", file], { stdio: "inherit" });
+    // --proto-redir =https: block a redirect from downgrading to http (the
+    // sha256 pin here is optional, so a downgraded/redirected fetch could hand
+    // us arbitrary bundle bytes). Only redirects are constrained - a direct
+    // https or LAN-http source still downloads fine.
+    execFileSync("curl", ["-fsSL", "--proto-redir", "=https", source.url, "-o", file], { stdio: "inherit" });
     if (source.sha256) {
       const sum = crypto.createHash("sha256").update(fs.readFileSync(file)).digest("hex");
       if (sum !== source.sha256.toLowerCase()) throw new Error("url source sha256 mismatch (got " + sum + ")");
