@@ -155,9 +155,18 @@ async function guardedFetch(url, init, impl) {
   delete opts.maxRedirects;
   delete opts.allow;
   let target = String(url);
-  const noDowngrade = /^https:\/\//i.test(target); // an https chain may not drop to http on any hop
-  const allowed = (u) =>
-    isAllowedFetchUrl(u) && (!noDowngrade || /^https:\/\//i.test(u)) && (!extraAllow || extraAllow(u));
+  // Scheme from the URL parser, not a "https://" prefix test: WHATWG normalizes
+  // scheme-relative forms like "https:example.com", which a regex would miss and
+  // then treat as a non-https (downgradeable) chain.
+  const isHttps = (u) => {
+    try {
+      return new URL(u).protocol === "https:";
+    } catch (e) {
+      return false;
+    }
+  };
+  const noDowngrade = isHttps(target); // an https chain may not drop to http on any hop
+  const allowed = (u) => isAllowedFetchUrl(u) && (!noDowngrade || isHttps(u)) && (!extraAllow || extraAllow(u));
   for (let hop = 0; ; hop++) {
     if (!allowed(target)) throw new Error("blocked url (need https, or LAN http with no downgrade): " + target);
     const res = await doFetch(target, { ...opts, redirect: "manual" });

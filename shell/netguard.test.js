@@ -77,6 +77,13 @@ test("guardedFetch: rejects an https->http-LAN downgrade redirect", async () => 
   await assert.rejects(() => ng.guardedFetch("https://a.example/feed", {}, impl), /blocked url/);
 });
 
+test("guardedFetch: a scheme-relative https URL still counts as an https chain (no downgrade)", async () => {
+  // "https:example.com/…" is a valid https URL per WHATWG; the downgrade guard
+  // must key off the parsed scheme, not a literal "https://" prefix
+  const impl = fakeFetch({ "https:example.com/feed": { status: 302, location: "http://127.0.0.1/x" } });
+  await assert.rejects(() => ng.guardedFetch("https:example.com/feed", {}, impl), /blocked url/);
+});
+
 test("guardedFetch: a self-hosted LAN http feed may still redirect within the LAN", async () => {
   const impl = fakeFetch({
     "http://192.168.1.5/feed": { status: 302, location: "http://192.168.1.6/feed" },

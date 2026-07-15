@@ -34,7 +34,9 @@ function validAptName(s) {
 // `trusted=yes`, no plain-http/unsigned repo, no foreign keyring).
 function aptRepoPlan(m, r) {
   const id = String((m && m.id) || "");
-  if (!/^[a-z0-9_-]+$/i.test(id)) throw new Error("aptRepo: invalid app id");
+  // lowercase-only, matching installPackage() + manifest validation (mixed case
+  // would derive a keyring/list path that other subsystems wouldn't agree on)
+  if (!/^[a-z0-9_-]+$/.test(id)) throw new Error("aptRepo: invalid app id");
   r = r || {};
   if (!/^https:\/\//.test(r.keyUrl || "")) throw new Error("aptRepo.keyUrl must be https");
   const keyring = "/usr/share/keyrings/tvbox-" + id + ".gpg";
