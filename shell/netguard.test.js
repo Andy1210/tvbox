@@ -81,6 +81,21 @@ test("guardedFetch: a self-hosted LAN http feed may still redirect within the LA
   assert.equal(res.status, 200);
 });
 
+test("guardedFetch: an `allow` origin-pin confines redirects to that origin", async () => {
+  const pin = (u) => new URL(u).origin === "https://reg.example";
+  // same-origin redirect is fine
+  const ok = fakeFetch({
+    "https://reg.example/apps/x/a.json": { status: 302, location: "https://reg.example/apps/x/b.json" },
+    "https://reg.example/apps/x/b.json": { status: 200 },
+  });
+  assert.equal((await ng.guardedFetch("https://reg.example/apps/x/a.json", { allow: pin }, ok)).status, 200);
+  // a cross-origin redirect (even https) is rejected despite passing the generic rule
+  const bad = fakeFetch({
+    "https://reg.example/apps/x/a.json": { status: 302, location: "https://cdn.evil.example/x" },
+  });
+  await assert.rejects(() => ng.guardedFetch("https://reg.example/apps/x/a.json", { allow: pin }, bad), /blocked url/);
+});
+
 test("guardedFetch: rejects a disallowed initial url before dialing out", async () => {
   const impl = fakeFetch({});
   await assert.rejects(() => ng.guardedFetch("http://evil.example/x", {}, impl), /blocked url/);

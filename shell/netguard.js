@@ -140,17 +140,24 @@ function isAllowedFetchUrl(u) {
 // the guards can't drift apart. An https chain must additionally STAY https:
 // http is accepted only when the request already started as http+LAN, so a
 // public https feed can never be redirected down onto http://127.0.0.1/ (the
-// box's own control API) or the http metadata service. `impl` is injectable for
-// tests (defaults to the global fetch). Throws on a disallowed target (initial
-// OR redirect) and past `maxRedirects` (default 5) hops.
+// box's own control API) or the http metadata service. An origin-pinned caller
+// (a package fetch confined to the registry origin) can pass `init.allow`, an
+// extra per-hop predicate applied to EVERY target - so a compromised/MITM'd
+// registry can't 3xx a pinned fetch off its origin, matching the pin the caller
+// documents. `impl` is injectable for tests (defaults to the global fetch).
+// Throws on a disallowed target (initial OR redirect) and past `maxRedirects`
+// (default 5) hops.
 async function guardedFetch(url, init, impl) {
   const doFetch = impl || fetch;
   const opts = { ...(init || {}) };
   const maxRedirects = opts.maxRedirects == null ? 5 : opts.maxRedirects;
+  const extraAllow = opts.allow; // optional per-call confinement, e.g. an origin pin
   delete opts.maxRedirects;
+  delete opts.allow;
   let target = String(url);
   const noDowngrade = /^https:\/\//i.test(target); // an https chain may not drop to http on any hop
-  const allowed = (u) => isAllowedFetchUrl(u) && (!noDowngrade || /^https:\/\//i.test(u));
+  const allowed = (u) =>
+    isAllowedFetchUrl(u) && (!noDowngrade || /^https:\/\//i.test(u)) && (!extraAllow || extraAllow(u));
   for (let hop = 0; ; hop++) {
     if (!allowed(target)) throw new Error("blocked url (need https, or LAN http with no downgrade): " + target);
     const res = await doFetch(target, { ...opts, redirect: "manual" });

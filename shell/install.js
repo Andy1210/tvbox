@@ -335,10 +335,13 @@ async function installPackage(id, baseUrl, files, log) {
       const url = new URL(rel, baseUrl);
       if (url.origin !== baseOrigin) throw new Error("package file leaves the registry origin: " + rel);
       log("fetch " + rel + " …");
-      // guardedFetch re-validates any redirect hop (a 3xx must not bounce an
-      // origin-pinned package fetch onto an internal address); sha256 below is
-      // the integrity backstop regardless of where the bytes finally came from.
-      const res = await guardedFetch(url.toString(), { cache: "no-store" });
+      // guardedFetch re-validates any redirect hop AND (via `allow`) confines it
+      // to baseOrigin, so a 3xx can't bounce this origin-pinned fetch off the
+      // registry; sha256 below is the content-integrity backstop on top.
+      const res = await guardedFetch(url.toString(), {
+        cache: "no-store",
+        allow: (u) => new URL(u).origin === baseOrigin,
+      });
       if (!res.ok) throw new Error("HTTP " + res.status + " for " + rel);
       const buf = Buffer.from(await res.arrayBuffer());
       const sum = crypto.createHash("sha256").update(buf).digest("hex");
