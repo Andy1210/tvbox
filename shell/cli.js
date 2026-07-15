@@ -38,22 +38,36 @@ function aptRepoPlan(m, r) {
   // would derive a keyring/list path that other subsystems wouldn't agree on)
   if (!/^[a-z0-9_-]+$/.test(id)) throw new Error("aptRepo: invalid app id");
   r = r || {};
-  if (!/^https:\/\//.test(r.keyUrl || "")) throw new Error("aptRepo.keyUrl must be https");
+  // Parse (not a prefix test): require a real https URL with a host, so
+  // "https://" or a whitespace-padded value can't pass and only blow up later
+  // inside the root curl.
+  let ku;
+  try {
+    ku = new URL(String(r.keyUrl || ""));
+  } catch (e) {
+    throw new Error("aptRepo.keyUrl must be a valid https URL", { cause: e });
+  }
+  if (ku.protocol !== "https:" || !ku.hostname) throw new Error("aptRepo.keyUrl must be https");
   const keyring = "/usr/share/keyrings/tvbox-" + id + ".gpg";
   const listPath = "/etc/apt/sources.list.d/tvbox-" + id + ".list";
   const debLine = /^deb \[([^\]]*)\] (https:\/\/\S+) \S.*$/.exec(r.line || "");
   if (!debLine) throw new Error("aptRepo.line must be: deb [signed-by=<keyring>] https://<url> <suite> [components]");
   if (debLine[1].trim() !== "signed-by=" + keyring)
     throw new Error("aptRepo.line options must be exactly [signed-by=" + keyring + "]");
-  return { id, keyUrl: r.keyUrl, keyring, listPath, line: r.line };
+  return { id, keyUrl: ku.href, keyring, listPath, line: r.line };
 }
 
 // Add a third-party APT repo (key + .list) for an app, as root, via sudo. No
 // shell. The safety rules live in aptRepoPlan; this only does the I/O.
 function installAptRepo(m, r, log) {
   const plan = aptRepoPlan(m, r);
-  const keyTmp = path.join(os.tmpdir(), "tvbox-repo-" + plan.id + ".asc");
-  const listTmp = path.join(os.tmpdir(), "tvbox-repo-" + plan.id + ".list");
+  // Private 0700 temp dir (mkdtemp), NOT predictable /tmp/tvbox-repo-<id>.* paths:
+  // a local process could pre-create/symlink those and swap the contents between
+  // our write and the following `sudo gpg`/`sudo cp`, substituting an attacker
+  // key/repo as root (TOCTOU). An unguessable owner-only dir closes that window.
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "tvbox-repo-"));
+  const keyTmp = path.join(tmpDir, "key.asc");
+  const listTmp = path.join(tmpDir, "repo.list");
   try {
     log("adding apt repo (" + plan.line + ")");
     // --proto-redir =https: keyUrl is https, but curl -L would otherwise follow
@@ -63,16 +77,7 @@ function installAptRepo(m, r, log) {
     fs.writeFileSync(listTmp, plan.line + "\n");
     execFileSync("sudo", ["cp", listTmp, plan.listPath], { stdio: "inherit" });
   } finally {
-    try {
-      fs.unlinkSync(keyTmp);
-    } catch (e) {
-      /* may not exist */
-    }
-    try {
-      fs.unlinkSync(listTmp);
-    } catch (e) {
-      /* may not exist */
-    }
+    fs.rmSync(tmpDir, { recursive: true, force: true });
   }
 }
 

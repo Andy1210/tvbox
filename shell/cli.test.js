@@ -41,6 +41,7 @@ test("aptRepoPlan: rejects trusted=yes, plain-http repo, and a missing signed-by
 
 test("aptRepoPlan: rejects a non-https keyUrl and a bad app id", () => {
   assert.throws(() => cli.aptRepoPlan({ id: "spotify" }, { keyUrl: "http://x/key.asc", line: okLine }), /keyUrl/);
+  assert.throws(() => cli.aptRepoPlan({ id: "spotify" }, { keyUrl: "https://", line: okLine }), /keyUrl/); // no host
   assert.throws(() => cli.aptRepoPlan({ id: "../evil" }, base), /invalid app id/);
   assert.throws(() => cli.aptRepoPlan({ id: "Spotify" }, base), /invalid app id/); // lowercase-only, like the rest of the stack
 });

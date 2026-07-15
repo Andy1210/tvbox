@@ -121,3 +121,11 @@ test("guardedFetch: caps the redirect chain", async () => {
     /too many redirects/,
   );
 });
+
+test("guardedFetch: a non-finite maxRedirects falls back to the default cap (no unbounded loop)", async () => {
+  const impl = fakeFetch(() => ({ status: 302, location: "https://loop.example/next" }));
+  await assert.rejects(
+    () => ng.guardedFetch("https://loop.example/start", { maxRedirects: NaN }, impl),
+    /too many redirects/,
+  );
+});

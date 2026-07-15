@@ -150,7 +150,9 @@ function isAllowedFetchUrl(u) {
 async function guardedFetch(url, init, impl) {
   const doFetch = impl || fetch;
   const opts = { ...(init || {}) };
-  const maxRedirects = opts.maxRedirects == null ? 5 : opts.maxRedirects;
+  // a non-finite/negative maxRedirects (e.g. NaN) would make `hop >= maxRedirects`
+  // never trip and the loop unbounded - fall back to the default cap
+  const maxRedirects = Number.isInteger(opts.maxRedirects) && opts.maxRedirects >= 0 ? opts.maxRedirects : 5;
   const extraAllow = opts.allow; // optional per-call confinement, e.g. an origin pin
   delete opts.maxRedirects;
   delete opts.allow;
