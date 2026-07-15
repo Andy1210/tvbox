@@ -90,33 +90,36 @@ function main() {
       if (badPkg.length) throw new Error("invalid apt package name(s): " + badPkg.join(", "));
       // Optional third-party APT repo (e.g. raspotify for librespot). No shell:
       // fetch the key to a temp file, dearmor + drop the .list via sudo directly.
-      // The repo fields come from the manifest, so bound them to the canonical
-      // system dirs and require https (defence-in-depth against a bad manifest).
       if (req.aptRepo) {
         const r = req.aptRepo;
+        const id = String(m.id || "");
+        if (!/^[a-z0-9_-]+$/i.test(id)) throw new Error("aptRepo: invalid app id");
         if (!/^https:\/\//.test(r.keyUrl || "")) throw new Error("aptRepo.keyUrl must be https");
-        if (!/^\/usr\/share\/keyrings\/[\w.-]+$/.test(r.keyring || ""))
-          throw new Error("aptRepo.keyring must be under /usr/share/keyrings/");
-        if (!/^\/etc\/apt\/sources\.list\.d\/[\w.-]+$/.test(r.list || ""))
-          throw new Error("aptRepo.list must be under /etc/apt/sources.list.d/");
+        // The keyring + list paths are OWNED by tvbox and derived from the app
+        // id - never a manifest-chosen path. `gpg --dearmor --yes` OVERWRITES its
+        // output, so a manifest naming e.g. /usr/share/keyrings/ubuntu-archive-
+        // keyring.gpg could clobber a system (or another app's) keyring and
+        // poison unrelated APT trust. Deriving the name makes that impossible.
+        const keyring = "/usr/share/keyrings/tvbox-" + id + ".gpg";
+        const listPath = "/etc/apt/sources.list.d/tvbox-" + id + ".list";
         // The .list line IS the apt trust decision (its packages' maintainer
         // scripts run as root). Don't accept an arbitrary `deb …`: require
-        // exactly `deb [signed-by=<the keyring we just dearmored>] https://…`,
-        // so a manifest can't slip in `[trusted=yes]`, a plain-http/unsigned
-        // repo, or a keyring other than the validated one.
+        // exactly `deb [signed-by=<our derived keyring>] https://…`, so a
+        // manifest can't slip in `[trusted=yes]`, a plain-http/unsigned repo, or
+        // point signed-by at a foreign keyring.
         const debLine = /^deb \[([^\]]*)\] (https:\/\/\S+) \S.*$/.exec(r.line || "");
         if (!debLine)
           throw new Error("aptRepo.line must be: deb [signed-by=<keyring>] https://<url> <suite> [components]");
-        if (debLine[1].trim() !== "signed-by=" + r.keyring)
-          throw new Error("aptRepo.line options must be exactly [signed-by=" + r.keyring + "]");
-        const keyTmp = path.join(os.tmpdir(), "tvbox-repo-" + m.id + ".asc");
-        const listTmp = path.join(os.tmpdir(), "tvbox-repo-" + m.id + ".list");
+        if (debLine[1].trim() !== "signed-by=" + keyring)
+          throw new Error("aptRepo.line options must be exactly [signed-by=" + keyring + "]");
+        const keyTmp = path.join(os.tmpdir(), "tvbox-repo-" + id + ".asc");
+        const listTmp = path.join(os.tmpdir(), "tvbox-repo-" + id + ".list");
         try {
           log("adding apt repo (" + r.line + ")");
           execFileSync("curl", ["-fsSL", r.keyUrl, "-o", keyTmp], { stdio: "inherit" });
-          execFileSync("sudo", ["gpg", "--yes", "--dearmor", "-o", r.keyring, keyTmp], { stdio: "inherit" });
+          execFileSync("sudo", ["gpg", "--yes", "--dearmor", "-o", keyring, keyTmp], { stdio: "inherit" });
           fs.writeFileSync(listTmp, r.line + "\n");
-          execFileSync("sudo", ["cp", listTmp, r.list], { stdio: "inherit" });
+          execFileSync("sudo", ["cp", listTmp, listPath], { stdio: "inherit" });
         } finally {
           try {
             fs.unlinkSync(keyTmp);

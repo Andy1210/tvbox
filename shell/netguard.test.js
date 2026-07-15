@@ -19,7 +19,7 @@ function fakeFetch(routes) {
     const location = r.location || null;
     return {
       status,
-      ok: status < 400,
+      ok: status >= 200 && status < 300, // mirror real Response.ok (2xx only), not < 400
       headers: { get: (n) => (String(n).toLowerCase() === "location" ? location : null) },
     };
   };
