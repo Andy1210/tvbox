@@ -1,0 +1,94 @@
+# tvbox CI - launcher typecheck/tests/build, shell syntax, manifest schema,
+# shell-script lint. (Paths assume this repo's root is the tvbox tree.)
+name: ci
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: npm, cache-dependency-path: package-lock.json }
+      - run: npm ci --no-audit --no-fund
+      - run: npm run lint
+      - run: npm run format:check
+
+  launcher:
+    runs-on: ubuntu-latest
+    defaults: { run: { working-directory: launcher } }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: npm, cache-dependency-path: launcher/package-lock.json }
+      - run: npm ci --no-audit --no-fund
+      - name: typecheck
+        run: npm run typecheck
+      - name: unit tests (vitest + happy-dom)
+        run: npm test
+      - name: build
+        run: npm run build
+
+  shell:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22 }
+      # --ignore-scripts skips the Electron binary download; we only need the
+      # dependency tree for require() resolution in the syntax check.
+      - run: cd shell && npm ci --ignore-scripts --no-audit --no-fund
+      - name: syntax-check shell sources
+        run: |
+          set -e
+          shopt -s nullglob
+          for f in shell/*.js shell/bridges/*.js shell/pairing/*.js; do
+            node --check "$f"
+          done
+      - name: shell unit tests (node --test, no Electron)
+        run: node --test shell/*.test.js
+      - name: manifest loader runs (apps now come from the tvbox-apps registry)
+        run: cd shell && node -e "const a=require('./install');a.loadManifests();console.log('manifest loader ok (installed apps:',a.getManifests().length+')')"
+
+  manifests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22 }
+      # First-party manifests now live in the tvbox-apps registry (validated by
+      # ITS CI). Only validate any that still ship here (none by default); the
+      # schema itself must stay valid JSON.
+      - name: validate any shipped manifests against the JSON Schema
+        run: |
+          node -e "JSON.parse(require('fs').readFileSync('docs/app-manifest.schema.json','utf8'))" && echo "schema is valid JSON"
+          if ls shell/apps/*.json >/dev/null 2>&1; then
+            npx --yes ajv-cli@5 validate --spec=draft2020 -s docs/app-manifest.schema.json -d "shell/apps/*.json"
+          else
+            echo "no first-party manifests shipped (registry-sourced)"
+          fi
+
+  scripts:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: shellcheck
+        run: |
+          sudo apt-get update -qq && sudo apt-get install -y -qq shellcheck
+          # -S error: the scripts use intentional word-splitting (apt lists);
+          # gate CI on real errors, not style
+          shellcheck -S error \
+            deploy/deploy.sh deploy/provision.sh deploy/run-shell.sh deploy/labwc-autostart deploy/tvbox \
+            scripts/copy-infra.sh scripts/make-release.sh scripts/build-image.sh \
+            shell/audio-default.sh
+      - name: python syntax (input bridges + helpers)
+        run: |
+          python3 -m py_compile cec/cec_uinput_bridge.py remote/remote_input_bridge.py deploy/cursor_idle_hide.py
+          python3 -m py_compile remote/firetv_remote_ir.py remote/keymap_compile.py remote/ir_protocols.py remote/firetv_hid_probe.py
+      - name: python unit tests (keymap compiler + IR protocol encoders, no hardware)
+        run: |
+          python3 remote/keymap_compile.py
+          python3 remote/ir_protocols_test.py

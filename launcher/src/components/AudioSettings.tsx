@@ -1,0 +1,315 @@
+import { useEffect, useState } from "react";
+import { FocusContext, useFocusable, setFocus } from "@noriginmedia/norigin-spatial-navigation";
+import { useI18n } from "../lib/i18n";
+import { useFocusableItem } from "../lib/useFocusableItem";
+import { fetchSinks, setDefaultSink, setSinkVolume, type AudioState } from "../lib/audio";
+import { FocusButton } from "./FocusButton";
+import { useConfigStore } from "../stores/config";
+import { useBackspace } from "../lib/useBackspace";
+import { useEntryAnim } from "../lib/useEntryAnim";
+
+// Audio section of the HOME Settings screen: pick the output sink (a manual
+// override of the HDMI auto-detect, persisted) and set the default sink's
+// volume. Renders inside the parent Settings FocusContext.
+const VOL_STEP = 0.05;
+
+// Volume as a single full-width row: Left/Right adjust while it's focused, Up/Down
+// navigate away. A full-width nav-stop (not two small −/＋ buttons that vertical
+// navigation skips past to the right-aligned rows below).
+function VolumeRow({ volume, muted, onBump }: { volume: number; muted: boolean; onBump: (d: number) => void }) {
+  const { t } = useI18n();
+  const { ref, focused } = useFocusableItem<HTMLDivElement>(
+    {
+      focusKey: "audio-vol",
+      onEnterPress: () => {},
+      onArrowPress: (dir) => {
+        if (dir === "left") {
+          onBump(-VOL_STEP);
+          return false;
+        } // false = handled, don't navigate
+        if (dir === "right") {
+          onBump(VOL_STEP);
+          return false;
+        }
+        return true; // up/down: let navigation proceed
+      },
+    },
+    { block: "nearest" },
+  );
+  return (
+    <div
+      ref={ref}
+      className={[
+        "px-[2vw] py-[1.5vh] rounded-[1.1vh] flex items-center justify-between gap-[1.5vw] transition-[transform,background-color,color] duration-150",
+        focused ? "!bg-white !text-[#06090d] scale-[1.02]" : "bg-white/5",
+      ].join(" ")}
+    >
+      <span className="text-[2.1vh]">{t("audio.volume")}</span>
+      <span className="flex items-center gap-[1.2vw] text-[2.2vh] font-semibold tabular-nums">
+        <svg
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2.4"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          className="w-[2.2vh] h-[2.2vh] opacity-60"
+          aria-hidden
+        >
+          <path d="M15 6l-6 6 6 6" />
+        </svg>
+        <span className="w-[7vw] text-center">{muted ? t("audio.muted") : Math.round(volume * 100) + "%"}</span>
+        <svg
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2.4"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          className="w-[2.2vh] h-[2.2vh] opacity-60"
+          aria-hidden
+        >
+          <path d="M9 6l6 6-6 6" />
+        </svg>
+      </span>
+    </div>
+  );
+}
+
+// Track languages offered for mpv --alang/--slang. "" = stream default. Labels
+// come from Intl.DisplayNames in the UI language, so adding a code here needs
+// zero i18n work.
+const TRACK_LANGS = [
+  "",
+  "hu",
+  "en",
+  "de",
+  "fr",
+  "it",
+  "es",
+  "pt",
+  "pl",
+  "cs",
+  "sk",
+  "ro",
+  "hr",
+  "sr",
+  "ru",
+  "uk",
+  "tr",
+];
+
+function langName(tag: string, code: string, autoLabel: string): string {
+  if (!code) return autoLabel;
+  try {
+    return new Intl.DisplayNames([tag], { type: "language" }).of(code) || code;
+  } catch {
+    return code;
+  }
+}
+
+// Full-screen language picker (same grammar as the resolution picker): its own
+// focus boundary, Back closes, cancel is the last row in the scroll list.
+function LangPicker({
+  title,
+  value,
+  onPick,
+  onClose,
+}: {
+  title: string;
+  value: string;
+  onPick: (code: string) => void;
+  onClose: () => void;
+}) {
+  const { t, tag } = useI18n();
+  const { ref, focusKey } = useFocusable({ focusKey: "lang-picker", isFocusBoundary: true });
+  const entryAnim = useEntryAnim();
+  useBackspace(onClose);
+  useEffect(() => {
+    // unknown stored code (hand-edited config): land on "auto" - focusing a
+    // nonexistent key would strand norigin in phantom focus (arrow/Enter-dead)
+    setTimeout(() => setFocus("lang-" + (TRACK_LANGS.includes(value) && value ? value : "auto")), 0);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  return (
+    <FocusContext.Provider value={focusKey}>
+      <div
+        ref={ref}
+        style={entryAnim}
+        className="fixed inset-0 z-[55] bg-black/90 flex flex-col items-center justify-center gap-[1.6vh] px-[6vw]"
+      >
+        <div className="text-[2.8vh] font-bold">{title}</div>
+        <div className="flex flex-col gap-[0.8vh] w-[32.3vw] max-h-[68vh] overflow-y-auto no-scrollbar">
+          {TRACK_LANGS.map((code) => (
+            <FocusButton
+              key={code || "auto"}
+              focusKey={"lang-" + (code || "auto")}
+              onEnter={() => onPick(code)}
+              className="px-[2vw] py-[1.5vh] rounded-[1.1vh] bg-white/5 flex items-center justify-between gap-[1.5vw]"
+            >
+              <span className="text-[2.1vh]">{langName(tag, code, t("audio.langAuto"))}</span>
+              {value === code && (
+                <span className="flex items-center gap-[0.6vw] text-[1.7vh] text-accent shrink-0">
+                  <span className="w-[1.2vh] h-[1.2vh] rounded-full bg-accent shrink-0" />
+                  {t("display.active")}
+                </span>
+              )}
+            </FocusButton>
+          ))}
+          <FocusButton
+            focusKey="lang-cancel"
+            onEnter={onClose}
+            className="px-[2vw] py-[1.5vh] rounded-[1.1vh] bg-white/10 text-[2.1vh] font-semibold text-center"
+          >
+            {t("power.cancel")}
+          </FocusButton>
+        </div>
+      </div>
+    </FocusContext.Provider>
+  );
+}
+
+export function AudioSettings() {
+  const { t, tag } = useI18n();
+  const navSounds = useConfigStore((st) => st.config?.ui.navSounds ?? true);
+  const audioLang = useConfigStore((st) => st.config?.player.audioLang) || "";
+  const subLang = useConfigStore((st) => st.config?.player.subLang) || "";
+  const setUi = useConfigStore((st) => st.setUi);
+  const setPlayer = useConfigStore((st) => st.setPlayer);
+  const [langPick, setLangPick] = useState<null | "audio" | "sub">(null);
+  const [state, setState] = useState<AudioState | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  const refresh = () => {
+    fetchSinks().then((s) => {
+      if (s) setState(s);
+    });
+  };
+  useEffect(() => {
+    refresh();
+  }, []);
+
+  const pick = async (sink: string, focusKey: string) => {
+    if (busy) return;
+    setBusy(true);
+    await setDefaultSink(sink);
+    setBusy(false);
+    setTimeout(() => setFocus(focusKey), 0);
+    refresh();
+  };
+
+  const def = state?.sinks.find((s) => s.isDefault) || null;
+  const bumpVolume = async (delta: number) => {
+    if (!def || def.volume == null || busy) return;
+    const v = Math.max(0, Math.min(1, def.volume + delta));
+    setState((s) => s && { ...s, sinks: s.sinks.map((x) => (x.id === def.id ? { ...x, volume: v } : x)) }); // optimistic
+    await setSinkVolume(def.id, v);
+  };
+
+  const sinks = state?.sinks || [];
+  const autoSelected = !state?.override;
+
+  return (
+    <div className="mt-[3vh]">
+      <div className="text-[2.4vh] font-semibold mb-[1.4vh]">{t("audio.title")}</div>
+      <div className="flex flex-col gap-[0.8vh] max-w-[70vw]">
+        <FocusButton
+          focusKey="audio-auto"
+          onEnter={() => pick("", "audio-auto")}
+          className={[
+            "px-[2vw] py-[1.5vh] rounded-[1.1vh] bg-white/5 flex items-center justify-between gap-[1.5vw]",
+            autoSelected ? "ring-[0.25vh] ring-white/40" : "",
+          ].join(" ")}
+        >
+          <span className="min-w-0">
+            <span className="text-[2.1vh]">{t("audio.auto")}</span>
+            <span className="block text-[1.7vh] text-fg-dim">{t("audio.autoHint")}</span>
+          </span>
+        </FocusButton>
+        {sinks.map((s) => (
+          <FocusButton
+            key={s.id}
+            focusKey={"audio-sink-" + s.id}
+            onEnter={() => pick(s.name, "audio-sink-" + s.id)}
+            className={[
+              "px-[2vw] py-[1.5vh] rounded-[1.1vh] bg-white/5 flex items-center justify-between gap-[1.5vw]",
+              state?.override === s.name ? "ring-[0.25vh] ring-white/40" : "",
+            ].join(" ")}
+          >
+            <span className="text-[2.1vh] truncate">{s.description || s.name}</span>
+            {s.isDefault && (
+              <span className="flex items-center gap-[0.6vw] text-[1.7vh] text-accent shrink-0">
+                <span className="w-[1.2vh] h-[1.2vh] rounded-full bg-accent shrink-0" />
+                {t("audio.default")}
+              </span>
+            )}
+          </FocusButton>
+        ))}
+        {!sinks.length && <div className="text-[1.9vh] text-fg-dim">{t("audio.none")}</div>}
+      </div>
+
+      {def && def.volume != null && (
+        <div className="mt-[1.4vh] max-w-[70vw]">
+          <VolumeRow volume={def.volume} muted={def.muted} onBump={bumpVolume} />
+        </div>
+      )}
+
+      <div className="flex flex-col gap-[1vh] max-w-[70vw] mt-[1.4vh]">
+        <FocusButton
+          focusKey="audio-nav-sounds"
+          onEnter={() => setUi({ navSounds: !navSounds })}
+          className="px-[2vw] py-[1.5vh] rounded-[1.1vh] bg-white/5 flex items-center justify-between gap-[1.5vw]"
+        >
+          <span className="text-[2.1vh]">{t("audio.navSounds")}</span>
+          <span className={["text-[1.9vh] font-semibold", navSounds ? "text-accent" : "text-fg-dim"].join(" ")}>
+            {navSounds ? t("display.on") : t("display.off")}
+          </span>
+        </FocusButton>
+        <FocusButton
+          focusKey="audio-lang"
+          onEnter={() => setLangPick("audio")}
+          className="px-[2vw] py-[1.5vh] rounded-[1.1vh] bg-white/5 flex items-center justify-between gap-[1.5vw]"
+        >
+          <span className="min-w-0">
+            <span className="text-[2.1vh]">{t("audio.trackLang")}</span>
+            <span className="block text-[1.7vh] text-fg-dim">{t("audio.trackLangHint")}</span>
+          </span>
+          <span className="text-[1.9vh] font-semibold text-fg-dim shrink-0">
+            {langName(tag, audioLang, t("audio.langAuto"))}
+          </span>
+        </FocusButton>
+        <FocusButton
+          focusKey="audio-sub-lang"
+          onEnter={() => setLangPick("sub")}
+          className="px-[2vw] py-[1.5vh] rounded-[1.1vh] bg-white/5 flex items-center justify-between gap-[1.5vw]"
+        >
+          <span className="min-w-0">
+            <span className="text-[2.1vh]">{t("audio.subLang")}</span>
+            <span className="block text-[1.7vh] text-fg-dim">{t("audio.subLangHint")}</span>
+          </span>
+          <span className="text-[1.9vh] font-semibold text-fg-dim shrink-0">
+            {langName(tag, subLang, t("audio.langAuto"))}
+          </span>
+        </FocusButton>
+      </div>
+
+      {langPick && (
+        <LangPicker
+          title={t(langPick === "audio" ? "audio.trackLang" : "audio.subLang")}
+          value={langPick === "audio" ? audioLang : subLang}
+          onPick={(code) => {
+            const which = langPick;
+            setLangPick(null);
+            void setPlayer(which === "audio" ? { audioLang: code } : { subLang: code });
+            setTimeout(() => setFocus(which === "audio" ? "audio-lang" : "audio-sub-lang"), 0);
+          }}
+          onClose={() => {
+            const which = langPick;
+            setLangPick(null);
+            setTimeout(() => setFocus(which === "audio" ? "audio-lang" : "audio-sub-lang"), 0);
+          }}
+        />
+      )}
+    </div>
+  );
+}

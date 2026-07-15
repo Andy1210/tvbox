@@ -1,0 +1,13 @@
+# tvbox: nightly user-flatpak update (see tvbox-flatpak-update.service).
+# 03:30 + jitter - same quiet window the shell's own OTA auto-apply uses;
+# Persistent catches up after a night the box spent unplugged.
+[Unit]
+Description=tvbox: nightly user flatpak update
+
+[Timer]
+OnCalendar=*-*-* 03:30
+RandomizedDelaySec=45m
+Persistent=true
+
+[Install]
+WantedBy=timers.target

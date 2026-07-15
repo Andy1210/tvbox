@@ -1,0 +1,236 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>tvbox demo - phone setup</title>
+    <!-- Demo stand-in for the shell's phone pairing pages (shell/pairing/pages/*):
+         same look, same forms, but fully offline - nothing is sent anywhere.
+         The demo launcher's QR codes point here with ?kind=&lang=&c=. -->
+    <style>
+      :root {
+        color-scheme: dark;
+      }
+      body {
+        margin: auto;
+        background: #0b0f14;
+        color: #f4f6fa;
+        font:
+          16px/1.5 system-ui,
+          sans-serif;
+        padding: 24px;
+        max-width: 520px;
+      }
+      h1 {
+        font-size: 20px;
+      }
+      .demo {
+        border: 1px solid #3a2d12;
+        background: #1a1408;
+        color: #e3b341;
+        border-radius: 10px;
+        padding: 10px 14px;
+        font-size: 14px;
+        margin-bottom: 18px;
+      }
+      label {
+        display: block;
+        margin: 14px 0 6px;
+        color: #aab4c2;
+        font-size: 14px;
+      }
+      input {
+        width: 100%;
+        box-sizing: border-box;
+        padding: 12px;
+        border-radius: 10px;
+        border: 1px solid #2a3442;
+        background: #121a24;
+        color: #fff;
+        font-size: 16px;
+      }
+      .tabs {
+        display: flex;
+        gap: 8px;
+        margin: 8px 0;
+      }
+      .tabs button {
+        flex: 1;
+        padding: 12px;
+        border-radius: 10px;
+        border: 1px solid #2a3442;
+        background: #121a24;
+        color: #fff;
+        font-size: 15px;
+      }
+      .tabs button.on {
+        background: #1f6feb;
+        border-color: #1f6feb;
+      }
+      .hide {
+        display: none;
+      }
+      #save {
+        width: 100%;
+        padding: 14px;
+        border: 0;
+        border-radius: 12px;
+        background: #1f6feb;
+        color: #fff;
+        font-size: 17px;
+        font-weight: 600;
+        margin-top: 16px;
+      }
+      #msg {
+        margin-top: 14px;
+        text-align: center;
+        font-weight: 600;
+        color: #3fb950;
+      }
+      p.hint {
+        color: #aab4c2;
+        font-size: 14px;
+      }
+      a {
+        color: #58a6ff;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="demo" id="banner"></div>
+    <h1 id="title"></h1>
+    <p class="hint" id="hint"></p>
+
+    <div id="f-code"><label id="l-code"></label><input id="code" maxlength="6" autocapitalize="characters" /></div>
+
+    <div id="k-iptv" class="hide">
+      <div class="tabs">
+        <button id="tx" class="on" onclick="mode('xtream')">Xtream</button>
+        <button id="tm" onclick="mode('m3u')">M3U</button>
+      </div>
+      <fieldset id="fx" style="border: 0; padding: 0; margin: 0">
+        <label id="l-host"></label><input placeholder="http://example.com:8080" autocapitalize="off" />
+        <label id="l-user"></label><input autocapitalize="off" /> <label id="l-pass"></label
+        ><input autocapitalize="off" />
+      </fieldset>
+      <fieldset id="fm" class="hide" style="border: 0; padding: 0; margin: 0">
+        <label id="l-m3u"></label><input placeholder="https://…/playlist.m3u" autocapitalize="off" />
+        <label id="l-epg"></label><input placeholder="https://…/xmltv.xml" autocapitalize="off" />
+      </fieldset>
+    </div>
+
+    <div id="k-spotify" class="hide">
+      <label>Client ID</label><input autocapitalize="off" /> <label>Client Secret</label><input autocapitalize="off" />
+    </div>
+
+    <div id="k-keyboard" class="hide">
+      <label>Email</label><input inputmode="email" autocapitalize="off" /> <label id="l-kbcode"></label
+      ><input inputmode="numeric" />
+    </div>
+
+    <div id="k-backup" class="hide"><label id="l-bpass"></label><input type="password" /></div>
+    <div id="k-photos" class="hide"><label id="l-photo"></label><input type="file" accept="image/*" /></div>
+
+    <button id="save" onclick="save()"></button>
+    <div id="msg"></div>
+
+    <script>
+      var P = new URLSearchParams(location.search);
+      var KIND = P.get("kind") || "iptv";
+      var LANG = P.get("lang") === "hu" ? "hu" : "en";
+      var T = {
+        en: {
+          banner:
+            "This is the <a href='https://github.com/Andy1210/tvbox'>tvbox</a> browser demo - nothing is sent anywhere, so please don't enter real credentials.",
+          code: "Pairing code (shown on the TV)",
+          save: "Save",
+          done: "Done! On a real box the TV would continue now - this demo only simulates it, so press Back on the TV.",
+          titles: {
+            iptv: "Live TV setup",
+            spotify: "Spotify API keys",
+            keyboard: "Phone keyboard for the TV",
+            backup: "Backup & restore",
+            photos: "Ambient photos",
+          },
+          hints: {
+            iptv: "On a real box this form configures the box's IPTV source (Xtream or M3U) without a TV keyboard.",
+            spotify: "On a real box you paste your Spotify app credentials here once; the box then links your account.",
+            keyboard: "On a real box whatever you type here is injected into the Spotify login window on the TV.",
+            backup: "On a real box this page downloads a password-encrypted backup of every setting, or restores one.",
+            photos: "On a real box photos you pick here are uploaded to the box for the ambient screensaver.",
+          },
+          host: "Server",
+          user: "Username",
+          pass: "Password",
+          m3u: "M3U URL",
+          epg: "EPG (XMLTV) URL",
+          kbcode: "Code",
+          bpass: "Backup password",
+          photo: "Pick a photo",
+        },
+        hu: {
+          banner:
+            "Ez a <a href='https://github.com/Andy1210/tvbox'>tvbox</a> böngészős demója - semmi nem kerül elküldésre, ezért ne adj meg valódi adatokat.",
+          code: "Párosítókód (a TV-n látható)",
+          save: "Mentés",
+          done: "Kész! Valódi eszközön a TV most magától továbblépne - a demó ezt csak szimulálja, nyomj Back-et a TV-n.",
+          titles: {
+            iptv: "Élő TV beállítás",
+            spotify: "Spotify API kulcsok",
+            keyboard: "Telefon-billentyűzet a TV-hez",
+            backup: "Mentés és visszaállítás",
+            photos: "Ambient fotók",
+          },
+          hints: {
+            iptv: "Valódi eszközön ez az űrlap állítja be a box IPTV forrását (Xtream vagy M3U), TV-billentyűzet nélkül.",
+            spotify: "Valódi eszközön itt adod meg egyszer a Spotify app kulcsait; utána a box összeköti a fiókod.",
+            keyboard: "Valódi eszközön amit itt beírsz, az a TV-n megnyíló Spotify belépőablakba kerül.",
+            backup:
+              "Valódi eszközön innen tölthető le jelszóval titkosított mentés minden beállításról - vagy állítható vissza.",
+            photos: "Valódi eszközön az itt kiválasztott fotók a boxra töltődnek fel az ambient képernyővédőhöz.",
+          },
+          host: "Szerver",
+          user: "Felhasználónév",
+          pass: "Jelszó",
+          m3u: "M3U URL",
+          epg: "EPG (XMLTV) URL",
+          kbcode: "Kód",
+          bpass: "Mentés jelszava",
+          photo: "Válassz fotót",
+        },
+      }[LANG];
+
+      document.documentElement.lang = LANG;
+      var $ = function (id) {
+        return document.getElementById(id);
+      };
+      $("banner").innerHTML = T.banner;
+      $("title").textContent = T.titles[KIND] || T.titles.iptv;
+      $("hint").textContent = T.hints[KIND] || T.hints.iptv;
+      $("l-code").textContent = T.code;
+      $("code").value = P.get("c") || "";
+      $("l-host").textContent = T.host;
+      $("l-user").textContent = T.user;
+      $("l-pass").textContent = T.pass;
+      $("l-m3u").textContent = T.m3u;
+      $("l-epg").textContent = T.epg;
+      $("l-kbcode").textContent = T.kbcode;
+      $("l-bpass").textContent = T.bpass;
+      $("l-photo").textContent = T.photo;
+      $("save").textContent = T.save;
+      var panel = $("k-" + KIND) || $("k-iptv");
+      panel.className = "";
+
+      function mode(m) {
+        $("tx").className = m === "xtream" ? "on" : "";
+        $("tm").className = m === "m3u" ? "on" : "";
+        $("fx").className = m === "xtream" ? "" : "hide";
+        $("fm").className = m === "m3u" ? "" : "hide";
+      }
+      function save() {
+        $("msg").textContent = T.done;
+        $("save").disabled = true;
+      }
+    </script>
+  </body>
+</html>

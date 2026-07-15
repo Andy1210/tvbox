@@ -1,0 +1,19 @@
+# tvbox remote input bridge -> per-device button remap - systemd USER unit (no
+# root: /dev/input read from the `input` group, /dev/uinput write from the udev
+# rule provision.sh sets up, same as the CEC bridge). Installed to
+# ~/.config/systemd/user/ by deploy.sh; starts at boot via `loginctl enable-linger`.
+[Unit]
+Description=tvbox remote input bridge (per-device button remap)
+
+[Service]
+ExecStart=/usr/bin/python3 %h/.tvbox/remote_input_bridge.py
+Restart=always
+RestartSec=3
+# Free hardening: the bridge never needs to gain privileges (device access is
+# via group membership; poweroff/standby go through logind D-Bus, not setuid).
+# Heavier sandboxing (ProtectSystem etc.) would break the shared /tmp FIFOs, so
+# keep it to this one knob.
+NoNewPrivileges=yes
+
+[Install]
+WantedBy=default.target

@@ -1,0 +1,22 @@
+{
+  "name": "tvbox-shell",
+  "version": "1.7.1",
+  "private": true,
+  "description": "tvbox Electron shell - manifest-driven host for the launcher + apps (web-client/mpv).",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Andy1210/tvbox"
+  },
+  "main": "main.js",
+  "scripts": {
+    "start": "electron ."
+  },
+  "dependencies": {
+    "@2colors/esphome-native-api": "^1.3.6",
+    "mqtt": "^5.15.2"
+  },
+  "devDependencies": {
+    "electron": "^43.1.0"
+  }
+}

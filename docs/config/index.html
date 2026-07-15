@@ -1,0 +1,386 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>tvbox.conf generator</title>
+    <style>
+      :root {
+        --bg: #0e1116;
+        --card: #161b22;
+        --line: #2a313c;
+        --fg: #e6edf3;
+        --dim: #9aa7b4;
+        --accent: #39c0d6;
+        --accent-fg: #04222a;
+        --warn: #e0b64a;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        background: var(--bg);
+        color: var(--fg);
+        font:
+          15px/1.5 system-ui,
+          -apple-system,
+          "Segoe UI",
+          Roboto,
+          sans-serif;
+      }
+      .wrap {
+        max-width: 900px;
+        margin: 0 auto;
+        padding: 32px 20px 64px;
+      }
+      h1 {
+        font-size: 1.7rem;
+        margin: 0 0 4px;
+      }
+      .lede {
+        color: var(--dim);
+        margin: 0 0 28px;
+      }
+      .lede code {
+        color: var(--fg);
+      }
+      .grid {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 24px;
+      }
+      @media (max-width: 720px) {
+        .grid {
+          grid-template-columns: 1fr;
+        }
+      }
+      .card {
+        background: var(--card);
+        border: 1px solid var(--line);
+        border-radius: 12px;
+        padding: 20px;
+      }
+      .field {
+        margin-bottom: 18px;
+      }
+      .field:last-child {
+        margin-bottom: 0;
+      }
+      label {
+        display: block;
+        font-weight: 600;
+        margin-bottom: 5px;
+      }
+      .hint {
+        color: var(--dim);
+        font-size: 0.85rem;
+        margin: 4px 0 0;
+      }
+      input[type="text"],
+      textarea {
+        width: 100%;
+        background: #0b0e13;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        color: var(--fg);
+        padding: 10px 12px;
+        font: inherit;
+      }
+      input[type="text"]:focus,
+      textarea:focus {
+        outline: none;
+        border-color: var(--accent);
+      }
+      textarea {
+        resize: vertical;
+        min-height: 74px;
+        font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+        font-size: 0.85rem;
+      }
+      .toggle {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+      }
+      .toggle input {
+        width: 20px;
+        height: 20px;
+        accent-color: var(--accent);
+      }
+      .toggle label {
+        margin: 0;
+      }
+      .out {
+        position: sticky;
+        top: 20px;
+      }
+      .out h2 {
+        font-size: 1rem;
+        margin: 0 0 10px;
+      }
+      pre {
+        background: #0b0e13;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        padding: 14px;
+        margin: 0;
+        overflow-x: auto;
+        white-space: pre-wrap;
+        word-break: break-all;
+        font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+        font-size: 0.85rem;
+        min-height: 120px;
+      }
+      .btns {
+        display: flex;
+        gap: 10px;
+        margin-top: 14px;
+      }
+      button {
+        flex: 1;
+        cursor: pointer;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        padding: 11px 14px;
+        font: inherit;
+        font-weight: 600;
+        background: #1e252e;
+        color: var(--fg);
+      }
+      button.primary {
+        background: var(--accent);
+        color: var(--accent-fg);
+        border-color: var(--accent);
+      }
+      button:active {
+        transform: translateY(1px);
+      }
+      .note {
+        color: var(--warn);
+        font-size: 0.85rem;
+        margin-top: 14px;
+      }
+      .steps {
+        color: var(--dim);
+        font-size: 0.9rem;
+        margin-top: 26px;
+        border-top: 1px solid var(--line);
+        padding-top: 18px;
+      }
+      .steps code {
+        color: var(--fg);
+      }
+      a {
+        color: var(--accent);
+      }
+      .importbar {
+        display: flex;
+        align-items: center;
+        flex-wrap: wrap;
+        gap: 12px;
+        margin-bottom: 24px;
+      }
+      .importbar button {
+        flex: 0 0 auto;
+      }
+      .importmsg {
+        color: var(--dim);
+        font-size: 0.9rem;
+      }
+      .importmsg.ok {
+        color: var(--accent);
+      }
+    </style>
+  </head>
+  <body>
+    <div class="wrap">
+      <h1>tvbox.conf generator</h1>
+      <p class="lede">
+        Fill in what you want, then save the file as <code>tvbox.conf</code> onto the SD card's boot partition (the
+        small one your computer mounts). The box applies it on first boot. Everything here is optional and stays on your
+        machine &mdash; nothing is uploaded.
+      </p>
+
+      <div class="importbar">
+        <button id="import">Import an existing tvbox.conf</button>
+        <input type="file" id="importfile" accept=".conf,text/plain" hidden />
+        <span class="importmsg" id="importmsg"></span>
+      </div>
+
+      <div class="grid">
+        <div class="card">
+          <div class="field">
+            <label for="hostname">Device name (hostname)</label>
+            <input type="text" id="hostname" placeholder="living-room" autocomplete="off" spellcheck="false" />
+            <p class="hint">Letters, digits and hyphens. Name each box so they don't clash on your network.</p>
+          </div>
+          <div class="field">
+            <label for="ssid">WiFi network name</label>
+            <input type="text" id="ssid" placeholder="MyNetwork" autocomplete="off" />
+            <p class="hint">Only needed if the box has no Ethernet. Leave blank to set WiFi up on the TV.</p>
+          </div>
+          <div class="field">
+            <label for="wifipw">WiFi password</label>
+            <input type="text" id="wifipw" placeholder="(blank for an open network)" autocomplete="off" />
+          </div>
+          <div class="field toggle">
+            <input type="checkbox" id="sudo" />
+            <label for="sudo">Passwordless <code>sudo</code> over SSH (power users)</label>
+          </div>
+          <div class="field">
+            <label for="sshkey">SSH public key</label>
+            <textarea id="sshkey" placeholder="ssh-ed25519 AAAA... you@computer" spellcheck="false"></textarea>
+            <p class="hint">
+              Your <em>public</em> key (e.g. from <code>~/.ssh/id_ed25519.pub</code>). Lets you SSH in.
+            </p>
+          </div>
+          <div class="field">
+            <label for="password">Account password (optional)</label>
+            <input
+              type="text"
+              id="password"
+              placeholder="(leave blank to keep the account locked)"
+              autocomplete="off"
+            />
+            <p class="hint">Only set this if you want to log in with a password. Otherwise SSH key access is enough.</p>
+          </div>
+        </div>
+
+        <div class="out">
+          <div class="card">
+            <h2>tvbox.conf</h2>
+            <pre id="preview"></pre>
+            <div class="btns">
+              <button class="primary" id="download">Download</button>
+              <button id="copy">Copy</button>
+            </div>
+            <p class="note" id="empty">Fill in at least one field above.</p>
+          </div>
+          <div class="steps">
+            <strong>Then:</strong>
+            <ol>
+              <li>Flash the tvbox image to the SD card.</li>
+              <li>Copy <code>tvbox.conf</code> onto the boot partition (the one your computer mounts).</li>
+              <li>Put the card in the box and power it on.</li>
+            </ol>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <script>
+      const ids = ["hostname", "ssid", "wifipw", "sudo", "sshkey", "password"];
+      const el = {};
+      ids.forEach((id) => (el[id] = document.getElementById(id)));
+      const preview = document.getElementById("preview");
+      const empty = document.getElementById("empty");
+
+      // One RFC-1123 label: letters/digits/hyphen, no leading/trailing hyphen, <=63.
+      // Trim hyphens AFTER truncating so a cut at 63 can't leave a trailing one.
+      const cleanHost = (v) =>
+        v
+          .replace(/[^A-Za-z0-9-]/g, "")
+          .slice(0, 63)
+          .replace(/^-+|-+$/g, "");
+
+      function build() {
+        const lines = [];
+        const host = cleanHost(el.hostname.value);
+        const ssid = el.ssid.value.trim();
+        const wifipw = el.wifipw.value;
+        const sshkey = el.sshkey.value.trim().replace(/\s+/g, " ");
+        const password = el.password.value;
+
+        if (host) lines.push("HOSTNAME=" + host);
+        if (ssid) lines.push("WIFI_SSID=" + ssid);
+        if (ssid && wifipw) lines.push("WIFI_PASSWORD=" + wifipw);
+        if (el.sudo.checked) lines.push("SUDO=true");
+        if (password) lines.push("PASSWORD=" + password);
+        if (sshkey) lines.push("SSH_AUTHORIZED_KEY=" + sshkey);
+
+        const has = lines.length > 0;
+        empty.style.display = has ? "none" : "block";
+        const header = "# tvbox.conf - drop on the boot (FAT) partition; applied on first boot.\n";
+        preview.textContent = has ? header + lines.join("\n") + "\n" : "";
+        return has ? preview.textContent : "";
+      }
+
+      ids.forEach((id) => el[id].addEventListener("input", build));
+
+      document.getElementById("download").addEventListener("click", () => {
+        const text = build();
+        if (!text) return;
+        const blob = new Blob([text], { type: "text/plain" });
+        const a = document.createElement("a");
+        a.href = URL.createObjectURL(blob);
+        a.download = "tvbox.conf";
+        a.click();
+        URL.revokeObjectURL(a.href);
+      });
+
+      document.getElementById("copy").addEventListener("click", async () => {
+        const text = build();
+        if (!text) return;
+        const btn = document.getElementById("copy");
+        try {
+          await navigator.clipboard.writeText(text);
+          btn.textContent = "Copied";
+        } catch {
+          btn.textContent = "Copy failed";
+        }
+        setTimeout(() => (btn.textContent = "Copy"), 1500);
+      });
+
+      // ---- Import an existing tvbox.conf back into the form ----
+      const FIELD_BY_KEY = {
+        HOSTNAME: "hostname",
+        WIFI_SSID: "ssid",
+        WIFI_PASSWORD: "wifipw",
+        PASSWORD: "password",
+        SSH_AUTHORIZED_KEY: "sshkey",
+      };
+      const importMsg = document.getElementById("importmsg");
+
+      // Parse like the box's firstboot: KEY at line start, value = everything
+      // after the first '=' (verbatim), '#' lines are comments. Returns how many
+      // recognised keys were loaded.
+      function importConf(text) {
+        ids.forEach((id) => (el[id].type === "checkbox" ? (el[id].checked = false) : (el[id].value = "")));
+        let n = 0;
+        for (const raw of text.split(/\r?\n/)) {
+          if (raw.startsWith("#")) continue;
+          const i = raw.indexOf("=");
+          if (i <= 0) continue;
+          const key = raw.slice(0, i);
+          const val = raw.slice(i + 1);
+          if (key === "SUDO") {
+            el.sudo.checked = ["true", "1", "yes"].includes(val.trim().toLowerCase());
+            n++;
+          } else if (FIELD_BY_KEY[key]) {
+            el[FIELD_BY_KEY[key]].value = val;
+            n++;
+          }
+        }
+        build();
+        return n;
+      }
+
+      document.getElementById("import").addEventListener("click", () => document.getElementById("importfile").click());
+      document.getElementById("importfile").addEventListener("change", (e) => {
+        const file = e.target.files && e.target.files[0];
+        if (!file) return;
+        const reader = new FileReader();
+        reader.onload = () => {
+          const n = importConf(String(reader.result || ""));
+          importMsg.textContent = n ? `Loaded ${n} setting${n === 1 ? "" : "s"}` : "No recognised keys in that file";
+          importMsg.className = n ? "importmsg ok" : "importmsg";
+        };
+        reader.readAsText(file);
+        e.target.value = ""; // let the same file be re-imported
+      });
+
+      build();
+    </script>
+  </body>
+</html>

@@ -1,0 +1,242 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/Andy1210/tvbox/blob/main/docs/app-manifest.schema.json",
+  "title": "tvbox app manifest",
+  "description": "One app on the tvbox HOME screen. Lives at shell/apps/<id>.json (first-party) or ~/.tvbox/apps/<id>.json / ~/.tvbox/apps/<id>/manifest.json (user-installed). See docs/app-manifest.md.",
+  "type": "object",
+  "required": ["id", "name", "type", "status"],
+  "additionalProperties": false,
+  "$defs": {
+    "localeString": {
+      "description": "A plain string (brand names) or a per-locale map, e.g. { \"en\": \"Live TV\", \"hu\": \"Élő TV\" }.",
+      "oneOf": [
+        { "type": "string" },
+        { "type": "object", "additionalProperties": { "type": "string" }, "minProperties": 1 }
+      ]
+    }
+  },
+  "properties": {
+    "id": {
+      "type": "string",
+      "pattern": "^[a-z0-9_-]+$",
+      "description": "Unique app id. Also the tile focus key, the apps-data/<id> bundle dir, and the /<id>/ mount for non-root static apps."
+    },
+    "manifestVersion": {
+      "type": "integer",
+      "const": 1,
+      "description": "Manifest format version this file speaks. Omitted = 1. The shell skips manifests with a version it doesn't know."
+    },
+    "version": {
+      "type": "string",
+      "description": "The app's own version (semver). Bump it to offer users an Update in the store."
+    },
+    "changelog": {
+      "type": "array",
+      "description": "Release notes shown in the store's app detail view, newest version first. English only.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["version", "notes"],
+        "properties": {
+          "version": { "type": "string", "description": "The version these notes describe." },
+          "notes": { "type": "string", "description": "What changed, in English (plain text)." }
+        }
+      }
+    },
+    "name": { "$ref": "#/$defs/localeString" },
+    "tagline": { "$ref": "#/$defs/localeString" },
+    "description": { "$ref": "#/$defs/localeString" },
+    "screenshots": {
+      "type": "array",
+      "items": { "type": "string", "pattern": "^https?://" },
+      "maxItems": 8,
+      "description": "Store-detail screenshots (https URLs, e.g. hosted in the registry repo)."
+    },
+    "type": {
+      "enum": ["webclient"],
+      "description": "webclient = the shell serves/loads the app (a package's own local web/ bundle, the legacy root bundle, or a remote site). Apps are self-contained packages now; there are no launcher-compiled 'builtin' views."
+    },
+    "status": {
+      "enum": ["ready", "coming_soon"],
+      "description": "coming_soon renders a non-launchable teaser tile."
+    },
+    "accent": {
+      "type": "string",
+      "pattern": "^#[0-9a-fA-F]{3,8}$",
+      "description": "Tile accent color. Hex only - the shell drops anything else (it is interpolated into launcher CSS)."
+    },
+    "icon": {
+      "type": "string",
+      "description": "Inline SVG markup for the tile. Rendered sandboxed (as an <img> data: URI), so it cannot run script."
+    },
+    "service": {
+      "type": "string",
+      "pattern": "^[a-z0-9_-]+$",
+      "description": "Shell-side plugin name. Repo apps resolve shell/plugins/<service>.js; a user app dir resolves its own plugin.js. Loaded only when requires.bin are all present."
+    },
+    "requires": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Runtime dependencies. Missing bins grey the tile ('needs X') instead of crashing anything.",
+      "properties": {
+        "bin": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Binaries that must resolve on PATH (~/.tvbox/bin is on PATH) for the app to be launchable."
+        },
+        "download": {
+          "type": "array",
+          "description": "No-root static-binary installs for `tvbox deps <id>`: sha256-verified into ~/.tvbox/bin. Preferred over apt when upstream ships binaries.",
+          "items": {
+            "type": "object",
+            "required": ["bin", "arch"],
+            "additionalProperties": false,
+            "properties": {
+              "bin": { "type": "string", "pattern": "^[a-zA-Z0-9_-]+$" },
+              "arch": {
+                "type": "object",
+                "description": "Keyed by Node process.arch (arm64, x64).",
+                "additionalProperties": {
+                  "type": "object",
+                  "required": ["url", "sha256"],
+                  "additionalProperties": false,
+                  "properties": {
+                    "url": { "type": "string", "pattern": "^https://" },
+                    "sha256": { "type": "string", "pattern": "^[0-9a-fA-F]{64}$" },
+                    "extract": {
+                      "type": "string",
+                      "description": "Path of the binary inside the archive (.tar.gz/.zip). Omit for a raw binary download or when it equals bin."
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "apt": {
+          "type": "array",
+          "items": { "type": "string", "pattern": "^[a-z0-9][a-z0-9.+-]*$" },
+          "description": "Debian packages `tvbox deps <id>` installs (the one step that asks for sudo). Only used for bins download can't cover (e.g. mpv)."
+        },
+        "aptRepo": {
+          "type": "object",
+          "required": ["keyUrl", "keyring", "line", "list"],
+          "additionalProperties": false,
+          "description": "Optional third-party APT repo for the apt deps (e.g. raspotify). All fields are validated by the CLI before touching root.",
+          "properties": {
+            "keyUrl": { "type": "string", "pattern": "^https://" },
+            "keyring": { "type": "string", "pattern": "^/usr/share/keyrings/[\\w.-]+$" },
+            "line": { "type": "string", "pattern": "^deb [^\\r\\n]+$" },
+            "list": { "type": "string", "pattern": "^/etc/apt/sources\\.list\\.d/[\\w.-]+$" }
+          }
+        },
+        "disableService": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "System services `tvbox deps` disables after the apt install (e.g. raspotify's own daemon - the shell supervises librespot itself)."
+        }
+      }
+    },
+    "install": {
+      "type": "object",
+      "required": ["source"],
+      "additionalProperties": false,
+      "description": "Web-client bundle install recipe (user-space, no root; runs from the UI or `tvbox install <id>`). The acquired files land in apps-data/<id>.",
+      "properties": {
+        "source": {
+          "type": "object",
+          "required": ["type"],
+          "additionalProperties": false,
+          "properties": {
+            "type": { "enum": ["flatpak", "url", "git"] },
+            "ref": {
+              "type": "string",
+              "description": "flatpak: the app ref (e.g. tv.plex.PlexHTPC), installed --user from flathub."
+            },
+            "arch": {
+              "type": "string",
+              "description": "flatpak: ref arch (a web-client extract is arch-independent, so x86_64 is fine on a Pi)."
+            },
+            "url": {
+              "type": "string",
+              "description": "url: a .tar.gz/.zip to download; git: a repo to clone. Must be https, or plain http to a private/LAN host (self-hosted)."
+            },
+            "sha256": {
+              "type": "string",
+              "pattern": "^[0-9a-fA-F]{64}$",
+              "description": "url: sha256 of the downloaded archive, verified before extraction. Optional but recommended - pins the bundle like every other install path."
+            },
+            "commit": {
+              "type": "string",
+              "pattern": "^[0-9a-fA-F]{40}$",
+              "description": "git: full commit sha checked out (detached) after clone. Optional but recommended - without it the clone floats at the branch head."
+            }
+          }
+        },
+        "extract": { "type": "string", "description": "Subpath inside the acquired source that holds the web client." },
+        "patch": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["op"],
+            "additionalProperties": false,
+            "properties": {
+              "op": { "enum": ["strip-script"] },
+              "match": {
+                "type": "string",
+                "description": "strip-script: remove <script> tags whose attributes contain this substring from the entry HTML."
+              }
+            }
+          }
+        }
+      }
+    },
+    "runtime": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "How the shell serves/launches the app and what the preload bridge exposes to it.",
+      "properties": {
+        "serve": {
+          "enum": ["static", "remote", "local"],
+          "description": "local: a package app that ships its own web/ UI bundle, served at /<id>/ in the main window (the usual model - apps are packages). static: the legacy single root-mounted bundle (mount:root, e.g. Plex). remote: load a live site in an isolated, hardened window."
+        },
+        "route": { "type": "string", "description": "builtin: the launcher hash route (e.g. /livetv)." },
+        "entry": { "type": "string", "description": "static/local: bundle entry file (default index.html)." },
+        "mount": { "enum": ["root"], "description": "static: mount at / (single root app per box) instead of /<id>/." },
+        "url": { "type": "string", "description": "remote: the site to load (https, or http for private/LAN hosts)." },
+        "urlConfig": {
+          "type": "string",
+          "pattern": "^[a-zA-Z0-9_]+$",
+          "description": "remote: read the URL from the named config section's baseUrl instead of a literal url (for self-hosted services)."
+        },
+        "userAgent": {
+          "type": "string",
+          "description": "remote: UA override (e.g. a smart-TV UA for youtube.com/tv)."
+        },
+        "origins": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "remote: hostnames (plus subdomains) navigation is allowed to. Defaults to the url's host. Also the allowlist for the `fetch` capability."
+        },
+        "capabilities": {
+          "type": "array",
+          "items": { "enum": ["nav", "player", "config", "fetch", "storage", "input", "system"] },
+          "description": "THE security boundary: which preload-bridge surfaces the app gets. Defaults to [\"nav\"] - an app that forgets this must not silently gain player/config/fetch. `fetch` is scoped to `origins`."
+        },
+        "bridge": {
+          "type": "string",
+          "pattern": "^[a-z0-9_-]+$",
+          "description": "Renderer bridge adapter from shell/bridges/<name>.js (e.g. qwebchannel for Plex HTPC)."
+        },
+        "player": {
+          "enum": ["mpv-fullscreen", "mpv-overlay"],
+          "description": "mpv-fullscreen: video behind the transparent launcher. mpv-overlay: video behind a transparent app-declared element (transparentSelector)."
+        },
+        "transparentSelector": {
+          "type": "string",
+          "description": "CSS selector of the app element made transparent to reveal mpv (e.g. Plex's #media-container)."
+        }
+      }
+    }
+  }
+}

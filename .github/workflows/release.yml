@@ -1,0 +1,57 @@
+# tvbox OTA release - on a v* tag: pack the shell release tarball + update.json
+# feed (scripts/make-release.sh), attach both to the GitHub Release, then kick
+# off the SD-image build for the same tag (it attaches the .img.xz when done,
+# ~1.5 h later). Boxes poll releases/latest/download/update.json
+# (shell/updater.js), so publishing the release IS the rollout.
+#
+# Flow: bump shell/package.json "version", add a CHANGELOG.md section, commit,
+# tag v<version>, push the tag. Everything else is automatic.
+#
+# The explicit workflow-dispatch at the end is load-bearing: a release created
+# with GITHUB_TOKEN does NOT fire other workflows' `on: release` triggers
+# (GitHub's recursion guard), so sd-image.yml must be dispatched by hand here.
+name: release
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write # create the release + upload assets
+  actions: write # dispatch the sd-image workflow
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: npm, cache-dependency-path: launcher/package-lock.json }
+
+      - name: tag must match shell/package.json version
+        run: |
+          V="$(node -p "require('./shell/package.json').version")"
+          [ "v$V" = "${GITHUB_REF_NAME}" ] || { echo "tag ${GITHUB_REF_NAME} != shell version v$V"; exit 1; }
+
+      - name: build launcher
+        run: cd launcher && npm ci --no-audit --no-fund && npm run build
+
+      - name: pack release (tarball + update.json)
+        run: ./scripts/make-release.sh --skip-build --out dist
+
+      - name: create GitHub release with the OTA assets
+        env: { GH_TOKEN: "${{ github.token }}" }
+        # idempotent: a re-run / re-pushed tag refreshes the assets instead of
+        # dying on "release already exists"
+        run: |
+          if gh release view "${GITHUB_REF_NAME}" >/dev/null 2>&1; then
+            gh release upload "${GITHUB_REF_NAME}" dist/tvbox-shell-*.tar.gz dist/update.json --clobber
+          else
+            gh release create "${GITHUB_REF_NAME}" dist/tvbox-shell-*.tar.gz dist/update.json \
+              --title "tvbox ${GITHUB_REF_NAME}" --generate-notes
+          fi
+
+      - name: kick off the SD-image build for this release
+        env: { GH_TOKEN: "${{ github.token }}" }
+        # NB: gh wants the workflow FILE name (image.yml), not its `name:`
+        run: gh workflow run image.yml --ref "${GITHUB_REF_NAME}" -f release-tag="${GITHUB_REF_NAME}"

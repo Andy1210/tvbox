@@ -1,0 +1,117 @@
+# tvbox SD-image build - pi-gen (Raspberry Pi OS Lite + stage-tvbox) → .img.xz
+# release asset. The stage lives at image/stage-tvbox/ (docs/sd-image.md is
+# the companion doc); this workflow builds the launcher, drops it + the infra
+# files into the stage's files/, then runs pi-gen.
+#
+# Triggered three ways (expect ~1-1.5 h):
+#  - by release.yml after it creates the release (release-tag input set) -
+#    builds THAT tag's code and attaches tvbox-<tag>.img.xz to the release;
+#  - manually (Run workflow) - plain artifact, no release upload;
+#  - by a hand-published release (the `release` event; a release created by
+#    release.yml's GITHUB_TOKEN doesn't fire this - hence the dispatch input).
+name: sd-image
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      release-tag:
+        description: "Existing release tag to build for + attach the image to (e.g. v1.1.0). Empty = artifact only."
+        required: false
+        default: ""
+
+permissions:
+  contents: write # upload the image as a release asset
+
+jobs:
+  image:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # build the tagged code when attaching to a release, HEAD otherwise
+          ref: ${{ inputs.release-tag || github.ref }}
+
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: npm, cache-dependency-path: launcher/package-lock.json }
+
+      - name: build launcher (host-side; arch-independent static bundle)
+        run: cd launcher && npm ci --no-audit --no-fund && npm run build
+
+      - name: assemble stage-tvbox/files
+        run: |
+          set -e
+          test -d image/stage-tvbox || { echo "image/stage-tvbox missing - see docs/sd-image.md"; exit 1; }
+          F=image/stage-tvbox/01-tvbox/files
+          mkdir -p "$F"
+          rsync -a --delete --exclude node_modules --exclude apps-data --exclude '*.log' shell "$F/"
+          # Infra files come from the ONE shared list (deploy/infra.list) via
+          # copy-infra.sh - byte-for-byte the same step build-image.sh runs, so
+          # a local image and this CI image ship an identical infra payload
+          # (remote_input_bridge.py, tvbox-remote.service, cec_vendor_shim.c…).
+          scripts/copy-infra.sh "$F"
+
+      # pi-gen + the in-chroot Electron install need ~20 GB of scratch space.
+      # Deliberately NOT the action's increase-runner-disk-size: that purges a
+      # hardcoded apt package list that breaks whenever GitHub's runner image
+      # drops a package (e.g. google-cloud-cli-anthoscli, 2026-07). Plain
+      # rm -rf of the big preinstalled toolchains reclaims ~25 GB and can't
+      # fail on a package name.
+      - name: free runner disk space
+        run: |
+          df -h / | tail -1
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc \
+            /usr/local/.ghcup /opt/hostedtoolcache/CodeQL /usr/local/share/boost
+          sudo docker system prune -af --volumes >/dev/null 2>&1 || true
+          df -h / | tail -1
+
+      # pi-gen's build-docker.sh wants a `qemu-aarch64` binary on the HOST
+      # PATH and a binfmt entry whose interpreter it can grep - and for the
+      # interpreter to work inside its build container it must be STATIC
+      # (fix-binary/F holds the file open, but a dynamic qemu can't resolve
+      # its libs in the container). qemu-user-static registers the F-flagged
+      # binfmt entry; the symlink satisfies the `which qemu-aarch64` check.
+      # (Same recipe as usimd/pi-gen-action#181 - we drive pi-gen DIRECTLY
+      # because as of 2026-07 every released version of that action has
+      # broken qemu handling on trixie (#179) and its main branch ships no
+      # built dist/. All build settings live in image/config.)
+      - name: set up qemu (static arm64 binfmt)
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq qemu-user-static binfmt-support
+          sudo ln -sf /usr/bin/qemu-aarch64-static /usr/bin/qemu-aarch64
+          ls /proc/sys/fs/binfmt_misc/ | grep -i aarch64
+          cat /proc/sys/fs/binfmt_misc/qemu-aarch64 2>/dev/null | head -3 || true
+
+      - name: pi-gen build
+        run: |
+          set -e
+          # Pinned for reproducible builds (keep in sync with scripts/build-image.sh):
+          # pi-gen's arm64 branch moves, so CI could otherwise bootstrap a different
+          # base image over time. Clone the branch (full history so the ref stays
+          # reachable after arm64 advances), then detach onto the exact commit.
+          PIGEN_REF="ca8aeed0ae300c2a89f55ce9617d5f96a27e99e5" # pi-gen arm64 @ 2026-07
+          git clone --branch arm64 https://github.com/RPi-Distro/pi-gen.git
+          git -C pi-gen checkout --detach "$PIGEN_REF"
+          cp -r image/stage-tvbox pi-gen/
+          cp image/config pi-gen/config
+          touch pi-gen/stage2/SKIP_IMAGES   # export only the tvbox stage's image
+          cd pi-gen && ./build-docker.sh
+          ls -la deploy/
+
+      - name: upload image artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: tvbox-image
+          path: pi-gen/deploy/*.img.xz
+          if-no-files-found: error
+
+      - name: attach to release (versioned filename)
+        if: github.event_name == 'release' || inputs.release-tag != ''
+        env: { GH_TOKEN: "${{ github.token }}" }
+        run: |
+          set -e
+          TAG="${{ github.event.release.tag_name || inputs.release-tag }}"
+          IMG=$(ls pi-gen/deploy/*.img.xz | head -1)
+          cp "$IMG" "tvbox-${TAG}.img.xz"
+          gh release upload "$TAG" "tvbox-${TAG}.img.xz" --clobber

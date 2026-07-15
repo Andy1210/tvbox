@@ -1,0 +1,40 @@
+#!/bin/sh
+# tvbox session autostart (installed to ~/.config/labwc/autostart).
+# Replaces the LXDE-pi desktop session: no panel, no file-manager, no Kodi -
+# just the tvbox Electron shell.
+command -v kanshi >/dev/null 2>&1 && kanshi 2>/dev/null &      # keep output/HDMI config (optional)
+# route audio to HDMI - honour the OTA `current` symlink (like deploy/tvbox and
+# run-shell.sh) so an OTA release's audio-default.sh wins over the dev tree.
+AUDIO_SH="$HOME/.tvbox/current/shell/audio-default.sh"
+[ -f "$AUDIO_SH" ] || AUDIO_SH="$HOME/.tvbox/shell/audio-default.sh"
+sh "$AUDIO_SH" >/dev/null 2>&1 &
+
+# Solid-black background layer BEHIND the Electron shell. The shell is fullscreen
+# always-on-top, so this is normally hidden - but when the shell restarts (e.g.
+# after installing/updating an app) there's a ~1s gap where it would otherwise
+# expose the Pi desktop/wallpaper. swaybg keeps that gap black. Best-effort: if
+# swaybg isn't installed the session is unchanged.
+command -v swaybg >/dev/null 2>&1 && swaybg -c '#000000' >/dev/null 2>&1 &
+
+# Hide the idle mouse cursor. A wireless TV remote often also presents a mouse
+# endpoint, so labwc parks a pointer on screen that never moves. This helper
+# hides it after a few idle seconds and lets it reappear the moment a real mouse
+# moves. Best-effort (needs python3-evdev + wlrctl, both in the baseline).
+command -v python3 >/dev/null 2>&1 && python3 "$HOME/.tvbox/cursor_idle_hide.py" >/dev/null 2>&1 &
+
+# The Pi desktop (panel + file-manager/wallpaper/icons) never starts: provision.sh
+# replaces the system labwc autostart (/etc/xdg/labwc/autostart) so there's
+# nothing to kill here - no race, and nothing to flash behind the shell on a
+# restart. (Belt: swaybg above keeps the screen black even if that override is
+# somehow missing on an un-provisioned box.)
+
+# The tvbox shell, respawned on crash. Self-contained POSIX respawn loop - do
+# NOT depend on the Pi desktop's /usr/bin/lwrespawn helper: the flashable image
+# is Raspberry Pi OS *Lite* + our own labwc, and lwrespawn ships with the
+# desktop session, which Lite doesn't have. Relying on it left a freshly flashed
+# box at a black screen (labwc up, cursor + black swaybg, but nothing ever
+# launched the shell). A plain loop needs no extra package and keeps the OTA
+# rollback contract: run-shell.sh exec's Electron, so when Electron exits/crashes
+# run-shell.sh exits, we re-run it and its own attempt counter / rollback runs -
+# exactly what lwrespawn gave us. (On a full-desktop deploy this behaves the same.)
+( while :; do "$HOME/.tvbox/run-shell.sh"; sleep 1; done ) &
