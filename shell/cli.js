@@ -25,6 +25,55 @@ function validAptName(s) {
   return /^[a-z0-9][a-z0-9.+-]*$/.test(s);
 }
 
+// Validate a manifest's optional third-party APT repo and return the concrete,
+// tvbox-OWNED paths to write. Pure (no I/O) so these security-critical rules
+// are unit-testable. Throws on anything unsafe. The keyring + .list names are
+// DERIVED from the app id - never manifest-chosen - so a bad manifest can't
+// clobber a system (or another app's) keyring via `gpg --dearmor --yes`. The
+// `deb` line must be exactly `deb [signed-by=<that keyring>] https://…` (no
+// `trusted=yes`, no plain-http/unsigned repo, no foreign keyring).
+function aptRepoPlan(m, r) {
+  const id = String((m && m.id) || "");
+  if (!/^[a-z0-9_-]+$/i.test(id)) throw new Error("aptRepo: invalid app id");
+  r = r || {};
+  if (!/^https:\/\//.test(r.keyUrl || "")) throw new Error("aptRepo.keyUrl must be https");
+  const keyring = "/usr/share/keyrings/tvbox-" + id + ".gpg";
+  const listPath = "/etc/apt/sources.list.d/tvbox-" + id + ".list";
+  const debLine = /^deb \[([^\]]*)\] (https:\/\/\S+) \S.*$/.exec(r.line || "");
+  if (!debLine) throw new Error("aptRepo.line must be: deb [signed-by=<keyring>] https://<url> <suite> [components]");
+  if (debLine[1].trim() !== "signed-by=" + keyring)
+    throw new Error("aptRepo.line options must be exactly [signed-by=" + keyring + "]");
+  return { id, keyUrl: r.keyUrl, keyring, listPath, line: r.line };
+}
+
+// Add a third-party APT repo (key + .list) for an app, as root, via sudo. No
+// shell. The safety rules live in aptRepoPlan; this only does the I/O.
+function installAptRepo(m, r, log) {
+  const plan = aptRepoPlan(m, r);
+  const keyTmp = path.join(os.tmpdir(), "tvbox-repo-" + plan.id + ".asc");
+  const listTmp = path.join(os.tmpdir(), "tvbox-repo-" + plan.id + ".list");
+  try {
+    log("adding apt repo (" + plan.line + ")");
+    // --proto-redir =https: keyUrl is https, but curl -L would otherwise follow
+    // a redirect down to http - keep the whole fetch (incl. redirects) https.
+    execFileSync("curl", ["-fsSL", "--proto-redir", "=https", plan.keyUrl, "-o", keyTmp], { stdio: "inherit" });
+    execFileSync("sudo", ["gpg", "--yes", "--dearmor", "-o", plan.keyring, keyTmp], { stdio: "inherit" });
+    fs.writeFileSync(listTmp, plan.line + "\n");
+    execFileSync("sudo", ["cp", listTmp, plan.listPath], { stdio: "inherit" });
+  } finally {
+    try {
+      fs.unlinkSync(keyTmp);
+    } catch (e) {
+      /* may not exist */
+    }
+    try {
+      fs.unlinkSync(listTmp);
+    } catch (e) {
+      /* may not exist */
+    }
+  }
+}
+
 // The no-root `requires.download` install logic lives in install.js now (shared
 // with the shell's UI dep-install path) - see apps.installDownloadDeps below.
 
@@ -88,51 +137,9 @@ function main() {
       if (!apt.length) throw new Error("missing after download: " + still.missing.join(", "));
       const badPkg = apt.filter((p) => !validAptName(String(p)));
       if (badPkg.length) throw new Error("invalid apt package name(s): " + badPkg.join(", "));
-      // Optional third-party APT repo (e.g. raspotify for librespot). No shell:
-      // fetch the key to a temp file, dearmor + drop the .list via sudo directly.
-      if (req.aptRepo) {
-        const r = req.aptRepo;
-        const id = String(m.id || "");
-        if (!/^[a-z0-9_-]+$/i.test(id)) throw new Error("aptRepo: invalid app id");
-        if (!/^https:\/\//.test(r.keyUrl || "")) throw new Error("aptRepo.keyUrl must be https");
-        // The keyring + list paths are OWNED by tvbox and derived from the app
-        // id - never a manifest-chosen path. `gpg --dearmor --yes` OVERWRITES its
-        // output, so a manifest naming e.g. /usr/share/keyrings/ubuntu-archive-
-        // keyring.gpg could clobber a system (or another app's) keyring and
-        // poison unrelated APT trust. Deriving the name makes that impossible.
-        const keyring = "/usr/share/keyrings/tvbox-" + id + ".gpg";
-        const listPath = "/etc/apt/sources.list.d/tvbox-" + id + ".list";
-        // The .list line IS the apt trust decision (its packages' maintainer
-        // scripts run as root). Don't accept an arbitrary `deb …`: require
-        // exactly `deb [signed-by=<our derived keyring>] https://…`, so a
-        // manifest can't slip in `[trusted=yes]`, a plain-http/unsigned repo, or
-        // point signed-by at a foreign keyring.
-        const debLine = /^deb \[([^\]]*)\] (https:\/\/\S+) \S.*$/.exec(r.line || "");
-        if (!debLine)
-          throw new Error("aptRepo.line must be: deb [signed-by=<keyring>] https://<url> <suite> [components]");
-        if (debLine[1].trim() !== "signed-by=" + keyring)
-          throw new Error("aptRepo.line options must be exactly [signed-by=" + keyring + "]");
-        const keyTmp = path.join(os.tmpdir(), "tvbox-repo-" + id + ".asc");
-        const listTmp = path.join(os.tmpdir(), "tvbox-repo-" + id + ".list");
-        try {
-          log("adding apt repo (" + r.line + ")");
-          execFileSync("curl", ["-fsSL", r.keyUrl, "-o", keyTmp], { stdio: "inherit" });
-          execFileSync("sudo", ["gpg", "--yes", "--dearmor", "-o", keyring, keyTmp], { stdio: "inherit" });
-          fs.writeFileSync(listTmp, r.line + "\n");
-          execFileSync("sudo", ["cp", listTmp, listPath], { stdio: "inherit" });
-        } finally {
-          try {
-            fs.unlinkSync(keyTmp);
-          } catch (e) {
-            /* may not exist */
-          }
-          try {
-            fs.unlinkSync(listTmp);
-          } catch (e) {
-            /* may not exist */
-          }
-        }
-      }
+      // Optional third-party APT repo (e.g. raspotify for librespot). Validation
+      // + orchestration live in installAptRepo/aptRepoPlan (unit-tested).
+      if (req.aptRepo) installAptRepo(m, req.aptRepo, log);
       log("apt-get install " + apt.join(" "));
       execFileSync("sudo", ["apt-get", "update", "-qq"], { stdio: "inherit" });
       execFileSync("sudo", ["apt-get", "install", "-y", ...apt], { stdio: "inherit" });
@@ -250,4 +257,6 @@ function main() {
   process.exit(1);
 }
 
-main();
+if (require.main === module) main(); // run only as the CLI, not when required by a test
+
+module.exports = { aptRepoPlan, installAptRepo };

@@ -49,7 +49,12 @@ test("guardedFetch: follows allowed https redirects to the final response", asyn
   const res = await ng.guardedFetch("https://a.example/feed", {}, impl);
   assert.equal(res.status, 200);
   assert.equal(impl.calls.length, 2);
-  assert.equal(impl.calls[0].redirect, "manual"); // never delegate following to undici
+  // every hop (not just the first) must use manual mode - never delegate
+  // following to undici, which would skip the per-hop re-guard
+  assert.deepEqual(
+    impl.calls.map((c) => c.redirect),
+    ["manual", "manual"],
+  );
 });
 
 test("guardedFetch: rejects a redirect onto a public http host", async () => {
