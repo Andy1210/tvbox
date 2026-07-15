@@ -36,6 +36,9 @@ test("isAllowedFetchUrl: https anywhere, http only to LAN/loopback", () => {
   assert.equal(ng.isAllowedFetchUrl("http://169.254.169.254/latest/"), false); // cloud metadata
   assert.equal(ng.isAllowedFetchUrl("ftp://example.com/x"), false);
   assert.equal(ng.isAllowedFetchUrl(""), false);
+  assert.equal(ng.isAllowedFetchUrl("https://"), false); // parseable-URL check, not a prefix test
+  assert.equal(ng.isAllowedFetchUrl("http://"), false);
+  assert.equal(ng.isAllowedFetchUrl("not a url"), false);
 });
 
 test("guardedFetch: follows allowed https redirects to the final response", async () => {
@@ -59,6 +62,23 @@ test("guardedFetch: rejects a redirect onto the cloud metadata address", async (
     "https://a.example/feed": { status: 302, location: "http://169.254.169.254/latest/meta-data/" },
   });
   await assert.rejects(() => ng.guardedFetch("https://a.example/feed", {}, impl), /blocked url/);
+});
+
+test("guardedFetch: rejects an https->http-LAN downgrade redirect", async () => {
+  // a public https feed must NOT be bounced down onto the box's own control API
+  const impl = fakeFetch({
+    "https://a.example/feed": { status: 302, location: "http://127.0.0.1:8097/tvbox/api/apps" },
+  });
+  await assert.rejects(() => ng.guardedFetch("https://a.example/feed", {}, impl), /blocked url/);
+});
+
+test("guardedFetch: a self-hosted LAN http feed may still redirect within the LAN", async () => {
+  const impl = fakeFetch({
+    "http://192.168.1.5/feed": { status: 302, location: "http://192.168.1.6/feed" },
+    "http://192.168.1.6/feed": { status: 200 },
+  });
+  const res = await ng.guardedFetch("http://192.168.1.5/feed", {}, impl);
+  assert.equal(res.status, 200);
 });
 
 test("guardedFetch: rejects a disallowed initial url before dialing out", async () => {

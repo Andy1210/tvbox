@@ -117,17 +117,30 @@ function isLanUrl(u) {
 // The self-hosted fetcher trust rule as a URL predicate: https to ANY host, or
 // plain http only to the owner's own LAN/loopback infra. The updater feed, the
 // app registry and package/download fetches all share this one rule instead of
-// each re-deriving it from a local regex.
+// each re-deriving it from a local regex. Parses the URL (not a prefix test) so
+// a malformed override like "https://" is rejected here - and falls back to the
+// shipped default - instead of being accepted and only failing later at fetch().
 function isAllowedFetchUrl(u) {
-  return /^https:\/\//i.test(String(u || "")) || isLanUrl(u);
+  let x;
+  try {
+    x = new URL(String(u));
+  } catch (e) {
+    return false;
+  }
+  if (x.protocol === "https:") return true; // https to any host
+  if (x.protocol === "http:") return isLanHost(x.hostname); // plain http only to LAN/loopback
+  return false;
 }
 
-// fetch() that follows redirects MANUALLY, re-validating every hop against
-// isAllowedFetchUrl. undici's default redirect:"follow" only checks the FIRST
-// url, so a 3xx from a vetted feed/registry/download could bounce the request
-// onto an internal address (metadata/link-local/arbitrary host) - classic
-// SSRF-via-redirect. This mirrors appfetch's "re-guard each hop" stance for the
-// non-broker fetchers so the guards can't drift apart. `impl` is injectable for
+// fetch() that follows redirects MANUALLY, re-validating every hop. undici's
+// default redirect:"follow" only checks the FIRST url, so a 3xx from a vetted
+// feed/registry/download could bounce the request onto an internal address
+// (metadata/link-local/arbitrary host) - classic SSRF-via-redirect. This
+// mirrors appfetch's "re-guard each hop" stance for the non-broker fetchers so
+// the guards can't drift apart. An https chain must additionally STAY https:
+// http is accepted only when the request already started as http+LAN, so a
+// public https feed can never be redirected down onto http://127.0.0.1/ (the
+// box's own control API) or the http metadata service. `impl` is injectable for
 // tests (defaults to the global fetch). Throws on a disallowed target (initial
 // OR redirect) and past `maxRedirects` (default 5) hops.
 async function guardedFetch(url, init, impl) {
@@ -136,8 +149,10 @@ async function guardedFetch(url, init, impl) {
   const maxRedirects = opts.maxRedirects == null ? 5 : opts.maxRedirects;
   delete opts.maxRedirects;
   let target = String(url);
+  const noDowngrade = /^https:\/\//i.test(target); // an https chain may not drop to http on any hop
+  const allowed = (u) => isAllowedFetchUrl(u) && (!noDowngrade || /^https:\/\//i.test(u));
   for (let hop = 0; ; hop++) {
-    if (!isAllowedFetchUrl(target)) throw new Error("blocked url (need https or LAN http): " + target);
+    if (!allowed(target)) throw new Error("blocked url (need https, or LAN http with no downgrade): " + target);
     const res = await doFetch(target, { ...opts, redirect: "manual" });
     const loc = res.status >= 300 && res.status < 400 && res.headers && res.headers.get("location");
     if (!loc) return res;
