@@ -114,6 +114,38 @@ function isLanUrl(u) {
   }
 }
 
+// The self-hosted fetcher trust rule as a URL predicate: https to ANY host, or
+// plain http only to the owner's own LAN/loopback infra. The updater feed, the
+// app registry and package/download fetches all share this one rule instead of
+// each re-deriving it from a local regex.
+function isAllowedFetchUrl(u) {
+  return /^https:\/\//i.test(String(u || "")) || isLanUrl(u);
+}
+
+// fetch() that follows redirects MANUALLY, re-validating every hop against
+// isAllowedFetchUrl. undici's default redirect:"follow" only checks the FIRST
+// url, so a 3xx from a vetted feed/registry/download could bounce the request
+// onto an internal address (metadata/link-local/arbitrary host) - classic
+// SSRF-via-redirect. This mirrors appfetch's "re-guard each hop" stance for the
+// non-broker fetchers so the guards can't drift apart. `impl` is injectable for
+// tests (defaults to the global fetch). Throws on a disallowed target (initial
+// OR redirect) and past `maxRedirects` (default 5) hops.
+async function guardedFetch(url, init, impl) {
+  const doFetch = impl || fetch;
+  const opts = { ...(init || {}) };
+  const maxRedirects = opts.maxRedirects == null ? 5 : opts.maxRedirects;
+  delete opts.maxRedirects;
+  let target = String(url);
+  for (let hop = 0; ; hop++) {
+    if (!isAllowedFetchUrl(target)) throw new Error("blocked url (need https or LAN http): " + target);
+    const res = await doFetch(target, { ...opts, redirect: "manual" });
+    const loc = res.status >= 300 && res.status < 400 && res.headers && res.headers.get("location");
+    if (!loc) return res;
+    if (hop >= maxRedirects) throw new Error("too many redirects");
+    target = new URL(loc, target).toString();
+  }
+}
+
 // The box's LAN IPv4 (prefer a private address; skip loopback/virtual).
 // Returns "" when the box has no external IPv4 - callers pick their own
 // fallback (pairing shows 127.0.0.1, About shows nothing).
@@ -131,4 +163,4 @@ function lanIp() {
   return fallback;
 }
 
-module.exports = { normHost, classifyIp, isPrivateName, isLanHost, isLanUrl, lanIp };
+module.exports = { normHost, classifyIp, isPrivateName, isLanHost, isLanUrl, isAllowedFetchUrl, guardedFetch, lanIp };

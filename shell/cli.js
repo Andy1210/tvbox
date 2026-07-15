@@ -99,7 +99,16 @@ function main() {
           throw new Error("aptRepo.keyring must be under /usr/share/keyrings/");
         if (!/^\/etc\/apt\/sources\.list\.d\/[\w.-]+$/.test(r.list || ""))
           throw new Error("aptRepo.list must be under /etc/apt/sources.list.d/");
-        if (!/^deb [^\r\n]+$/.test(r.line || "")) throw new Error("aptRepo.line must be a single 'deb …' line");
+        // The .list line IS the apt trust decision (its packages' maintainer
+        // scripts run as root). Don't accept an arbitrary `deb …`: require
+        // exactly `deb [signed-by=<the keyring we just dearmored>] https://…`,
+        // so a manifest can't slip in `[trusted=yes]`, a plain-http/unsigned
+        // repo, or a keyring other than the validated one.
+        const debLine = /^deb \[([^\]]*)\] (https:\/\/\S+) \S.*$/.exec(r.line || "");
+        if (!debLine)
+          throw new Error("aptRepo.line must be: deb [signed-by=<keyring>] https://<url> <suite> [components]");
+        if (debLine[1].trim() !== "signed-by=" + r.keyring)
+          throw new Error("aptRepo.line options must be exactly [signed-by=" + r.keyring + "]");
         const keyTmp = path.join(os.tmpdir(), "tvbox-repo-" + m.id + ".asc");
         const listTmp = path.join(os.tmpdir(), "tvbox-repo-" + m.id + ".list");
         try {

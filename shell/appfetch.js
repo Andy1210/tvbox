@@ -64,9 +64,15 @@ const RES_HEADER_ALLOW = new Set([
 function hostAllowed(origins, hostname) {
   const n = normHost(hostname);
   if (!n) return false;
+  const nIsIp = net.isIP(n) !== 0;
   return origins.some((o) => {
     const oo = normHost(o);
-    return oo && (n === oo || n.endsWith("." + oo));
+    if (!oo) return false;
+    // Suffix ("subdomain") matching is a DNS-name concept: the dotted groups of
+    // an IP address are NOT labels, so origin "0.0.1" must not authorize
+    // "10.0.0.1". Require exact equality whenever either side is an IP literal.
+    if (nIsIp || net.isIP(oo) !== 0) return n === oo;
+    return n === oo || n.endsWith("." + oo);
   });
 }
 

@@ -7,7 +7,7 @@ const path = require("path");
 const os = require("os");
 const crypto = require("crypto");
 const { execFileSync } = require("child_process");
-const { isLanUrl } = require("./netguard"); // shared self-hosted trust rule (plain http only to LAN hosts)
+const { isLanUrl, guardedFetch } = require("./netguard"); // shared self-hosted trust rule (plain http only to LAN hosts)
 
 // Installed web-client BUNDLES live OUTSIDE the shell install so they survive
 // OTA + deploys - an OTA runs the shell from a fresh ~/.tvbox/current/shell (the
@@ -335,7 +335,10 @@ async function installPackage(id, baseUrl, files, log) {
       const url = new URL(rel, baseUrl);
       if (url.origin !== baseOrigin) throw new Error("package file leaves the registry origin: " + rel);
       log("fetch " + rel + " …");
-      const res = await fetch(url.toString(), { cache: "no-store" });
+      // guardedFetch re-validates any redirect hop (a 3xx must not bounce an
+      // origin-pinned package fetch onto an internal address); sha256 below is
+      // the integrity backstop regardless of where the bytes finally came from.
+      const res = await guardedFetch(url.toString(), { cache: "no-store" });
       if (!res.ok) throw new Error("HTTP " + res.status + " for " + rel);
       const buf = Buffer.from(await res.arrayBuffer());
       const sum = crypto.createHash("sha256").update(buf).digest("hex");
