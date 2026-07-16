@@ -19,16 +19,32 @@ export function InstallWatcher() {
   const [visible, setVisible] = useState(false); // drives the HOME-toast-style slide/fade
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const hideTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const queue = useRef<string[]>([]);
+  const showing = useRef(false);
 
-  const show = useCallback((msg: string) => {
-    if (timer.current) clearTimeout(timer.current);
-    if (hideTimer.current) clearTimeout(hideTimer.current);
-    setToast(msg);
-    // after the dwell: slide out, then unmount once the transition has run
+  // Show queued completions one at a time. If several installs finish in the
+  // same poll, each is reported in turn - the old single-slot toast overwrote
+  // all but the last. pump() displays the next message and re-arms itself once
+  // the current card has fully dismissed. (ref-held so `show` stays stable.)
+  const pump = useRef<() => void>(() => {});
+  pump.current = () => {
+    if (showing.current || !queue.current.length) return;
+    showing.current = true;
+    setToast(queue.current.shift() as string);
+    // after the dwell: slide out, unmount once the transition ran, then advance
     timer.current = setTimeout(() => {
       setVisible(false);
-      hideTimer.current = setTimeout(() => setToast(null), 250);
+      hideTimer.current = setTimeout(() => {
+        setToast(null);
+        showing.current = false;
+        pump.current();
+      }, 250);
     }, 4000);
+  };
+
+  const show = useCallback((msg: string) => {
+    queue.current.push(msg);
+    pump.current();
   }, []);
 
   // Entry: the card mounts hidden (translated + transparent); flip `visible` on

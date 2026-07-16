@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { FocusContext, useFocusable, setFocus } from "@noriginmedia/norigin-spatial-navigation";
 import { useFocusableItem } from "@sdk/useFocusableItem";
 import { type StoreEntry } from "../lib/api";
@@ -38,7 +38,7 @@ function ChangelogEntry({ focusKey, version, notes }: { focusKey: string; versio
 // A store screenshot: a D-pad-focusable card so the remote can scroll a wide
 // gallery into view (like ChangelogEntry). The image is an external https URL
 // (hosted in the registry); a broken/offline URL just hides itself.
-function Screenshot({ focusKey, src }: { focusKey: string; src: string }) {
+function Screenshot({ focusKey, src, onFail }: { focusKey: string; src: string; onFail: () => void }) {
   const { ref, focused } = useFocusableItem<HTMLDivElement>({ focusKey }, { block: "nearest", inline: "nearest" });
   return (
     <div
@@ -48,13 +48,9 @@ function Screenshot({ focusKey, src }: { focusKey: string; src: string }) {
         focused ? "border-focus" : "border-transparent",
       ].join(" ")}
     >
-      <img
-        src={src}
-        alt=""
-        loading="lazy"
-        className="h-[26vh] w-auto block"
-        onError={(e) => ((e.currentTarget.parentElement as HTMLElement).style.display = "none")}
-      />
+      {/* on load failure the PARENT drops this card (unmounts it), so the
+          spatial-nav item deregisters - display:none would leave it focusable */}
+      <img src={src} alt="" loading="lazy" className="h-[26vh] w-auto block" onError={onFail} />
     </div>
   );
 }
@@ -102,6 +98,7 @@ export function AppDetail({
 }) {
   const { guard, gate } = usePinGuard();
   const { t, loc } = useI18n();
+  const [failedShots, setFailedShots] = useState<Set<number>>(() => new Set());
   const { ref, focusKey } = useFocusable({ focusKey: "app-detail", isFocusBoundary: true });
   const entryAnim = useEntryAnim();
   const accent = app.accent || "#4152d8";
@@ -238,9 +235,16 @@ export function AppDetail({
           <>
             <div className="text-[2.4vh] font-semibold mt-[3.5vh] mb-[1.4vh]">{t("store.screenshots")}</div>
             <div className="flex gap-[1.5vw] overflow-x-auto no-scrollbar pb-[1vh] -mx-[1vw] px-[1vw]">
-              {app.screenshots.map((s, i) => (
-                <Screenshot key={i} focusKey={"detail-shot-" + i} src={s} />
-              ))}
+              {app.screenshots.map((s, i) =>
+                failedShots.has(i) ? null : (
+                  <Screenshot
+                    key={i}
+                    focusKey={"detail-shot-" + i}
+                    src={s}
+                    onFail={() => setFailedShots((prev) => new Set(prev).add(i))}
+                  />
+                ),
+              )}
             </div>
           </>
         )}

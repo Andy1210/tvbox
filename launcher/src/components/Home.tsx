@@ -24,6 +24,7 @@ export function Home() {
   const hidden = useAppPrefsStore((s) => s.hidden);
   const getMoreHidden = useAppPrefsStore((s) => s.getMoreHidden);
   const [apps, setApps] = useState<AppManifest[]>([]);
+  const [loaded, setLoaded] = useState(false); // first app-list fetch has resolved
   const [widgets, setWidgets] = useState<HomeWidget[]>([]);
   const [powerOpen, setPowerOpen] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
@@ -38,7 +39,9 @@ export function Home() {
     let alive = true;
     const load = () =>
       fetchApps().then((list) => {
-        if (alive) setApps(list);
+        if (!alive) return;
+        setApps(list);
+        setLoaded(true);
       });
     load();
     const onVis = () => {
@@ -80,13 +83,20 @@ export function Home() {
     ).map((id) => byId.get(id)!);
   }, [apps, order, hidden, loc, tag]);
 
-  // focus the first tile once the apps load; else the "Get more" tile; else the
-  // Settings gear (nothing installed and Get-more hidden)
+  // Place focus ONCE, after the first app-list load: the first tile, else the
+  // "Get more" tile, else the Settings gear. One-shot so a later setApps (the
+  // quit handler, or the visibility refetch) can't overwrite an explicitly-set
+  // focus - e.g. the quit flow's run-*/first-tile target.
+  const didInitialFocus = useRef(false);
   useEffect(() => {
+    if (didInitialFocus.current || !loaded) return;
     const first = sorted.length ? sorted[0].id : !getMoreHidden ? GET_MORE_ID : "home-settings";
-    const id = setTimeout(() => setFocus(first), 0);
+    const id = setTimeout(() => {
+      setFocus(first);
+      didInitialFocus.current = true; // mark done only after focus actually ran (a cleared timer must retry)
+    }, 0);
     return () => clearTimeout(id);
-  }, [sorted, getMoreHidden]);
+  }, [loaded, sorted, getMoreHidden]);
 
   const showToast = useCallback((msg: string) => {
     setToast(msg);

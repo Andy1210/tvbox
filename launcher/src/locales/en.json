@@ -237,6 +237,16 @@
     "creditsIntro": "tvbox is MIT-licensed and built on these projects:",
     "trademarks": "Not affiliated with or endorsed by Amazon. Fire TV and Alexa are trademarks of Amazon; used only to describe compatibility. The Fire TV remote feature interoperates with hardware you own and is experimental - use at your own risk."
   },
+  "aboutCredits": {
+    "electron": "app shell",
+    "mpv": "video player",
+    "libcec": "HDMI-CEC remote",
+    "evdev": "remote input bridge",
+    "bleak": "Bluetooth LE (remote IR programming)",
+    "react": "launcher UI",
+    "vite": "launcher build",
+    "tailwind": "launcher styling"
+  },
   "app": {
     "shellUnreachable": "Can't reach the box",
     "shellUnreachableHint": "The tvbox service didn't answer. It may still be starting - try again in a moment.",
@@ -263,6 +273,7 @@
     "update": "Update",
     "updated": "{name} updated",
     "version": "Version {v}",
+    "vShort": "v{v}",
     "installedLatest": "Installed v{installed} · Latest v{latest}",
     "updateAvailableBadge": "Update available",
     "screenshots": "Screenshots",
@@ -367,6 +378,7 @@
     "title": "Backup & restore",
     "hint": "Save the box's settings (channels, accounts, app layout) to your phone as a password-encrypted file - and restore them from there, even onto a re-flashed box.",
     "start": "Backup / restore on phone (QR)",
+    "qrAlt": "Backup QR code",
     "phoneTitle": "Backup on your phone",
     "phoneHint": "Scan the QR with your phone. On the page you can download an encrypted backup, or pick a saved file to restore.",
     "code": "Code",

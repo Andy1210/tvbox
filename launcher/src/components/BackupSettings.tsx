@@ -85,7 +85,7 @@ function BackupPhone({ onClose }: { onClose: () => void }) {
           <div className="text-[2.2vh] text-red-400">{t("backup.error")}</div>
         ) : qr ? (
           <>
-            <img src={qr} alt="QR" className="w-[30vh] h-[30vh] rounded-[1.4vh] bg-white p-[1vh]" />
+            <img src={qr} alt={t("backup.qrAlt")} className="w-[30vh] h-[30vh] rounded-[1.4vh] bg-white p-[1vh]" />
             <div className="text-[2.2vh] font-semibold tabular-nums">{info?.shortUrl}</div>
             <div className="text-[2vh] text-fg-dim">
               {t("backup.code")}: <span className="font-bold text-fg tabular-nums tracking-[0.3vw]">{info?.code}</span>

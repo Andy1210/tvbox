@@ -76,16 +76,16 @@ def main():
     devs = {d.fd: d for d, *_ in remotes}
     seen = {}  # scancode -> keyname (kernel's)
     idx = 0
-    last_scan = None
+    last_scan = {}  # fd -> pending scancode (per node: interleaved reads must not cross)
     try:
         while True:
             r, _, _ = select.select(list(devs), [], [], 1.0)
             for fd in r:
                 for ev in devs[fd].read():
                     if ev.type == e.EV_MSC and ev.code == e.MSC_SCAN:
-                        last_scan = ev.value
+                        last_scan[fd] = ev.value
                     elif ev.type == e.EV_KEY and ev.value == 1:  # key down
-                        scan = last_scan
+                        scan = last_scan.get(fd)
                         kn = keyname(ev.code)
                         tag = ""
                         if scan is not None and scan not in seen:
@@ -94,7 +94,7 @@ def main():
                             tag = f"   hwdb:  KEYBOARD_KEY_{scan:x}={key[4:].lower()}"
                         sc = f"0x{scan:x}" if scan is not None else "(none)"
                         print(f"node={devs[fd].path}  scancode={sc}  key={kn}{tag}")
-                        last_scan = None
+                        last_scan.pop(fd, None)
     except KeyboardInterrupt:
         pass
 

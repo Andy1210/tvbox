@@ -212,7 +212,7 @@ export function StoreSettings() {
           const shownVersion = e.installed && e.installedVersion ? e.installedVersion : e.version;
           const subtitle = [
             e.tagline ? loc(e.tagline) : null,
-            "v" + shownVersion,
+            t("store.vShort", { v: shownVersion }),
             e.urlConfig && e.installed && !e.baseUrl ? t("store.urlMissing") : null,
           ]
             .filter(Boolean)
@@ -233,7 +233,7 @@ export function StoreSettings() {
                   accent can be arbitrarily dark and unreadable */}
               {e.updateAvailable && (
                 <span className="text-[1.6vh] font-semibold shrink-0 whitespace-nowrap text-emerald-200">
-                  {t("store.updateAvailableBadge")} · v{e.version}
+                  {t("store.updateAvailableBadge")} · {t("store.vShort", { v: e.version })}
                 </span>
               )}
               <span className="w-[2.4vh] h-[2.4vh] shrink-0 opacity-40">{chevron}</span>

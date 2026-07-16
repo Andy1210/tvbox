@@ -61,9 +61,15 @@ export function AppOrderSettings() {
   const focusPlaced = useRef(false);
   useEffect(() => {
     if (focusPlaced.current || !ordered.length) return;
-    focusPlaced.current = true;
     const id = ordered[0].id;
-    setTimeout(() => setFocus("apporder-up-" + id), 0);
+    // the first row's "move up" is a no-op (nothing above it) - land on an
+    // actionable control: "move down" when another row exists, otherwise "hide"
+    const target = ordered.length > 1 ? "apporder-down-" + id : "apporder-hide-" + id;
+    const timer = setTimeout(() => {
+      setFocus(target);
+      focusPlaced.current = true; // mark done only after focus ran (a cleared timer must retry)
+    }, 0);
+    return () => clearTimeout(timer); // Settings may close before this fires - don't setFocus off-screen
   }, [ordered]);
 
   const move = (id: string, dir: -1 | 1) => {

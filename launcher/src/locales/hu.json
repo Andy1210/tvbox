@@ -237,6 +237,16 @@
     "creditsIntro": "A tvbox MIT-licencű, és az alábbi projektekre épül:",
     "trademarks": "Nem áll kapcsolatban az Amazonnal, és nem az Amazon támogatja. A Fire TV és az Alexa az Amazon védjegyei; itt csak a kompatibilitás leírására szolgálnak. A Fire TV távirányító funkció a saját tulajdonú eszközöddel működik együtt, és kísérleti - a használat a saját felelősségedre történik."
   },
+  "aboutCredits": {
+    "electron": "alkalmazásváz",
+    "mpv": "videolejátszó",
+    "libcec": "HDMI-CEC távirányító",
+    "evdev": "távirányító bemeneti híd",
+    "bleak": "Bluetooth LE (távirányító IR-programozás)",
+    "react": "indító felület",
+    "vite": "indító build",
+    "tailwind": "indító stílus"
+  },
   "app": {
     "shellUnreachable": "A box nem elérhető",
     "shellUnreachableHint": "A tvbox szolgáltatás nem válaszolt. Lehet, hogy még indul - próbáld újra kicsit később.",
@@ -263,6 +273,7 @@
     "update": "Frissítés",
     "updated": "{name} frissítve",
     "version": "Verzió {v}",
+    "vShort": "v{v}",
     "installedLatest": "Telepítve v{installed} · Legújabb v{latest}",
     "updateAvailableBadge": "Frissítés elérhető",
     "screenshots": "Képernyőképek",
@@ -367,6 +378,7 @@
     "title": "Mentés és visszaállítás",
     "hint": "A box beállításait (csatornák, fiókok, app-elrendezés) jelszóval titkosított fájlként mentheted a telefonodra - és onnan vissza is töltheted, akár egy újratelepített boxra.",
     "start": "Mentés / visszaállítás telefonról (QR)",
+    "qrAlt": "Biztonsági mentés QR-kód",
     "phoneTitle": "Mentés a telefonodon",
     "phoneHint": "Olvasd be a QR-kódot a telefonoddal. Az oldalon letölthetsz egy titkosított mentést, vagy kiválaszthatsz egy korábbi fájlt a visszaállításhoz.",
     "code": "Kód",
