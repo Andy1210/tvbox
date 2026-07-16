@@ -27,6 +27,13 @@ let LOCALES: Record<string, LocaleDict> = {};
 let FALLBACK = "en";
 let LOCALE_INFO: LocaleInfo[] = [];
 
+// Own-property check: LOCALES["toString"]/["constructor"] etc. are truthy via
+// Object.prototype, so a corrupted persisted id must be validated as a real
+// dictionary key, not just "truthy on LOCALES".
+function hasLocale(id: string): boolean {
+  return Object.prototype.hasOwnProperty.call(LOCALES, id);
+}
+
 // Register the locale dictionaries + fallback and derive each locale's {name, tag}
 // from its `_meta`. Call once at startup, before rendering. Replaces the old
 // hardcoded `import hu/en` + `AVAILABLE_LOCALES` const.
@@ -48,7 +55,7 @@ export function configureI18n(locales: Record<string, LocaleDict>, opts?: { fall
   if (current == null) {
     const legacy = legacyLocale();
     if (legacy) useLocaleStore.setState({ locale: legacy });
-  } else if (!LOCALES[current]) {
+  } else if (!hasLocale(current)) {
     useLocaleStore.setState({ locale: null });
   }
 }
@@ -93,7 +100,7 @@ export function localize(value: LocaleString | undefined, locale: string): strin
 function legacyLocale(): string | null {
   try {
     const v = localStorage.getItem("tvbox.locale");
-    return v && LOCALES[v] ? v : null;
+    return v && hasLocale(v) ? v : null;
   } catch {
     return null;
   }
@@ -109,7 +116,7 @@ export const useLocaleStore = create<LocaleState>()(
     (set) => ({
       locale: legacyLocale(),
       setLocale: (id) => {
-        if (!LOCALES[id]) return;
+        if (!hasLocale(id)) return;
         try {
           document.documentElement.lang = id;
         } catch {

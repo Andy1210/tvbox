@@ -119,6 +119,13 @@ test("verGt orders prerelease below the matching release", () => {
   assert.equal(store.verGt("1.2.0+build9", "1.2.0"), false); // build metadata ignored
 });
 
+test("verGt compares large numeric identifiers without precision loss", () => {
+  // parseInt would round both to the same float (> Number.MAX_SAFE_INTEGER)
+  assert.equal(store.verGt("1.0.9007199254740993", "1.0.9007199254740992"), true);
+  assert.equal(store.verGt("1.0.9007199254740992", "1.0.9007199254740993"), false);
+  assert.equal(store.verGt("1.0.0-beta.9007199254740993", "1.0.0-beta.9007199254740992"), true);
+});
+
 test("listForUi flags updateAvailable when the registry version is newer than installed", async () => {
   const manifest = (v) => ({
     id: "verapp",

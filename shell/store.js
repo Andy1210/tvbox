@@ -86,6 +86,17 @@ async function getEntries(config, refresh) {
 // by identifier (numeric compared as numbers and ranked below non-numeric per
 // semver; a shorter prerelease is lower). Build metadata (+...) is ignored.
 // Drives the store's "update available" flag: registry version vs installed.
+// Compare two numeric identifier strings without precision loss (parseInt rounds
+// past Number.MAX_SAFE_INTEGER, so 9007199254740993 and 9007199254740992 would
+// tie). Non-numeric input sorts as 0. Longer (leading zeros stripped) wins; equal
+// length compares lexically. Returns <0 / 0 / >0.
+function cmpNum(a, b) {
+  const norm = (s) => (/^\d+$/.test(s) ? s.replace(/^0+(?=\d)/, "") : "0");
+  const x = norm(a);
+  const y = norm(b);
+  if (x.length !== y.length) return x.length - y.length;
+  return x < y ? -1 : x > y ? 1 : 0;
+}
 function parseVer(v) {
   const s = String(v || "0")
     .trim()
@@ -93,13 +104,14 @@ function parseVer(v) {
   const dash = s.indexOf("-");
   const core = dash === -1 ? s : s.slice(0, dash);
   const pre = dash === -1 ? null : s.slice(dash + 1).split(".");
-  return { nums: core.split(".").map((n) => parseInt(n, 10) || 0), pre };
+  return { core: core.split("."), pre };
 }
 function verGt(a, b) {
   const pa = parseVer(a);
   const pb = parseVer(b);
   for (let i = 0; i < 3; i++) {
-    if ((pa.nums[i] || 0) !== (pb.nums[i] || 0)) return (pa.nums[i] || 0) > (pb.nums[i] || 0);
+    const c = cmpNum(pa.core[i] || "0", pb.core[i] || "0");
+    if (c) return c > 0;
   }
   if (!pa.pre && !pb.pre) return false;
   if (!pa.pre) return true; // release > prerelease
@@ -112,7 +124,7 @@ function verGt(a, b) {
     if (x === y) continue;
     const xn = /^\d+$/.test(x);
     const yn = /^\d+$/.test(y);
-    if (xn && yn) return parseInt(x, 10) > parseInt(y, 10);
+    if (xn && yn) return cmpNum(x, y) > 0;
     if (xn !== yn) return !xn; // numeric identifiers rank below non-numeric
     return x > y;
   }

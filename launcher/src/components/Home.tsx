@@ -90,9 +90,11 @@ export function Home() {
   const didInitialFocus = useRef(false);
   useEffect(() => {
     if (didInitialFocus.current || !loaded) return;
-    didInitialFocus.current = true;
     const first = sorted.length ? sorted[0].id : !getMoreHidden ? GET_MORE_ID : "home-settings";
-    const id = setTimeout(() => setFocus(first), 0);
+    const id = setTimeout(() => {
+      setFocus(first);
+      didInitialFocus.current = true; // mark done only after focus actually ran (a cleared timer must retry)
+    }, 0);
     return () => clearTimeout(id);
   }, [loaded, sorted, getMoreHidden]);
 
