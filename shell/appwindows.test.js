@@ -6,7 +6,7 @@ const assert = require("node:assert");
 const appwins = require("./appwindows");
 
 function fakeWin() {
-  return {
+  const win = {
     destroyed: false,
     visible: true,
     muted: false,
@@ -24,14 +24,14 @@ function fakeWin() {
     },
     webContents: {
       setAudioMuted(v) {
-        // eslint-disable-next-line no-unused-expressions
-        v;
+        win.muted = v; // record on the window so a hidden-but-audible app fails the test
       },
       executeJavaScript() {
         return Promise.resolve();
       },
     },
   };
+  return win;
 }
 
 // 8GB-box limits (maxHidden 6) unless a test overrides memInfo
@@ -49,6 +49,7 @@ test("background hides and mutes; destroy removes from the registry", () => {
   assert.equal(appwins.get("plex"), w);
   appwins.background("plex");
   assert.equal(w.visible, false);
+  assert.equal(w.muted, true, "a backgrounded app must be muted");
   assert.equal(w.destroyed, false);
   assert.ok(appwins.runningIds().includes("plex"));
   appwins.destroy("plex");
