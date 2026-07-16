@@ -114,6 +114,75 @@ function isLanUrl(u) {
   }
 }
 
+// The self-hosted fetcher trust rule as a URL predicate: https to ANY host, or
+// plain http only to the owner's own LAN/loopback infra. The updater feed, the
+// app registry and package/download fetches all share this one rule instead of
+// each re-deriving it from a local regex. Parses the URL (not a prefix test) so
+// a malformed override like "https://" is rejected here - and falls back to the
+// shipped default - instead of being accepted and only failing later at fetch().
+function isAllowedFetchUrl(u) {
+  let x;
+  try {
+    x = new URL(String(u));
+  } catch (e) {
+    return false;
+  }
+  if (x.protocol === "https:") return true; // https to any host
+  if (x.protocol === "http:") return isLanHost(x.hostname); // plain http only to LAN/loopback
+  return false;
+}
+
+// fetch() that follows redirects MANUALLY, re-validating every hop. undici's
+// default redirect:"follow" only checks the FIRST url, so a 3xx from a vetted
+// feed/registry/download could bounce the request onto an internal address
+// (metadata/link-local/arbitrary host) - classic SSRF-via-redirect. This
+// mirrors appfetch's "re-guard each hop" stance for the non-broker fetchers so
+// the guards can't drift apart. An https chain must additionally STAY https:
+// http is accepted only when the request already started as http+LAN, so a
+// public https feed can never be redirected down onto http://127.0.0.1/ (the
+// box's own control API) or the http metadata service. An origin-pinned caller
+// (a package fetch confined to the registry origin) can pass `init.allow`, an
+// extra per-hop predicate applied to EVERY target - so a compromised/MITM'd
+// registry can't 3xx a pinned fetch off its origin, matching the pin the caller
+// documents. `impl` is injectable for tests (defaults to the global fetch).
+// Throws on a disallowed target (initial OR redirect) and past `maxRedirects`
+// (default 5) hops.
+async function guardedFetch(url, init, impl) {
+  const doFetch = impl || fetch;
+  const opts = { ...(init || {}) };
+  // a non-finite/negative maxRedirects (e.g. NaN) would make `hop >= maxRedirects`
+  // never trip and the loop unbounded - fall back to the default cap
+  const maxRedirects = Number.isInteger(opts.maxRedirects) && opts.maxRedirects >= 0 ? opts.maxRedirects : 5;
+  const extraAllow = opts.allow; // optional per-call confinement, e.g. an origin pin
+  delete opts.maxRedirects;
+  delete opts.allow;
+  let target = String(url);
+  // Scheme from the URL parser, not a "https://" prefix test: WHATWG normalizes
+  // scheme-relative forms like "https:example.com", which a regex would miss and
+  // then treat as a non-https (downgradeable) chain.
+  const isHttps = (u) => {
+    try {
+      return new URL(u).protocol === "https:";
+    } catch (e) {
+      return false;
+    }
+  };
+  const noDowngrade = isHttps(target); // an https chain may not drop to http on any hop
+  const allowed = (u) => isAllowedFetchUrl(u) && (!noDowngrade || isHttps(u)) && (!extraAllow || extraAllow(u));
+  for (let hop = 0; ; hop++) {
+    if (!allowed(target)) throw new Error("blocked url (need https, or LAN http with no downgrade): " + target);
+    const res = await doFetch(target, { ...opts, redirect: "manual" });
+    const loc = res.status >= 300 && res.status < 400 && res.headers && res.headers.get("location");
+    if (!loc) return res;
+    // release the intermediate redirect body before the next hop (or before
+    // throwing) so undici doesn't keep the connection/stream open until GC -
+    // appfetch.realTransport drains its redirect responses for the same reason.
+    if (res.body) await res.body.cancel().catch(() => {});
+    if (hop >= maxRedirects) throw new Error("too many redirects");
+    target = new URL(loc, target).toString();
+  }
+}
+
 // The box's LAN IPv4 (prefer a private address; skip loopback/virtual).
 // Returns "" when the box has no external IPv4 - callers pick their own
 // fallback (pairing shows 127.0.0.1, About shows nothing).
@@ -131,4 +200,4 @@ function lanIp() {
   return fallback;
 }
 
-module.exports = { normHost, classifyIp, isPrivateName, isLanHost, isLanUrl, lanIp };
+module.exports = { normHost, classifyIp, isPrivateName, isLanHost, isLanUrl, isAllowedFetchUrl, guardedFetch, lanIp };

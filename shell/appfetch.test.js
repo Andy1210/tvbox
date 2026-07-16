@@ -60,6 +60,14 @@ test("hostAllowed: subdomains yes, lookalikes/empty no", () => {
   assert.equal(af.hostAllowed([""], "evil.com."), false); // empty origin must not wildcard (H2)
   assert.equal(af.hostAllowed([""], "evil.com"), false);
 });
+test("hostAllowed: IP origins match exactly, never as a dotted suffix", () => {
+  assert.equal(af.hostAllowed(["192.168.1.50"], "192.168.1.50"), true); // exact IP ok
+  assert.equal(af.hostAllowed(["0.0.1"], "10.0.0.1"), false); // IP octets are NOT DNS labels
+  assert.equal(af.hostAllowed(["168.1.1"], "192.168.1.1"), false);
+  assert.equal(af.hostAllowed(["1"], "10.0.0.1"), false); // ".1" suffix must not match an IP
+  assert.equal(af.hostAllowed(["example.com"], "10.0.example.com"), true); // real subdomain still ok
+  assert.equal(af.urlAllowed(["0.0.1"], "http://10.0.0.1/").ok, false);
+});
 test("urlAllowed: empty/blank origins reject (H2)", () => {
   assert.equal(af.urlAllowed([], "https://example.com/").ok, false);
   assert.equal(af.urlAllowed([""], "https://evil.com./").ok, false);

@@ -6,16 +6,18 @@
 const fs = require("fs");
 const path = require("path");
 const apps = require("./install");
+const { isAllowedFetchUrl, guardedFetch } = require("./netguard"); // https anywhere, or LAN http; re-guards redirects
 
 const DEFAULT_REGISTRY = "https://raw.githubusercontent.com/Andy1210/tvbox-apps/main/index.json";
 const CACHE_MS = 5 * 60 * 1000;
 let cache = { at: 0, url: null, entries: null, error: null };
 
 function registryUrl(config) {
-  // The override is the box owner's own config.json entry - plain http is
-  // allowed there (self-hosted LAN registry); the shipped default is https.
+  // The override is the box owner's own config.json entry: https anywhere, or
+  // plain http ONLY to a self-hosted LAN registry (never a public http host).
+  // The shipped default is https.
   const s = config.rawStore() || {};
-  return typeof s.registry === "string" && /^https?:\/\//.test(s.registry) ? s.registry : DEFAULT_REGISTRY;
+  return typeof s.registry === "string" && isAllowedFetchUrl(s.registry) ? s.registry : DEFAULT_REGISTRY;
 }
 
 // The registry is CURATED (every app is merge-reviewed - the review is the
@@ -35,7 +37,7 @@ async function fetchIndex(url) {
   const ctl = new AbortController();
   const t = setTimeout(() => ctl.abort(), 10000);
   try {
-    const res = await fetch(url, { signal: ctl.signal, cache: "no-store" });
+    const res = await guardedFetch(url, { signal: ctl.signal, cache: "no-store" });
     if (!res.ok) throw new Error("HTTP " + res.status);
     const idx = await res.json();
     if (!idx || idx.registryVersion !== 1 || !Array.isArray(idx.apps)) throw new Error("bad index shape");
