@@ -88,7 +88,8 @@ export interface TvboxBridge {
 // doesn't throw off-shell; the real bridge, when present, overrides them.
 export function tvbox(): TvboxBridge {
   const bridge = (globalThis as { window?: { tvbox?: Partial<TvboxBridge> } }).window?.tvbox;
-  return { launch: () => {}, home: () => {}, ...bridge } as TvboxBridge;
+  // no-op signatures mirror the required TvboxBridge methods (launch takes an id)
+  return { launch: (_id: string) => {}, home: () => {}, ...bridge } as TvboxBridge;
 }
 
 // Same-origin helper for the shell's /tvbox/api endpoints (thin wrapper over
