@@ -74,7 +74,9 @@ function listSinks(env, cb) {
 // Set a sink's volume (0..1). Targeted by id (from the current list); wireplumber
 // persists per-device volume, so no config write is needed.
 function setVolume(env, id, volume, cb) {
-  const v = Math.max(0, Math.min(1, Number(volume) || 0));
+  const n = Number(volume);
+  if (!Number.isFinite(n)) return cb(false); // reject a bad value, don't silently mute the sink
+  const v = Math.max(0, Math.min(1, n));
   execFile("wpctl", ["set-volume", String(id), v.toFixed(2)], { env, timeout: 8000 }, (e) => cb(!e));
 }
 

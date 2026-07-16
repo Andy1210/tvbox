@@ -108,6 +108,24 @@ test("verGt compares major.minor.patch", () => {
   assert.equal(store.verGt("1.2", "1.1.9"), true); // missing patch = 0
 });
 
+test("verGt orders prerelease below the matching release", () => {
+  assert.equal(store.verGt("1.2.0", "1.2.0-beta.1"), true); // release > its prerelease
+  assert.equal(store.verGt("1.2.0-beta.1", "1.2.0"), false);
+  assert.equal(store.verGt("1.2.0-beta.2", "1.2.0-beta.1"), true); // numeric identifier compare
+  assert.equal(store.verGt("1.2.0-beta.10", "1.2.0-beta.2"), true); // numeric, not lexical
+  assert.equal(store.verGt("1.2.0-rc.1", "1.2.0-beta.9"), true); // rc > beta (lexical)
+  assert.equal(store.verGt("1.2.0-beta", "1.2.0-beta.1"), false); // shorter prerelease is lower
+  assert.equal(store.verGt("1.3.0-beta.1", "1.2.0"), true); // higher core wins regardless
+  assert.equal(store.verGt("1.2.0+build9", "1.2.0"), false); // build metadata ignored
+});
+
+test("verGt compares large numeric identifiers without precision loss", () => {
+  // parseInt would round both to the same float (> Number.MAX_SAFE_INTEGER)
+  assert.equal(store.verGt("1.0.9007199254740993", "1.0.9007199254740992"), true);
+  assert.equal(store.verGt("1.0.9007199254740992", "1.0.9007199254740993"), false);
+  assert.equal(store.verGt("1.0.0-beta.9007199254740993", "1.0.0-beta.9007199254740992"), true);
+});
+
 test("listForUi flags updateAvailable when the registry version is newer than installed", async () => {
   const manifest = (v) => ({
     id: "verapp",

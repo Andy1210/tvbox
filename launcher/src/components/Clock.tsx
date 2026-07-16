@@ -24,10 +24,22 @@ export function Clock() {
   }, []);
 
   useEffect(() => {
-    if (!city) return;
-    fetchWeather().then(setWx);
-    const id = setInterval(() => fetchWeather().then(setWx), 10 * 60 * 1000);
-    return () => clearInterval(id);
+    if (!city) {
+      setWx(null); // drop stale weather when the city is cleared, don't keep showing it
+      return;
+    }
+    // ignore a response that resolves after the city changed/unmounted, or an
+    // in-flight fetch from the previous city could repopulate the chip
+    let alive = true;
+    const apply = (w: Weather | null) => {
+      if (alive) setWx(w);
+    };
+    fetchWeather().then(apply);
+    const id = setInterval(() => fetchWeather().then(apply), 10 * 60 * 1000);
+    return () => {
+      alive = false;
+      clearInterval(id);
+    };
   }, [city]);
 
   const hour12 = hourFormat === "12" ? true : hourFormat === "24" ? false : undefined;
