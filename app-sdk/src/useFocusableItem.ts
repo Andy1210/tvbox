@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef } from "react";
+import { useCallback, useEffect, useRef, type MutableRefObject } from "react";
 import { useFocusable } from "@noriginmedia/norigin-spatial-navigation";
 
 // D-pad focusable list/grid item. Owns the two things every focusable element
@@ -20,7 +20,7 @@ export function useFocusableItem<T extends HTMLElement = HTMLDivElement>(
   const ref = useCallback(
     (el: T | null) => {
       domRef.current = el;
-      (focusRef as React.MutableRefObject<T | null>).current = el;
+      (focusRef as MutableRefObject<T | null>).current = el;
     },
     [focusRef],
   );

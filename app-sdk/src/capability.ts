@@ -38,6 +38,13 @@ export interface TvCommand {
   app?: string;
 }
 
+// Launcher navigation pushed by the shell while the launcher is already up (a
+// remapped Settings/Home button on the remote → /tvbox/api/nav). `dest` is the
+// target surface, e.g. "settings" or "home".
+export interface NavEvent {
+  dest: string;
+}
+
 // ---- fetch capability: scoped server-side data proxy ----
 // Request options an app may pass to fetch(). Only GET/POST/HEAD are allowed and
 // the header set is allowlisted shell-side (see shell/appfetch.js).
@@ -70,14 +77,18 @@ export interface TvboxBridge {
   onPlayer?(cb: (ev: PlayerEvent) => void): () => void;
   onCommand?(cb: (c: TvCommand) => void): () => void;
   onNotify?(cb: (n: TvNotification) => void): () => void;
+  onNav?(cb: (n: NavEvent) => void): () => void;
   fetch?(url: string, opts?: FetchRequest): Promise<FetchResponse>;
   storage?: StorageBridge;
 }
 
-// The shell bridge, or an empty object when running outside the shell (vite dev,
-// tests) so optional-method calls simply no-op rather than throw on undefined.
+// The shell bridge, or a no-op stub when running outside the shell (vite dev,
+// tests). The optional methods are absent (so `?.()` call sites no-op), but the
+// REQUIRED ones (launch/home) get no-op defaults here so a direct `tvbox().home()`
+// doesn't throw off-shell; the real bridge, when present, overrides them.
 export function tvbox(): TvboxBridge {
-  return ((globalThis as { window?: { tvbox?: TvboxBridge } }).window?.tvbox ?? {}) as TvboxBridge;
+  const bridge = (globalThis as { window?: { tvbox?: Partial<TvboxBridge> } }).window?.tvbox;
+  return { launch: () => {}, home: () => {}, ...bridge } as TvboxBridge;
 }
 
 // Same-origin helper for the shell's /tvbox/api endpoints (thin wrapper over

@@ -38,13 +38,18 @@ export function configureI18n(locales: Record<string, LocaleDict>, opts?: { fall
     name: d._meta.name,
     tag: d._meta.tag,
   }));
-  // Re-apply the legacy migration now that the locales are known: at module load
-  // (before this call) LOCALES was empty, so a stored legacy "tvbox.locale" could
-  // not be validated. If nothing has been persisted/chosen yet (locale still
-  // null), adopt the legacy value.
-  if (useLocaleStore.getState().locale == null) {
+  // Now that the locales are known, reconcile the persisted store against them:
+  //  - nothing chosen yet → adopt a valid legacy "tvbox.locale" value if present
+  //    (at module load LOCALES was empty, so it couldn't be validated then);
+  //  - a persisted locale this host no longer ships → drop it, otherwise useI18n()
+  //    would report that stale id while translations silently fall back, leaving
+  //    locale state and the rendered language inconsistent.
+  const current = useLocaleStore.getState().locale;
+  if (current == null) {
     const legacy = legacyLocale();
     if (legacy) useLocaleStore.setState({ locale: legacy });
+  } else if (!LOCALES[current]) {
+    useLocaleStore.setState({ locale: null });
   }
 }
 

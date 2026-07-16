@@ -80,18 +80,41 @@ async function getEntries(config, refresh) {
   return cache;
 }
 
-// Is version a > b? major.minor.patch, missing parts = 0, non-numeric ignored.
+// Is version a > b? Semver-ish precedence: numeric major.minor.patch first,
+// then prerelease handling - a version WITHOUT a prerelease outranks the same
+// core WITH one (1.2.0 > 1.2.0-beta.1), and two prereleases compare identifier
+// by identifier (numeric compared as numbers and ranked below non-numeric per
+// semver; a shorter prerelease is lower). Build metadata (+...) is ignored.
 // Drives the store's "update available" flag: registry version vs installed.
+function parseVer(v) {
+  const s = String(v || "0")
+    .trim()
+    .split("+")[0]; // drop build metadata
+  const dash = s.indexOf("-");
+  const core = dash === -1 ? s : s.slice(0, dash);
+  const pre = dash === -1 ? null : s.slice(dash + 1).split(".");
+  return { nums: core.split(".").map((n) => parseInt(n, 10) || 0), pre };
+}
 function verGt(a, b) {
-  const pa = String(a || "0")
-    .split(".")
-    .map((n) => parseInt(n, 10) || 0);
-  const pb = String(b || "0")
-    .split(".")
-    .map((n) => parseInt(n, 10) || 0);
+  const pa = parseVer(a);
+  const pb = parseVer(b);
   for (let i = 0; i < 3; i++) {
-    if ((pa[i] || 0) > (pb[i] || 0)) return true;
-    if ((pa[i] || 0) < (pb[i] || 0)) return false;
+    if ((pa.nums[i] || 0) !== (pb.nums[i] || 0)) return (pa.nums[i] || 0) > (pb.nums[i] || 0);
+  }
+  if (!pa.pre && !pb.pre) return false;
+  if (!pa.pre) return true; // release > prerelease
+  if (!pb.pre) return false; // prerelease < release
+  for (let i = 0; i < Math.max(pa.pre.length, pb.pre.length); i++) {
+    const x = pa.pre[i];
+    const y = pb.pre[i];
+    if (x === undefined) return false; // shorter prerelease is lower
+    if (y === undefined) return true;
+    if (x === y) continue;
+    const xn = /^\d+$/.test(x);
+    const yn = /^\d+$/.test(y);
+    if (xn && yn) return parseInt(x, 10) > parseInt(y, 10);
+    if (xn !== yn) return !xn; // numeric identifiers rank below non-numeric
+    return x > y;
   }
   return false;
 }
