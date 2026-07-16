@@ -54,12 +54,24 @@ function aptRepoPlan(m, r) {
   // regex below already blocks): the line is written verbatim into the root
   // .list, so a tab/NUL/etc. has no business there. Return this sanitized value.
   const line = String(r.line || "");
-  if ([...line].some((ch) => ch.charCodeAt(0) < 0x20 || ch.charCodeAt(0) === 0x7f))
+  // reject the full control range: C0 (< 0x20), DEL + C1 (0x7f-0x9f)
+  if ([...line].some((ch) => ch.charCodeAt(0) < 0x20 || (ch.charCodeAt(0) >= 0x7f && ch.charCodeAt(0) <= 0x9f)))
     throw new Error("aptRepo.line must be a single line without control characters");
   const debLine = /^deb \[([^\]]*)\] (https:\/\/\S+) \S.*$/.exec(line);
   if (!debLine) throw new Error("aptRepo.line must be: deb [signed-by=<keyring>] https://<url> <suite> [components]");
   if (debLine[1].trim() !== "signed-by=" + keyring)
     throw new Error("aptRepo.line options must be exactly [signed-by=" + keyring + "]");
+  // Parse the repo URL (not just regex-match it): https://\S+ matches things
+  // like "https://:8080/" that have no host and would only fail later under
+  // root apt-get update.
+  let repoUrl;
+  try {
+    repoUrl = new URL(debLine[2]);
+  } catch (e) {
+    throw new Error("aptRepo.line repository URL is not a valid URL", { cause: e });
+  }
+  if (repoUrl.protocol !== "https:" || !repoUrl.hostname)
+    throw new Error("aptRepo.line repository URL must be https with a host");
   return { id, keyUrl: ku.href, keyring, listPath, line };
 }
 

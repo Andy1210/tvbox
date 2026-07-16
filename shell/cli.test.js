@@ -46,9 +46,17 @@ test("aptRepoPlan: rejects a non-https keyUrl and a bad app id", () => {
   assert.throws(() => cli.aptRepoPlan({ id: "Spotify" }, base), /invalid app id/); // lowercase-only, like the rest of the stack
 });
 
-test("aptRepoPlan: rejects control characters (newline, tab) in the deb line", () => {
+test("aptRepoPlan: rejects control characters (newline, tab, C1) in the deb line", () => {
   const withLf = "deb [signed-by=" + KEYRING + "] https://x/ suite main\ndeb https://evil/ x main";
   const withTab = "deb [signed-by=" + KEYRING + "] https://x/ suite\tmain";
+  // NEL (U+0085) - a C1 control; built explicitly so no invisible byte lives in the source
+  const withC1 = "deb [signed-by=" + KEYRING + "] https://x/ suite" + String.fromCharCode(0x85) + "main";
   assert.throws(() => cli.aptRepoPlan({ id: "spotify" }, { keyUrl: base.keyUrl, line: withLf }), /control/);
   assert.throws(() => cli.aptRepoPlan({ id: "spotify" }, { keyUrl: base.keyUrl, line: withTab }), /control/);
+  assert.throws(() => cli.aptRepoPlan({ id: "spotify" }, { keyUrl: base.keyUrl, line: withC1 }), /control/);
+});
+
+test("aptRepoPlan: rejects a deb line whose repo URL has no host", () => {
+  const line = "deb [signed-by=" + KEYRING + "] https://:8080/ suite main";
+  assert.throws(() => cli.aptRepoPlan({ id: "spotify" }, { keyUrl: base.keyUrl, line }), /repository URL/);
 });
