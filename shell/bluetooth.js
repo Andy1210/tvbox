@@ -155,6 +155,10 @@ function pair(env, mac, cb) {
     cb({ ok, log: out.replace(/\s+/g, " ").trim().slice(-240) });
   };
   const paired = () => /Pairing successful|Paired: yes|AlreadyExists|already exists/i.test(out);
+  // A ChildProcess 'error' with no listener (bluetoothctl missing / exec fails)
+  // is an uncaught exception that would take the whole shell down - route it
+  // into the normal single-shot finish(false) instead.
+  p.on("error", () => finish(false));
   const iv = setInterval(() => {
     if (!bonded && !paired() && /Failed to pair|org\.bluez\.Error\.Auth/i.test(out)) {
       return finish(false); // hard auth failure and not (yet) bonded

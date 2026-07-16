@@ -25,7 +25,7 @@ const path = require("path");
 const crypto = require("crypto");
 const { execFile } = require("child_process");
 const config = require("./config");
-const { isLanUrl } = require("./netguard"); // shared LAN/loopback trust rule (feed may be self-hosted http)
+const { isLanUrl, isAllowedFetchUrl, guardedFetch } = require("./netguard"); // shared LAN/loopback trust rule (feed may be self-hosted http)
 const pkg = require("./package.json");
 
 const TVBOX = path.join(os.homedir(), ".tvbox");
@@ -149,7 +149,9 @@ function readLast() {
 
 function feedUrl() {
   const u = config.rawUpdate() || {};
-  return typeof u.feed === "string" && /^https?:\/\//.test(u.feed) ? u.feed : DEFAULT_FEED;
+  // https anywhere, or plain http ONLY to the owner's own LAN feed - a public
+  // http override would be an unauthenticated MITM channel for the whole OTA.
+  return typeof u.feed === "string" && isAllowedFetchUrl(u.feed) ? u.feed : DEFAULT_FEED;
 }
 function autoEnabled() {
   const u = config.rawUpdate() || {};
@@ -201,7 +203,7 @@ async function fetchJson(url, timeoutMs) {
   const ctl = new AbortController();
   const t = setTimeout(() => ctl.abort(), timeoutMs);
   try {
-    const res = await fetch(url, { signal: ctl.signal, cache: "no-store", redirect: "follow" });
+    const res = await guardedFetch(url, { signal: ctl.signal, cache: "no-store" });
     if (!res.ok) throw new Error("HTTP " + res.status);
     return await res.json();
   } finally {
@@ -286,7 +288,7 @@ async function download(url, dest) {
   writeFailed.catch(() => {});
   out.on("error", failWrite);
   try {
-    const res = await fetch(url, { signal: ctl.signal, redirect: "follow" });
+    const res = await guardedFetch(url, { signal: ctl.signal });
     if (!res.ok) throw new Error("HTTP " + res.status);
     // Enforce the size cap WHILE streaming, not after buffering: reject a
     // declared-oversize body up front, and count the real bytes as they arrive

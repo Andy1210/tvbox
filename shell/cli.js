@@ -25,6 +25,80 @@ function validAptName(s) {
   return /^[a-z0-9][a-z0-9.+-]*$/.test(s);
 }
 
+// Validate a manifest's optional third-party APT repo and return the concrete,
+// tvbox-OWNED paths to write. Pure (no I/O) so these security-critical rules
+// are unit-testable. Throws on anything unsafe. The keyring + .list names are
+// DERIVED from the app id - never manifest-chosen - so a bad manifest can't
+// clobber a system (or another app's) keyring via `gpg --dearmor --yes`. The
+// `deb` line must be exactly `deb [signed-by=<that keyring>] https://…` (no
+// `trusted=yes`, no plain-http/unsigned repo, no foreign keyring).
+function aptRepoPlan(m, r) {
+  const id = String((m && m.id) || "");
+  // lowercase-only, matching installPackage() + manifest validation (mixed case
+  // would derive a keyring/list path that other subsystems wouldn't agree on)
+  if (!/^[a-z0-9_-]+$/.test(id)) throw new Error("aptRepo: invalid app id");
+  r = r || {};
+  // Parse (not a prefix test): require a real https URL with a host, so
+  // "https://" or a whitespace-padded value can't pass and only blow up later
+  // inside the root curl.
+  let ku;
+  try {
+    ku = new URL(String(r.keyUrl || ""));
+  } catch (e) {
+    throw new Error("aptRepo.keyUrl must be a valid https URL", { cause: e });
+  }
+  if (ku.protocol !== "https:" || !ku.hostname) throw new Error("aptRepo.keyUrl must be https");
+  const keyring = "/usr/share/keyrings/tvbox-" + id + ".gpg";
+  const listPath = "/etc/apt/sources.list.d/tvbox-" + id + ".list";
+  // Coerce to a string and reject ALL control chars (not just the \r/\n the
+  // regex below already blocks): the line is written verbatim into the root
+  // .list, so a tab/NUL/etc. has no business there. Return this sanitized value.
+  const line = String(r.line || "");
+  // reject the full control range: C0 (< 0x20), DEL + C1 (0x7f-0x9f)
+  if ([...line].some((ch) => ch.charCodeAt(0) < 0x20 || (ch.charCodeAt(0) >= 0x7f && ch.charCodeAt(0) <= 0x9f)))
+    throw new Error("aptRepo.line must be a single line without control characters");
+  const debLine = /^deb \[([^\]]*)\] (https:\/\/\S+) \S.*$/.exec(line);
+  if (!debLine) throw new Error("aptRepo.line must be: deb [signed-by=<keyring>] https://<url> <suite> [components]");
+  if (debLine[1].trim() !== "signed-by=" + keyring)
+    throw new Error("aptRepo.line options must be exactly [signed-by=" + keyring + "]");
+  // Parse the repo URL (not just regex-match it): https://\S+ matches things
+  // like "https://:8080/" that have no host and would only fail later under
+  // root apt-get update.
+  let repoUrl;
+  try {
+    repoUrl = new URL(debLine[2]);
+  } catch (e) {
+    throw new Error("aptRepo.line repository URL is not a valid URL", { cause: e });
+  }
+  if (repoUrl.protocol !== "https:" || !repoUrl.hostname)
+    throw new Error("aptRepo.line repository URL must be https with a host");
+  return { id, keyUrl: ku.href, keyring, listPath, line };
+}
+
+// Add a third-party APT repo (key + .list) for an app, as root, via sudo. No
+// shell. The safety rules live in aptRepoPlan; this only does the I/O.
+function installAptRepo(m, r, log) {
+  const plan = aptRepoPlan(m, r);
+  // Private 0700 temp dir (mkdtemp), NOT predictable /tmp/tvbox-repo-<id>.* paths:
+  // a local process could pre-create/symlink those and swap the contents between
+  // our write and the following `sudo gpg`/`sudo cp`, substituting an attacker
+  // key/repo as root (TOCTOU). An unguessable owner-only dir closes that window.
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "tvbox-repo-"));
+  const keyTmp = path.join(tmpDir, "key.asc");
+  const listTmp = path.join(tmpDir, "repo.list");
+  try {
+    log("adding apt repo (" + plan.line + ")");
+    // --proto-redir =https: keyUrl is https, but curl -L would otherwise follow
+    // a redirect down to http - keep the whole fetch (incl. redirects) https.
+    execFileSync("curl", ["-fsSL", "--proto-redir", "=https", plan.keyUrl, "-o", keyTmp], { stdio: "inherit" });
+    execFileSync("sudo", ["gpg", "--yes", "--dearmor", "-o", plan.keyring, keyTmp], { stdio: "inherit" });
+    fs.writeFileSync(listTmp, plan.line + "\n");
+    execFileSync("sudo", ["cp", listTmp, plan.listPath], { stdio: "inherit" });
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+}
+
 // The no-root `requires.download` install logic lives in install.js now (shared
 // with the shell's UI dep-install path) - see apps.installDownloadDeps below.
 
@@ -88,39 +162,9 @@ function main() {
       if (!apt.length) throw new Error("missing after download: " + still.missing.join(", "));
       const badPkg = apt.filter((p) => !validAptName(String(p)));
       if (badPkg.length) throw new Error("invalid apt package name(s): " + badPkg.join(", "));
-      // Optional third-party APT repo (e.g. raspotify for librespot). No shell:
-      // fetch the key to a temp file, dearmor + drop the .list via sudo directly.
-      // The repo fields come from the manifest, so bound them to the canonical
-      // system dirs and require https (defence-in-depth against a bad manifest).
-      if (req.aptRepo) {
-        const r = req.aptRepo;
-        if (!/^https:\/\//.test(r.keyUrl || "")) throw new Error("aptRepo.keyUrl must be https");
-        if (!/^\/usr\/share\/keyrings\/[\w.-]+$/.test(r.keyring || ""))
-          throw new Error("aptRepo.keyring must be under /usr/share/keyrings/");
-        if (!/^\/etc\/apt\/sources\.list\.d\/[\w.-]+$/.test(r.list || ""))
-          throw new Error("aptRepo.list must be under /etc/apt/sources.list.d/");
-        if (!/^deb [^\r\n]+$/.test(r.line || "")) throw new Error("aptRepo.line must be a single 'deb …' line");
-        const keyTmp = path.join(os.tmpdir(), "tvbox-repo-" + m.id + ".asc");
-        const listTmp = path.join(os.tmpdir(), "tvbox-repo-" + m.id + ".list");
-        try {
-          log("adding apt repo (" + r.line + ")");
-          execFileSync("curl", ["-fsSL", r.keyUrl, "-o", keyTmp], { stdio: "inherit" });
-          execFileSync("sudo", ["gpg", "--yes", "--dearmor", "-o", r.keyring, keyTmp], { stdio: "inherit" });
-          fs.writeFileSync(listTmp, r.line + "\n");
-          execFileSync("sudo", ["cp", listTmp, r.list], { stdio: "inherit" });
-        } finally {
-          try {
-            fs.unlinkSync(keyTmp);
-          } catch (e) {
-            /* may not exist */
-          }
-          try {
-            fs.unlinkSync(listTmp);
-          } catch (e) {
-            /* may not exist */
-          }
-        }
-      }
+      // Optional third-party APT repo (e.g. raspotify for librespot). Validation
+      // + orchestration live in installAptRepo/aptRepoPlan (unit-tested).
+      if (req.aptRepo) installAptRepo(m, req.aptRepo, log);
       log("apt-get install " + apt.join(" "));
       execFileSync("sudo", ["apt-get", "update", "-qq"], { stdio: "inherit" });
       execFileSync("sudo", ["apt-get", "install", "-y", ...apt], { stdio: "inherit" });
@@ -238,4 +282,6 @@ function main() {
   process.exit(1);
 }
 
-main();
+if (require.main === module) main(); // run only as the CLI, not when required by a test
+
+module.exports = { aptRepoPlan, installAptRepo };

@@ -7,7 +7,7 @@ const path = require("path");
 const os = require("os");
 const crypto = require("crypto");
 const { execFileSync } = require("child_process");
-const { isLanUrl } = require("./netguard"); // shared self-hosted trust rule (plain http only to LAN hosts)
+const { isLanUrl, guardedFetch } = require("./netguard"); // shared self-hosted trust rule (plain http only to LAN hosts)
 
 // Installed web-client BUNDLES live OUTSIDE the shell install so they survive
 // OTA + deploys - an OTA runs the shell from a fresh ~/.tvbox/current/shell (the
@@ -275,10 +275,15 @@ function installDownload(entry, log) {
   try {
     const archive = path.join(tmp, "dl");
     log("download " + spec.url + " …");
-    // bounded: a stalled fetch must not hang the install (leaving the tile stuck)
-    execFileSync("curl", ["-fsSL", "--connect-timeout", "20", "--max-time", "600", spec.url, "-o", archive], {
-      stdio: "inherit",
-    });
+    // bounded: a stalled fetch must not hang the install (leaving the tile stuck).
+    // --proto-redir =https: spec.url is https, but -L would otherwise follow a
+    // redirect down to http - keep redirects https too (github's release
+    // redirects are https->https, so this doesn't break real downloads).
+    execFileSync(
+      "curl",
+      ["-fsSL", "--proto-redir", "=https", "--connect-timeout", "20", "--max-time", "600", spec.url, "-o", archive],
+      { stdio: "inherit" },
+    );
     const sum = crypto.createHash("sha256").update(fs.readFileSync(archive)).digest("hex");
     if (sum !== spec.sha256.toLowerCase()) throw new Error(bin + ": sha256 mismatch (got " + sum + ")");
     let src = archive;
@@ -310,6 +315,7 @@ function installDownload(entry, log) {
 // partial download never leaves a half-installed app. `baseUrl` is derived from
 // the registry URL by the caller, so it inherits the registry's trust + scheme.
 const MAX_PKG_FILES = 4000; // a web bundle is dozens of files; this is a runaway-index backstop
+const PKG_FILE_TIMEOUT_MS = 60000; // per-file cap so an unresponsive registry can't hang the install
 async function installPackage(id, baseUrl, files, log) {
   log = log || (() => {});
   if (!/^[a-z0-9_-]+$/.test(String(id || ""))) throw new Error("bad app id");
@@ -335,9 +341,25 @@ async function installPackage(id, baseUrl, files, log) {
       const url = new URL(rel, baseUrl);
       if (url.origin !== baseOrigin) throw new Error("package file leaves the registry origin: " + rel);
       log("fetch " + rel + " …");
-      const res = await fetch(url.toString(), { cache: "no-store" });
-      if (!res.ok) throw new Error("HTTP " + res.status + " for " + rel);
-      const buf = Buffer.from(await res.arrayBuffer());
+      // guardedFetch re-validates any redirect hop AND (via `allow`) confines it
+      // to baseOrigin, so a 3xx can't bounce this origin-pinned fetch off the
+      // registry; sha256 below is the content-integrity backstop on top. Bounded
+      // by a timeout like every other fetcher (fetchIndex/fetchJson/download) so
+      // an unresponsive registry can't hang the install and wedge the tile.
+      const ctl = new AbortController();
+      const timer = setTimeout(() => ctl.abort(), PKG_FILE_TIMEOUT_MS);
+      let buf;
+      try {
+        const res = await guardedFetch(url.toString(), {
+          cache: "no-store",
+          signal: ctl.signal,
+          allow: (u) => new URL(u).origin === baseOrigin,
+        });
+        if (!res.ok) throw new Error("HTTP " + res.status + " for " + rel);
+        buf = Buffer.from(await res.arrayBuffer());
+      } finally {
+        clearTimeout(timer);
+      }
       const sum = crypto.createHash("sha256").update(buf).digest("hex");
       if (sum !== f.sha256.toLowerCase()) throw new Error("sha256 mismatch for " + rel + " (got " + sum + ")");
       const out = path.join(tmp, rel);
@@ -453,7 +475,11 @@ function acquireSource(source, log) {
     const isZip = /\.zip$/i.test(source.url);
     const file = path.join(tmp, isZip ? "src.zip" : "src.tar.gz");
     log("download " + source.url + " …");
-    execFileSync("curl", ["-fsSL", source.url, "-o", file], { stdio: "inherit" });
+    // --proto-redir =https: block a redirect from downgrading to http (the
+    // sha256 pin here is optional, so a downgraded/redirected fetch could hand
+    // us arbitrary bundle bytes). Only redirects are constrained - a direct
+    // https or LAN-http source still downloads fine.
+    execFileSync("curl", ["-fsSL", "--proto-redir", "=https", source.url, "-o", file], { stdio: "inherit" });
     if (source.sha256) {
       const sum = crypto.createHash("sha256").update(fs.readFileSync(file)).digest("hex");
       if (sum !== source.sha256.toLowerCase()) throw new Error("url source sha256 mismatch (got " + sum + ")");
