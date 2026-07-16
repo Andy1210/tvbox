@@ -44,7 +44,7 @@ app packages, shown running on a real box):
 
 ## How it works
 
-```
+```text
    TV remote     ──HDMI-CEC─▶ cec_uinput_bridge    (user service) ─┐
    BT/USB remote ──evdev────▶ remote_input_bridge  (user service) ─┼─▶ both write /dev/uinput ─▶ Wayland key events
                                                                    │
@@ -332,7 +332,7 @@ manifest) on the box; it survives deploys and appears on HOME live, no restart:
   "accent": "#00a4dc",
   "icon": "<svg .../>", // inline SVG, rendered sandboxed
   "tagline": { "en": "Movies & TV", "hu": "Filmek és sorozatok" },
-  "requires": { "bin": ["mpv"], "apt": ["mpv"] }, // runtime deps; the tile greys out if missing
+  "requires": { "bin": ["mpv"] }, // mpv ships in the core image; the tile greys out if the binary is missing
   "runtime": {
     "serve": "remote", // local bundle | static bundle | remote site
     "url": "https://your.jellyfin/web/",
@@ -436,7 +436,7 @@ full build + install in one command.
 
 ## Repo layout
 
-```
+```text
 tvbox/
   shell/         Electron host (HTTP server, app-package registry + installer, mpv, plugin loader) + preload bridges
     bridges/     renderer bridge adapters (e.g. QWebChannel for Plex)

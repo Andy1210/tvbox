@@ -53,8 +53,10 @@ AUTHORING.md; merge review is the trust boundary.
 
 ## PRs
 
-Keep them focused. Describe the TV/remote you tested with for CEC-related
-changes (CEC quirks are very TV-specific). CI must pass: launcher
+Keep them focused. **Run `npm run format` before committing** - CI runs the
+repo-wide `npm run format:check` (Prettier) and fails on any unformatted file,
+not only launcher changes. Describe the TV/remote you tested with for
+CEC-related changes (CEC quirks are very TV-specific). CI must pass: launcher
 typecheck/tests/build, shell syntax, manifest schema, shellcheck.
 
 ## License
