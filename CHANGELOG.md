@@ -5,6 +5,18 @@ updates). `scripts/make-release.sh` lifts the current version's `hu`/`en`
 blocks into the OTA feed's `notes` - keep both languages, keep it short, and
 write for the person on the couch (what changes for THEM), not for developers.
 
+## 1.7.2
+
+### hu
+
+- Háttérben futó biztonsági és megbízhatósági javítások (frissítés-letöltés, alkalmazástelepítés, Bluetooth-párosítás).
+- Felületi finomítások: a fókusz-kijelölés a Beállításokban (nyelv és hang) újra jól látszik, az időjárás eltűnik a város törlésekor, az elalvás-időzítő visszaszámlálása helyesen frissül és lejár, és néhány felirat mostantól magyarul jelenik meg.
+
+### en
+
+- Behind-the-scenes security and reliability fixes (update downloads, app install, Bluetooth pairing).
+- UI polish: the focus highlight in Settings (language and audio) shows correctly again, the weather clears when you remove the city, the sleep-timer countdown updates and expires properly, and a few labels are now translated.
+
 ## 1.7.1
 
 ### hu
