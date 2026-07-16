@@ -26,7 +26,7 @@ boxes - you do **not** make a separate app per box.
 2. Add this **Redirect URI** exactly (Spotify only allows a loopback `http`
    redirect, so the login has to finish on the box itself):
 
-   ```
+   ```text
    http://127.0.0.1:8097/tvbox/api/spotify/auth/callback
    ```
 

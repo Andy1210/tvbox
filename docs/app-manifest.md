@@ -141,7 +141,7 @@ only when the app's `requires.bin` all resolve.
 > repo), which is what lets a package carry a plugin. A `remote` app you host
 > yourself gets only its declared, sandboxed capabilities. Review any plugin
 > before dropping it into `~/.tvbox/apps`.
-
+>
 > **Before reaching for a plugin, check the capabilities.** A lot of what used
 > to need host-side code - playing a stream (`player`), fetching + parsing a
 > feed across origins (`fetch`), persisting settings (`storage`) - is a

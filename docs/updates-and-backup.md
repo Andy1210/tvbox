@@ -16,7 +16,7 @@ your phone ([shell/backup.js](../shell/backup.js)).
 
 Everything is user-space (hard rule #1 - no root at runtime):
 
-```
+```text
 ~/.tvbox/
   shell/                 dev tree (deploy.sh target) - runs when `current` is absent
   versions/<v>/          one extracted release: shell/ + infra/ + manifest.json
