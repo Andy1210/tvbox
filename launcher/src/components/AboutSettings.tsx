@@ -105,7 +105,7 @@ export function AboutSettings() {
           {CREDITS.map((c) => (
             <li key={c.name} className="text-[1.9vh]">
               <span className="font-semibold">{c.name}</span>
-              <span className="text-fg-dim"> - {c.what}</span>
+              <span className="text-fg-dim"> - {t(c.what)}</span>
               <span className="block text-[1.6vh] text-fg-dim break-all">
                 {c.url} · {c.license}
               </span>
@@ -118,15 +118,17 @@ export function AboutSettings() {
   );
 }
 
+// `what` is an i18n key (aboutCredits.*), resolved through t() at render so the
+// descriptions localize; name/url/license are proper nouns kept verbatim.
 const CREDITS: { name: string; what: string; url: string; license: string }[] = [
-  { name: "Electron", what: "app shell", url: "electronjs.org", license: "MIT" },
-  { name: "mpv", what: "video player", url: "mpv.io", license: "GPL-2.0+/LGPL" },
-  { name: "libcec", what: "HDMI-CEC remote", url: "libcec.pulse-eight.com", license: "GPL-2.0" },
-  { name: "python-evdev", what: "remote input bridge", url: "github.com/gvalkov/python-evdev", license: "BSD-3" },
-  { name: "Bleak", what: "Bluetooth LE (remote IR programming)", url: "github.com/hbldh/bleak", license: "MIT" },
-  { name: "React", what: "launcher UI", url: "react.dev", license: "MIT" },
-  { name: "Vite", what: "launcher build", url: "vite.dev", license: "MIT" },
-  { name: "Tailwind CSS", what: "launcher styling", url: "tailwindcss.com", license: "MIT" },
+  { name: "Electron", what: "aboutCredits.electron", url: "electronjs.org", license: "MIT" },
+  { name: "mpv", what: "aboutCredits.mpv", url: "mpv.io", license: "GPL-2.0+/LGPL" },
+  { name: "libcec", what: "aboutCredits.libcec", url: "libcec.pulse-eight.com", license: "GPL-2.0" },
+  { name: "python-evdev", what: "aboutCredits.evdev", url: "github.com/gvalkov/python-evdev", license: "BSD-3" },
+  { name: "Bleak", what: "aboutCredits.bleak", url: "github.com/hbldh/bleak", license: "MIT" },
+  { name: "React", what: "aboutCredits.react", url: "react.dev", license: "MIT" },
+  { name: "Vite", what: "aboutCredits.vite", url: "vite.dev", license: "MIT" },
+  { name: "Tailwind CSS", what: "aboutCredits.tailwind", url: "tailwindcss.com", license: "MIT" },
 ];
 
 // Verbatim per irdb LICENSE.md clause 2 - keep as-is.

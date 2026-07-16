@@ -13,6 +13,14 @@ export function useIdle(idleMs: number, suppressed: boolean): [boolean, () => vo
   };
 
   useEffect(() => {
+    // Clear idle the instant suppression starts, not on the next 5s tick: an
+    // already-idle user returning to Home via a brokered nav event would
+    // otherwise briefly re-trigger the ambient overlay before the interval
+    // catches up.
+    if (suppressed) {
+      last.current = Date.now();
+      setIdle(false);
+    }
     const bump = () => {
       last.current = Date.now();
       setIdle((v) => (v ? false : v));

@@ -17,10 +17,14 @@ export function PowerMenu({ onClose }: { onClose: () => void }) {
   // sleep timer: cycles Off -> 30 -> 60 -> 90 min; the shell owns the countdown
   const TIMER_STEPS = [0, 30, 60, 90];
   const [timerAt, setTimerAt] = useState<number | null>(null);
+  const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
     sleepTimer().then(setTimerAt);
+    const id = setInterval(() => setNow(Date.now()), 30000); // tick so the countdown updates + expires
+    return () => clearInterval(id);
   }, []);
-  const timerLeftMin = timerAt ? Math.max(1, Math.round((timerAt - Date.now()) / 60000)) : 0;
+  // minutes left, or 0 once the timer has elapsed (don't stick at "1 minute")
+  const timerLeftMin = timerAt && timerAt > now ? Math.max(1, Math.round((timerAt - now) / 60000)) : 0;
   const cycleTimer = async () => {
     // pick the next step above what's currently left (or off after the top)
     const next = TIMER_STEPS.find((m) => m > timerLeftMin) ?? 0;
@@ -88,8 +92,8 @@ export function PowerMenu({ onClose }: { onClose: () => void }) {
               <FocusButton key="power-timer" focusKey="power-timer" onEnter={cycleTimer} className={item}>
                 <span className="flex items-center justify-between w-full">
                   <span>{t("power.sleepTimer")}</span>
-                  <span className={["text-[2vh]", timerAt ? "text-accent" : "text-fg-dim"].join(" ")}>
-                    {timerAt ? t("power.sleepTimerIn", { min: String(timerLeftMin) }) : t("display.off")}
+                  <span className={["text-[2vh]", timerLeftMin ? "text-accent" : "text-fg-dim"].join(" ")}>
+                    {timerLeftMin ? t("power.sleepTimerIn", { min: String(timerLeftMin) }) : t("display.off")}
                   </span>
                 </span>
                 <span className="text-[1.7vh] font-normal text-fg-dim">{t("power.sleepTimerHint")}</span>

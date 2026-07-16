@@ -63,7 +63,10 @@ export function AppOrderSettings() {
     if (focusPlaced.current || !ordered.length) return;
     focusPlaced.current = true;
     const id = ordered[0].id;
-    setTimeout(() => setFocus("apporder-up-" + id), 0);
+    // the first row's "move up" is a no-op (nothing above it) - land on an
+    // actionable control: "move down" when another row exists, otherwise "hide"
+    const target = ordered.length > 1 ? "apporder-down-" + id : "apporder-hide-" + id;
+    setTimeout(() => setFocus(target), 0);
   }, [ordered]);
 
   const move = (id: string, dir: -1 | 1) => {

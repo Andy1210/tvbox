@@ -24,7 +24,10 @@ export function Clock() {
   }, []);
 
   useEffect(() => {
-    if (!city) return;
+    if (!city) {
+      setWx(null); // drop stale weather when the city is cleared, don't keep showing it
+      return;
+    }
     fetchWeather().then(setWx);
     const id = setInterval(() => fetchWeather().then(setWx), 10 * 60 * 1000);
     return () => clearInterval(id);
