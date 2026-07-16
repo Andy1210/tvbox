@@ -42,13 +42,26 @@ jobs:
       - name: create GitHub release with the OTA assets
         env: { GH_TOKEN: "${{ github.token }}" }
         # idempotent: a re-run / re-pushed tag refreshes the assets instead of
-        # dying on "release already exists"
+        # dying on "release already exists". The release body is the CHANGELOG's
+        # English notes + a full-changelog compare link (matching earlier
+        # releases), NOT GitHub's --generate-notes PR-list / "New Contributors".
         run: |
+          # previous version = the 2nd "## x.y.z" header in CHANGELOG.md
+          PREV="$(grep -oE '^## [0-9]+\.[0-9]+\.[0-9]+' CHANGELOG.md | sed -n '2p' | awk '{print $2}')"
+          export COMPARE=""
+          [ -n "$PREV" ] && export COMPARE="https://github.com/${{ github.repository }}/compare/v${PREV}...${GITHUB_REF_NAME}"
+          node -e '
+            const n = require("./dist/update.json").notes || {};
+            let body = n.en || "See CHANGELOG.md.";
+            if (process.env.COMPARE) body += "\n\n**Full changelog:** " + process.env.COMPARE;
+            require("fs").writeFileSync("dist/RELEASE_NOTES.md", body + "\n");
+          '
           if gh release view "${GITHUB_REF_NAME}" >/dev/null 2>&1; then
+            gh release edit "${GITHUB_REF_NAME}" --notes-file dist/RELEASE_NOTES.md
             gh release upload "${GITHUB_REF_NAME}" dist/tvbox-shell-*.tar.gz dist/update.json --clobber
           else
             gh release create "${GITHUB_REF_NAME}" dist/tvbox-shell-*.tar.gz dist/update.json \
-              --title "tvbox ${GITHUB_REF_NAME}" --generate-notes
+              --title "tvbox ${GITHUB_REF_NAME}" --notes-file dist/RELEASE_NOTES.md
           fi
 
       - name: kick off the SD-image build for this release
