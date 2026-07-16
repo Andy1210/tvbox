@@ -45,3 +45,10 @@ test("aptRepoPlan: rejects a non-https keyUrl and a bad app id", () => {
   assert.throws(() => cli.aptRepoPlan({ id: "../evil" }, base), /invalid app id/);
   assert.throws(() => cli.aptRepoPlan({ id: "Spotify" }, base), /invalid app id/); // lowercase-only, like the rest of the stack
 });
+
+test("aptRepoPlan: rejects control characters (newline, tab) in the deb line", () => {
+  const withLf = "deb [signed-by=" + KEYRING + "] https://x/ suite main\ndeb https://evil/ x main";
+  const withTab = "deb [signed-by=" + KEYRING + "] https://x/ suite\tmain";
+  assert.throws(() => cli.aptRepoPlan({ id: "spotify" }, { keyUrl: base.keyUrl, line: withLf }), /control/);
+  assert.throws(() => cli.aptRepoPlan({ id: "spotify" }, { keyUrl: base.keyUrl, line: withTab }), /control/);
+});

@@ -50,11 +50,17 @@ function aptRepoPlan(m, r) {
   if (ku.protocol !== "https:" || !ku.hostname) throw new Error("aptRepo.keyUrl must be https");
   const keyring = "/usr/share/keyrings/tvbox-" + id + ".gpg";
   const listPath = "/etc/apt/sources.list.d/tvbox-" + id + ".list";
-  const debLine = /^deb \[([^\]]*)\] (https:\/\/\S+) \S.*$/.exec(r.line || "");
+  // Coerce to a string and reject ALL control chars (not just the \r/\n the
+  // regex below already blocks): the line is written verbatim into the root
+  // .list, so a tab/NUL/etc. has no business there. Return this sanitized value.
+  const line = String(r.line || "");
+  if ([...line].some((ch) => ch.charCodeAt(0) < 0x20 || ch.charCodeAt(0) === 0x7f))
+    throw new Error("aptRepo.line must be a single line without control characters");
+  const debLine = /^deb \[([^\]]*)\] (https:\/\/\S+) \S.*$/.exec(line);
   if (!debLine) throw new Error("aptRepo.line must be: deb [signed-by=<keyring>] https://<url> <suite> [components]");
   if (debLine[1].trim() !== "signed-by=" + keyring)
     throw new Error("aptRepo.line options must be exactly [signed-by=" + keyring + "]");
-  return { id, keyUrl: ku.href, keyring, listPath, line: r.line };
+  return { id, keyUrl: ku.href, keyring, listPath, line };
 }
 
 // Add a third-party APT repo (key + .list) for an app, as root, via sudo. No
