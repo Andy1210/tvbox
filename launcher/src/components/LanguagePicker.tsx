@@ -55,7 +55,7 @@ function LangOption({
         // choice stays obvious even after focus moves to the Next button.
         active ? "bg-white/15 ring-[0.3vh] ring-white" : "bg-white/5",
         // Focus is still the brightest state (dark text on a white fill).
-        focused ? "!bg-white !text-[#06090d] scale-[1.04] shadow-[0_0.6vh_2vh_rgba(0,0,0,0.5)]" : "",
+        focused ? "bg-white! text-[#06090d]! scale-[1.04] shadow-[0_0.6vh_2vh_rgba(0,0,0,0.5)]" : "",
       ].join(" ")}
     >
       {active && <Check className="absolute left-[1vw] top-1/2 -translate-y-1/2 w-[2.4vh] h-[2.4vh]" />}

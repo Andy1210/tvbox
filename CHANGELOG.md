@@ -14,7 +14,7 @@ write for the person on the couch (what changes for THEM), not for developers.
 
 ### en
 
-- About is now its own item in Settings, and the page finally scrolls with the arrows (system information and open source credits).
+- About is now its own item in Settings, and the page finally scrolls with the arrows (system information and open-source credits).
 - The emergency button reset (same remapped button 8 times fast) is now explained on screen, under the remote's reset button.
 
 ## 1.7.0

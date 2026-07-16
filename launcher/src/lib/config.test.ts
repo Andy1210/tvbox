@@ -6,7 +6,10 @@ import { fetchConfig } from "./config";
 // Returning {} on a hiccup would drop the user into first-run onboarding.
 describe("fetchConfig", () => {
   beforeEach(() => vi.spyOn(console, "warn").mockImplementation(() => {}));
-  afterEach(() => vi.unstubAllGlobals());
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks(); // unstubAllGlobals doesn't reset the console.warn spy
+  });
 
   it("returns the parsed config when the shell responds", async () => {
     const cfg = { parental: { pinSet: true, lockedGroups: [] } };

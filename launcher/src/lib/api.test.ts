@@ -8,7 +8,10 @@ import { fetchApps } from "./api";
 // mistaken for a failure (that wrongly seeded 4 phantom apps on a fresh box).
 describe("fetchApps", () => {
   beforeEach(() => vi.spyOn(console, "warn").mockImplementation(() => {}));
-  afterEach(() => vi.unstubAllGlobals());
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks(); // unstubAllGlobals doesn't reset the console.warn spy
+  });
 
   const ok = (data: unknown) => vi.fn().mockResolvedValue({ ok: true, json: () => Promise.resolve(data) });
 

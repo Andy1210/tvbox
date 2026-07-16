@@ -12,7 +12,7 @@ an AI agent** - what runs where and which assumptions burn you.
 
 ## Architecture in one screen
 
-```
+```text
 TV remote     ─HDMI-CEC→ cec_uinput_bridge.py    (systemd USER unit tvbox-cec)     ─┐ uinput
 BT/USB remote ─evdev───→ remote_input_bridge.py  (systemd USER unit tvbox-remote) ─┘ key events
    both write /dev/uinput via the udev grant + `input` group - NO root. tvbox-cec        │

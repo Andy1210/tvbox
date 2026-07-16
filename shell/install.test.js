@@ -126,7 +126,10 @@ test("installPackage fetches a package, verifies sha256, and installs the dir at
     assert.ok(fs.existsSync(path.join(dst, "manifest.json")), "manifest missing");
     assert.equal(fs.readFileSync(path.join(dst, "web", "index.html"), "utf8"), "<html>pkg</html>");
     assert.ok(fs.existsSync(path.join(dst, "web", "assets", "app.js")), "nested asset missing");
-    assert.equal(fs.existsSync(path.dirname(dst) + "/." + "pkgtest.tmp-"), false); // no temp left behind
+    // mkdtemp suffixes the name (.pkgtest.tmp-AbCd), so scan the parent for ANY
+    // leftover rather than the literal prefix (which never exists as a dir)
+    const leaked = fs.readdirSync(path.dirname(dst)).filter((n) => n.startsWith(".pkgtest.tmp-"));
+    assert.deepEqual(leaked, [], "temp dir left behind: " + leaked.join(", "));
   } finally {
     srv.close();
   }

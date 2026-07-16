@@ -21,7 +21,7 @@ Native ARM, no emulation.
 
 ## Layout
 
-```
+```text
 shell/
   main.js               Electron host: HTTP server + route dispatch, manifest registry +
                         install runner, mpv control, window, nav, capability IPC, plugin loader

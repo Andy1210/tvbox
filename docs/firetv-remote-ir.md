@@ -108,7 +108,7 @@ app-switcher style buttons are similar: their consumer-report usage reaches
 evdev only as `KEY_UNKNOWN` (the same code 240 for all of them, useless). But
 they all DO show up on the remote's **hidraw** node:
 
-```
+```text
 ef a1 00 00 00   # report 0xEF: vendor app buttons (byte[1] = code, 0x00 = release)
 02 33 00 00 00   # report 0x02: consumer buttons (0x33 hamburger, 0x02 app switcher)
 01 4f 00 00      # report 0x01: mirrors the NORMAL keys - ignored (evdev has them)

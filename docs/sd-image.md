@@ -15,7 +15,7 @@ itself is built with. It runs a sequence of **stages** (stage0 = bootstrap,
 stage1 = minimal system, stage2 = lite image, …) in an arm64 chroot (qemu
 binfmt on an x86 host, native on an ARM host/runner). We build:
 
-```
+```text
 stage0 → stage1 → stage2 (Raspberry Pi OS Lite)
                 → stage-tvbox (our custom stage)
 ```
@@ -28,7 +28,7 @@ than the full desktop image: the box needs labwc + the shell, not a desktop.
 A pi-gen stage is a directory of numbered sub-steps. The stage is committed -
 this is what's where:
 
-```
+```text
 image/
   config                      # pi-gen config for LOCAL builds (CI passes the
                               # same values as pi-gen-action inputs)

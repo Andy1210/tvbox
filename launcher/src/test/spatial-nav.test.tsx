@@ -211,7 +211,10 @@ describe("grouped panes (Settings sidebar <-> content)", () => {
     expect(getCurrentFocusKey()).toBe("opt-a");
     await remote.down();
     expect(getCurrentFocusKey()).toBe("opt-b");
-    await remote.left(); // content -> sidebar
-    expect(["cat-net", "cat-disp"]).toContain(getCurrentFocusKey());
+    // content -> sidebar: cross-pane nav resolves at the container level (see the
+    // rect setup above), so it lands on the sidebar group's entry item (cat-net),
+    // not the y-aligned "Screen" - assert that exact result, not "either".
+    await remote.left();
+    expect(getCurrentFocusKey()).toBe("cat-net");
   });
 });
