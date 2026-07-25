@@ -67,6 +67,7 @@ const INFRA_FILES = [
   "cursor_idle_hide.py", // idle mouse-cursor hider (launched from labwc-autostart)
   "tvbox",
   "provision.sh",
+  "install-libcec8.sh", // provision builds libcec >= 8 from it (no distro package yet)
   "labwc-autostart",
   "tvbox-cec.service",
   "tvbox-remote.service",

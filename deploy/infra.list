@@ -19,6 +19,7 @@ deploy/labwc-autostart
 deploy/cursor_idle_hide.py
 deploy/tvbox
 deploy/provision.sh
+scripts/install-libcec8.sh
 deploy/tvbox-cec.service
 deploy/tvbox-remote.service
 deploy/tvbox-flatpak-update.service
