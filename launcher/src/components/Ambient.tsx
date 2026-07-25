@@ -211,8 +211,12 @@ export function Ambient({ onExit }: { onExit: () => void }) {
       {/* darken only the bottom for clock/weather legibility, leave the photo visible */}
       <div className="absolute inset-x-0 bottom-0 h-[45vh] bg-gradient-to-t from-black/75 to-transparent" />
       <div className="absolute left-[6vw] bottom-[8vh]">
-        {/* no drop-shadow filter - the bottom scrim already carries legibility */}
-        <div className="text-[16vh] font-bold leading-[0.9] tabular-nums">{time}</div>
+        {/* text-shadow, not a drop-shadow filter: same look, but it paints with
+            the glyphs instead of needing its own render surface. The scrim alone
+            isn't enough - the clock's top half sits where it is nearly clear. */}
+        <div className="text-[16vh] font-bold leading-[0.9] tabular-nums [text-shadow:0_0.4vh_2vh_rgba(0,0,0,0.6)]">
+          {time}
+        </div>
         <div className="text-[3vh] text-white/80 mt-[1vh]">{date}</div>
         {wx && wx.tempC != null && (
           <div className="flex items-center gap-[1.4vw] mt-[2.4vh] text-white/90">

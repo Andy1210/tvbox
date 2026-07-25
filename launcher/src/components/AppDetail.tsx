@@ -25,7 +25,7 @@ function ChangelogEntry({ focusKey, version, notes }: { focusKey: string; versio
     <div
       ref={ref}
       className={[
-        "rounded-[1.1vh] px-[1.6vw] py-[1.3vh] bg-white/5 border-[0.3vh] transition-colors",
+        "rounded-[1.1vh] px-[1.6vw] py-[1.3vh] bg-white/5 border-[0.3vh]",
         focused ? "border-focus bg-white/10" : "border-transparent",
       ].join(" ")}
     >
@@ -44,7 +44,7 @@ function Screenshot({ focusKey, src, onFail }: { focusKey: string; src: string; 
     <div
       ref={ref}
       className={[
-        "shrink-0 rounded-[1.1vh] overflow-hidden border-[0.3vh] transition-colors bg-black/30",
+        "shrink-0 rounded-[1.1vh] overflow-hidden border-[0.3vh] bg-black/30",
         focused ? "border-focus" : "border-transparent",
       ].join(" ")}
     >

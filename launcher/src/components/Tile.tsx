@@ -23,13 +23,15 @@ export function Tile({ app, onSelect }: { app: AppManifest; onSelect: (app: AppM
         // Only transform is transitioned - box-shadow isn't compositable, so
         // animating it repaints the tile every frame. The shadow is the same in
         // both states; focus is the scale plus an outline that snaps on.
-        // will-change keeps each tile on its own layer so the focus scale is a
-        // compositor transform instead of a re-raster at the new size.
-        "flex flex-col justify-end p-[2vh] transition-transform duration-150 will-change-transform",
-        "outline outline-[3px] outline-transparent outline-offset-[3px]",
+        "flex flex-col justify-end p-[2vh] transition-transform duration-150",
+        // vh, not px: a 3px ring is a hairline at 4K and bold at 720p.
+        "outline outline-[0.4vh] outline-offset-[0.4vh]",
         "shadow-[0_1vh_3vh_rgba(0,0,0,0.45)]",
         ready ? "" : "opacity-55",
-        focused ? "scale-[1.09] outline-[var(--color-focus)]" : "",
+        // The two outline-color classes MUST be mutually exclusive: they have
+        // equal specificity, so whichever Tailwind emits last would win no
+        // matter what the element asks for (transparent, as it happens).
+        focused ? "scale-[1.09] outline-[var(--color-focus)]" : "outline-transparent",
       ].join(" ")}
       style={{ background: `linear-gradient(150deg, ${app.accent || "#8b9db4"}22 0%, #0a0f16 70%)` }}
     >

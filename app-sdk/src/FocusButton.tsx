@@ -23,7 +23,10 @@ export function FocusButton({
       onClick={onEnter}
       aria-label={label}
       className={[
-        "transition-[transform,background-color,color] duration-150",
+        // transform only: background-color/color aren't compositable, so
+        // transitioning them repaints on every D-pad move (this is the most-used
+        // focusable in the UI). The fill still changes, it just snaps.
+        "transition-transform duration-150",
         // Focus is the single, unmistakable highlight: a bright fill with dark
         // text (overrides any base bg). Nothing else should look "selected".
         focused ? "!bg-white !text-[#06090d] scale-[1.04] shadow-[0_0.6vh_2vh_rgba(0,0,0,0.5)]" : "",
