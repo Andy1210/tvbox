@@ -281,9 +281,9 @@ export function Home() {
           )}
           <h1 className="text-[2vh] font-semibold text-fg-dim mb-[2.4vh] tracking-wide">{t("home.apps")}</h1>
           {/* overflow-x:auto forces vertical clipping too (overflow-y:visible is
-              not honoured next to auto), so give the focused tile's scale+shadow
-              room INSIDE the scroll box and cancel the layout shift with the
-              negative margins - otherwise the shadow crops in a hard line */}
+              not honoured next to auto), so give the focused tile's scale +
+              outline + shadow room INSIDE the scroll box and cancel the layout
+              shift with the negative margins - otherwise they crop in a hard line */}
           <div className="flex gap-[2.4vw] overflow-x-auto py-[9vh] -my-[5vh] px-[3vw] -mx-[1.4vw] no-scrollbar">
             {sorted.map((app) => (
               <Tile key={app.id} app={app} onSelect={onSelect} />

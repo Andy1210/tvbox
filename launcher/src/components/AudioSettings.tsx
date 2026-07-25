@@ -40,7 +40,7 @@ function VolumeRow({ volume, muted, onBump }: { volume: number; muted: boolean; 
     <div
       ref={ref}
       className={[
-        "px-[2vw] py-[1.5vh] rounded-[1.1vh] flex items-center justify-between gap-[1.5vw] transition-[transform,background-color,color] duration-150",
+        "px-[2vw] py-[1.5vh] rounded-[1.1vh] flex items-center justify-between gap-[1.5vw] transition-transform duration-150",
         focused ? "bg-white! text-[#06090d]! scale-[1.02]" : "bg-white/5",
       ].join(" ")}
     >
