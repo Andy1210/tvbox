@@ -49,7 +49,7 @@ function LangOption({
       onClick={() => onPick(locale.id)}
       className={[
         "relative w-full rounded-[1.4vh] font-bold text-center truncate",
-        "transition-[transform,background-color,color] duration-150",
+        "transition-transform duration-150",
         size === "lg" ? "px-[2vw] py-[2.6vh] text-[2.8vh]" : "px-[1.5vw] py-[1.6vh] text-[2.2vh]",
         // Selected (but not focused): filled tint + solid ring + check, so the
         // choice stays obvious even after focus moves to the Next button.
