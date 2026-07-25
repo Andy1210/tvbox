@@ -59,15 +59,22 @@ export function WeatherIcon({ group, className }: { group: string; className?: s
   );
 }
 
-// One slideshow frame: the blurred cover fills the screen (no letterbox bars)
-// while the sharp contained copy shows the WHOLE photo without cropping. The
-// opaque backdrop keeps the pair self-contained so a wrapper can crossfade it
-// as a unit without the outgoing photo ghosting through the 50% blur layer.
+// One slideshow frame: a soft cover fills the screen (no letterbox bars) while
+// the sharp contained copy shows the WHOLE photo without cropping. The opaque
+// backdrop keeps the pair self-contained so a wrapper can crossfade it as a unit.
+// The cover is laid out small and scaled up rather than blurred at full size
+// (measured: same look, less work on each photo change). 11% at -5%,-5% scaled
+// 10x spans -5%..105% - the overscan hides the blur's own transparent edge
+// falloff, which would otherwise show as a dark ramp around the screen.
 function PhotoPair({ src }: { src: string }) {
   return (
     <>
       <div className="absolute inset-0 bg-[#07090d]" />
-      <img src={src} alt="" className="absolute inset-0 w-full h-full object-cover scale-110 blur-[28px] opacity-50" />
+      <img
+        src={src}
+        alt=""
+        className="absolute left-[-5%] top-[-5%] w-[11%] h-[11%] object-cover origin-top-left scale-[10] blur-[2.8px] opacity-50"
+      />
       <img src={src} alt="" className="absolute inset-0 w-full h-full object-contain" />
     </>
   );
@@ -204,9 +211,8 @@ export function Ambient({ onExit }: { onExit: () => void }) {
       {/* darken only the bottom for clock/weather legibility, leave the photo visible */}
       <div className="absolute inset-x-0 bottom-0 h-[45vh] bg-gradient-to-t from-black/75 to-transparent" />
       <div className="absolute left-[6vw] bottom-[8vh]">
-        <div className="text-[16vh] font-bold leading-[0.9] tabular-nums drop-shadow-[0_0.4vh_2vh_rgba(0,0,0,0.6)]">
-          {time}
-        </div>
+        {/* no drop-shadow filter - the bottom scrim already carries legibility */}
+        <div className="text-[16vh] font-bold leading-[0.9] tabular-nums">{time}</div>
         <div className="text-[3vh] text-white/80 mt-[1vh]">{date}</div>
         {wx && wx.tempC != null && (
           <div className="flex items-center gap-[1.4vw] mt-[2.4vh] text-white/90">

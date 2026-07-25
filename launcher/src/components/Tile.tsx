@@ -1,4 +1,3 @@
-import { useEffect } from "react";
 import type { AppManifest } from "../lib/types";
 import { useI18n } from "../lib/i18n";
 import { useFocusableItem } from "../lib/useFocusableItem";
@@ -14,12 +13,6 @@ export function Tile({ app, onSelect }: { app: AppManifest; onSelect: (app: AppM
     { behavior: "smooth", inline: "center", block: "nearest" },
   );
 
-  // tint the ambient backdrop (Backdrop.tsx) with the focused app's accent -
-  // the .tv-backdrop-accent layer transitions when this variable changes
-  useEffect(() => {
-    if (focused) document.documentElement.style.setProperty("--tile-accent", app.accent || "#4152d8");
-  }, [focused, app.accent]);
-
   return (
     <div
       ref={ref}
@@ -27,12 +20,16 @@ export function Tile({ app, onSelect }: { app: AppManifest; onSelect: (app: AppM
       onClick={() => onSelect(app)}
       className={[
         "relative flex-none w-[16.7vw] aspect-[16/10] rounded-[1.6vh] overflow-hidden",
-        "flex flex-col justify-end p-[2vh] transition-[transform,box-shadow,outline-color] duration-150",
+        // Only transform is transitioned - box-shadow isn't compositable, so
+        // animating it repaints the tile every frame. The shadow is the same in
+        // both states; focus is the scale plus an outline that snaps on.
+        // will-change keeps each tile on its own layer so the focus scale is a
+        // compositor transform instead of a re-raster at the new size.
+        "flex flex-col justify-end p-[2vh] transition-transform duration-150 will-change-transform",
         "outline outline-[3px] outline-transparent outline-offset-[3px]",
+        "shadow-[0_1vh_3vh_rgba(0,0,0,0.45)]",
         ready ? "" : "opacity-55",
-        focused
-          ? "scale-[1.09] outline-[var(--color-focus)] shadow-[0_2vh_5vh_rgba(0,0,0,0.6)]"
-          : "shadow-[0_1vh_3vh_rgba(0,0,0,0.45)]",
+        focused ? "scale-[1.09] outline-[var(--color-focus)]" : "",
       ].join(" ")}
       style={{ background: `linear-gradient(150deg, ${app.accent || "#8b9db4"}22 0%, #0a0f16 70%)` }}
     >
