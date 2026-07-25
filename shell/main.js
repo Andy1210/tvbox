@@ -5,7 +5,7 @@
 // window driven over its JSON IPC. Apps get a capability-scoped bridge
 // (preload.js); the remote Home button returns to the launcher from anywhere.
 // Run: electron . --ozone-platform=wayland --no-sandbox
-const { app, BrowserWindow, ipcMain } = require("electron");
+const { app, BrowserWindow, ipcMain, screen } = require("electron");
 const { spawn, execFile } = require("child_process");
 const http = require("http");
 const net = require("net");
@@ -1104,6 +1104,52 @@ function applyDisplayMode(mode, res) {
     if (ok) config.setDisplay({ mode }); // persist only on success
     jsonRes(res, ok ? { ok: true } : { ok: false, error: err || "apply failed" });
   });
+}
+
+// Keep the saved display mode across a TV power cycle: switching the TV off and
+// on cycles HDMI hotplug, and labwc re-adds the output at the EDID PREFERRED
+// mode, undoing a user-forced resolution (the boot apply runs only once).
+// The event payload is stale while labwc settles, so debounce and re-read the
+// live mode - that comparison also stops our own apply from re-triggering us.
+function watchDisplayMode() {
+  let timer = null;
+  let tries = 0; // consecutive re-applies that did not stick
+  const MAX_TRIES = 3;
+  const recheck = () => {
+    if (timer) clearTimeout(timer);
+    timer = setTimeout(() => {
+      timer = null;
+      const want = (config.rawDisplay() || {}).mode;
+      if (!want) return; // never forced a mode -> the preferred one is correct
+      display.list({ ...process.env, ...WL_ENV }, (info) => {
+        if (!info) return; // no output (TV still off) - the next event retries
+        const cur = info.modes.find((m) => m.current);
+        if (!cur) return;
+        if (cur.key === want) {
+          tries = 0; // it stuck; arm again for the next real hotplug
+          return;
+        }
+        // Give up after a few goes. wlr-randr reporting success does NOT mean the
+        // sink kept the mode (a marginal 4K60 link or an AVR can bounce straight
+        // back to preferred), and each attempt blanks the screen for ~3s - so
+        // without this the TV would black-flash in a loop forever.
+        if (++tries > MAX_TRIES) {
+          if (tries === MAX_TRIES + 1)
+            console.log("[display]", want, "will not stick (now", cur.key + ") - leaving it alone");
+          return;
+        }
+        console.log("[display] output re-detected at", cur.key, "- re-applying saved", want);
+        // Deliberately NOT resetting `tries` on a reported success: wlr-randr
+        // exiting 0 is exactly the signal that can't be trusted here. Only
+        // observing the mode actually current (above) clears the counter.
+        display.applyKey({ ...process.env, ...WL_ENV }, want, (ok, err) =>
+          console.log("[display] re-apply", want, ok ? "ok" : "failed: " + err),
+        );
+      });
+    }, 2000);
+  };
+  screen.on("display-added", recheck);
+  screen.on("display-metrics-changed", recheck);
 }
 
 // Power menu actions from Home. sleep = display off over CEC (the box keeps
@@ -2534,6 +2580,7 @@ app.whenReady().then(() => {
         console.log("[display] boot apply", d.mode, ok ? "ok" : "failed"),
       );
   }
+  watchDisplayMode();
   win = new BrowserWindow({
     fullscreen: true,
     frame: false,
