@@ -503,14 +503,16 @@ function handlePost(p, data, res) {
   if (p === "/tvbox/api/firetvir/deps") {
     return jsonRes(res, { ok: firetvir.installDeps() }); // progress is polled via /firetvir/status
   }
+  // `plan` = { base, keys: { <key>: { path, second } } } (per-key brands + a
+  // second device on a key); a bare `path` is the single-codeset form.
   if (p === "/tvbox/api/firetvir/test") {
-    firetvir.testKey(String(data.mac || ""), String(data.path || ""), String(data.key || ""), (err, r) =>
+    firetvir.testKey(String(data.mac || ""), data.plan || String(data.path || ""), String(data.key || ""), (err, r) =>
       jsonRes(res, err ? { ok: false, error: String(err.message || err).slice(0, 200) } : r),
     );
     return;
   }
   if (p === "/tvbox/api/firetvir/program") {
-    firetvir.program(String(data.mac || ""), String(data.path || ""), String(data.label || ""), (err, r) =>
+    firetvir.program(String(data.mac || ""), data.plan || String(data.path || ""), String(data.label || ""), (err, r) =>
       jsonRes(res, err ? { ok: false, error: String(err.message || err).slice(0, 200) } : r),
     );
     return;

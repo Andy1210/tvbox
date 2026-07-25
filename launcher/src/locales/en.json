@@ -483,6 +483,18 @@
     "erased": "Erased the remote's programmed codes.",
     "credit": "TV codes from the community irdb database (github.com/probonopd/irdb). See About for credits.",
     "suggested": "Detected your TV as {brand} - suggested below.",
-    "entry": "TV IR (this remote's own blaster)"
+    "entry": "TV IR (this remote's own blaster)",
+    "test": "Test",
+    "override": "Other brand",
+    "change": "Change",
+    "useBase": "Use default",
+    "addSecond": "+ 2nd device",
+    "removeSecond": "Remove 2nd",
+    "fromBase": "default brand",
+    "keyMissing": "not in this codeset",
+    "pickFor": "Brand for {key}",
+    "pickSecondFor": "Second device for {key}",
+    "cancel": "Cancel",
+    "perKeyHint": "Each button can use a different brand - e.g. a soundbar on volume. A second device makes one press blast both (the TV's own power still goes over HDMI-CEC)."
   }
 }
