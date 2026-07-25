@@ -83,6 +83,7 @@ jobs:
           shellcheck -S error \
             deploy/deploy.sh deploy/provision.sh deploy/run-shell.sh deploy/labwc-autostart deploy/tvbox \
             scripts/copy-infra.sh scripts/make-release.sh scripts/build-image.sh \
+            scripts/install-libcec8.sh \
             shell/audio-default.sh
       - name: python syntax (input bridges + helpers)
         run: |

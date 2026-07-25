@@ -30,7 +30,9 @@ blacklists the box (worked by boot-timing luck on kernels <= 6.12; kernel
 6.18's later logical-address claim loses the race deterministically). Fix:
 cec_vendor_shim.c, an LD_PRELOAD for cec-client that rewrites the announced
 vendor at the ioctl boundary ($CEC_SHIM_VENDOR_ID selects the vendor, so the
-mechanism is not LG-specific). Policy lives here, keyed by `cec.vendorShim`
+mechanism is not LG-specific). On libcec >= 8 the shim is skipped entirely -
+cec-client takes `--vendor-id` natively (scripts/install-libcec8.sh builds it;
+no distro packages 8.x yet). Policy lives here, keyed by `cec.vendorShim`
 in ~/.tvbox/config.json:
   "auto" (default) - masquerade as LG, only when the TV's vendor broadcast
           says LG (the only brand this is tested against; remembered in
@@ -154,6 +156,20 @@ def store_tv_vendor(vendor: str) -> None:
             f.write(vendor + "\n")
     except OSError as ex:
         print(f"cec_tv_vendor not saved: {ex}", flush=True)
+
+
+def cec_client_has_vendor_id() -> bool:
+    """Does the cec-client on PATH support --vendor-id (libcec >= 8)?
+    Feature-detected from --help, which exits instantly without touching the CEC
+    adapter - there is no --version flag (it is parsed as a serial port), and the
+    v8 binary is statically linked so its soname can't be read either."""
+    try:
+        out = subprocess.run(
+            ["cec-client", "--help"], capture_output=True, text=True, timeout=10
+        )
+        return "--vendor-id" in (out.stdout + out.stderr)
+    except Exception:
+        return False
 
 
 def ensure_vendor_shim() -> str | None:
@@ -331,13 +347,27 @@ def main() -> None:
     tv_vendor = stored_tv_vendor()
     target = resolve_shim_target(mode, tv_vendor)
     env = None
-    if target is not None:
+    client = list(CEC_CLIENT)
+    # libcec >= 8 can announce the vendor itself (--vendor-id), which is what the
+    # LD_PRELOAD shim was faking - it sets cec_log_addrs.vendor_id on the same
+    # ioctl the shim intercepted, so the vendor query race is won without us.
+    # Older libcec (Debian/RPi still ship 7.x) keeps the shim.
+    if target is not None and cec_client_has_vendor_id():
+        client += ["--vendor-id", target.upper()]
+        print(
+            f"vendor shim: not needed - libcec --vendor-id {target} "
+            f"(mode={mode}, tv_vendor={tv_vendor or 'unknown'})",
+            flush=True,
+        )
+    elif target is not None:
         so = ensure_vendor_shim()
         if so:
             env = {**os.environ, "LD_PRELOAD": so, "CEC_SHIM_VENDOR_ID": target}
         else:
             target = None
-    print(f"vendor shim: {target or 'off'} (mode={mode}, tv_vendor={tv_vendor or 'unknown'})", flush=True)
+        print(f"vendor shim: {target or 'off'} (mode={mode}, tv_vendor={tv_vendor or 'unknown'})", flush=True)
+    else:
+        print(f"vendor shim: off (mode={mode}, tv_vendor={tv_vendor or 'unknown'})", flush=True)
 
     ui = UInput({e.EV_KEY: ALL_KEYS}, name="tvbox-cec-remote")
     print("uinput device created: tvbox-cec-remote", flush=True)
@@ -348,7 +378,7 @@ def main() -> None:
     # forces line buffering so each frame is delivered the instant cec-client
     # logs it. stdbuf appends libstdbuf.so to LD_PRELOAD, so the LG vendor shim
     # (also LD_PRELOAD, via env) still loads alongside it.
-    launch = ["stdbuf", "-oL", *CEC_CLIENT] if shutil.which("stdbuf") else CEC_CLIENT
+    launch = ["stdbuf", "-oL", *client] if shutil.which("stdbuf") else client
     proc = subprocess.Popen(
         launch,
         stdin=subprocess.PIPE,

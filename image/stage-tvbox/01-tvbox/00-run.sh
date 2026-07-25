@@ -310,6 +310,14 @@ set -e
 usermod -aG input,video,netdev ${FIRST_USER_NAME}
 chown -R ${FIRST_USER_NAME}:${FIRST_USER_NAME} ${USER_HOME}/.tvbox
 
+# libcec >= 8: gives cec-client --vendor-id, so the CEC bridge does not need the
+# LD_PRELOAD vendor shim for LG SIMPLINK. No distro packages 8.x yet, so it is
+# built from source (pinned commit) - here rather than in provision.sh's path,
+# because a flashed box never runs provision. Slow under qemu but it is the only
+# channel that can add a system library. Non-fatal: a box without it just keeps
+# using the shim.
+sh ${USER_HOME}/.tvbox/install-libcec8.sh || echo "WARN: libcec 8 build failed - the CEC bridge will use the vendor shim"
+
 # NB: librespot (Spotify Connect) is NOT preinstalled - it's a per-app
 # requires.download binary the Spotify app installs from the UI, no root
 # (Kodi binary-addon style). NOTE: this on_chroot heredoc is UNQUOTED so the
