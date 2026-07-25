@@ -75,90 +75,30 @@
     background: transparent !important;
   }
 
-  /* Ambient backdrop (Backdrop.tsx): two slowly drifting colour glows + a
-     layer tinted by the focused tile's accent + an edge vignette. Pi-friendly:
-     pre-soft radial gradients, transform-only animation, no filter blur. */
-  :root {
-    --tile-accent: #4152d8; /* Tile.tsx sets this to the focused app's accent */
-  }
+  /* Ambient backdrop: one STATIC gradient layer. Painted once, then the GPU
+     idles. Three rules hold everywhere in this UI, all measured on a Pi 5 at 4K:
+     nothing full-screen animates (a drifting backdrop cost 7.5x idle CPU),
+     never transition box-shadow/background-color (not compositable - a repaint
+     per frame took D-pad nav to 16.6 fps), and no filter blur or full-screen
+     mask (each needs its own render pass). */
   .tv-backdrop {
     position: fixed;
     inset: 0;
     z-index: -1; /* above the body background, below all content */
     overflow: hidden;
     pointer-events: none;
+    /* One continuous colour field in ONE layer - indigo upper-left, teal
+       lower-right, a faint violet lower-left, and the edge vignette on top.
+       Their tails cross mid-screen so every corner is gently lit and the hues
+       blend diagonally; peaks are low so the wash stays subtle. */
+    background-image:
+      radial-gradient(135% 120% at 50% 48%, transparent 58%, rgba(0, 0, 0, 0.3) 100%),
+      radial-gradient(70% 70% at 12% 90%, rgba(122, 82, 216, 0.13), rgba(122, 82, 216, 0.04) 55%, transparent 85%),
+      radial-gradient(85% 85% at 82% 88%, rgba(13, 150, 168, 0.22), rgba(13, 150, 168, 0.07) 50%, transparent 88%),
+      radial-gradient(80% 80% at 20% 15%, rgba(65, 82, 216, 0.24), rgba(65, 82, 216, 0.08) 50%, transparent 88%);
   }
   html.tvbox-video .tv-backdrop {
     display: none; /* never paint over mpv showing through the window */
-  }
-  /* One continuous, full-screen colour field - no bands, no dark gaps: three
-     HUGE overlapping gradients (indigo upper-left, teal lower-right, a faint
-     violet lower-left) whose tails cross mid-screen, so every corner is gently
-     lit and the hues blend diagonally. Peaks are low; the wash stays subtle.
-     Layers are oversized (inset -15%) so the slow sway never exposes an edge. */
-  .tv-backdrop-glow {
-    position: absolute;
-    inset: -15%;
-    will-change: transform;
-  }
-  .tv-backdrop-a {
-    background: radial-gradient(
-      80% 80% at 20% 15%,
-      rgba(65, 82, 216, 0.24),
-      rgba(65, 82, 216, 0.08) 50%,
-      transparent 88%
-    );
-    animation: tv-sway-a 75s ease-in-out infinite alternate;
-  }
-  .tv-backdrop-b {
-    background: radial-gradient(
-      85% 85% at 82% 88%,
-      rgba(13, 150, 168, 0.22),
-      rgba(13, 150, 168, 0.07) 50%,
-      transparent 88%
-    );
-    animation: tv-sway-b 95s ease-in-out infinite alternate;
-  }
-  .tv-backdrop-c {
-    background: radial-gradient(
-      70% 70% at 12% 90%,
-      rgba(122, 82, 216, 0.13),
-      rgba(122, 82, 216, 0.04) 55%,
-      transparent 85%
-    );
-  }
-  /* whole-screen accent tint, slightly stronger around the rail -
-     background-color transitions when Tile.tsx flips --tile-accent */
-  .tv-backdrop-accent {
-    position: absolute;
-    inset: 0;
-    background-color: var(--tile-accent);
-    opacity: 0.1;
-    transition: background-color 900ms ease;
-    -webkit-mask-image: radial-gradient(90% 75% at 50% 58%, black, transparent 96%);
-    mask-image: radial-gradient(90% 75% at 50% 58%, black, transparent 96%);
-  }
-  /* barely-there edge falloff - kept wide and weak so it never reads as a band */
-  .tv-backdrop-vignette {
-    position: absolute;
-    inset: 0;
-    background: radial-gradient(135% 120% at 50% 48%, transparent 58%, rgba(0, 0, 0, 0.3) 100%);
-  }
-  @keyframes tv-sway-a {
-    from {
-      transform: translate3d(-2.5%, 0.5%, 0) scale(1);
-    }
-    to {
-      transform: translate3d(2.5%, -0.5%, 0) scale(1.06);
-    }
-  }
-  @keyframes tv-sway-b {
-    from {
-      transform: translate3d(2%, -0.5%, 0) scale(1.05);
-    }
-    to {
-      transform: translate3d(-2.5%, 0.5%, 0) scale(1);
-    }
   }
 
   /* Store install progress (AppDetail InstallProgress): an INDETERMINATE bar -
