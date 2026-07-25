@@ -75,6 +75,18 @@ apt-get install -y -qq mpv libpulse0 && ok "mpv + libpulse0" || warn "mpv/libpul
 # bookworm box. Installed separately so a name miss can't drop mpv/libpulse0.
 apt-get install -y -qq libasound2t64 || apt-get install -y -qq libasound2 && ok "libasound2" || warn "libasound2 missing"
 
+# libcec >= 8 (built from source - no distro ships it yet). Gives cec-client
+# --vendor-id, so the LG SIMPLINK identity no longer needs the LD_PRELOAD shim.
+# Optional: if the build fails the bridge just keeps using the shim.
+echo "==> libcec >= 8 (native --vendor-id, replaces the CEC vendor shim)"
+# infra.list lands every shipped file flat next to this script (~/.tvbox/).
+LIBCEC_SH="$(cd "$(dirname "$0")" && pwd)/install-libcec8.sh"
+if [ -f "$LIBCEC_SH" ]; then
+  sh "$LIBCEC_SH" && ok "libcec >= 8" || warn "libcec 8 build failed - the CEC bridge keeps using the vendor shim"
+else
+  warn "install-libcec8.sh missing - skipping (CEC bridge will use the vendor shim)"
+fi
+
 echo "==> OS auto-updates (unattended-upgrades: install yes, reboot NEVER)"
 # A living-room box must patch itself without anyone SSH-ing in - but it must
 # also never reboot on its own (a reboot mid-movie is the opposite of an
