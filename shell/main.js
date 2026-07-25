@@ -1113,13 +1113,18 @@ function applyDisplayMode(mode, res) {
 // live mode - that comparison also stops our own apply from re-triggering us.
 function watchDisplayMode() {
   let timer = null;
-  let tries = 0; // consecutive re-applies that did not stick
+  let tries = 0; // re-applies within THIS hotplug session that did not stick
+  let lastWant = null;
   const MAX_TRIES = 3;
   const recheck = () => {
     if (timer) clearTimeout(timer);
     timer = setTimeout(() => {
       timer = null;
       const want = (config.rawDisplay() || {}).mode;
+      if (want !== lastWant) {
+        tries = 0; // different target (or cleared) - it gets its own budget
+        lastWant = want;
+      }
       if (!want) return; // never forced a mode -> the preferred one is correct
       display.list({ ...process.env, ...WL_ENV }, (info) => {
         if (!info) return; // no output (TV still off) - the next event retries
@@ -1129,10 +1134,13 @@ function watchDisplayMode() {
           tries = 0; // it stuck; arm again for the next real hotplug
           return;
         }
-        // Give up after a few goes. wlr-randr reporting success does NOT mean the
-        // sink kept the mode (a marginal 4K60 link or an AVR can bounce straight
-        // back to preferred), and each attempt blanks the screen for ~3s - so
-        // without this the TV would black-flash in a loop forever.
+        // Give up after a few goes IN THIS SESSION. wlr-randr reporting success
+        // does NOT mean the sink kept the mode (a marginal 4K60 link or an AVR
+        // can bounce straight back to preferred), and each attempt blanks the
+        // screen for ~3s - so without this the TV would black-flash in a loop.
+        // The budget is re-armed by the next display-added, because giving up
+        // here means the mode never becomes current, so the reset above would
+        // never fire again on its own.
         if (++tries > MAX_TRIES) {
           if (tries === MAX_TRIES + 1)
             console.log("[display]", want, "will not stick (now", cur.key + ") - leaving it alone");
@@ -1148,7 +1156,13 @@ function watchDisplayMode() {
       });
     }, 2000);
   };
-  screen.on("display-added", recheck);
+  // display-added is a NEW hotplug session (the TV came back), so it re-arms the
+  // budget. display-metrics-changed is not: our own apply emits one, and that
+  // must not hand itself a fresh set of retries.
+  screen.on("display-added", () => {
+    tries = 0;
+    recheck();
+  });
   screen.on("display-metrics-changed", recheck);
 }
 
