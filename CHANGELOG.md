@@ -5,6 +5,20 @@ updates). `scripts/make-release.sh` lifts the current version's `hu`/`en`
 blocks into the OTA feed's `notes` - keep both languages, keep it short, and
 write for the person on the couch (what changes for THEM), not for developers.
 
+## 1.8.0
+
+### hu
+
+- Sokkal gördülékenyebb a felület, főleg 4K TV-n: a főképernyő mostantól akadásmentesen mozog, és tétlenül a box jóval kevesebbet fogyaszt és hidegebb marad.
+- A beállított felbontás megmarad azután is, hogy kikapcsolod és visszakapcsolod a TV-t - eddig ilyenkor visszaugrott a TV alapértelmezettjére.
+- A kijelölt csempén újra látszik a fehér keret, így egyértelmű, hol jársz. A háttér letisztultabb lett: nem úszkál és nem színeződik át a kiválasztott alkalmazás szerint.
+
+### en
+
+- The interface is much smoother, especially on a 4K TV: the home screen now moves without stutter, and when idle the box draws noticeably less power and runs cooler.
+- Your chosen resolution now survives switching the TV off and on again - until now it jumped back to the TV's default.
+- The selected tile has its white outline back, so it is always clear where you are. The background is calmer: it no longer drifts or tints itself to the selected app.
+
 ## 1.7.2
 
 ### hu
