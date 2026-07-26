@@ -111,12 +111,31 @@ RX_STANDBY = re.compile(r">> 0f:36", re.IGNORECASE)   # TV broadcasts <Standby> 
 # user selected. Physical addresses are 2 bytes (e.g. "20:00" = HDMI2).
 #   << x f:82 aa:bb  our own <Active Source> - tells us OUR physical address
 #   >> x f:82 aa:bb  someone else took over
-#   >> 0f:86 aa:bb   <Set Stream Path>: the TV routed to that address
-#   >> 0f:80 cc:dd:aa:bb  <Routing Change>: ... from cc:dd to aa:bb
+#   >> x f:86 aa:bb  <Set Stream Path>: routed to that address
+#   >> x f:80 cc:dd:aa:bb  <Routing Change>: ... from cc:dd to aa:bb
+#   >> x f:81 aa:bb  <Routing Information>: the path a switch now routes
+# Any initiator, not just the TV (0): with an AVR or HDMI switch in the chain it
+# is the switch that announces the change, and ignoring those would leave us
+# re-asserting over the user's choice again.
 RX_OUR_AS = re.compile(r"<< [0-9a-f]f:82:([0-9a-f]{2}):([0-9a-f]{2})", re.IGNORECASE)
 RX_ACTIVE_SRC = re.compile(r">> [0-9a-f]f:82:([0-9a-f]{2}):([0-9a-f]{2})", re.IGNORECASE)
-RX_STREAM_PATH = re.compile(r">> 0f:86:([0-9a-f]{2}):([0-9a-f]{2})", re.IGNORECASE)
-RX_ROUTING = re.compile(r">> 0f:80:[0-9a-f]{2}:[0-9a-f]{2}:([0-9a-f]{2}):([0-9a-f]{2})", re.IGNORECASE)
+RX_STREAM_PATH = re.compile(r">> [0-9a-f]f:86:([0-9a-f]{2}):([0-9a-f]{2})", re.IGNORECASE)
+RX_ROUTING_INFO = re.compile(r">> [0-9a-f]f:81:([0-9a-f]{2}):([0-9a-f]{2})", re.IGNORECASE)
+RX_ROUTING = re.compile(
+    r">> [0-9a-f]f:80:[0-9a-f]{2}:[0-9a-f]{2}:([0-9a-f]{2}):([0-9a-f]{2})", re.IGNORECASE)
+
+
+def routes_to_us(addr: str, phys: str) -> bool:
+    """Does a routed physical address mean US? Addresses are hierarchical, most
+    significant nibble first, zero-padded: a box on HDMI1 behind a soundbar is
+    "1100", and the TV selecting the soundbar routes to "1000" - an ANCESTOR of
+    us, not somewhere else. Treating that as "not us" would make the remote go
+    dead the moment an AVR sits in the chain, so a prefix match counts as ours;
+    a sibling path ("2000") does not, and neither does "0000" (the TV itself)."""
+    if addr == phys:
+        return True
+    depth = len(addr.rstrip("0"))
+    return depth > 0 and addr[:depth] == phys[:depth]
 # When the TV powers off, tell the shell to stop playback (so a stream doesn't
 # keep running on a dark screen). Best-effort, fire-and-forget.
 STANDBY_URL = "http://127.0.0.1:8097/tvbox/api/tv/standby"
@@ -448,7 +467,7 @@ def main() -> None:
             routed = next(
                 ((("".join(m.groups()).lower()), why)
                  for rx, why in ((RX_STREAM_PATH, "stream path"), (RX_ROUTING, "routing change"),
-                                 (RX_ACTIVE_SRC, "active source"))
+                                 (RX_ROUTING_INFO, "routing info"), (RX_ACTIVE_SRC, "active source"))
                  for m in [rx.search(line)] if m),
                 None,
             )
@@ -458,7 +477,7 @@ def main() -> None:
                 # cannot tell "us" from "them" - staying put beats latching
                 # inactive forever and never asserting (which would never teach us).
                 if tv.phys is not None:
-                    mine = addr == tv.phys
+                    mine = routes_to_us(addr, tv.phys)
                     if mine != tv.active:
                         print(f"TV routed to {addr} ({why}) -> "
                               f"{'ours again' if mine else 'another input, backing off'}", flush=True)
