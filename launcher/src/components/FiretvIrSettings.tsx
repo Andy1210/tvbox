@@ -131,12 +131,23 @@ export function FiretvIrSettings({ device }: { device?: { id: string; name: stri
   };
 
   // What a key will actually blast: its override if it has one, else the base.
+  // The second device is resolved the same way - the shell only attaches it when
+  // that codeset really has a row for THIS key, so a soundbar set without e.g.
+  // Mute must not be advertised here as if it were being blasted.
   const effective = (key: string) => {
     const ov = overrides[key];
     const path = ov?.path || codeset?.path || null;
     const cs = path ? csCache[path] : null;
     const row = cs?.keys?.[key];
-    return { path, row, label: ov?.label || null, ok: !!row && (cs?.supported ? !!cs.supported[row.protocol] : true) };
+    const sec = seconds[key];
+    return {
+      path,
+      row,
+      label: ov?.label || null,
+      ok: !!row && (cs?.supported ? !!cs.supported[row.protocol] : true),
+      sec,
+      secRow: sec ? csCache[sec.path]?.keys?.[key] : undefined,
+    };
   };
 
   // The plan the shell resolves into a keymap - the test blasts exactly this.
@@ -411,7 +422,10 @@ export function FiretvIrSettings({ device }: { device?: { id: string; name: stri
                       <div className="flex-1 text-[1.7vh] text-fg-dim truncate">
                         {!eff.row
                           ? t("firetvir.keyMissing")
-                          : (eff.label || t("firetvir.fromBase")) + (sec ? " + " + sec.label : "")}
+                          : (eff.label || t("firetvir.fromBase")) +
+                            (eff.sec
+                              ? " + " + eff.sec.label + (eff.secRow ? "" : " (" + t("firetvir.keyMissing") + ")")
+                              : "")}
                       </div>
                       <FocusButton
                         focusKey={"ftir-test-" + key}

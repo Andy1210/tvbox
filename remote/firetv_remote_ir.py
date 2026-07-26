@@ -95,14 +95,30 @@ def build_actions(spec, scan_id):
         repeat   = int(k.get("repeat", 1))
         pdelay   = int(k.get("post_delay", 1000 if key == "Power" else 0))
         tmask    = int(k.get("toggle_mask", 0))
-        prim = code_sequences(k)
+        # One bad code must cost at most its own key (or its own extra blast) -
+        # ir_protocols.encode raises for anything outside NEC/NECx/RC5/RC6/SIRC/
+        # Panasonic, and letting that escape would fail programming for EVERY key.
+        try:
+            prim = code_sequences(k)
+        except Exception as ex:
+            log(f"! key {key!r}: code unusable ({ex}), skipping"); continue
         if prim is None:
             log(f"! key {key!r} has no 'irdb'/'nec'/'pronto'/'raw', skipping"); continue
         seqs, freq, min_repeat = prim
         rtype = "Sequence" if len(seqs) > 1 else "Basic"
-        sec = code_sequences(k["second"]) if isinstance(k.get("second"), dict) else None
+        sec = None
+        if isinstance(k.get("second"), dict):
+            # The UI only gates the PRIMARY codeset's protocol; a second device is
+            # picked from any irdb device type, so this one really can be unencodable.
+            try:
+                sec = code_sequences(k["second"])
+            except Exception as ex:
+                log(f"! key {key!r}: second device code unusable ({ex}) - blasting the primary only")
         if sec:
-            seqs2, freq2, _ = sec
+            seqs2, freq2, min_repeat2 = sec
+            # Protocols like Sony SIRC only decode after N frames; the action has a
+            # single repeat count, so take whichever device needs more.
+            min_repeat = max(min_repeat, min_repeat2)
             # One action = one carrier. Consumer IR is nearly always 38kHz, so a
             # mismatch is rare - but say so rather than silently retuning the
             # second device's code to a carrier it may not decode.
@@ -111,6 +127,8 @@ def build_actions(spec, scan_id):
                     f"blasting both at {freq}Hz; if the second device ignores it, that is why")
             if len(seqs) > 1:
                 log(f"! key {key!r}: 'second' replaces the repeat frame (max 2 sequences per action)")
+            if len(seqs2) > 1:
+                log(f"! key {key!r}: the second code's own repeat frame is dropped (max 2 sequences)")
             seqs, rtype = [seqs[0], seqs2[0]], "Sequence"
         act = kc.compile_ir_action(seqs, freq, duty, max(repeat, min_repeat), pdelay,
                                    tmask, rtype, optional)
