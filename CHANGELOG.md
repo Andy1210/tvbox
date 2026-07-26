@@ -5,6 +5,18 @@ updates). `scripts/make-release.sh` lifts the current version's `hu`/`en`
 blocks into the OTA feed's `notes` - keep both languages, keep it short, and
 write for the person on the couch (what changes for THEM), not for developers.
 
+## 1.10.0
+
+### hu
+
+- A felbontás mostantól automatikus, és megszűnt a kézi beállítás. A felület legfeljebb 1080p-ben rajzol (4K TV-n is), a film viszont a saját felbontásán és képfrissítésén megy - így a 4K tartalom újra 4K, a mozis 24 képkockás filmek pedig nem rángatnak többé. Indításkor a kép egy-két másodpercre elsötétül, amíg a TV átvált; ez normális.
+- Ha a box olyankor kapcsolódott be, amikor a TV ki volt kapcsolva, feleslegesen pörgött magában: melegedett és fogyasztott, a felület pedig utána is lassabb maradt. Ez megszűnt.
+
+### en
+
+- Resolution is automatic now, and the manual setting is gone. The interface draws at up to 1080p (even on a 4K TV) while a film plays at its own resolution and frame rate - so 4K content is 4K again, and 24-frame cinema films no longer stutter. The picture goes dark for a second or two as the TV switches; that is normal.
+- If the box started while the TV was off, it kept spinning for nothing: it ran hot, drew power, and the interface stayed slower afterwards. Fixed.
+
 ## 1.9.0
 
 ### hu
