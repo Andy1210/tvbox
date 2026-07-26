@@ -98,26 +98,29 @@ fi
 # Verified with this on: CEC keeps a real physical address and the remote works.
 echo "==> always-on HDMI output (vc4.force_hotplug=1 - labwc spins with no output)"
 # KEEP IN SYNC with image/stage-tvbox/01-tvbox/00-run.sh, which does the same to
-# the image's cmdline.txt. Match the exact token, not a substring: a leftover
-# `vc4.force_hotplug=0` must be corrected, not mistaken for "already done".
+# the image's cmdline.txt. Normalise EVERY occurrence, not just the first: a
+# cmdline carrying both `vc4.force_hotplug=1` and a later `=0` would otherwise
+# keep the =0, and the kernel honours the LAST occurrence - so we would report
+# success and still boot without it. Build the wanted line, then write only when
+# it differs, which keeps this idempotent and leaves the file alone when correct.
 CMDLINE=/boot/firmware/cmdline.txt
 [ -f "$CMDLINE" ] || CMDLINE=/boot/cmdline.txt
 if [ ! -f "$CMDLINE" ]; then
   warn "no cmdline.txt found - skipping (a box booted with the TV off will spin)"
-elif grep -qE '(^| )vc4\.force_hotplug=1( |$)' "$CMDLINE"; then
-  ok "vc4.force_hotplug=1 already set"
-elif [ ! -f "$CMDLINE.bak-tvbox" ] && ! cp "$CMDLINE" "$CMDLINE.bak-tvbox"; then
-  # Never edit the boot cmdline without a way back.
-  warn "could not back up $CMDLINE - leaving it unchanged"
-elif grep -qE '(^| )vc4\.force_hotplug=' "$CMDLINE"; then
-  sed -i '1s/vc4\.force_hotplug=[^ ]*/vc4.force_hotplug=1/' "$CMDLINE" &&
-    ok "vc4.force_hotplug corrected to =1 (takes effect on the next boot)" ||
-    warn "could not edit $CMDLINE"
 else
-  # cmdline.txt must stay ONE space-separated line - append to line 1 only.
-  sed -i '1s|$| vc4.force_hotplug=1|' "$CMDLINE" &&
-    ok "vc4.force_hotplug=1 added (takes effect on the next boot)" ||
+  CUR=$(cat "$CMDLINE")
+  WANT=$(printf '%s' "$CUR" | sed -E 's/(^| )vc4\.force_hotplug=[^ ]*/\1vc4.force_hotplug=1/g')
+  case "$WANT" in *vc4.force_hotplug=1*) ;; *) WANT="$WANT vc4.force_hotplug=1" ;; esac
+  if [ "$WANT" = "$CUR" ]; then
+    ok "vc4.force_hotplug=1 already set"
+  elif [ ! -f "$CMDLINE.bak-tvbox" ] && ! cp "$CMDLINE" "$CMDLINE.bak-tvbox"; then
+    # Never edit the boot cmdline without a way back.
+    warn "could not back up $CMDLINE - leaving it unchanged"
+  elif printf '%s\n' "$WANT" > "$CMDLINE"; then
+    ok "vc4.force_hotplug=1 set (takes effect on the next boot)"
+  else
     warn "could not edit $CMDLINE"
+  fi
 fi
 
 echo "==> OS auto-updates (unattended-upgrades: install yes, reboot NEVER)"
