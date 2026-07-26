@@ -87,6 +87,30 @@ else
   warn "install-libcec8.sh missing - skipping (CEC bridge will use the vendor shim)"
 fi
 
+# Always give the compositor an output, even with the TV off or unplugged.
+# labwc (0.9.8/wlroots 0.19) BUSY-LOOPS with zero outputs: a session started with
+# no sink measured ~65% of a core in labwc alone, ~200% once Electron joined in
+# (~35k Wayland roundtrips/s on its main thread) - which is where a box plugged
+# in while the TV was off sat until someone turned the TV on. Recovery on the
+# TV coming back was clean, so this is purely about never being in that state.
+# `vc4.force_hotplug=1`, NOT `video=HDMI-A-1:e`: the latter is what stops vc4
+# feeding CEC its physical address on kernels 6.14-6.18 (sharp edge in CLAUDE.md).
+# Verified with this on: CEC keeps a real physical address and the remote works.
+echo "==> always-on HDMI output (vc4.force_hotplug=1 - labwc spins with no output)"
+CMDLINE=/boot/firmware/cmdline.txt
+[ -f "$CMDLINE" ] || CMDLINE=/boot/cmdline.txt
+if [ ! -f "$CMDLINE" ]; then
+  warn "no cmdline.txt found - skipping (a box booted with the TV off will spin)"
+elif grep -q force_hotplug "$CMDLINE"; then
+  ok "vc4.force_hotplug already set"
+else
+  cp -n "$CMDLINE" "$CMDLINE.bak-tvbox" 2>/dev/null || true
+  # cmdline.txt must stay ONE space-separated line - append to line 1 only.
+  sed -i "1s|\$| vc4.force_hotplug=1|" "$CMDLINE" &&
+    ok "vc4.force_hotplug=1 added (takes effect on the next boot)" ||
+    warn "could not edit $CMDLINE"
+fi
+
 echo "==> OS auto-updates (unattended-upgrades: install yes, reboot NEVER)"
 # A living-room box must patch itself without anyone SSH-ing in - but it must
 # also never reboot on its own (a reboot mid-movie is the opposite of an
