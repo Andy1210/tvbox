@@ -1747,18 +1747,27 @@ function adaptMpvMode(seq, done) {
       done();
     });
   };
-  readVideoProps().then((c) => {
-    if (c.fps > 0 && c.width > 0) return claim(c);
-    // The video output can still be settling right after the first frame - one
-    // more go, keeping whatever we already learned.
-    setTimeout(
-      () =>
-        readVideoProps().then((c2) =>
-          claim({ fps: c2.fps || c.fps, width: c2.width || c.width, height: c2.height || c.height }),
-        ),
-      400,
-    );
-  });
+  // Nothing in this chain rejects today (mpvQuery resolves null on every failure),
+  // but playback must not hang on that staying true: anything thrown in here starts
+  // the film immediately instead of waiting for the failsafe.
+  const failed = (e) => {
+    console.warn("[player] display mode adapt failed:", (e && e.message) || e);
+    done();
+  };
+  readVideoProps()
+    .then((c) => {
+      if (c.fps > 0 && c.width > 0) return claim(c);
+      // The video output can still be settling right after the first frame - one
+      // more go, keeping whatever we already learned.
+      setTimeout(
+        () =>
+          readVideoProps()
+            .then((c2) => claim({ fps: c2.fps || c.fps, width: c2.width || c.width, height: c2.height || c.height }))
+            .catch(failed),
+        400,
+      );
+    })
+    .catch(failed);
 }
 
 // Paused-start handshake: switch the mode, then play. The 6s failsafe is

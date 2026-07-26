@@ -15,9 +15,13 @@ export interface DisplayStatus {
   claimedBy: string | null; // who holds a video claim ("shell:mpv", "app:<id>")
 }
 
+// null = not readable (offline, or the shell answered non-2xx - an error body must
+// not be cast to a status). The Resolution row shows "-" then; pressing OK on it
+// re-detects AND re-reads, so there is always a way forward without a keyboard.
 export async function fetchDisplayStatus(): Promise<DisplayStatus | null> {
   try {
     const r = await fetch("/tvbox/api/display/status", { cache: "no-store" });
+    if (!r.ok) return null;
     return (await r.json()) as DisplayStatus;
   } catch {
     return null;
