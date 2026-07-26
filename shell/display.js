@@ -1,7 +1,8 @@
-// tvbox display control (Wayland/wlroots via wlr-randr). Lists the connected
-// output's modes, switches resolution/refresh, and re-applies the saved mode on
-// boot. labwc tracks the output size for fullscreen surfaces, so the shell
-// window follows a mode change with no extra work. Callers pass the session's
+// tvbox display control (Wayland/wlroots via wlr-randr): lists the connected
+// output's modes, picks which one to be at, and switches. Who wants what and when
+// lives in displaymode.js; this file is the wlr-randr surface plus the pure
+// selection rules. labwc tracks the output size for fullscreen surfaces, so the
+// shell window follows a mode change with no extra work. Callers pass the session's
 // Wayland env (main's childEnv) - wlr-randr needs WAYLAND_DISPLAY / XDG_RUNTIME_DIR.
 const { execFile } = require("child_process");
 
@@ -14,10 +15,11 @@ const { execFile } = require("child_process");
 // both round to "@24" but are NOT interchangeable: 23.976 content on a 24.000 Hz
 // output drifts 0.1% (a repeated frame every ~41s), and 29.97 on 60.000 likewise.
 // Dropping one of them is why asking for "1920x1080@24" used to hand back 24.000.
+// wlr-randr prints no interlace flag, so a 1080i/1080p pair at the same rate is
+// indistinguishable here (and to `--mode`); nothing downstream can prefer one.
 function parse(stdout) {
   let output = null;
   const modes = [];
-  const byKey = new Map();
   for (const line of (stdout || "").split("\n")) {
     const oh = /^(\S+) "/.exec(line); // e.g.  HDMI-A-1 "LG Electronics ..."
     if (oh) {
@@ -33,9 +35,7 @@ function parse(stdout) {
     const current = /current/.test(mm[4] || "");
     const preferred = /preferred/.test(mm[4] || "");
     const key = width + "x" + height + "@" + refresh;
-    const mode = { key, width, height, refresh, refreshExact, current, preferred };
-    if (!byKey.has(key)) byKey.set(key, mode); // first wins for key lookups (60.000 over 59.94)
-    modes.push(mode);
+    modes.push({ key, width, height, refresh, refreshExact, current, preferred });
   }
   return output ? { output, modes } : null;
 }
@@ -90,13 +90,16 @@ function pickUiMode(modes, maxHeight = UI_MAX_HEIGHT) {
 // stays put and lets mpv resample.
 function pickContentMode(modes, content) {
   if (!modes || !modes.length || !content || !(content.fps > 0)) return null;
-  const w = content.width || 0;
-  const h = content.height || 0;
+  // An unknown (or nonsense) size means "assume the floor": mpv can report the
+  // framerate before dwidth/dheight are available, and the smallest-that-fits rule
+  // would otherwise happily drop a film to 640x480 because nothing said not to.
+  const w = content.width > 0 ? content.width : 1280;
+  const h = content.height > 0 ? content.height : 720;
   const cands = [];
   for (const m of modes) {
     const rank = cadenceRank(m.refreshExact, content.fps);
     if (rank === null) continue;
-    if (m.height < 720 && h > 0) continue; // 720p floor
+    if (m.height < 720) continue; // 720p floor, whatever the content claims to be
     cands.push({ m, rank, covers: m.width >= w && m.height >= h });
   }
   if (!cands.length) return null;
@@ -131,16 +134,4 @@ function apply(env, output, mode, cb) {
   );
 }
 
-// Resolve a mode key ("WxH@N") against the live mode list and apply it. Shared by
-// the apply route and boot re-apply so both go through the same exact-refresh path.
-function applyKey(env, key, cb) {
-  if (!key) return cb(false, "no mode");
-  list(env, (info) => {
-    if (!info) return cb(false, "no output");
-    const mode = info.modes.find((m) => m.key === key);
-    if (!mode) return cb(false, "unknown mode");
-    apply(env, info.output, mode, cb);
-  });
-}
-
-module.exports = { parse, list, apply, applyKey, pickUiMode, pickContentMode, cadenceRank, UI_MAX_HEIGHT };
+module.exports = { parse, list, apply, pickUiMode, pickContentMode, cadenceRank, UI_MAX_HEIGHT };

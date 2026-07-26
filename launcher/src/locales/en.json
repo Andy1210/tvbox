@@ -62,16 +62,13 @@
   "display": {
     "title": "Display",
     "resolution": "Resolution",
-    "choose": "Choose resolution",
+    "autoHint": "Automatic: the UI runs at up to 1080p, video switches the output to match. Press OK to re-detect.",
     "active": "active",
     "none": "No modes available",
     "applying": "Applying…",
     "failed": "Couldn't switch mode",
-    "matchFramerate": "Match content framerate",
-    "matchHint": "Plays 50fps content more smoothly on 60Hz (mpv).",
     "on": "On",
-    "off": "Off",
-    "default": "default"
+    "off": "Off"
   },
   "notify": {
     "dismiss": "Back to dismiss"

@@ -34,14 +34,52 @@ third-party root apt source), which is never accepted - ship a no-root
 Declared per app in `runtime.capabilities` (default `["nav"]`). Omitting a
 capability must never grant it - the boundary fails closed.
 
-| Capability        | Grants (`window.tvbox.*`)                                           | Notes                                                                                                                                                       |
-| ----------------- | ------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `nav`             | `launch(id)`, `home()` (+ `onNotify`/`onCommand`, main window only) | Universal; every app has it. `onNotify`/`onCommand` currently fire only for the launcher/main window - the isolated window doesn't receive them yet.        |
-| `player`          | `play(url)`, `stop()`, `pip(on, rect)`, `onPlayer(cb)`              | Drives the shared `mpv`. App-agnostic - the shell plays a URL on the app's behalf; the app never spawns anything. Needs `mpv` on the box (`tvbox deps`).    |
-| `fetch`           | `fetch(url, opts) → { ok, status, headers, body }`                  | Scoped server-side data proxy. **Only reaches the hosts in `runtime.origins`.** The sandbox-safe way to read a cross-origin JSON/M3U/XMLTV feed. See below. |
-| `storage`         | `storage.get/set/remove(key[, value])`                              | A small, shell-owned, per-app key/value store (persisted, size-capped, never cross-app).                                                                    |
-| `config`          | (launcher-internal)                                                 | First-party surface; not for third-party apps.                                                                                                              |
-| `input`, `system` | reserved                                                            | Declared in the schema, not yet implemented.                                                                                                                |
+| Capability        | Grants (`window.tvbox.*`)                                           | Notes                                                                                                                                                                                                         |
+| ----------------- | ------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `nav`             | `launch(id)`, `home()` (+ `onNotify`/`onCommand`, main window only) | Universal; every app has it. `onNotify`/`onCommand` currently fire only for the launcher/main window - the isolated window doesn't receive them yet.                                                          |
+| `player`          | `play(url)`, `stop()`, `pip(on, rect)`, `onPlayer(cb)`              | Drives the shared `mpv`. App-agnostic - the shell plays a URL on the app's behalf; the app never spawns anything. Needs `mpv` on the box (`tvbox deps`).                                                      |
+| `fetch`           | `fetch(url, opts) → { ok, status, headers, body }`                  | Scoped server-side data proxy. **Only reaches the hosts in `runtime.origins`.** The sandbox-safe way to read a cross-origin JSON/M3U/XMLTV feed. See below.                                                   |
+| `storage`         | `storage.get/set/remove(key[, value])`                              | A small, shell-owned, per-app key/value store (persisted, size-capped, never cross-app).                                                                                                                      |
+| `display`         | `display.claimForVideo({width,height,fps})`, `display.release()`    | Switches the OUTPUT mode to suit the app's OWN video (its `<video>`/player) and puts the UI mode back on release. Foreground-only. Not needed with `player` - the shell's `mpv` claims for itself. See below. |
+| `config`          | (launcher-internal)                                                 | First-party surface; not for third-party apps.                                                                                                                                                                |
+| `input`, `system` | reserved                                                            | Declared in the schema, not yet implemented.                                                                                                                                                                  |
+
+### `display` - the adaptive-mode capability
+
+Resolution on the box is automatic: the UI draws at the panel's own resolution
+**capped to 1080p** (a 4K launcher costs bandwidth, heat and frames for nothing),
+and video temporarily takes a mode that suits the content - **refresh first**,
+because a 23.976 fps film on a 60 Hz output judders even though not one frame is
+dropped, then the smallest resolution that still covers the video, never below
+720p. There is no manual resolution setting to fight with.
+
+An app that hands a URL to the shared `mpv` (`player`) gets this for free - the
+shell reads the stream's `container-fps`/`dwidth`/`dheight` and claims before the
+first frame. `display` is for an app that plays video **itself** (a `<video>`
+element, its own player):
+
+```ts
+import { useVideoDisplayMode } from "@tvbox/app-sdk";
+// claims while `video` is set, releases on unmount / when it clears
+useVideoDisplayMode(playing ? { width: 1920, height: 1080, fps: 23.976 } : null);
+```
+
+`fps` is the CONTENT's own rate (24000/1001 = 23.976, not a rounded 24) - the app
+knows it from its own metadata; `HTMLVideoElement` does not expose it.
+
+Rules the broker enforces, so a misbehaving app can't own the screen:
+
+- **one claim at a time**, newest wins, and only the **foreground** app's counts;
+- leaving the app (Home, backgrounded, window closed, crash) releases it;
+- a release from anyone but the holder is ignored;
+- a claim the panel can't satisfy (a 60 Hz-only set and a 24p film) answers
+  `{ ok: true, changed: false, reason: "no-matching-mode" }` - keep playing, and
+  the shell's own mpv path switches to `video-sync=display-resample` there;
+- switches are rate-limited: each one blanks HDMI for a second or two.
+
+Needs `wlr-randr` on the box (in the image + provision apt lists). On an
+OTA-updated box that never got it, every claim answers `no output` and the
+resolution simply stays where the TV put it.
 
 ### `fetch` - the data-proxy capability
 

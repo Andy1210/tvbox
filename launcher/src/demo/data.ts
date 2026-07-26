@@ -7,7 +7,7 @@ import type { AppManifest } from "../lib/types";
 import type { WifiNet, WifiStatus } from "../lib/wifi";
 import type { BtDevice } from "../lib/bluetooth";
 import type { AudioState } from "../lib/audio";
-import type { DisplayInfo } from "../lib/display";
+import type { DisplayStatus } from "../lib/display";
 import type { SystemInfo } from "../lib/system";
 import type { RegionInfo } from "../lib/region";
 import type { UpdateStatus } from "../lib/update";
@@ -144,18 +144,13 @@ export const AUDIO: AudioState = {
   override: null,
 };
 
-export const DISPLAY: DisplayInfo = {
+export const DISPLAY: DisplayStatus = {
   output: "HDMI-A-1",
-  modes: [
-    { key: "3840x2160@60", width: 3840, height: 2160, refresh: 60, current: false, preferred: true },
-    { key: "3840x2160@50", width: 3840, height: 2160, refresh: 50, current: false, preferred: false },
-    { key: "3840x2160@30", width: 3840, height: 2160, refresh: 30, current: false, preferred: false },
-    { key: "1920x1080@60", width: 1920, height: 1080, refresh: 60, current: true, preferred: false },
-    { key: "1920x1080@50", width: 1920, height: 1080, refresh: 50, current: false, preferred: false },
-    { key: "1280x720@60", width: 1280, height: 720, refresh: 60, current: false, preferred: false },
-  ],
-  saved: null,
-  matchFramerate: true,
+  // a 4K panel: the UI sits at 1080p60, video may claim 4K/24p while it plays
+  current: { width: 1920, height: 1080, refresh: 60 },
+  ui: { width: 1920, height: 1080, refresh: 60 },
+  desired: { width: 1920, height: 1080, refresh: 60 },
+  claimedBy: null,
 };
 
 export const SYSTEM_INFO: SystemInfo = {

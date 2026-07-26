@@ -62,16 +62,13 @@
   "display": {
     "title": "Kijelző",
     "resolution": "Felbontás",
-    "choose": "Válassz felbontást",
+    "autoHint": "Automatikus: a felület legfeljebb 1080p-ben fut, a videó a tartalomhoz állítja a kimenetet. OK: újrafelismerés.",
     "active": "aktív",
     "none": "Nincs elérhető mód",
     "applying": "Beállítás…",
     "failed": "Nem sikerült a módváltás",
-    "matchFramerate": "Igazítás a tartalom képfrissítéséhez",
-    "matchHint": "Az 50 fps-es adást simábban játssza 60 Hz-en (mpv).",
     "on": "Be",
-    "off": "Ki",
-    "default": "alapértelmezett"
+    "off": "Ki"
   },
   "notify": {
     "dismiss": "Vissza a bezáráshoz"

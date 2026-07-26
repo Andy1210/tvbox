@@ -15,6 +15,7 @@ const os = require("os");
 const config = require("./config");
 const pairing = require("./pairing");
 const display = require("./display"); // wlr-randr resolution/refresh control
+const displaymode = require("./displaymode"); // adaptive mode: UI mode + per-video claims
 const audio = require("./audio"); // wpctl sink list + volume (device audio settings)
 const bluetooth = require("./bluetooth"); // bluetoothctl pair/connect (audio + input devices)
 const ambient = require("./ambient"); // weather + local photos for the idle/ambient screen
@@ -107,6 +108,9 @@ let mpv = null;
 let mpvPip = false; // mpv is in PiP (small top-right) mode, not fullscreen
 let playingUrl = null;
 let mpvOwnerId = null; // app id whose player broker call launched mpv (video-mode target)
+let mpvStartPending = false; // fullscreen mpv launched paused, waiting for the display-mode switch
+let mpvSeq = 0; // launch counter, so a stale start-gate timer can't touch a newer launch
+let mpvStartedSeq = 0; // the launch whose start handshake already ran
 let currentAppId = null; // which app is FOREGROUND (null = launcher); drives focus + video-mode targeting
 // Background apps: every app runs in its OWN BrowserWindow; leaving an app
 // hides its window (registry + hidden-set policy live in appwindows.js). A
@@ -396,10 +400,6 @@ function handlePost(p, data, res) {
       config.setSpotify(data.spotify);
       changed.push("spotify");
     }
-    if (data.display) {
-      config.setDisplay(data.display); // e.g. { matchFramerate } toggle
-      changed.push("display");
-    }
     if (data.ambient) {
       config.setAmbient(data.ambient);
       changed.push("ambient");
@@ -448,8 +448,13 @@ function handlePost(p, data, res) {
     emitConfigChange(changed); // e.g. Live TV drops its channel/EPG cache on a new IPTV source
     return jsonRes(res, { ok: true, config: config.publicConfig() });
   }
-  if (p === "/tvbox/api/display/apply") {
-    return applyDisplayMode(String(data.mode || ""), res);
+  if (p === "/tvbox/api/display/refresh") {
+    // "Re-detect": recompute the UI mode from the live output and go there. The
+    // user's escape hatch if a TV pushed the box somewhere odd - and the only
+    // display action left in the UI now that resolution is automatic. rearm() first:
+    // a person pressing OK means "try again", even if earlier attempts didn't stick.
+    dmode.rearm();
+    return dmode.refresh((ok, err) => jsonRes(res, ok ? { ok: true } : { ok: false, error: err || "failed" }));
   }
   if (p === "/tvbox/api/audio/default") {
     // persist the override (empty string clears it -> back to auto), then re-apply
@@ -1099,70 +1104,40 @@ function systemInfo(cb) {
   });
 }
 
-// Apply a display mode ("WxH@N") via wlr-randr, persisting it only on success so
-// a rejected mode never gets re-applied on boot.
-function applyDisplayMode(mode, res) {
-  display.applyKey({ ...process.env, ...WL_ENV }, mode, (ok, err) => {
-    if (ok) config.setDisplay({ mode }); // persist only on success
-    jsonRes(res, ok ? { ok: true } : { ok: false, error: err || "apply failed" });
-  });
-}
+// Adaptive display mode. The UI draws at the panel's own resolution capped to
+// 1080p (a 4K launcher costs bandwidth and heat for nothing), and video claims a
+// mode that suits the content - refresh first, so 24p film stops juddering - then
+// gives it back. There is no manual resolution setting: any app can claim through
+// the `display` capability, and the mpv path below is just the first caller.
+// Mode selection lives in display.js (pure, unit-tested), arbitration in
+// displaymode.js.
+const dmode = displaymode.create({
+  getModes: (cb) => display.list({ ...process.env, ...WL_ENV }, cb),
+  applyMode: (output, mode, cb) => display.apply({ ...process.env, ...WL_ENV }, output, mode, cb),
+  log: (m) => console.log("[display]", m),
+});
+const MPV_CLAIM = "shell:mpv"; // claim id for the shell's own player
+const appClaimId = (id) => "app:" + (id || "launcher"); // an app's own claim id
+const displayClaiming = new Set(); // app ids with a claim in flight (one at a time)
 
-// Keep the saved display mode across a TV power cycle: switching the TV off and
-// on cycles HDMI hotplug, and labwc re-adds the output at the EDID PREFERRED
-// mode, undoing a user-forced resolution (the boot apply runs only once).
-// The event payload is stale while labwc settles, so debounce and re-read the
-// live mode - that comparison also stops our own apply from re-triggering us.
+// A TV power cycle re-adds the output at the EDID PREFERRED mode (4K on a 4K set),
+// undoing whatever we chose, so re-assert on every output change. The event
+// payload is stale while labwc settles: debounce, then let the service re-read
+// the live mode - that comparison also stops our own apply from re-triggering us.
 function watchDisplayMode() {
   let timer = null;
-  let tries = 0; // re-applies within THIS hotplug session that did not stick
-  let lastWant = null;
-  const MAX_TRIES = 3;
   const recheck = () => {
     if (timer) clearTimeout(timer);
     timer = setTimeout(() => {
       timer = null;
-      const want = (config.rawDisplay() || {}).mode;
-      if (want !== lastWant) {
-        tries = 0; // different target (or cleared) - it gets its own budget
-        lastWant = want;
-      }
-      if (!want) return; // never forced a mode -> the preferred one is correct
-      display.list({ ...process.env, ...WL_ENV }, (info) => {
-        if (!info) return; // no output (TV still off) - the next event retries
-        const cur = info.modes.find((m) => m.current);
-        if (!cur) return;
-        if (cur.key === want) {
-          tries = 0; // it stuck; arm again for the next real hotplug
-          return;
-        }
-        // Give up after a few goes IN THIS SESSION. wlr-randr reporting success
-        // does NOT mean the sink kept the mode (a marginal 4K60 link or an AVR
-        // can bounce straight back to preferred), and each attempt blanks the
-        // screen for ~3s - so without this the TV would black-flash in a loop.
-        // The budget is re-armed by the next display-added, because giving up
-        // here means the mode never becomes current, so the reset above would
-        // never fire again on its own.
-        if (++tries > MAX_TRIES) {
-          if (tries === MAX_TRIES + 1)
-            console.log("[display]", want, "will not stick (now", cur.key + ") - leaving it alone");
-          return;
-        }
-        console.log("[display] output re-detected at", cur.key, "- re-applying saved", want);
-        // Deliberately NOT resetting `tries` on a reported success: wlr-randr
-        // exiting 0 is exactly the signal that can't be trusted here. Only
-        // observing the mode actually current (above) clears the counter.
-        display.applyKey({ ...process.env, ...WL_ENV }, want, (ok, err) =>
-          console.log("[display] re-apply", want, ok ? "ok" : "failed: " + err),
-        );
-      });
+      dmode.refresh();
     }, 2000);
   };
   // display-added is a NEW hotplug session (the TV came back), so it re-arms the
-  // budget. display-metrics-changed is not: our own apply emits one, and that
-  // must not hand itself a fresh set of retries.
+  // "it won't stick" budget. display-metrics-changed is not: our own apply emits
+  // one, and that must not hand itself a fresh set of retries.
   screen.on("display-added", () => {
-    tries = 0;
+    dmode.rearm();
     recheck();
   });
   screen.on("display-metrics-changed", recheck);
@@ -1354,14 +1329,16 @@ function serve() {
       jsonRes(res, backup.pendingLocalStorage());
       return;
     }
-    if (p === "/tvbox/api/display/modes") {
+    if (p === "/tvbox/api/display/status") {
+      // Read-only: what the output is at now, what the UI mode should be, and who
+      // (if anyone) currently holds a video claim. Resolution is automatic, so
+      // there is nothing to pick - the only action is /display/refresh below.
       display.list({ ...process.env, ...WL_ENV }, (info) => {
-        const d = config.rawDisplay() || {};
+        const cur = info && info.modes.find((m) => m.current);
         jsonRes(res, {
           output: info ? info.output : "",
-          modes: info ? info.modes : [],
-          saved: d.mode || null,
-          matchFramerate: !!d.matchFramerate,
+          current: cur ? { key: cur.key, width: cur.width, height: cur.height, refresh: cur.refreshExact } : null,
+          ...dmode.state(),
         });
       });
       return;
@@ -1599,10 +1576,14 @@ function mpvCmd(obj) {
     s.end();
   });
 }
-function stopMpv() {
+// keepMode: launchMpv's own pre-launch stop, where releasing the display claim
+// would put the UI mode back for a second only for the new file to claim again.
+function stopMpv(keepMode) {
   // (mpvOwnerId is NOT cleared here: launchMpv calls this on relaunch right
   // after "play" set the owner. Every play re-assigns it, and without a running
   // mpv no first-frame reveal can consume a stale value.)
+  if (!keepMode) dmode.release(MPV_CLAIM);
+  mpvStartPending = false; // no paused-start handshake outlives the process
   if (mpv) {
     const pid = mpv.pid;
     mpv.removeAllListeners("exit"); // our own kill must NOT signal "finished" to the app
@@ -1621,7 +1602,11 @@ function stopMpv() {
   } catch (e) {}
 }
 function launchMpv(url, startPos, pip, rect) {
-  stopMpv();
+  // Fullscreen relaunch keeps the claim (the next file re-claims immediately, and
+  // releasing in between would blank the TV twice); going to PiP gives it back,
+  // because there the browse UI is what's on screen.
+  stopMpv(!pip);
+  const seq = ++mpvSeq; // this launch's identity for every async gate below
   mpvPip = !!pip;
   // mpv is a shared, dep-gated player service - spawned lazily only when a
   // player-capable app actually plays, and only if the binary is present. A box
@@ -1661,11 +1646,16 @@ function launchMpv(url, startPos, pip, rect) {
     // through a box-shadow "hole" the browse UI punches, so the launcher keeps
     // keyboard focus (D-pad works) while the video is visible in the hole.
     args.push("--no-border", "--ontop=no", "--geometry=" + geo);
-  } else args.push("--window-maximized=yes", "--no-border", "--ontop=no");
+  } else {
+    args.push("--window-maximized=yes", "--no-border", "--ontop=no");
+    // Fullscreen starts PAUSED so the output can be switched to match the video
+    // BEFORE it plays (adaptMpvMode -> startMpvPlayback below): a mode change
+    // blanks HDMI for a second or two, which belongs before the first frame, not
+    // three seconds into the film. PiP never switches - the UI owns the screen there.
+    args.push("--pause=yes");
+    mpvStartPending = true;
+  }
   if (audioSink) args.push("--audio-device=pipewire/" + audioSink);
-  // "match content framerate": resample so e.g. 50fps IPTV plays smoothly on a
-  // 60Hz output without a display mode switch (user opts in; off by default).
-  if (config.rawDisplay() && config.rawDisplay().matchFramerate) args.push("--video-sync=display-resample");
   // Preferred audio/subtitle language (Settings > Picture & sound). mpv falls
   // back to the stream default when the language isn't present; subtitles stay
   // OFF unless a preference is set (--slang alone doesn't enable them, so add
@@ -1689,12 +1679,30 @@ function launchMpv(url, startPos, pip, rect) {
   // the stop we emit as "finished" can make an app auto-play the next item
   // (Plex on-deck), which must not switch the TV back on.
   if (Date.now() - lastTvStandbyAt > 30 * 1000) cecPower(true);
+  // Never leave a paused-start film stuck: if the file hasn't loaded (or the IPC
+  // observer never came up) within 8s, do the mode handshake anyway. Tied to this
+  // launch's sequence number so a stale timer can't shortcut the NEXT film.
+  if (!pip) {
+    setTimeout(() => {
+      if (mpvSeq === seq && mpvStartPending) {
+        // The file hasn't loaded (a slow Plex/HLS start) or the IPC observer never
+        // came up: play rather than sit on a black screen. Deliberately NOT running
+        // the handshake here - it would claim a mode from a stream mpv hasn't opened
+        // yet. If the file does load later, the first-frame path still switches.
+        console.warn("[player] start gate timed out - playing anyway");
+        mpvStartPending = false;
+        mpvCmd({ command: ["set_property", "pause", false] });
+      }
+    }, 8000);
+  }
   mpv.on("exit", (code, sig) => {
     console.log("[player] mpv exited code", code, "sig", sig);
     emit({ type: "finished" });
     mpv = null;
     playingUrl = null;
     setVideoMode(false);
+    mpvStartPending = false;
+    dmode.release(MPV_CLAIM); // film over -> UI mode back (stopMpv covers our own kills)
   });
   // mpv grabs keyboard focus when its window maps (and can do so late), which
   // would break D-pad nav - so keep pulling the launcher back to the front +
@@ -1702,13 +1710,89 @@ function launchMpv(url, startPos, pip, rect) {
   // the transparent overlay, and PiP mpv is behind the transparent window showing
   // through the browse UI's hole, so raising the launcher never hides the video.
   [500, 1200, 2000, 3000, 4000].forEach((ms) => setTimeout(raiseWindow, ms));
-  setTimeout(observeMpv, 900);
+  setTimeout(() => observeMpv(seq, 0), 900);
 }
-function observeMpv() {
+// What the video actually is, per mpv. `container-fps` is the stream's declared
+// rate (not the drifting measured one); dwidth/dheight are the display size after
+// aspect correction, with the decoded size as fallback - on the box dwidth came
+// back "property unavailable" at the very moment dheight was already readable.
+function readVideoProps() {
+  const props = ["container-fps", "dwidth", "dheight", "width", "height"];
+  return Promise.all(props.map((p) => mpvQuery(["get_property", p]))).then(([fps, dw, dh, w, h]) => ({
+    fps: Number(fps) || 0,
+    width: Number(dw) || Number(w) || 0,
+    height: Number(dh) || Number(h) || 0,
+  }));
+}
+
+// Match the output to the video, then hand control back to the caller (which
+// unpauses). A stream with no declared fps (some live HLS) leaves the mode alone.
+// `seq` is the launch this belongs to: reading mpv's properties can take seconds,
+// and a claim landing after that film was stopped would leave the launcher (or the
+// NEXT film) at the dead one's mode with nothing left to release it.
+function adaptMpvMode(seq, done) {
+  const claim = (content) => {
+    if (mpvSeq !== seq || !mpv) return done(); // stopped or superseded while we read
+    if (!(content.fps > 0)) {
+      console.log("[player] no container-fps - leaving the display mode alone");
+      return done();
+    }
+    dmode.claim(MPV_CLAIM, content, (r) => {
+      // Nothing on this panel divides into the content's rate (a 60Hz-only set and
+      // a 24p film): resample instead of juddering. This is what the old manual
+      // "match content framerate" toggle did, decided per file now.
+      if (r && r.reason === "no-matching-mode") {
+        mpvCmd({ command: ["set_property", "video-sync", "display-resample"] });
+      }
+      done();
+    });
+  };
+  readVideoProps().then((c) => {
+    if (c.fps > 0 && c.width > 0) return claim(c);
+    // The video output can still be settling right after the first frame - one
+    // more go, keeping whatever we already learned.
+    setTimeout(
+      () =>
+        readVideoProps().then((c2) =>
+          claim({ fps: c2.fps || c.fps, width: c2.width || c.width, height: c2.height || c.height }),
+        ),
+      400,
+    );
+  });
+}
+
+// Paused-start handshake: switch the mode, then play. The 6s failsafe is
+// load-bearing - if wlr-randr wedges or the claim never answers, the film must
+// still start. (launchMpv arms a second one for "the observer never connected".)
+function startMpvPlayback(seq) {
+  if (mpvStartedSeq === seq) return; // exactly one handshake per launch
+  mpvStartedSeq = seq;
+  const go = () => {
+    if (mpvSeq !== seq || !mpvStartPending) return; // newer launch, or already playing
+    mpvStartPending = false;
+    mpvCmd({ command: ["set_property", "pause", false] });
+    // A mode switch remaps windows, so pull the app UI back over mpv again.
+    [200, 700, 1500].forEach((ms) => setTimeout(raiseWindow, ms));
+  };
+  setTimeout(go, 6000);
+  adaptMpvMode(seq, go);
+}
+
+function observeMpv(seq, tries) {
   const s = net.connect(IPC);
+  let connected = false;
   let firstPos = false;
-  s.on("error", (e) => console.log("[player] observer error", e.code));
+  s.on("error", (e) => {
+    console.log("[player] observer error", e.code);
+    // The observer is what starts playback now (paused launch), so an IPC socket
+    // that isn't up yet must be retried rather than dropped - but only for the
+    // launch it was started for, or a dead launch's retry chain would attach a
+    // second observer to the NEXT mpv.
+    if (!connected && mpv && mpvSeq === seq && (tries || 0) < 5)
+      setTimeout(() => observeMpv(seq, (tries || 0) + 1), 400);
+  });
   s.on("connect", () => {
+    connected = true;
     console.log("[player] observer connected");
     ["time-pos", "duration", "pause", "eof-reached", "core-idle"].forEach((p, i) =>
       s.write(JSON.stringify({ command: ["observe_property", i + 1, p] }) + "\n"),
@@ -1745,6 +1829,9 @@ function observeMpv() {
           // after, since the focus grab can trail the first frame) - this covers
           // any buffer delay, unlike the fixed launch-time window.
           [0, 250, 700, 1500].forEach((ms) => setTimeout(raiseWindow, ms));
+          // The file is loaded now (that's what a time-pos means), so its real
+          // fps/size are readable: pick a mode for it, then let it play.
+          if (!mpvPip) startMpvPlayback(seq);
         }
         emit({ type: "playing" });
         emit({ type: "position", ms: Math.round(m.data * 1000) });
@@ -1833,8 +1920,16 @@ function showLauncher(hash) {
 // appwindows.js; here is only the foreground orchestration. The "exactly ONE
 // visible always-on-top toplevel" invariant still holds - hidden windows are
 // unmapped in Wayland, so CEC key routing / stacking stay sane.
-const backgroundApp = (id) => appwins.background(id);
-const destroyAppWindow = (id) => appwins.destroy(id);
+// Leaving the foreground drops the app's display claim: whatever mode it wanted
+// for its video is wrong for whatever is on screen now.
+const backgroundApp = (id) => {
+  dmode.releaseIfHolder(appClaimId(id));
+  return appwins.background(id);
+};
+const destroyAppWindow = (id) => {
+  dmode.releaseIfHolder(appClaimId(id));
+  return appwins.destroy(id);
+};
 
 // Bring a running app's window back to the foreground (instant resume). The
 // page kept its state; only audio is re-enabled - a paused video stays paused
@@ -1984,6 +2079,7 @@ function openRemoteApp(m, url) {
   // so this is a no-op there; likewise when switching straight to another app.
   const thisAppId = m.id;
   w.on("closed", () => {
+    dmode.releaseIfHolder(appClaimId(thisAppId)); // a gone window can't hold the mode
     if (appwins.get(thisAppId) === w) appwins.destroy(thisAppId);
     if (currentAppId === thisAppId) showLauncher();
   });
@@ -2065,6 +2161,7 @@ function openLocalApp(m) {
   });
   const thisAppId = m.id;
   w.on("closed", () => {
+    dmode.releaseIfHolder(appClaimId(thisAppId)); // a gone window can't hold the mode
     if (appwins.get(thisAppId) === w) appwins.destroy(thisAppId);
     if (currentAppId === thisAppId) showLauncher();
   });
@@ -2360,6 +2457,39 @@ ipcMain.handle("app:storage", (e, action, key, value) => {
   return { ok: false, error: "unknown storage action" };
 });
 
+// ---- capability: adaptive display mode ----
+// "I am about to show video this size at this framerate" - the shell switches the
+// output to a mode that suits it and puts the UI mode back on release. For apps
+// that play video THEMSELVES (a <video> element, their own player) rather than
+// through the shell's mpv, which handles its own claim.
+// Same foreground-only rule as `player`: a backgrounded app must never own the
+// screen's mode, and the claim is keyed to the sender's app so it can only ever
+// release its own. Leaving the app (background/close/Home) releases it too.
+ipcMain.handle("display", (e, action, payload) => {
+  const senderId = windowAppId(e.sender);
+  if (senderId === undefined || senderId !== currentAppId || !capsFor(senderId).includes("display")) {
+    return { ok: false, error: "display not permitted (not the foreground app)" };
+  }
+  const id = appClaimId(senderId);
+  if (action === "release") return new Promise((resolve) => dmode.release(id, resolve));
+  if (action === "claim") {
+    // One claim in flight per app. Without this a page looping claimForVideo()
+    // queues thousands of them, and each mode switch blanks the TV - the arbiter
+    // caps the switches, but the app shouldn't get to queue them either.
+    if (displayClaiming.has(id)) return { ok: false, error: "claim already in flight" };
+    displayClaiming.add(id);
+    const c = payload || {};
+    const content = { width: Number(c.width) || 0, height: Number(c.height) || 0, fps: Number(c.fps) || 0 };
+    return new Promise((resolve) =>
+      dmode.claim(id, content, (r) => {
+        displayClaiming.delete(id);
+        resolve(r);
+      }),
+    );
+  }
+  return { ok: false, error: "unknown display action" };
+});
+
 ipcMain.handle("player", (e, action, payload) => {
   // Only the FOREGROUND window may drive the shared mpv, and only if its app
   // holds the player capability. A backgrounded app must never start/seek
@@ -2381,8 +2511,14 @@ ipcMain.handle("player", (e, action, payload) => {
     // (setVideoMode(true) in observeMpv) must hit THAT window, not the launcher
     mpvOwnerId = appIdForSender(e.sender);
     if (mpv && playingUrl === queued.url && !mpvPip) {
-      console.log("[player] resume (already loaded)");
-      mpvCmd({ command: ["set_property", "pause", false] });
+      if (mpvStartPending) {
+        // Still in the paused-start handshake: the mode switch starts it in a
+        // moment. Unpausing here would put the switch INSIDE playback.
+        console.log("[player] play during the start handshake - letting it finish");
+      } else {
+        console.log("[player] resume (already loaded)");
+        mpvCmd({ command: ["set_property", "pause", false] });
+      }
     } else if (queued.url) {
       playingUrl = queued.url;
       setVideoMode(false);
@@ -2587,15 +2723,9 @@ app.whenReady().then(() => {
   loadPlugins(); // require plugins + register their routes (deps-gated)
   apps.installAll((s) => console.log("[install]", s));
   serve();
-  // Re-apply the saved display mode (the compositor boots at the EDID preferred
-  // mode; a user who forced e.g. 1080p wants it back after a restart).
-  {
-    const d = config.rawDisplay();
-    if (d && d.mode)
-      display.applyKey({ ...process.env, ...WL_ENV }, d.mode, (ok) =>
-        console.log("[display] boot apply", d.mode, ok ? "ok" : "failed"),
-      );
-  }
+  // Put the output at the UI mode: the compositor boots at the EDID preferred
+  // mode, which on a 4K set means drawing the launcher at 8.3 Mpixels.
+  dmode.refresh();
   watchDisplayMode();
   win = new BrowserWindow({
     fullscreen: true,

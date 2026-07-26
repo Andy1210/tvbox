@@ -103,3 +103,17 @@ test("never drops below 720p, and unknown fps is not guessed at", () => {
   assert.strictEqual(label(display.pickContentMode(tiny, { width: 640, height: 480, fps: 24 })), "1920x1080@24");
   assert.strictEqual(display.pickContentMode(modesOf(LG_768), { width: 1920, height: 1080, fps: 0 }), null);
 });
+
+test("an UNKNOWN size never selects an SD mode (mpv reports fps before dwidth)", () => {
+  // The real trap: container-fps is readable while dwidth/dheight are still
+  // unavailable, so the claim arrives as { fps, width: 0, height: 0 }. Without a
+  // floor the "smallest that fits" rule happily picks 640x480 - which is what the
+  // TV would actually switch to for the whole film.
+  const sd = display.parse(
+    `HDMI-A-1 "x"\n    640x480 px, 60.000000 Hz\n    720x576 px, 50.000000 Hz\n` +
+      `    1280x720 px, 60.000000 Hz\n    1920x1080 px, 50.000000 Hz\n`,
+  ).modes;
+  assert.strictEqual(label(display.pickContentMode(sd, { fps: 60 })), "1280x720@60");
+  assert.strictEqual(label(display.pickContentMode(sd, { width: 0, height: 0, fps: 60 })), "1280x720@60");
+  assert.strictEqual(label(display.pickContentMode(sd, { width: -1, height: -1, fps: 50 })), "1920x1080@50");
+});

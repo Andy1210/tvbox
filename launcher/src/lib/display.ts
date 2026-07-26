@@ -1,51 +1,38 @@
-// Launcher-side access to the shell's display control (wlr-randr). Lists the
-// connected output's modes, switches resolution/refresh, and toggles the
-// "match content framerate" mpv option. Absent during `vite dev`.
-export interface DisplayMode {
-  key: string; // "WxH@N" (N = whole Hz) - the id we send back to apply
+// Launcher-side view of the shell's display control. Resolution is AUTOMATIC (the
+// UI runs at the panel's own resolution capped to 1080p, video claims a mode that
+// suits it), so there is nothing to pick here - only a status read and a
+// "re-detect" that re-asserts the UI mode. Absent during `vite dev`.
+export interface DisplayModeInfo {
   width: number;
   height: number;
-  refresh: number;
-  current: boolean;
-  preferred: boolean;
+  refresh: number; // exact Hz (23.976, not a rounded 24)
 }
-export interface DisplayInfo {
+export interface DisplayStatus {
   output: string;
-  modes: DisplayMode[];
-  saved: string | null;
-  matchFramerate: boolean;
+  current: DisplayModeInfo | null; // what the output is at right now
+  ui: DisplayModeInfo | null; // what the UI should sit at
+  desired: DisplayModeInfo | null; // the UI mode, or a live video claim's mode
+  claimedBy: string | null; // who holds a video claim ("shell:mpv", "app:<id>")
 }
 
-export async function fetchDisplayModes(): Promise<DisplayInfo | null> {
+export async function fetchDisplayStatus(): Promise<DisplayStatus | null> {
   try {
-    const r = await fetch("/tvbox/api/display/modes", { cache: "no-store" });
-    return (await r.json()) as DisplayInfo;
+    const r = await fetch("/tvbox/api/display/status", { cache: "no-store" });
+    return (await r.json()) as DisplayStatus;
   } catch {
     return null;
   }
 }
 
-export async function applyDisplayMode(mode: string): Promise<{ ok: boolean; error?: string }> {
+export async function refreshDisplayMode(): Promise<{ ok: boolean; error?: string }> {
   try {
-    const r = await fetch("/tvbox/api/display/apply", {
+    const r = await fetch("/tvbox/api/display/refresh", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ mode }),
+      body: "{}",
     });
     return await r.json();
   } catch {
     return { ok: false, error: "network" };
-  }
-}
-
-export async function setMatchFramerate(on: boolean): Promise<void> {
-  try {
-    await fetch("/tvbox/api/config", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ display: { matchFramerate: on } }),
-    });
-  } catch {
-    /* best effort */
   }
 }
