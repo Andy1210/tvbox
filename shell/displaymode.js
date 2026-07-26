@@ -64,10 +64,13 @@ function create({ getModes, applyMode, log, minApplyGapMs = MIN_APPLY_GAP_MS }) 
     });
   }
 
-  function flush(ok, err) {
+  // `applied` = a mode switch really happened. Callers need it to tell "we switched
+  // the TV" from "it was already there" - reporting the latter as a change makes an
+  // app think the screen blanked when nothing moved.
+  function flush(ok, err, applied) {
     const list = waiters;
     waiters = [];
-    for (const cb of list) cb(ok, err);
+    for (const cb of list) cb(ok, err, !!applied);
   }
 
   function windowFull() {
@@ -82,12 +85,12 @@ function create({ getModes, applyMode, log, minApplyGapMs = MIN_APPLY_GAP_MS }) 
   function settle(cb) {
     if (cb) waiters.push(cb);
     if (settling) return; // whoever is settling will serve the queue when it lands
-    if (!desired()) return flush(false, "no mode");
+    if (!desired()) return flush(false, "no mode", false);
     settling = true;
     modes((info) => {
       const done = (ok, err) => {
         settling = false;
-        flush(ok, err);
+        flush(ok, err, false); // every path here returns without touching the output
       };
       if (!info) return done(false, "no output");
       const want = desired(); // may have moved while we were reading
@@ -125,7 +128,7 @@ function create({ getModes, applyMode, log, minApplyGapMs = MIN_APPLY_GAP_MS }) 
           // A claim/release landed while we were applying: go again rather than
           // answer with a mode nobody wants any more. The queue rides along.
           if (!same(want, desired())) return settle();
-          flush(ok, err);
+          flush(ok, err, true);
         });
       }, wait);
     });
@@ -173,11 +176,11 @@ function create({ getModes, applyMode, log, minApplyGapMs = MIN_APPLY_GAP_MS }) 
         }
         holder.mode = mode;
         settle(
-          (ok, err) =>
+          (ok, err, applied) =>
             cb &&
             cb({
               ok,
-              changed: ok,
+              changed: applied,
               reason: ok ? "" : err,
               mode: pub(mode),
             }),
@@ -191,7 +194,7 @@ function create({ getModes, applyMode, log, minApplyGapMs = MIN_APPLY_GAP_MS }) 
       if (!holder || (id != null && holder.id !== id)) return cb && cb({ ok: true, changed: false });
       log(`release ${holder.id}`);
       holder = null;
-      settle((ok, err) => cb && cb({ ok, changed: ok, reason: ok ? "" : err }));
+      settle((ok, err, applied) => cb && cb({ ok, changed: applied, reason: ok ? "" : err }));
     },
 
     // Any app leaving the foreground loses its claim - this is what makes "press

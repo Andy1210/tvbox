@@ -5,8 +5,12 @@
 // The shell draws the UI at up to 1080p and switches the output to suit the
 // content while it plays: refresh first (a 23.976 film on a 60Hz output judders
 // even though no frame is dropped), then the smallest resolution that still covers
-// the video, never below 720p. Everything here no-ops without the `display`
-// capability, so an app can call it unconditionally.
+// the video, never below 720p.
+//
+// Without the `display` capability every call is a benign no-op
+// (`{ ok: true, changed: false, reason: "no-capability" }`), so an app can call
+// these unconditionally - not holding the capability is a manifest decision, not a
+// runtime error.
 import { useEffect } from "react";
 import { tvbox } from "./capability";
 
@@ -23,10 +27,10 @@ export interface VideoMode {
 // nothing better to offer" answer - the app should just keep playing.
 export interface DisplayClaim {
   ok: boolean;
-  changed?: boolean;
-  reason?: string;
+  changed?: boolean; // a switch really happened (false = the output was already right)
+  reason?: string; // "no-matching-mode" | "no-capability" | "superseded" | …
   mode?: { width: number; height: number; refresh: number };
-  error?: string;
+  error?: string; // only for a broken bridge, never for a missing capability
 }
 
 export interface DisplayBridge {
@@ -36,9 +40,11 @@ export interface DisplayBridge {
 
 const bridge = (): DisplayBridge | undefined => tvbox().display;
 
+const NO_CAP: DisplayClaim = { ok: true, changed: false, reason: "no-capability" };
+
 export async function claimForVideo(v: VideoMode): Promise<DisplayClaim> {
   const d = bridge();
-  if (!d) return { ok: false, error: "no display capability" };
+  if (!d) return NO_CAP;
   try {
     return await d.claimForVideo(v);
   } catch {
@@ -48,7 +54,7 @@ export async function claimForVideo(v: VideoMode): Promise<DisplayClaim> {
 
 export async function releaseVideoMode(): Promise<DisplayClaim> {
   const d = bridge();
-  if (!d) return { ok: false, error: "no display capability" };
+  if (!d) return NO_CAP;
   try {
     return await d.release();
   } catch {

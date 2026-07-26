@@ -1672,7 +1672,22 @@ function launchMpv(url, startPos, pip, rect) {
     delete env.WAYLAND_DISPLAY;
   }
   mpv = spawn("mpv", args, { env, detached: true, stdio: "ignore" });
+  const child = mpv;
   console.log("[player] mpv launched pid", mpv.pid, pip ? "(pip)" : "");
+  // A spawn that never got off the ground (EACCES, fork failure - ENOENT is already
+  // guarded above) emits "error" and no usable "exit". Unhandled it would take the
+  // shell down, and it must not leave a paused-start flag or a claim behind either.
+  child.on("error", (e) => {
+    console.error("[player] mpv spawn failed:", e.message);
+    child.removeAllListeners("exit"); // don't report "finished" twice
+    if (mpv === child) mpv = null;
+    playingUrl = null;
+    mpvStartPending = false;
+    setVideoMode(false);
+    dmode.release(MPV_CLAIM);
+    emit({ type: "error" });
+    emit({ type: "finished" });
+  });
   // One-touch wake: video starting while the TV sleeps should light it up
   // (voice/HA "play X" with the TV off). "on 0" is a no-op on a TV that's
   // already on. The one exception: right after the USER put the TV on standby -

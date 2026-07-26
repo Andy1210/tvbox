@@ -77,6 +77,18 @@ test("a film claim takes the matching mode and release gives it back", async () 
   assert.deepStrictEqual(s.applied, ["1920x1080@60", "1920x1080@23.976", "1920x1080@60"]);
 });
 
+test("`changed` means the TV actually switched, not just that we settled", async () => {
+  const s = sink(WLR_4K);
+  const d = svc(s);
+  await new Promise((r) => d.refresh(r));
+  const first = await new Promise((res) => d.claim("app:plex", FILM, res));
+  assert.strictEqual(first.changed, true); // 1080p60 -> 1080p23.976
+  const again = await new Promise((res) => d.claim("app:plex", FILM, res));
+  assert.strictEqual(again.ok, true);
+  assert.strictEqual(again.changed, false); // already there: nothing blanked
+  assert.deepStrictEqual(s.applied, ["1920x1080@60", "1920x1080@23.976"]);
+});
+
 test("no matching refresh is a successful no-op, not a failure", async () => {
   const s = sink(WLR_60_ONLY);
   const d = svc(s);
