@@ -15,6 +15,7 @@ import {
   type FiretvIrStatus,
   type IrBrand,
   type IrCodeset,
+  type IrPlan,
 } from "../lib/firetvir";
 import { FocusButton } from "./FocusButton";
 import { Osk } from "./Osk";
@@ -27,6 +28,11 @@ import { Osk } from "./Osk";
 // TV codes come from the community irdb database (credited in About).
 const MAC_RE = /^([0-9a-f]{2}:){5}[0-9a-f]{2}$/i;
 const TEST_KEYS = ["VolumeUp", "VolumeDown", "Mute", "Power"] as const;
+
+// A chosen codeset + how to name it on screen. The picker serves three targets:
+// the base (all keys), one key's override, or a key's SECOND device.
+type PickedSet = { path: string; label: string };
+type PickTarget = { kind: "base" } | { kind: "override"; key: string } | { kind: "second"; key: string };
 
 // `device`, when given, embeds the flow under one remote in the remap UI (no
 // remote-picker, scoped to that MAC) - so the feature only appears for a remote
@@ -46,7 +52,13 @@ export function FiretvIrSettings({ device }: { device?: { id: string; name: stri
   const [brand, setBrand] = useState<IrBrand | null>(null);
   const [filter, setFilter] = useState("");
   const [editingFilter, setEditingFilter] = useState(false);
-  const [codeset, setCodeset] = useState<IrCodeset | null>(null);
+  const [codeset, setCodeset] = useState<IrCodeset | null>(null); // the base
+  // Per-key overrides on top of the base, and an optional second device on a key
+  // (one press blasts both - e.g. Power to the TV and a soundbar).
+  const [overrides, setOverrides] = useState<Record<string, PickedSet>>({});
+  const [seconds, setSeconds] = useState<Record<string, PickedSet>>({});
+  const [csCache, setCsCache] = useState<Record<string, IrCodeset>>({});
+  const [picking, setPicking] = useState<PickTarget | null>(null);
   const [busy, setBusy] = useState<string>(""); // a key being tested / "program"
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -99,24 +111,62 @@ export function FiretvIrSettings({ device }: { device?: { id: string; name: stri
       const sug = status?.suggestedBrand && r.brands.find((b) => b.brand === status.suggestedBrand);
       if (sug && !brand && !codeset) {
         setBrand(sug);
-        if (sug.sets.length === 1) chooseCodeset(sug.sets[0].path);
+        if (sug.sets.length === 1) chooseCodeset(sug.sets[0].path, sug.brand + " " + sug.sets[0].name);
       }
     } else setBrandsErr(r.error || "error");
   };
 
-  const chooseCodeset = async (path: string) => {
-    setCodeset(null);
+  const chooseCodeset = async (path: string, label: string) => {
     setMsg(null);
+    const target: PickTarget = picking || { kind: "base" };
+    if (target.kind === "base") setCodeset(null);
     const cs = await fetchIrCodeset(path);
-    setCodeset(cs);
-    setTimeout(() => setFocus("ftir-test-VolumeUp"), 0);
+    setCsCache((c) => ({ ...c, [path]: cs }));
+    if (target.kind === "base") setCodeset(cs);
+    else if (target.kind === "override") setOverrides((o) => ({ ...o, [target.key]: { path, label } }));
+    else setSeconds((o) => ({ ...o, [target.key]: { path, label } }));
+    setPicking(null);
+    setBrand(null);
+    setTimeout(() => setFocus(target.kind === "base" ? "ftir-test-VolumeUp" : "ftir-change-" + target.key), 0);
+  };
+
+  // What a key will actually blast: its override if it has one, else the base.
+  // The second device is resolved the same way - the shell only attaches it when
+  // that codeset really has a row for THIS key, so a soundbar set without e.g.
+  // Mute must not be advertised here as if it were being blasted.
+  const effective = (key: string) => {
+    const ov = overrides[key];
+    const path = ov?.path || codeset?.path || null;
+    const cs = path ? csCache[path] : null;
+    const row = cs?.keys?.[key];
+    const sec = seconds[key];
+    return {
+      path,
+      row,
+      label: ov?.label || null,
+      ok: !!row && (cs?.supported ? !!cs.supported[row.protocol] : true),
+      sec,
+      secRow: sec ? csCache[sec.path]?.keys?.[key] : undefined,
+    };
+  };
+
+  // The plan the shell resolves into a keymap - the test blasts exactly this.
+  const buildPlan = (): IrPlan => {
+    const keys: IrPlan["keys"] = {};
+    for (const key of TEST_KEYS) {
+      const entry: { path?: string; second?: string } = {};
+      if (overrides[key]) entry.path = overrides[key].path;
+      if (seconds[key]) entry.second = seconds[key].path;
+      if (Object.keys(entry).length) keys[key] = entry;
+    }
+    return { base: codeset?.path || null, keys };
   };
 
   const doTest = async (key: string) => {
     if (!mac || !codeset) return;
     setBusy(key);
     setMsg(null);
-    const r = await testIrKey(mac, codeset.path, key);
+    const r = await testIrKey(mac, buildPlan(), key);
     setBusy("");
     setMsg({
       ok: r.ok,
@@ -128,13 +178,13 @@ export function FiretvIrSettings({ device }: { device?: { id: string; name: stri
     if (!mac || !codeset) return;
     setBusy("program");
     setMsg(null);
+    const extra = TEST_KEYS.filter((k) => overrides[k] || seconds[k]).length;
     const label =
-      (brand ? brand.brand + " " : "") +
-      codeset.path
+      (codeset.path
         .split("/")
         .pop()
-        ?.replace(/\.csv$/, "");
-    const r = await programIr(mac, codeset.path, label);
+        ?.replace(/\.csv$/, "") || "custom") + (extra ? ` +${extra}` : "");
+    const r = await programIr(mac, buildPlan(), label);
     setBusy("");
     if (r.ok) {
       await enablePassthrough(mac);
@@ -163,6 +213,17 @@ export function FiretvIrSettings({ device }: { device?: { id: string; name: stri
     setBusy("");
     setMsg({ ok: r.ok, text: r.ok ? t("firetvir.erased") : t("firetvir.programFailed", { error: r.error || "?" }) });
   };
+
+  // The base is a TV codeset (that is what the flow is for); a per-key override
+  // or second device may be any device type - that is how a soundbar lands on
+  // the volume keys. Brands with no TV set fall back to showing everything.
+  const setsFor = (b: IrBrand) => {
+    if (picking && picking.kind !== "base") return b.sets;
+    const tv = b.sets.filter((s) => s.type === "TV");
+    return tv.length ? tv : b.sets;
+  };
+  const setLabel = (s: { name: string; type: string }) =>
+    picking && picking.kind !== "base" && s.type !== "TV" ? s.type + " " + s.name : s.name;
 
   const filteredBrands = useMemo(() => {
     if (!brands) return [];
@@ -241,10 +302,30 @@ export function FiretvIrSettings({ device }: { device?: { id: string; name: stri
               </div>
             ))}
 
-          {/* Step 3: brand + codeset (irdb) */}
-          {mac && (
+          {/* Step 3: brand + codeset (irdb). Shown until a base is chosen, and
+              again whenever a key's override / second device is being picked. */}
+          {mac && (!codeset || picking) && (
             <div className="mb-[2vh]">
-              <div className="text-[2vh] font-semibold mb-[0.4vh]">{t("firetvir.pickBrand")}</div>
+              <div className="text-[2vh] font-semibold mb-[0.4vh]">
+                {picking && picking.kind !== "base"
+                  ? t(picking.kind === "second" ? "firetvir.pickSecondFor" : "firetvir.pickFor", {
+                      key: t("firetvir.key." + picking.key),
+                    })
+                  : t("firetvir.pickBrand")}
+              </div>
+              {picking && (
+                <FocusButton
+                  focusKey="ftir-pickcancel"
+                  onEnter={() => {
+                    setPicking(null);
+                    setBrand(null);
+                    setTimeout(() => setFocus("ftir-test-VolumeUp"), 0);
+                  }}
+                  className="px-[1.3vw] py-[1vh] rounded-[1vh] bg-white/5 text-[1.8vh] mb-[1vh] inline-flex"
+                >
+                  {t("firetvir.cancel")}
+                </FocusButton>
+              )}
               {status?.suggestedBrand && (
                 <div className="text-[1.7vh] text-fg-dim mb-[0.8vh]">
                   {t("firetvir.suggested", { brand: status.suggestedBrand })}
@@ -278,7 +359,8 @@ export function FiretvIrSettings({ device }: { device?: { id: string; name: stri
                           focusKey={"ftir-brand-" + b.brand.replace(/[^a-z0-9]/gi, "")}
                           onEnter={() => {
                             setBrand(b);
-                            if (b.sets.length === 1) chooseCodeset(b.sets[0].path);
+                            const only = setsFor(b);
+                            if (only.length === 1) chooseCodeset(only[0].path, b.brand + " " + setLabel(only[0]));
                           }}
                           className="px-[1.3vw] py-[1vh] rounded-[1vh] bg-white/5 text-[1.9vh]"
                         >
@@ -302,17 +384,17 @@ export function FiretvIrSettings({ device }: { device?: { id: string; name: stri
                       >
                         ← {brand.brand}
                       </FocusButton>
-                      {brand.sets.map((s) => (
+                      {setsFor(brand).map((s) => (
                         <FocusButton
                           key={s.path}
                           focusKey={"ftir-set-" + s.name.replace(/[^a-z0-9]/gi, "")}
-                          onEnter={() => chooseCodeset(s.path)}
+                          onEnter={() => chooseCodeset(s.path, brand.brand + " " + setLabel(s))}
                           className={[
                             "px-[1.3vw] py-[1vh] rounded-[1vh] text-[1.9vh]",
                             codeset?.path === s.path ? "bg-accent text-[#06090d] font-semibold" : "bg-white/5",
                           ].join(" ")}
                         >
-                          {s.name}
+                          {setLabel(s)}
                         </FocusButton>
                       ))}
                     </div>
@@ -327,27 +409,83 @@ export function FiretvIrSettings({ device }: { device?: { id: string; name: stri
             <div className="mb-[1.4vh] max-w-[66vw]">
               <div className="text-[2vh] font-semibold mb-[0.4vh]">{t("firetvir.testTitle")}</div>
               <div className="text-[1.7vh] text-fg-dim mb-[1vh]">{t("firetvir.testHint")}</div>
-              <div className="flex flex-wrap gap-[0.8vh] mb-[1.2vh]">
+              <div className="mb-[1.2vh]">
                 {TEST_KEYS.map((key) => {
-                  const row = codeset.keys[key];
-                  const proto = row?.protocol;
-                  const ok = row && (codeset.supported ? codeset.supported[proto] : true);
+                  const eff = effective(key);
+                  const sec = seconds[key];
                   return (
-                    <FocusButton
+                    <div
                       key={key}
-                      focusKey={"ftir-test-" + key}
-                      onEnter={() => ok && doTest(key)}
-                      className={[
-                        "px-[1.6vw] py-[1.2vh] rounded-[1.1vh] text-[1.9vh]",
-                        ok ? "bg-white/5" : "bg-white/5 opacity-40",
-                      ].join(" ")}
+                      className="flex items-center gap-[0.8vw] py-[0.7vh] border-b-[0.15vh] border-white/5"
                     >
-                      {t("firetvir.key." + key)}
-                      {busy === key ? " …" : !row ? " ✕" : !ok ? " (?)" : ""}
-                    </FocusButton>
+                      <div className="w-[9vw] text-[1.9vh] font-semibold">{t("firetvir.key." + key)}</div>
+                      <div className="flex-1 text-[1.7vh] text-fg-dim truncate">
+                        {!eff.row
+                          ? t("firetvir.keyMissing")
+                          : (eff.label || t("firetvir.fromBase")) +
+                            (eff.sec
+                              ? " + " + eff.sec.label + (eff.secRow ? "" : " (" + t("firetvir.keyMissing") + ")")
+                              : "")}
+                      </div>
+                      <FocusButton
+                        focusKey={"ftir-test-" + key}
+                        onEnter={() => eff.ok && doTest(key)}
+                        className={[
+                          "px-[1.2vw] py-[0.9vh] rounded-[1vh] text-[1.8vh]",
+                          eff.ok ? "bg-white/5" : "bg-white/5 opacity-40",
+                        ].join(" ")}
+                      >
+                        {busy === key ? "…" : t("firetvir.test")}
+                        {eff.row && !eff.ok ? " (?)" : ""}
+                      </FocusButton>
+                      <FocusButton
+                        focusKey={"ftir-change-" + key}
+                        onEnter={() => {
+                          setPicking({ kind: "override", key });
+                          setBrand(null);
+                          setTimeout(() => setFocus("ftir-brandfilter"), 0);
+                        }}
+                        className="px-[1.2vw] py-[0.9vh] rounded-[1vh] bg-white/5 text-[1.8vh]"
+                      >
+                        {overrides[key] ? t("firetvir.change") : t("firetvir.override")}
+                      </FocusButton>
+                      <FocusButton
+                        focusKey={"ftir-second-" + key}
+                        onEnter={() => {
+                          if (sec)
+                            return setSeconds((o) => {
+                              const n = { ...o };
+                              delete n[key];
+                              return n;
+                            });
+                          setPicking({ kind: "second", key });
+                          setBrand(null);
+                          setTimeout(() => setFocus("ftir-brandfilter"), 0);
+                        }}
+                        className="px-[1.2vw] py-[0.9vh] rounded-[1vh] bg-white/5 text-[1.8vh]"
+                      >
+                        {sec ? t("firetvir.removeSecond") : t("firetvir.addSecond")}
+                      </FocusButton>
+                      {overrides[key] && (
+                        <FocusButton
+                          focusKey={"ftir-reset-" + key}
+                          onEnter={() =>
+                            setOverrides((o) => {
+                              const n = { ...o };
+                              delete n[key];
+                              return n;
+                            })
+                          }
+                          className="px-[1.2vw] py-[0.9vh] rounded-[1vh] bg-white/5 text-[1.8vh]"
+                        >
+                          {t("firetvir.useBase")}
+                        </FocusButton>
+                      )}
+                    </div>
                   );
                 })}
               </div>
+              <div className="text-[1.6vh] text-fg-dim mb-[1vh]">{t("firetvir.perKeyHint")}</div>
               {codeset.supported && Object.values(codeset.supported).some((v) => !v) && (
                 <div className="text-[1.7vh] text-warn mb-[1vh]">{t("firetvir.someUnsupported")}</div>
               )}

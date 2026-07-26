@@ -55,11 +55,37 @@ def log(*a): print(*a, file=sys.stderr, flush=True)
 
 
 # ---------------------------------------------------------------- config -------
+def code_sequences(k):
+    """One code entry ("irdb" / "nec" / "pronto" / "raw") -> (sequences, frequency,
+    min_repeat - only irdb rows carry one), or None if it carries no code. Split
+    out so a key's primary and its optional "second" device share one path."""
+    if "irdb" in k:                        # {"protocol":"NEC1","device":4,"subdevice":-1,"function":2}
+        i = k["irdb"]
+        enc = ir_protocols.encode(i["protocol"], i["device"], i.get("subdevice", -1), i["function"])
+        return [enc["raw"]], enc["frequency"], enc["repeat"]
+    if "nec" in k:                         # {"address":0x04,"command":0x08} - LG & most TVs
+        n = k["nec"]
+        return [kc.nec_raw(int(n["address"]), int(n["command"]))], int(k.get("frequency", 38000)), 0
+    if "pronto" in k:
+        freq, raw = kc.pronto_to_raw(k["pronto"])
+        seqs = [raw]
+        if k.get("pronto_repeat"):
+            seqs.append(kc.pronto_to_raw(k["pronto_repeat"])[1])
+        return seqs, freq, 0
+    if "raw" in k:
+        return [list(k["raw"])] + ([list(k["raw2"])] if "raw2" in k else []), int(k["frequency"]), 0
+    return None
+
+
 def build_actions(spec, scan_id):
     """spec = {"duty_cycle":33, "keys": {"VolumeUp": {...}, ...}} ->
-    dict key_name -> [action_bytes]. Each key entry has either "pronto"
-    (+ optional "pronto_repeat") or "raw":[..]+"frequency". Optional per-key:
-    repeat, post_delay, toggle_mask, optional, notify_host."""
+    dict key_name -> [action_bytes]. Each key entry carries a code as "irdb",
+    "nec", "pronto" (+ optional "pronto_repeat") or "raw":[..]+"frequency".
+    Optional per-key: repeat, post_delay, toggle_mask, optional, notify_host,
+    and "second" - a SECOND device's code in the same shape, so one press blasts
+    both (e.g. Power to a TV and a soundbar). Amazon's keymap action holds at
+    most two sequences, so a "second" takes the slot a pronto repeat frame would
+    have used."""
     duty = int(spec.get("duty_cycle", 33))
     out = {}
     for key, k in spec["keys"].items():
@@ -69,25 +95,43 @@ def build_actions(spec, scan_id):
         repeat   = int(k.get("repeat", 1))
         pdelay   = int(k.get("post_delay", 1000 if key == "Power" else 0))
         tmask    = int(k.get("toggle_mask", 0))
-        if "irdb" in k:                    # {"protocol":"NEC1","device":4,"subdevice":-1,"function":2}
-            i = k["irdb"]
-            enc = ir_protocols.encode(i["protocol"], i["device"], i.get("subdevice", -1), i["function"])
-            act = kc.compile_ir_action([enc["raw"]], enc["frequency"], duty,
-                                       max(repeat, enc["repeat"]), pdelay, tmask, "Basic", optional)
-        elif "nec" in k:                   # {"address":0x04,"command":0x08} - LG & most TVs
-            n = k["nec"]
-            raw = kc.nec_raw(int(n["address"]), int(n["command"]))
-            act = kc.compile_ir_action([raw], int(k.get("frequency", 38000)), duty,
-                                       repeat, pdelay, tmask, "Basic", optional)
-        elif "pronto" in k:
-            act = kc.ir_action_from_pronto(
-                k["pronto"], k.get("pronto_repeat"), duty, repeat, pdelay, tmask, optional)
-        elif "raw" in k:
-            seqs = [k["raw"]] + ([k["raw2"]] if "raw2" in k else [])
-            act = kc.compile_ir_action(seqs, int(k["frequency"]), duty, repeat, pdelay,
-                                       tmask, "Sequence" if "raw2" in k else "Basic", optional)
-        else:
+        # One bad code must cost at most its own key (or its own extra blast) -
+        # ir_protocols.encode raises for anything outside NEC/NECx/RC5/RC6/SIRC/
+        # Panasonic, and letting that escape would fail programming for EVERY key.
+        try:
+            prim = code_sequences(k)
+        except Exception as ex:
+            log(f"! key {key!r}: code unusable ({ex}), skipping"); continue
+        if prim is None:
             log(f"! key {key!r} has no 'irdb'/'nec'/'pronto'/'raw', skipping"); continue
+        seqs, freq, min_repeat = prim
+        rtype = "Sequence" if len(seqs) > 1 else "Basic"
+        sec = None
+        if isinstance(k.get("second"), dict):
+            # The UI only gates the PRIMARY codeset's protocol; a second device is
+            # picked from any irdb device type, so this one really can be unencodable.
+            try:
+                sec = code_sequences(k["second"])
+            except Exception as ex:
+                log(f"! key {key!r}: second device code unusable ({ex}) - blasting the primary only")
+        if sec:
+            seqs2, freq2, min_repeat2 = sec
+            # Protocols like Sony SIRC only decode after N frames; the action has a
+            # single repeat count, so take whichever device needs more.
+            min_repeat = max(min_repeat, min_repeat2)
+            # One action = one carrier. Consumer IR is nearly always 38kHz, so a
+            # mismatch is rare - but say so rather than silently retuning the
+            # second device's code to a carrier it may not decode.
+            if freq2 != freq:
+                log(f"! key {key!r}: second code is {freq2}Hz, primary is {freq}Hz - "
+                    f"blasting both at {freq}Hz; if the second device ignores it, that is why")
+            if len(seqs) > 1:
+                log(f"! key {key!r}: 'second' replaces the repeat frame (max 2 sequences per action)")
+            if len(seqs2) > 1:
+                log(f"! key {key!r}: the second code's own repeat frame is dropped (max 2 sequences)")
+            seqs, rtype = [seqs[0], seqs2[0]], "Sequence"
+        act = kc.compile_ir_action(seqs, freq, duty, max(repeat, min_repeat), pdelay,
+                                   tmask, rtype, optional)
         actions = [act]
         if k.get("notify_host"):
             actions.append(kc.notify_host_action())
