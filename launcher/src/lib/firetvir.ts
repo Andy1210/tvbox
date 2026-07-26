@@ -13,7 +13,10 @@ export interface FiretvIrStatus {
 }
 export interface IrBrand {
   brand: string;
-  sets: { name: string; path: string }[];
+  // `type` is the irdb device folder ("TV", "Receiver", "Unknown_AH59-..."). The
+  // base picker shows TV sets; a per-key override shows all of them, since a
+  // button can drive something else entirely (a soundbar on volume).
+  sets: { name: string; path: string; type: string }[];
 }
 export interface IrCodeset {
   ok: boolean;
@@ -22,6 +25,13 @@ export interface IrCodeset {
   protocols: string[];
   supported: Record<string, boolean> | null; // per-protocol, null if the check failed
   error?: string;
+}
+// What gets written to the remote: one base codeset for every key, plus
+// optional per-key overrides (a different brand on a single button) and an
+// optional second device on a key, so one press blasts both.
+export interface IrPlan {
+  base: string | null;
+  keys: Record<string, { path?: string; second?: string }>;
 }
 export interface ToolResult {
   ok: boolean;
@@ -77,11 +87,11 @@ export function fetchIrCodeset(path: string): Promise<IrCodeset> {
     error: "unreachable",
   });
 }
-export function testIrKey(mac: string, path: string, key: string): Promise<ToolResult> {
-  return postJson("/tvbox/api/firetvir/test", { mac, path, key }, { ok: false, error: "unreachable" });
+export function testIrKey(mac: string, plan: IrPlan, key: string): Promise<ToolResult> {
+  return postJson("/tvbox/api/firetvir/test", { mac, plan, key }, { ok: false, error: "unreachable" });
 }
-export function programIr(mac: string, path: string, label: string): Promise<ToolResult> {
-  return postJson("/tvbox/api/firetvir/program", { mac, path, label }, { ok: false, error: "unreachable" });
+export function programIr(mac: string, plan: IrPlan, label: string): Promise<ToolResult> {
+  return postJson("/tvbox/api/firetvir/program", { mac, plan, label }, { ok: false, error: "unreachable" });
 }
 export function eraseIr(mac: string): Promise<ToolResult> {
   return postJson("/tvbox/api/firetvir/erase", { mac }, { ok: false, error: "unreachable" });

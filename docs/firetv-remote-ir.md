@@ -46,6 +46,17 @@ The guided on-TV flow does all of the below for you, no SSH:
    `remote.devices[<mac>].irPassthrough = true` so the bridge stops diverting
    that remote's BT volume keys to the box's own IR blaster (no double volume).
 
+Per key, you can override that choice with **another brand entirely** ("Other
+brand" on the row) - e.g. a soundbar on Volume/Mute while the TV keeps Power -
+and add a **second device** to a key so one press blasts both. The per-key
+picker lists every irdb device type, not just TVs (irdb has no tidy "Soundbar"
+folder; Samsung's audio codes live under `Unknown_AH59-*` remote model numbers).
+The row's **Test** button blasts exactly what would be programmed, second device
+included, without saving anything.
+
+Note the box already toggles the TV over HDMI-CEC, so "TV + soundbar on one
+button" usually needs only the soundbar's code on that key.
+
 irdb attribution: the verbatim notice its license requires (LICENSE.md clause
 2, "Contains/accesses irdb by Simon Peter and contributors, used under
 permission. …") is shown in **Settings → About → Open source**, and the flow

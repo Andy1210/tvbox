@@ -483,6 +483,18 @@
     "erased": "A távirányítóra írt kódok törölve.",
     "credit": "A TV-kódok a közösségi irdb adatbázisból származnak (github.com/probonopd/irdb). Lásd a Névjegy menüt.",
     "suggested": "A TV-t {brand} márkájúként ismertük fel - lent javasoljuk.",
-    "entry": "TV IR (a távirányító saját jeladója)"
+    "entry": "TV IR (a távirányító saját jeladója)",
+    "test": "Teszt",
+    "override": "Más márka",
+    "change": "Módosítás",
+    "useBase": "Alapértelmezett",
+    "addSecond": "+ 2. készülék",
+    "removeSecond": "2. törlése",
+    "fromBase": "alap márka",
+    "keyMissing": "nincs ebben a kódkészletben",
+    "pickFor": "{key} márkája",
+    "pickSecondFor": "{key} második készüléke",
+    "cancel": "Mégse",
+    "perKeyHint": "Minden gombhoz más márka is választható - pl. soundbar a hangerőre. A második készülékkel egy nyomás mindkettőnek szól (a TV-t a HDMI-CEC amúgy is kapcsolja)."
   }
 }

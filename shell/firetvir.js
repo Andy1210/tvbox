@@ -25,7 +25,7 @@ const PY = path.join(PYENV, "bin", "python3");
 const TOOL = path.join(TVBOX, "firetv_remote_ir.py");
 const CODES_FILE = path.join(TVBOX, "firetv_tv_codes.json");
 const CACHE_DIR = path.join(TVBOX, "cache");
-const INDEX_CACHE = path.join(CACHE_DIR, "irdb-tv-index.json");
+const INDEX_CACHE = path.join(CACHE_DIR, "irdb-index-v2.json"); // v2: all device types, not just TV
 const INDEX_TTL_MS = 30 * 24 * 3600 * 1000;
 // The user's "latest deps" stance, but pinned so an install is reproducible;
 // dbus-fast ships aarch64 manylinux wheels, so no compiler is needed on the box.
@@ -224,15 +224,23 @@ function fetchBrands(cb) {
     } catch (e) {
       return cb(new Error("bad index json"));
     }
+    // Every device type, not just TV: the per-key override lets a single button
+    // drive something else entirely (a soundbar on volume). irdb has no tidy
+    // "Soundbar" folder - Samsung's audio codes sit under Unknown_AH59-* remote
+    // model numbers - so the type is carried through and shown rather than
+    // filtered to a guessed whitelist. The UI defaults the BASE picker to TV.
     const brands = new Map();
     for (const ent of tree) {
-      const m = /^codes\/([^/]+)\/TV\/([^/]+\.csv)$/.exec(ent.path || "");
+      const m = /^codes\/([^/]+)\/([^/]+)\/([^/]+\.csv)$/.exec(ent.path || "");
       if (!m) continue;
       if (!brands.has(m[1])) brands.set(m[1], []);
-      brands.get(m[1]).push({ name: m[2].replace(/\.csv$/, ""), path: ent.path });
+      brands.get(m[1]).push({ name: m[3].replace(/\.csv$/, ""), path: ent.path, type: m[2] });
     }
     const out = [...brands.entries()]
-      .map(([brand, sets]) => ({ brand, sets: sets.sort((a, b) => a.name.localeCompare(b.name)) }))
+      .map(([brand, sets]) => ({
+        brand,
+        sets: sets.sort((a, b) => a.type.localeCompare(b.type) || a.name.localeCompare(b.name)),
+      }))
       .sort((a, b) => a.brand.localeCompare(b.brand));
     try {
       fs.mkdirSync(CACHE_DIR, { recursive: true });
@@ -252,15 +260,29 @@ const KEY_SYNONYMS = {
   Power: ["POWER TOGGLE", "POWER", "POWER ON/OFF", "STANDBY"],
 };
 
+// irdb mixes two naming conventions: human ("VOLUME +", "VOL UP") and evdev-style
+// ("KEY_VOLUMEUP"), the latter common on audio/soundbar remotes. Collapsing both
+// to letters-only with the KEY_ prefix dropped makes them comparable - without
+// this, a KEY_* codeset silently loses Volume up/down (MUTE and POWER happened to
+// survive as substrings), which is exactly the case for a Samsung soundbar.
+const canon = (s) =>
+  s
+    .toUpperCase()
+    .trim()
+    .replace(/^KEY[_ ]/, "")
+    .replace(/[^A-Z0-9+-]/g, "");
+
 function pickRow(rows, synonyms) {
   let best = null;
   let bestScore = -1;
   for (const r of rows) {
-    const name = r.functionname.toUpperCase().trim();
+    const name = canon(r.functionname);
+    const slashy = r.functionname.includes("/");
     for (let i = 0; i < synonyms.length; i++) {
+      const syn = canon(synonyms[i]);
       let score = -1;
-      if (name === synonyms[i]) score = 100 - i;
-      else if (name.includes(synonyms[i])) score = (name.includes("/") ? 20 : 50) - i;
+      if (name === syn) score = 100 - i;
+      else if (name.includes(syn)) score = (slashy ? 20 : 50) - i;
       if (score > bestScore) {
         bestScore = score;
         best = r;
@@ -338,16 +360,59 @@ function checkProtocols(protocols, cb) {
   );
 }
 
-function specFromCodeset(cs, label) {
-  const spec = { name: label || cs.path, source: "irdb: " + cs.path, duty_cycle: 33, keys: {} };
-  for (const [key, row] of Object.entries(cs.keys)) {
-    spec.keys[key] = {
-      irdb: { protocol: row.protocol, device: row.device, subdevice: row.subdevice, function: row.function },
-      ...(key === "Power" ? { optional: true, post_delay: 1000 } : {}),
-    };
+const IR_KEYS = ["VolumeUp", "VolumeDown", "Mute", "Power"];
+const irdbRow = (row) => ({
+  protocol: row.protocol,
+  device: row.device,
+  subdevice: row.subdevice,
+  function: row.function,
+});
+
+// A "plan" is what the UI assembles: one base codeset for everything, plus
+// optional per-key overrides, plus an optional SECOND device per key (one press
+// blasts both - e.g. Power to a TV and a soundbar). Fetching is per codeset, so
+// a plan that names three different brands pulls three CSVs, each once.
+//   { base: "codes/LG/..csv", keys: { Power: { path: "codes/Samsung/..csv", second: "..." } } }
+function resolvePlan(plan, label, cb) {
+  const per = (plan && plan.keys) || {};
+  const pathFor = (key) => (per[key] && per[key].path) || (plan && plan.base) || null;
+  const wanted = new Set();
+  for (const key of IR_KEYS) {
+    for (const p of [pathFor(key), per[key] && per[key].second]) if (p) wanted.add(p);
   }
-  return spec;
+  if (!wanted.size) return cb(new Error("no codeset selected"));
+
+  const paths = [...wanted];
+  const sets = {};
+  let pending = paths.length;
+  let failed = null;
+  for (const p of paths) {
+    fetchCodeset(p, (err, cs) => {
+      if (err) failed = failed || err;
+      else sets[p] = cs;
+      if (--pending) return;
+      if (failed) return cb(failed);
+      const spec = { name: label || "custom", source: "irdb: " + paths.join(", "), duty_cycle: 33, keys: {} };
+      for (const key of IR_KEYS) {
+        const row = (sets[pathFor(key)] || { keys: {} }).keys[key];
+        if (!row) continue; // this key is simply not programmed
+        const entry = {
+          irdb: irdbRow(row),
+          ...(key === "Power" ? { optional: true, post_delay: 1000 } : {}),
+        };
+        const sp = per[key] && per[key].second;
+        const srow = sp && (sets[sp] || { keys: {} }).keys[key];
+        if (srow) entry.second = { irdb: irdbRow(srow) };
+        spec.keys[key] = entry;
+      }
+      if (!Object.keys(spec.keys).length) return cb(new Error("codeset has no usable keys"));
+      cb(null, spec);
+    });
+  }
 }
+
+// Accept either the plan object or a bare codeset path (the pre-per-key shape).
+const asPlan = (planOrPath) => (typeof planOrPath === "string" ? { base: planOrPath, keys: {} } : planOrPath || {});
 
 // ---- running the BLE tool -----------------------------------------------------------
 function runTool(args, timeoutMs, cb) {
@@ -379,13 +444,15 @@ const MAC_RE = /^([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}$/;
 
 // test = write the chosen codeset to the config + one-shot blast (nothing is
 // stored on the remote); program = persist the keymap onto the remote's keys.
-function testKey(mac, relPath, key, cb) {
+// The blast is built from the SAME plan the program would write, so what you
+// hear/see in the test is exactly what lands on the remote - including a
+// key's second device.
+function testKey(mac, planOrPath, key, cb) {
   if (!MAC_RE.test(mac)) return cb(new Error("invalid MAC"));
-  if (!["VolumeUp", "VolumeDown", "Mute", "Power"].includes(key)) return cb(new Error("invalid key"));
-  fetchCodeset(relPath, (err, cs) => {
+  if (!IR_KEYS.includes(key)) return cb(new Error("invalid key"));
+  resolvePlan(asPlan(planOrPath), null, (err, spec) => {
     if (err) return cb(err);
-    if (!cs.keys[key]) return cb(new Error("codeset has no " + key));
-    const spec = specFromCodeset(cs);
+    if (!spec.keys[key]) return cb(new Error("codeset has no " + key));
     try {
       fs.writeFileSync(CODES_FILE, JSON.stringify(spec, null, 2));
     } catch (e) {
@@ -395,12 +462,10 @@ function testKey(mac, relPath, key, cb) {
   });
 }
 
-function program(mac, relPath, label, cb) {
+function program(mac, planOrPath, label, cb) {
   if (!MAC_RE.test(mac)) return cb(new Error("invalid MAC"));
-  fetchCodeset(relPath, (err, cs) => {
+  resolvePlan(asPlan(planOrPath), label, (err, spec) => {
     if (err) return cb(err);
-    if (!Object.keys(cs.keys).length) return cb(new Error("codeset has no usable keys"));
-    const spec = specFromCodeset(cs, label);
     try {
       fs.writeFileSync(CODES_FILE, JSON.stringify(spec, null, 2));
     } catch (e) {
