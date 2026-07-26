@@ -102,10 +102,6 @@ function applyConfig(body: Record<string, unknown>): void {
       config.mqtt.configured = !!(config.mqtt.host && config.mqtt.username);
     }
   }
-  if (body.display && typeof body.display === "object") {
-    const d = body.display as { matchFramerate?: boolean };
-    if (d.matchFramerate !== undefined) display.matchFramerate = d.matchFramerate;
-  }
   if (typeof body.spotifyDeviceName === "string") config.spotify.deviceName = body.spotifyDeviceName;
 }
 
@@ -208,11 +204,10 @@ export async function handleApi(
       if (s) s.volume = Number(b.volume);
       return ok;
     }
-    case "/tvbox/api/display/modes":
+    case "/tvbox/api/display/status":
       return display;
-    case "/tvbox/api/display/apply":
-      for (const m of display.modes) m.current = m.key === b.mode;
-      display.saved = String(b.mode ?? "");
+    case "/tvbox/api/display/refresh":
+      display.current = display.ui;
       return ok;
 
     // ---- system / update / ambient / backup / misc ----

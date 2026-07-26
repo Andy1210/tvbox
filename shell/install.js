@@ -136,7 +136,7 @@ function validateManifest(m, src) {
   // CI). An empty/blank/wildcard origin must never slip through (it would let
   // the `fetch` broker's host allowlist match anything); capability values must
   // be known.
-  const CAPS = ["nav", "player", "config", "fetch", "storage", "input", "system"];
+  const CAPS = ["nav", "player", "config", "fetch", "storage", "display", "input", "system"];
   const caps = m.runtime && m.runtime.capabilities;
   if (caps != null) {
     if (!Array.isArray(caps)) return bad("runtime.capabilities must be an array");

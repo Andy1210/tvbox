@@ -60,6 +60,11 @@ export interface FetchRequest {
 export type FetchResponse =
   { ok: true; status: number; headers: Record<string, string>; body: string } | { ok: false; error: string };
 
+// ---- display capability: adaptive output mode ----
+// Type-only import (erased at build time, so no runtime cycle): the client and
+// its types live in display.ts, but the bridge shape belongs on TvboxBridge.
+import type { DisplayBridge } from "./display";
+
 // ---- storage capability: per-app key/value ----
 // (Named to avoid shadowing the DOM `Storage` lib type.)
 export interface StorageBridge {
@@ -80,6 +85,7 @@ export interface TvboxBridge {
   onNav?(cb: (n: NavEvent) => void): () => void;
   fetch?(url: string, opts?: FetchRequest): Promise<FetchResponse>;
   storage?: StorageBridge;
+  display?: DisplayBridge;
 }
 
 // The shell bridge, or a no-op stub when running outside the shell (vite dev,

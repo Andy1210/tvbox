@@ -68,10 +68,6 @@ function publicConfig() {
       // in the image. Default off - this is "installed" for the built-in app.
       enabled: !!(c.spotify && c.spotify.enabled),
     },
-    display: {
-      mode: (c.display && c.display.mode) || null,
-      matchFramerate: !!(c.display && c.display.matchFramerate),
-    },
     audio: {
       sink: (c.audio && c.audio.sink) || null, // manual default-sink override (node.name); null = auto-detect
     },
@@ -235,17 +231,6 @@ function setSpotify(spotify) {
 }
 function rawSpotify() {
   return load().spotify || null;
-}
-
-// Display mode + "match content framerate" (mpv display-resample) toggle.
-// Merges so the mode-apply route and the framerate toggle don't clobber each other.
-function setDisplay(display) {
-  const c = load();
-  c.display = { ...c.display, ...display };
-  save(c);
-}
-function rawDisplay() {
-  return load().display || null;
 }
 
 // Manual audio default-sink override (node.name). audio-default.sh honors it if
@@ -574,8 +559,6 @@ module.exports = {
   appConfig,
   setAppConfig,
   rawStore,
-  setDisplay,
-  rawDisplay,
   setUi,
   setPlayer,
   rawPlayer,
