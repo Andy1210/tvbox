@@ -66,6 +66,25 @@ if [ -f "$CMDLINE" ] && ! grep -q ieee80211_regdom "$CMDLINE"; then
   # cmdline.txt must stay a single space-separated line - append to line 1 only
   sed -i "1s|\$| cfg80211.ieee80211_regdom=${WIFI_COUNTRY}|" "$CMDLINE"
 fi
+# Always give the compositor an output, even with the TV off or unplugged.
+# labwc (0.9.8/wlroots 0.19) BUSY-LOOPS with zero outputs: measured on a Pi 5,
+# a session started with no sink burns ~65% of a core in labwc alone and ~200%
+# once Electron joins in (its main thread does ~35k Wayland roundtrips/s), which
+# is what a box plugged in while the TV is off used to sit at until the TV came
+# on. force_hotplug makes vc4 ignore HPD so an output always exists.
+# NOTE: this is `vc4.force_hotplug=1`, NOT `video=HDMI-A-1:e` - the latter is
+# what kills CEC on kernels 6.14-6.18 (see the sharp edge in CLAUDE.md).
+# Verified on an LG set: CEC keeps a real physical address (2.0.0.0) with this on.
+# Normalise EVERY `vc4.force_hotplug` occurrence to =1: a `=0` inherited from a
+# base image must be corrected rather than read as "already set", and with two
+# occurrences the kernel honours the LAST one. KEEP IN SYNC with provision.sh.
+if [ -f "$CMDLINE" ]; then
+  CUR=$(cat "$CMDLINE")
+  WANT=$(printf '%s' "$CUR" | sed -E 's/(^| )vc4\.force_hotplug=[^ ]*/\1vc4.force_hotplug=1/g')
+  case "$WANT" in *vc4.force_hotplug=1*) ;; *) WANT="$WANT vc4.force_hotplug=1" ;; esac
+  [ "$WANT" = "$CUR" ] || printf '%s\n' "$WANT" > "$CMDLINE"
+fi
+
 # NM ships the WiFi radio off - turn it on persistently so the very first boot
 # scans (before/without the boot service even running).
 NMSTATE="${ROOTFS_DIR}/var/lib/NetworkManager/NetworkManager.state"
