@@ -178,10 +178,20 @@ touched one file, `npx prettier --write <file>` is enough; when in doubt run
 - **Kernel 6.14-6.18 + a forced HDMI connector kills CEC** on the Pi 5: with
   `video=HDMI-A-1:e` on the cmdline the vc4 driver never feeds the EDID
   physical address to the CEC core (phys addr stays `f.f.f.f`, nothing
-  transmits; fixed in mainline 6.19 by `cf207ea2c39d`). If a box needs a
-  forced output (boot with TV off), use `vc4.force_hotplug=1` instead - it
-  keeps the normal detect/EDID/CEC path. Diagnose with
-  `cec-ctl -d0` (look at "Physical Address").
+  transmits; fixed in mainline 6.19 by `cf207ea2c39d`). Diagnose with
+  `cec-ctl -d0` (look at "Physical Address"). This is `video=...:e` ONLY -
+  **`vc4.force_hotplug=1` is safe and provision/the image now set it**, verified
+  on an LG set (CEC keeps a real physical address with it on). Don't confuse the
+  two: the LG key-forwarding breakage on 6.18 was the vendor-query race (hence
+  the shim, now libcec 8 `--vendor-id`), NOT the hotplug setting.
+- **labwc busy-loops with ZERO outputs**, so the box must always have one.
+  Measured on a Pi 5 (labwc 0.9.8 / wlroots 0.19.1): a session that _starts_
+  with no sink - a box plugged in while the TV is off - burns ~65% of a core in
+  labwc alone and ~200% once Electron joins (its main thread does ~35k Wayland
+  roundtrips/s: `recvmsg`/`sendmsg`/`ppoll` in a tight loop). Losing the output
+  later is harmless (~0.1%) and recovery when the TV returns is clean, so the fix
+  is `vc4.force_hotplug=1` on the cmdline - vc4 then ignores HPD and an output
+  always exists. Not fixable by upgrading: 0.9.8 is the newest packaged.
 - The Pi 5 has **no H.264 hardware decode** - mpv runs `--vo=gpu` with
   software decode; don't add hwdec flags blindly.
 - mpv PiP runs under **XWayland** (`DISPLAY`, no `WAYLAND_DISPLAY`) because

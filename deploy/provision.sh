@@ -87,6 +87,42 @@ else
   warn "install-libcec8.sh missing - skipping (CEC bridge will use the vendor shim)"
 fi
 
+# Always give the compositor an output, even with the TV off or unplugged.
+# labwc (0.9.8/wlroots 0.19) BUSY-LOOPS with zero outputs: a session started with
+# no sink measured ~65% of a core in labwc alone, ~200% once Electron joined in
+# (~35k Wayland roundtrips/s on its main thread) - which is where a box plugged
+# in while the TV was off sat until someone turned the TV on. Recovery on the
+# TV coming back was clean, so this is purely about never being in that state.
+# `vc4.force_hotplug=1`, NOT `video=HDMI-A-1:e`: the latter is what stops vc4
+# feeding CEC its physical address on kernels 6.14-6.18 (sharp edge in CLAUDE.md).
+# Verified with this on: CEC keeps a real physical address and the remote works.
+echo "==> always-on HDMI output (vc4.force_hotplug=1 - labwc spins with no output)"
+# KEEP IN SYNC with image/stage-tvbox/01-tvbox/00-run.sh, which does the same to
+# the image's cmdline.txt. Normalise EVERY occurrence, not just the first: a
+# cmdline carrying both `vc4.force_hotplug=1` and a later `=0` would otherwise
+# keep the =0, and the kernel honours the LAST occurrence - so we would report
+# success and still boot without it. Build the wanted line, then write only when
+# it differs, which keeps this idempotent and leaves the file alone when correct.
+CMDLINE=/boot/firmware/cmdline.txt
+[ -f "$CMDLINE" ] || CMDLINE=/boot/cmdline.txt
+if [ ! -f "$CMDLINE" ]; then
+  warn "no cmdline.txt found - skipping (a box booted with the TV off will spin)"
+else
+  CUR=$(cat "$CMDLINE")
+  WANT=$(printf '%s' "$CUR" | sed -E 's/(^| )vc4\.force_hotplug=[^ ]*/\1vc4.force_hotplug=1/g')
+  case "$WANT" in *vc4.force_hotplug=1*) ;; *) WANT="$WANT vc4.force_hotplug=1" ;; esac
+  if [ "$WANT" = "$CUR" ]; then
+    ok "vc4.force_hotplug=1 already set"
+  elif [ ! -f "$CMDLINE.bak-tvbox" ] && ! cp "$CMDLINE" "$CMDLINE.bak-tvbox"; then
+    # Never edit the boot cmdline without a way back.
+    warn "could not back up $CMDLINE - leaving it unchanged"
+  elif printf '%s\n' "$WANT" > "$CMDLINE"; then
+    ok "vc4.force_hotplug=1 set (takes effect on the next boot)"
+  else
+    warn "could not edit $CMDLINE"
+  fi
+fi
+
 echo "==> OS auto-updates (unattended-upgrades: install yes, reboot NEVER)"
 # A living-room box must patch itself without anyone SSH-ing in - but it must
 # also never reboot on its own (a reboot mid-movie is the opposite of an
