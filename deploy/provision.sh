@@ -97,16 +97,25 @@ fi
 # feeding CEC its physical address on kernels 6.14-6.18 (sharp edge in CLAUDE.md).
 # Verified with this on: CEC keeps a real physical address and the remote works.
 echo "==> always-on HDMI output (vc4.force_hotplug=1 - labwc spins with no output)"
+# KEEP IN SYNC with image/stage-tvbox/01-tvbox/00-run.sh, which does the same to
+# the image's cmdline.txt. Match the exact token, not a substring: a leftover
+# `vc4.force_hotplug=0` must be corrected, not mistaken for "already done".
 CMDLINE=/boot/firmware/cmdline.txt
 [ -f "$CMDLINE" ] || CMDLINE=/boot/cmdline.txt
 if [ ! -f "$CMDLINE" ]; then
   warn "no cmdline.txt found - skipping (a box booted with the TV off will spin)"
-elif grep -q force_hotplug "$CMDLINE"; then
-  ok "vc4.force_hotplug already set"
+elif grep -qE '(^| )vc4\.force_hotplug=1( |$)' "$CMDLINE"; then
+  ok "vc4.force_hotplug=1 already set"
+elif [ ! -f "$CMDLINE.bak-tvbox" ] && ! cp "$CMDLINE" "$CMDLINE.bak-tvbox"; then
+  # Never edit the boot cmdline without a way back.
+  warn "could not back up $CMDLINE - leaving it unchanged"
+elif grep -qE '(^| )vc4\.force_hotplug=' "$CMDLINE"; then
+  sed -i '1s/vc4\.force_hotplug=[^ ]*/vc4.force_hotplug=1/' "$CMDLINE" &&
+    ok "vc4.force_hotplug corrected to =1 (takes effect on the next boot)" ||
+    warn "could not edit $CMDLINE"
 else
-  cp -n "$CMDLINE" "$CMDLINE.bak-tvbox" 2>/dev/null || true
   # cmdline.txt must stay ONE space-separated line - append to line 1 only.
-  sed -i "1s|\$| vc4.force_hotplug=1|" "$CMDLINE" &&
+  sed -i '1s|$| vc4.force_hotplug=1|' "$CMDLINE" &&
     ok "vc4.force_hotplug=1 added (takes effect on the next boot)" ||
     warn "could not edit $CMDLINE"
 fi

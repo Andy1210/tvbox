@@ -75,8 +75,15 @@ fi
 # NOTE: this is `vc4.force_hotplug=1`, NOT `video=HDMI-A-1:e` - the latter is
 # what kills CEC on kernels 6.14-6.18 (see the sharp edge in CLAUDE.md).
 # Verified on an LG set: CEC keeps a real physical address (2.0.0.0) with this on.
-if [ -f "$CMDLINE" ] && ! grep -q force_hotplug "$CMDLINE"; then
-  sed -i "1s|\$| vc4.force_hotplug=1|" "$CMDLINE"
+# Exact token, not a substring: a `vc4.force_hotplug=0` inherited from a base
+# image must be corrected rather than read as "already set".
+# KEEP IN SYNC with deploy/provision.sh.
+if [ -f "$CMDLINE" ] && ! grep -qE '(^| )vc4\.force_hotplug=1( |$)' "$CMDLINE"; then
+  if grep -qE '(^| )vc4\.force_hotplug=' "$CMDLINE"; then
+    sed -i '1s/vc4\.force_hotplug=[^ ]*/vc4.force_hotplug=1/' "$CMDLINE"
+  else
+    sed -i '1s|$| vc4.force_hotplug=1|' "$CMDLINE"
+  fi
 fi
 
 # NM ships the WiFi radio off - turn it on persistently so the very first boot
