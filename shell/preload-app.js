@@ -65,6 +65,22 @@ if (caps.indexOf("storage") >= 0) {
   };
 }
 
+// ---- display capability: adaptive output mode for the app's OWN video ----
+// For an app that plays video itself (a <video> element) instead of handing a URL
+// to the shell's mpv: the output switches to a mode that matches the content and
+// goes back on release. Foreground-only, enforced main-side.
+if (caps.indexOf("display") >= 0) {
+  api.display = {
+    claimForVideo: function (v) {
+      v = v || {};
+      return ipcRenderer.invoke("display", "claim", { width: v.width, height: v.height, fps: v.fps });
+    },
+    release: function () {
+      return ipcRenderer.invoke("display", "release");
+    },
+  };
+}
+
 try {
   contextBridge.exposeInMainWorld("tvbox", api);
 } catch (e) {

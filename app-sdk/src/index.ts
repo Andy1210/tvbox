@@ -12,4 +12,5 @@ export * from "./config";
 export * from "./config-store";
 export * from "./i18n";
 export * from "./capability";
+export * from "./display";
 export * from "./spatial-nav";

@@ -15,7 +15,7 @@ const GET_ENDPOINTS = [
   "/tvbox/api/bt/status",
   "/tvbox/api/bt/devices",
   "/tvbox/api/audio/sinks",
-  "/tvbox/api/display/modes",
+  "/tvbox/api/display/status",
   "/tvbox/api/system/info",
   "/tvbox/api/system/region",
   "/tvbox/api/update/status",

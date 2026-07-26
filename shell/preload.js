@@ -145,6 +145,21 @@ const path = require("path");
       });
     };
   }
+  // ---- display capability: adaptive output mode for an app's OWN video ----
+  // Apps playing through the shell's mpv get this for free (main handles it);
+  // this is for an app that plays video itself (a <video> element, its own player)
+  // and wants the output to match. Foreground-only, enforced main-side.
+  if (caps.indexOf("display") >= 0) {
+    window.tvbox.display = {
+      claimForVideo: function (v) {
+        v = v || {};
+        return ipcRenderer.invoke("display", "claim", { width: v.width, height: v.height, fps: v.fps });
+      },
+      release: function () {
+        return ipcRenderer.invoke("display", "release");
+      },
+    };
+  }
   // ---- storage capability: per-app key/value (main-side app:storage) ----
   if (caps.indexOf("storage") >= 0) {
     window.tvbox.storage = {
