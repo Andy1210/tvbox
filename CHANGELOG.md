@@ -5,6 +5,18 @@ updates). `scripts/make-release.sh` lifts the current version's `hu`/`en`
 blocks into the OTA feed's `notes` - keep both languages, keep it short, and
 write for the person on the couch (what changes for THEM), not for developers.
 
+## 1.9.0
+
+### hu
+
+- A box többé nem veszi vissza magának a TV bemenetét. Eddig, ha átkapcsoltál egy másik bemenetre, negyed percen belül visszarántotta magára - most ott maradsz, ahova kapcsoltál. (Induláskor egyszer még magához veszi a képet, mint eddig.)
+- A Fire TV távirányító infra-tanításánál gombonként külön márka is választható: mehet például a soundbar a hangerő gombokra, miközben a többi gomb a TV-t vezérli. Egy gombra akár két készülék kódja is rátehető, így egy nyomás mindkettőnek szól. A Teszt gomb pontosan azt küldi ki, ami mentéskor a távirányítóra kerülne.
+
+### en
+
+- The box no longer takes the TV's input back. Until now, switching to another input lasted at most a quarter of a minute before the box grabbed it again - now it stays where you put it. (It still claims the picture once when it starts, as before.)
+- When teaching a Fire TV remote's infrared buttons you can pick a different brand per button: put a soundbar on the volume keys while the rest still drive the TV. A button can even carry two devices, so one press reaches both. Test sends exactly what saving would put on the remote.
+
 ## 1.8.0
 
 ### hu
