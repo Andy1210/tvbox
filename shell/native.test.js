@@ -108,9 +108,14 @@ test("start refuses a manifest whose native block is unusable and stays idle", (
 test("start then stop drives a real process down, and settled() reports it", async () => {
   native.init({ childEnv: () => process.env, bridgeCmd: () => {}, onExit: () => {} });
   assert.strictEqual(native.start({ id: "sleeper", runtime: { native: { bin: "sleep", args: ["30"] } } }), true);
-  assert.strictEqual(native.running(), true);
-  assert.strictEqual(native.id(), "sleeper");
-  native.stop();
+  try {
+    assert.strictEqual(native.running(), true);
+    assert.strictEqual(native.id(), "sleeper");
+  } finally {
+    // A failing assertion above must not leave the spawned process running for
+    // the rest of its 30 seconds.
+    native.stop();
+  }
   const deadline = Date.now() + 5000;
   while (!native.settled() && Date.now() < deadline) await new Promise((r) => setTimeout(r, 50));
   assert.strictEqual(native.settled(), true, "the process was still alive after stop()");
