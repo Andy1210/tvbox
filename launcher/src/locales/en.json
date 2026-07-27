@@ -210,7 +210,15 @@
     "pairingDone": "Done",
     "pairingFailed": "Couldn't start the phone connection.",
     "pairingRetry": "Try again",
-    "pairingQrAlt": "QR code to scan with your phone"
+    "pairingQrAlt": "QR code to scan with your phone",
+    "manage": "Manage",
+    "manageTitle": "This app",
+    "phoneActions": "Do from your phone",
+    "phoneActionsHint": "These open a code on the TV that you scan with your phone. Some things are simply easier there than with a remote.",
+    "stateShown": "On the home screen",
+    "stateHidden": "Hidden from the home screen",
+    "stateRunning": "running",
+    "back": "Back"
   },
   "catalog": {
     "title": "Get more apps"

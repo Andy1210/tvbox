@@ -210,7 +210,15 @@
     "pairingDone": "Kész",
     "pairingFailed": "Nem sikerült elindítani a telefonos kapcsolatot.",
     "pairingRetry": "Újra",
-    "pairingQrAlt": "Beolvasható QR-kód a telefonodhoz"
+    "pairingQrAlt": "Beolvasható QR-kód a telefonodhoz",
+    "manage": "Kezelés",
+    "manageTitle": "Ez az alkalmazás",
+    "phoneActions": "Telefonról",
+    "phoneActionsHint": "Ezek kódot jelenítenek meg a TV-n, amit a telefonoddal beolvasol. Néhány dolog ott egyszerűen könnyebb, mint távirányítóval.",
+    "stateShown": "A kezdőképernyőn",
+    "stateHidden": "Elrejtve a kezdőképernyőről",
+    "stateRunning": "fut",
+    "back": "Vissza"
   },
   "catalog": {
     "title": "Továbbiak beszerzése"
