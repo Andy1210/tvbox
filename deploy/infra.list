@@ -9,6 +9,7 @@
 cec/cec_uinput_bridge.py
 cec/cec_vendor_shim.c
 remote/remote_input_bridge.py
+gamepad/gamepad_shim.py
 remote/firetv_remote_ir.py
 remote/keymap_compile.py
 remote/ir_protocols.py
@@ -22,5 +23,6 @@ deploy/provision.sh
 scripts/install-libcec8.sh
 deploy/tvbox-cec.service
 deploy/tvbox-remote.service
+deploy/tvbox-gamepad.service
 deploy/tvbox-flatpak-update.service
 deploy/tvbox-flatpak-update.timer

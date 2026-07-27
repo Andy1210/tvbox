@@ -124,6 +124,16 @@ else
   warn "remote input bridge not running yet (fresh group grant? fine after reboot)"
 fi
 
+echo "==> gamepad shim (systemd user service - unrecognised pad -> standard Xbox mapping)"
+cp ~/.tvbox/tvbox-gamepad.service ~/.config/systemd/user/tvbox-gamepad.service
+if systemctl --user daemon-reload 2>/dev/null \
+   && systemctl --user enable tvbox-gamepad.service >/dev/null 2>&1 \
+   && systemctl --user restart tvbox-gamepad.service 2>/dev/null; then
+  ok "gamepad shim"
+else
+  warn "gamepad shim not running yet (fresh group grant? fine after reboot)"
+fi
+
 echo "==> session autostart (tvbox shell; no panel / Kodi)"
 mkdir -p ~/.config/labwc
 if [ -f ~/.config/labwc/autostart ] && [ ! -f ~/.config/labwc/autostart.pre-tvbox ]; then

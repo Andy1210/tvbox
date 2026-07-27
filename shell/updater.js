@@ -59,6 +59,7 @@ const INFRA_FILES = [
   "cec_uinput_bridge.py",
   "cec_vendor_shim.c", // the bridge compiles it on start (mtime check)
   "remote_input_bridge.py", // BT/USB remote bridge (the tvbox-remote user service)
+  "gamepad_shim.py", // unrecognised pad -> virtual standard Xbox pad (tvbox-gamepad)
   "firetv_remote_ir.py", // program a Fire TV remote's IR buttons over BLE (no Fire TV)
   "keymap_compile.py", // byte-accurate keymap/IR compiler used by firetv_remote_ir.py
   "ir_protocols.py", // IR protocol encoders (NEC/RC5/RC6/SIRC/...) - irdb row -> raw timings
@@ -71,12 +72,14 @@ const INFRA_FILES = [
   "labwc-autostart",
   "tvbox-cec.service",
   "tvbox-remote.service",
+  "tvbox-gamepad.service",
   "tvbox-flatpak-update.service",
   "tvbox-flatpak-update.timer",
 ];
 const USER_UNITS = [
   "tvbox-cec.service",
   "tvbox-remote.service",
+  "tvbox-gamepad.service",
   "tvbox-flatpak-update.service",
   "tvbox-flatpak-update.timer",
 ];
@@ -90,6 +93,7 @@ const EXECUTABLE = ["run-shell.sh", "tvbox"];
 const UNIT_WANTS = {
   "tvbox-cec.service": "default.target.wants",
   "tvbox-remote.service": "default.target.wants",
+  "tvbox-gamepad.service": "default.target.wants",
   "tvbox-flatpak-update.timer": "timers.target.wants",
 };
 

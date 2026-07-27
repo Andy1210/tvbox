@@ -362,13 +362,14 @@ su - ${FIRST_USER_NAME} -c 'cd ~/.tvbox/shell && npm ci --no-audit --no-fund'
 su - ${FIRST_USER_NAME} -c 'mkdir -p ~/.local/bin && ln -sf ~/.tvbox/tvbox ~/.local/bin/tvbox'
 
 # user units: systemctl --user can't run in a chroot - "enable" by creating
-# the WantedBy symlinks directly (CEC bridge + remote-input bridge + nightly
-# flatpak-update timer)
+# the WantedBy symlinks directly (CEC bridge + remote-input bridge + gamepad shim
+# + nightly flatpak-update timer)
 su - ${FIRST_USER_NAME} -c '
   mkdir -p ~/.config/systemd/user/default.target.wants ~/.config/systemd/user/timers.target.wants
-  cp ~/.tvbox/tvbox-cec.service ~/.tvbox/tvbox-remote.service ~/.tvbox/tvbox-flatpak-update.service ~/.tvbox/tvbox-flatpak-update.timer ~/.config/systemd/user/
+  cp ~/.tvbox/tvbox-cec.service ~/.tvbox/tvbox-remote.service ~/.tvbox/tvbox-gamepad.service ~/.tvbox/tvbox-flatpak-update.service ~/.tvbox/tvbox-flatpak-update.timer ~/.config/systemd/user/
   ln -sf ../tvbox-cec.service ~/.config/systemd/user/default.target.wants/tvbox-cec.service
   ln -sf ../tvbox-remote.service ~/.config/systemd/user/default.target.wants/tvbox-remote.service
+  ln -sf ../tvbox-gamepad.service ~/.config/systemd/user/default.target.wants/tvbox-gamepad.service
   ln -sf ../tvbox-flatpak-update.timer ~/.config/systemd/user/timers.target.wants/tvbox-flatpak-update.timer'
 
 # session autostart + flathub user remote (network works in the chroot;
