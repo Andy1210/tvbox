@@ -15,13 +15,15 @@ const APPS = [
 ];
 
 describe("AppOrderSettings focus placement", () => {
+  let served: unknown[] = APPS;
   beforeEach(() => {
+    served = APPS;
     vi.stubGlobal(
       "fetch",
       () =>
         new Promise<Response>((resolve) =>
           setTimeout(
-            () => resolve(new Response(JSON.stringify(APPS), { headers: { "Content-Type": "application/json" } })),
+            () => resolve(new Response(JSON.stringify(served), { headers: { "Content-Type": "application/json" } })),
             20,
           ),
         ),
@@ -38,5 +40,19 @@ describe("AppOrderSettings focus placement", () => {
     // first row by name order; focus lands on "move down" (an actionable control),
     // not the first row's disabled "move up"
     expect(getCurrentFocusKey()).toBe("apporder-down-alpha");
+  });
+
+  // A single row has no "move down" to land on, so focus falls through to the
+  // other control in the row. That used to be a per-row hide button; it is now
+  // Manage, and a focus key that no longer exists leaves the D-pad stuck on the
+  // toggle above the list with the row unreachable.
+  it("focuses the only row's Manage button when one app is installed", async () => {
+    served = [APPS[0]];
+    render(<Settings onExit={() => {}} />);
+    await setFocus("cat-apps");
+    await remote.ok();
+    await act(() => new Promise((r) => setTimeout(r, 60)));
+    await act(() => new Promise((r) => setTimeout(r, 10)));
+    expect(getCurrentFocusKey()).toBe("apporder-manage-beta");
   });
 });

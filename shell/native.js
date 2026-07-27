@@ -92,10 +92,21 @@ function parseSpec(nat) {
 
 // A per-app log next to the shell's own, opened truncating. Returns a raw fd for
 // spawn's stdio, or null when it cannot be opened (never a reason not to launch).
+//
+// The id is a manifest id, which the validator constrains to APP_ID - an id that
+// does not match is refused rather than reshaped into some other file's name. The
+// mode is owner-only like the rest of ~/.tvbox: an app's output is the user's, and
+// reopening an existing file would otherwise keep whatever mode it already had.
+const APP_ID = /^[a-z0-9_-]+$/; // the same rule install.js validates a manifest id against
 function logFor(id) {
+  if (!APP_ID.test(String(id || ""))) {
+    console.warn("[native] no log file: unexpected app id", id);
+    return null;
+  }
   try {
-    const p = path.join(os.homedir(), ".tvbox", "native-" + String(id).replace(/[^a-z0-9_-]/gi, "") + ".log");
-    return fs.openSync(p, "w");
+    const fd = fs.openSync(path.join(os.homedir(), ".tvbox", "native-" + id + ".log"), "w", 0o600);
+    fs.fchmodSync(fd, 0o600);
+    return fd;
   } catch (e) {
     console.warn("[native] no log file for", id, "-", e.message);
     return null;
