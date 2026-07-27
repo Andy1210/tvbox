@@ -145,6 +145,25 @@ const path = require("path");
       });
     };
   }
+  // ---- typing screen (launcher only; main.js rejects any other sender) ----
+  // Not an HTTP route on purpose: every local app bundle shares the shell's origin,
+  // so a route would let any of them read the pairing code and inject keystrokes
+  // into another app's focused field.
+  window.tvbox.typing = {
+    status: function () {
+      return ipcRenderer.invoke("textinput", "status");
+    },
+    submit: function (text) {
+      return ipcRenderer.invoke("textinput", "submit", { text: String(text == null ? "" : text) });
+    },
+    cancel: function () {
+      return ipcRenderer.invoke("textinput", "cancel");
+    },
+    phone: function () {
+      return ipcRenderer.invoke("textinput", "phone");
+    },
+  };
+
   // ---- display capability: adaptive output mode for an app's OWN video ----
   // Apps playing through the shell's mpv get this for free (main handles it);
   // this is for an app that plays video itself (a <video> element, its own player)

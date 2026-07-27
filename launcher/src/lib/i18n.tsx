@@ -22,9 +22,11 @@ function mirrorLocale(locale: string | null) {
     body: JSON.stringify({ locale }),
   }).catch(() => {});
 }
-mirrorLocale(useLocaleStore.getState().locale);
+// The store is null until the user picks a language explicitly, but the UI is already
+// rendering in the fallback - mirror what is actually on screen.
+mirrorLocale(useLocaleStore.getState().locale || "en");
 useLocaleStore.subscribe((s, prev) => {
-  if (s.locale !== prev.locale) mirrorLocale(s.locale);
+  if (s.locale !== prev.locale) mirrorLocale(s.locale || "en");
 });
 
 export { useI18n, translate, localize, useLocaleStore } from "@sdk/i18n";

@@ -136,6 +136,25 @@ function validateManifest(m, src) {
   // CI). An empty/blank/wildcard origin must never slip through (it would let
   // the `fetch` broker's host allowlist match anything); capability values must
   // be known.
+  // Language + cookies: the schema constrains these in CI, but a manifest dropped into
+  // ~/.tvbox/apps/ is validated ONLY here, and both feed real machinery (an HTTP header,
+  // a URL, the cookie jar).
+  const rtl = m.runtime && m.runtime.language;
+  if (rtl !== undefined && !(typeof rtl === "string" && /^(system|[a-z]{2,3}(-[A-Za-z0-9]{2,8})?)$/.test(rtl)))
+    return bad('runtime.language must be a BCP-47 tag or "system"');
+  const cookies = m.runtime && m.runtime.cookies;
+  if (cookies !== undefined) {
+    if (!Array.isArray(cookies) || cookies.length > 8) return bad("runtime.cookies must be an array of at most 8");
+    for (const c of cookies) {
+      if (!c || typeof c !== "object") return bad("runtime.cookies entries must be objects");
+      if (!/^https?:\/\/\S+$/.test(String(c.url || ""))) return bad("runtime.cookies[].url must be http(s)");
+      if (!/^[A-Za-z0-9!#$%&'*+.^_`|~-]{1,64}$/.test(String(c.name || ""))) return bad("bad runtime.cookies[].name");
+      for (const k of ["value", "domain", "path"])
+        if (c[k] !== undefined && typeof c[k] !== "string") return bad("runtime.cookies[]." + k + " must be a string");
+    }
+  }
+  const ti = m.runtime && m.runtime.textInput;
+  if (ti !== undefined && ti !== "auto" && ti !== "off") return bad('runtime.textInput must be "auto" or "off"');
   const CAPS = ["nav", "player", "config", "fetch", "storage", "display", "input", "system"];
   const caps = m.runtime && m.runtime.capabilities;
   if (caps != null) {

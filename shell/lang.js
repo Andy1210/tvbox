@@ -20,6 +20,14 @@
 // already looks like a tag, so a new launcher locale needs no change here.
 const REGION = { hu: "hu-HU", en: "en-GB", de: "de-DE", sk: "sk-SK", ro: "ro-RO" };
 
+// The system locale is whatever Chromium reports and is NOT guaranteed BCP-47 ("C",
+// "en_US"): an invalid tag would go straight into Accept-Language, into
+// navigator.language (where Intl throws on it) and into a {locale} URL.
+function sane(tag) {
+  const t = String(tag || "").replace("_", "-");
+  return /^[a-z]{2,3}(-[A-Za-z0-9]{2,8})?$/.test(t) ? t : "en-GB";
+}
+
 function toTag(locale, systemLocale) {
   const id = String(locale || "").trim();
   if (/^[a-z]{2,3}-[A-Za-z0-9]{2,8}$/.test(id)) return id; // already a tag
@@ -27,10 +35,10 @@ function toTag(locale, systemLocale) {
     .toLowerCase()
     .slice(0, 3)
     .replace(/[^a-z]/g, "");
-  if (!base) return String(systemLocale || "en-GB");
+  if (!base) return sane(systemLocale);
   // The system locale wins the REGION guess when it's the same language: a box set
   // to en_US shouldn't be told en-GB just because that's our default for "en".
-  const sys = String(systemLocale || "");
+  const sys = sane(systemLocale);
   if (sys.toLowerCase().startsWith(base + "-")) return sys;
   return REGION[base] || base;
 }
@@ -59,17 +67,14 @@ function resolve(uiLocale, systemLocale, override) {
 // pinning one. Sites differ in which lever they honour: Accept-Language +
 // navigator.language for most, a path segment for xbox.com, its own cookie for
 // others, so the manifest picks and this fills it in.
-//   {locale}       hu-HU     {locale_lower} hu-hu
-//   {lang}         hu        {lang_upper}   HU (the region alone)
+//   {locale}  hu-HU        {locale_lower}  hu-hu        {lang}  hu
 function expand(template, tag) {
   const t = String(tag || "");
   const base = t.split("-")[0];
-  const region = t.split("-")[1] || "";
   return String(template == null ? "" : template)
     .replace(/\{locale\}/g, t)
     .replace(/\{locale_lower\}/g, t.toLowerCase())
-    .replace(/\{lang\}/g, base)
-    .replace(/\{lang_upper\}/g, region.toUpperCase());
+    .replace(/\{lang\}/g, base);
 }
 
 module.exports = { resolve, toTag, acceptLanguage, expand };

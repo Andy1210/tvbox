@@ -96,11 +96,16 @@ export function Osk({
   initial,
   onDone,
   onCancel,
+  extra,
 }: {
   title: string;
   initial?: string;
   onDone: (value: string) => void;
   onCancel: () => void;
+  // An optional extra action in the key row (e.g. "type on your phone"). It lives
+  // INSIDE the keyboard because the OSK is a focus boundary - a button outside it
+  // could never be reached with the arrows.
+  extra?: { label: string; onPress: () => void };
 }) {
   const [text, setText] = useState(initial || "");
   const [cursor, setCursor] = useState((initial || "").length); // caret index into text
@@ -166,6 +171,15 @@ export function Osk({
             <Key focusKey="osk-del" onEnter={backspace}>
               <KeyGlyph name="backspace" />
             </Key>
+            {extra && (
+              <FocusButton
+                focusKey="osk-extra"
+                onEnter={extra.onPress}
+                className="h-[7vh] px-[2vw] rounded-[1vh] bg-white/10 flex items-center justify-center text-[2vh] font-semibold"
+              >
+                {extra.label}
+              </FocusButton>
+            )}
             <FocusButton
               focusKey="osk-done"
               onEnter={() => onDone(text)}

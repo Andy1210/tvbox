@@ -10,7 +10,9 @@
 // Why key events and not DOM writes: sendInputEvent goes through the browser's
 // input pipeline, so a React-controlled field sees exactly what a USB keyboard
 // would, and it reaches the focused element wherever it is - including inside a
-// cross-origin iframe the preload can't touch.
+// cross-origin iframe the preload can't touch. (DELIVERY reaches an iframe; the
+// TRIGGER does not - the preload runs in the main frame only, so a field inside an
+// iframe never reports focus and the screen has to be opened from a top-level one.)
 //
 // One session at a time, owned by the app window that asked for it. If that
 // window stops being the foreground app (Home, a switch, a crash), the session is
@@ -19,6 +21,7 @@ const MAX_TEXT = 400; // a login/search field, not a document
 
 let session = null; // { appId, wc, kind, password, label, url, code }
 let lastEnded = null; // { appId, sig, at } - see the cooldown in focused()
+let ourPairing = false; // did WE start the pairing session? (photos/backup share it)
 const RETRIGGER_MS = 2500;
 let deps = {
   // supplied by main.js
@@ -26,6 +29,7 @@ let deps = {
   onDone: () => {}, // put the app back in front
   pairingStart: () => null, // start the phone-typing pairing session -> { url, code }
   pairingStop: () => {},
+  isForeground: () => true, // is this app still the one on screen?
 };
 
 function init(d) {
@@ -49,19 +53,43 @@ function focused(appId, wc, field) {
   if (lastEnded && lastEnded.appId === appId && lastEnded.sig === sig && Date.now() - lastEnded.at < RETRIGGER_MS) {
     return;
   }
-  const pairing = deps.pairingStart() || {};
   session = {
     appId,
     wc,
     kind: String(field.kind || "text"),
     password: !!field.password,
     label: String(field.label || ""),
-    url: pairing.url || "",
-    code: pairing.code || "",
+    // No pairing session yet: starting one opens a LAN server, mints a code and
+    // resets its lockout counter, so it waits for the user to ask for the phone
+    // (startPhone) instead of happening because a page focused a field.
+    url: "",
+    code: "",
     sig,
   };
   console.log("[textinput] field focused in", appId, session.password ? "(password)" : "", session.label);
   deps.onShow(status());
+}
+
+// "I want to type on my phone": NOW the pairing session starts. Explicit user
+// action, so it can also legitimately replace another pairing session.
+function startPhone() {
+  if (!session) return { ok: false, error: "no typing session" };
+  if (!session.url) {
+    const p = deps.pairingStart() || {};
+    session.url = p.url || "";
+    session.code = p.code || "";
+    ourPairing = !!session.url;
+    console.log("[textinput] phone typing armed");
+  }
+  return { ok: true, url: session.url, code: session.code };
+}
+
+// Only ever stop a pairing session WE started: photos/backup share the one server, and
+// tearing theirs down from here would kill a transfer the user is in the middle of.
+function stopPairing() {
+  if (!ourPairing) return;
+  ourPairing = false;
+  deps.pairingStop();
 }
 
 function status() {
@@ -85,18 +113,35 @@ function submit(text) {
   session = null;
   lastEnded = { appId: s.appId, sig: s.sig, at: Date.now() };
   deps.pairingStop();
-  const chars = String(text == null ? "" : text).slice(0, MAX_TEXT);
+  // C0 controls out: a submitted "\n" would arrive as a real Enter (submitting a
+  // form the user never chose to submit) and "\t" would move focus mid-typing.
+  const chars = String(text == null ? "" : text)
+    .replace(/[\u0000-\u001f\u007f]/g, "")
+    .slice(0, MAX_TEXT);
   deps.onDone(s.appId);
   if (!s.wc || s.wc.isDestroyed()) return { ok: false, error: "app window is gone" };
   // Give the compositor a beat to put the app window back in front before typing
   // into it - a field that isn't focused yet would swallow the first characters.
   setTimeout(() => {
     if (!s.wc || s.wc.isDestroyed()) return;
+    // The user may have pressed Home during the beat we waited: typing into a window
+    // that is no longer in front is at best invisible and at worst a surprise later.
+    if (!deps.isForeground(s.appId)) {
+      console.log("[textinput] dropped", chars.length, "chars - the app left the foreground");
+      return;
+    }
+    // Select-all first: the field usually already holds something (a prefilled email,
+    // the last search, or the typo being corrected), and appending to it produced
+    // concatenated garbage the user couldn't even see in a password field.
+    try {
+      s.wc.sendInputEvent({ type: "keyDown", keyCode: "a", modifiers: ["control"] });
+      s.wc.sendInputEvent({ type: "keyUp", keyCode: "a", modifiers: ["control"] });
+    } catch (e) {}
     for (const ch of chars) {
       try {
         s.wc.sendInputEvent({ type: "char", keyCode: ch });
       } catch (e) {
-        break;
+        // One character the platform can't express must not swallow the rest.
       }
     }
   }, 400);
@@ -109,7 +154,7 @@ function cancel() {
   const s = session;
   session = null;
   lastEnded = { appId: s.appId, sig: s.sig, at: Date.now() };
-  deps.pairingStop();
+  stopPairing();
   deps.onDone(s.appId);
   console.log("[textinput] cancelled");
   return { ok: true };
@@ -119,10 +164,14 @@ function cancel() {
 // delivered to the window that asked for it.
 function dropFor(appId) {
   if (session && (appId == null || session.appId === appId)) {
+    // Record it like a submit/cancel would: showing the app again re-fires focusin on
+    // the field that is still focused, and without this the screen came straight back
+    // up - the user could never get INTO the app.
+    lastEnded = { appId: session.appId, sig: session.sig, at: Date.now() };
     session = null;
-    deps.pairingStop();
+    stopPairing();
     console.log("[textinput] session dropped (app left the foreground)");
   }
 }
 
-module.exports = { init, focused, status, submit, cancel, dropFor, MAX_TEXT };
+module.exports = { init, focused, status, submit, cancel, dropFor, startPhone, MAX_TEXT };

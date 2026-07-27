@@ -22,9 +22,14 @@ test("an unknown locale keeps its language instead of guessing a region", () => 
   assert.strictEqual(lang.resolve("sv", "en-GB").tag, "sv");
 });
 
-test("nothing sensible in, system locale out", () => {
+test("nothing sensible in, system locale out - and the system locale is validated", () => {
   assert.strictEqual(lang.resolve("", "en-GB").tag, "en-GB");
   assert.strictEqual(lang.resolve(null, "hu-HU").tag, "hu-HU");
+  // Chromium can report a locale that is not a BCP-47 tag; passing it through would
+  // put junk in Accept-Language, in navigator.language (Intl throws) and in a URL.
+  assert.strictEqual(lang.resolve("", "C").tag, "en-GB");
+  assert.strictEqual(lang.resolve("", "en_US").tag, "en-US");
+  assert.strictEqual(lang.resolve("", "").tag, "en-GB");
 });
 
 test("Accept-Language falls back through the bare language to English", () => {
@@ -43,9 +48,8 @@ test("placeholders let a manifest follow the language without pinning one", () =
   assert.strictEqual(lang.expand("https://www.xbox.com/{locale}/play", "hu-HU"), "https://www.xbox.com/hu-HU/play");
   assert.strictEqual(lang.expand("{locale_lower}", "hu-HU"), "hu-hu");
   assert.strictEqual(lang.expand("{lang}", "hu-HU"), "hu");
-  assert.strictEqual(lang.expand("{lang_upper}", "hu-HU"), "HU");
   // A template with no placeholder, and a tag with no region, both pass through sanely.
   assert.strictEqual(lang.expand("https://x/play", "hu-HU"), "https://x/play");
-  assert.strictEqual(lang.expand("{locale}/{lang_upper}", "sv"), "sv/");
+  assert.strictEqual(lang.expand("{locale}/{lang}", "sv"), "sv/sv");
   assert.strictEqual(lang.expand(null, "hu-HU"), "");
 });

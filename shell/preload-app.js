@@ -94,6 +94,35 @@ if (caps.indexOf("display") >= 0) {
 // an SPA reads its locale once at bootstrap. Without this a remote app followed the
 // system locale - or the site's IP guess, which had xbox.com coming up in German on
 // a Hungarian box.
+// WebAuthn: Chromium advertises it, but this Electron has no authenticator UI, so
+// navigator.credentials.get() never settles (measured: no dialog, no rejection, its
+// own timeout ignored) - a sign-in page then offers "face / fingerprint / PIN" and
+// does nothing, forever. Remove it here, BEFORE the page's scripts feature-detect:
+// the main-process dom-ready injection is only a backstop, and a page could defeat
+// that one by setting its marker global first.
+try {
+  contextBridge.executeInMainWorld({
+    func: function () {
+      try {
+        delete window.PublicKeyCredential;
+      } catch (e) {}
+      try {
+        var no = function () {
+          var err = new Error("WebAuthn is not available on this device");
+          err.name = "NotSupportedError";
+          return Promise.reject(err);
+        };
+        if (navigator.credentials) {
+          navigator.credentials.get = no;
+          navigator.credentials.create = no;
+        }
+      } catch (e) {}
+    },
+  });
+} catch (e) {
+  // Older Electron without executeInMainWorld: the dom-ready backstop still runs.
+}
+
 if (info.language) {
   try {
     contextBridge.executeInMainWorld({
@@ -134,11 +163,20 @@ if (info.language) {
   var TEXTY = /^(|text|search|email|url|tel|number|password)$/i;
   function fieldInfo(el) {
     if (!el || el.disabled || el.readOnly) return null;
+    // Offscreen/hidden inputs are a common leanback trick for capturing keys; opening
+    // the keyboard for one would hijack an app that is perfectly usable already.
+    try {
+      if (el.hidden || el.getAttribute("aria-hidden") === "true") return null;
+      if (!el.offsetParent && el.getClientRects().length === 0) return null;
+    } catch (e) {}
     var tag = (el.tagName || "").toLowerCase();
     if (tag === "textarea") return { kind: "textarea", password: false };
-    if (tag === "input" && TEXTY.test(el.getAttribute("type") || "")) {
-      var type = (el.getAttribute("type") || "text").toLowerCase();
-      return { kind: type, password: type === "password" };
+    if (tag === "input") {
+      // Once, into a local: a page that overrides getAttribute could otherwise pass
+      // the test with "text" and hand us something else as the kind.
+      var type = String(el.getAttribute("type") || "text").toLowerCase();
+      if (!TEXTY.test(type)) return null;
+      return { kind: type.slice(0, 16), password: type === "password" };
     }
     if (el.isContentEditable) return { kind: "contenteditable", password: false };
     return null;
@@ -154,6 +192,7 @@ if (info.language) {
       "";
     return String(t).trim().slice(0, 80);
   }
+  if (info.textInput === "off") return; // the app brings its own keyboard
   document.addEventListener(
     "focusin",
     function (ev) {

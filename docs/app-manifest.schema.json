@@ -209,6 +209,10 @@
           "pattern": "^[a-zA-Z0-9_]+$",
           "description": "remote: read the URL from the named config section's baseUrl instead of a literal url (for self-hosted services)."
         },
+        "textInput": {
+          "enum": ["auto", "off"],
+          "description": "auto (default): a focused text field raises the box's typing screen (on-screen keyboard + phone QR), because a TV has no keyboard. off: the app has its own on-screen keyboard (YouTube's leanback UI) and ours would be a downgrade."
+        },
         "cookies": {
           "type": "array",
           "maxItems": 8,
