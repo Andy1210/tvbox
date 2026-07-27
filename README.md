@@ -255,6 +255,20 @@ over CEC - handy for remotes whose own power button never reaches the box, e.g.
 Fire TV remotes send theirs as IR only) and **Open Settings**. Bind them to any
 spare button.
 
+### Game controllers
+
+Pair a **game controller** and it drives the UI too: D-pad and left stick move
+the focus, **A** selects, **B** goes back. Nothing to set up.
+
+Cloud-gaming apps are pickier than the UI: a browser only tells them which button
+is A/B/X/Y for controllers it recognises, so an unrecognised pad (typically a
+phone/Android controller) shows up as "no controller connected" even though the
+box sees it fine. A third user service, `tvbox-gamepad`
+([gamepad/gamepad_shim.py](gamepad/gamepad_shim.py)), re-publishes such a pad as a
+standard Xbox controller so those apps accept it - pads that are already
+recognised (Xbox, PlayStation, Nintendo, Steam, Logitech, 8BitDo) are left
+untouched. Details: [docs/gamepad.md](docs/gamepad.md).
+
 ### TV volume over an IR blaster
 
 Most TVs ignore CEC volume from a source device, so out of the box the
