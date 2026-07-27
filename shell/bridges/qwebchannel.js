@@ -21,6 +21,7 @@ module.exports.setup = function setup(ctx) {
     return caps.indexOf(c) >= 0;
   }
   var Success = 0;
+  var Denied = 1; // any non-zero errorCode reads as a failure to a QWebChannel client
 
   var signals = {}; // QWebChannel signal path -> connected callback
   var playing = false; // an mpv session is active (used to stop video on Back)
@@ -143,12 +144,21 @@ module.exports.setup = function setup(ctx) {
       // and not "home": home only backgrounds the app (instant resume), which left
       // it in the app switcher with its exit dialog still on screen. Anything else
       // under system.* is logged (not acted on) so an unknown exit verb on a new
-      // client is visible in ~/.tvbox/shell.log and easy to wire up. Gated on the
-      // declared `system` capability like every other surface here - tearing the
-      // app down is a host action, so it must not be reachable unconditionally.
-      if (has("system") && path.indexOf("system.") === 0) {
+      // client is visible in ~/.tvbox/shell.log and easy to wire up. Tearing the app
+      // down is a host action, so it needs the declared `system` capability like
+      // every other surface here - and a denial ANSWERS the call: falling through to
+      // the generic responder below would report success for a teardown that never
+      // happened, which is the one thing worse than not gating it at all.
+      if (path.indexOf("system.") === 0) {
         var leaf = path.slice("system.".length);
         if (leaf === "exit" || leaf === "quit" || leaf === "closeApp" || leaf === "close") {
+          if (!has("system")) {
+            try {
+              ipcRenderer.send("plog", path, "(denied: app did not declare the system capability)");
+            } catch (e) {}
+            if (hasCb) cb({ errorCode: Denied, result: {} });
+            return;
+          }
           try {
             ipcRenderer.send("nav", "exit");
           } catch (e) {}
