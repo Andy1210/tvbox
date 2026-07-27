@@ -303,6 +303,8 @@ export async function handleApi(
         protocols: ["NEC1"],
         supported: { NEC1: true },
       };
+    case "/tvbox/api/ui/locale":
+      return ok; // the demo has no shell state to mirror into
     case "/tvbox/api/firetvir/deps":
       return ok;
     case "/tvbox/api/firetvir/test":

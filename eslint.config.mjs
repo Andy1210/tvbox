@@ -45,7 +45,7 @@ export default tseslint.config(
   // ---- renderer-context shell code: the preload bridge + per-app bridge
   // adapters run inside pages, so they see `window`/DOM on top of Node ----
   {
-    files: ["shell/preload.js", "shell/bridges/**/*.js"],
+    files: ["shell/preload.js", "shell/preload-app.js", "shell/bridges/**/*.js"],
     languageOptions: { globals: { ...globals.node, ...globals.browser } },
   },
 

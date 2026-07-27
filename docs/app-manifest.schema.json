@@ -209,6 +209,31 @@
           "pattern": "^[a-zA-Z0-9_]+$",
           "description": "remote: read the URL from the named config section's baseUrl instead of a literal url (for self-hosted services)."
         },
+        "textInput": {
+          "enum": ["auto", "off"],
+          "description": "auto (default): a focused text field raises the box's typing screen (on-screen keyboard + phone QR), because a TV has no keyboard. off: the app has its own on-screen keyboard (YouTube's leanback UI) and ours would be a downgrade."
+        },
+        "cookies": {
+          "type": "array",
+          "maxItems": 8,
+          "description": "Cookies to place in the app's own session before its first load - for a site whose language/market lever IS a cookie. Values support the same {locale} placeholders as `url`. Restricted to hosts in `origins`.",
+          "items": {
+            "type": "object",
+            "required": ["url", "name"],
+            "properties": {
+              "url": { "type": "string", "pattern": "^https?://" },
+              "name": { "type": "string", "pattern": "^[A-Za-z0-9!#$%&'*+.^_`|~-]{1,64}$" },
+              "value": { "type": "string" },
+              "domain": { "type": "string" },
+              "path": { "type": "string" }
+            },
+            "additionalProperties": false
+          }
+        },
+        "language": {
+          "type": "string",
+          "description": "BCP-47 tag (or \"system\", the default) for what language the app is told it runs in - Accept-Language + navigator.language. Pin it only for a service that exists in one language; otherwise it follows the box's UI language."
+        },
         "userAgent": {
           "type": "string",
           "description": "remote: UA override (e.g. a smart-TV UA for youtube.com/tv)."
