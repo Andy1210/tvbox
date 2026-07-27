@@ -5,6 +5,16 @@ updates). `scripts/make-release.sh` lifts the current version's `hu`/`en`
 blocks into the OTA feed's `notes` - keep both languages, keep it short, and
 write for the person on the couch (what changes for THEM), not for developers.
 
+## 1.10.1
+
+### hu
+
+- A Plex kilépés-kérdésére ("bezárom?") most tényleg bezárul az alkalmazás. Eddig csak a kezdőképernyőre vitt, a Plex viszont futva maradt, és ha visszaléptél bele, megint a kilépés-kérdésnél találtad magad. (A Kezdőlap gomb változatlanul csak háttérbe teszi az alkalmazást, hogy azonnal ott folytathasd, ahol abbahagytad.)
+
+### en
+
+- Plex's "Exit?" prompt now really closes the app. Until now it only took you to the home screen while Plex kept running, so going back into it landed you on that same prompt again. (The Home button still just puts an app in the background, so you can pick up exactly where you left off.)
+
 ## 1.10.0
 
 ### hu
