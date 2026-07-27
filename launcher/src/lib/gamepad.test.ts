@@ -25,7 +25,11 @@ function pad(over: Partial<Gamepad> = {}): Gamepad {
 }
 
 let pads: (Gamepad | null)[] = [];
-let frames: FrameRequestCallback[] = [];
+// A real fake clock: cancelAnimationFrame must actually cancel, otherwise "the loop
+// stopped" is untestable - a no-op stub leaves the queued callback and the next tick
+// reschedules it, which is exactly what hid the missing stop.
+let frameId = 0;
+const scheduled = new Map<number, FrameRequestCallback>();
 let keys: string[] = [];
 let now = 0;
 let stop: (() => void) | null = null;
@@ -35,22 +39,25 @@ const collect = (e: KeyboardEvent) => keys.push(e.key);
 
 function tick(advanceMs = 16) {
   now += advanceMs;
-  const run = frames;
-  frames = [];
+  const run = [...scheduled.values()];
+  scheduled.clear();
   for (const f of run) f(now);
 }
+const pending = () => scheduled.size;
 
 beforeEach(() => {
   pads = [];
-  frames = [];
+  scheduled.clear();
+  frameId = 0;
   keys = [];
   now = 1000;
   (navigator as unknown as { getGamepads: () => (Gamepad | null)[] }).getGamepads = () => pads;
   vi.stubGlobal("requestAnimationFrame", (cb: FrameRequestCallback) => {
-    frames.push(cb);
-    return frames.length;
+    const id = ++frameId;
+    scheduled.set(id, cb);
+    return id;
   });
-  vi.stubGlobal("cancelAnimationFrame", () => {});
+  vi.stubGlobal("cancelAnimationFrame", (id: number) => scheduled.delete(id));
   vi.spyOn(performance, "now").mockImplementation(() => now);
   window.addEventListener("keydown", collect);
 });
@@ -70,7 +77,7 @@ function begin() {
 
 it("does nothing at all until a pad exists", () => {
   begin();
-  expect(frames.length).toBe(0); // no polling loop, no idle cost
+  expect(pending()).toBe(0); // no polling loop, no idle cost
 });
 
 it("D-pad buttons become arrow keys", () => {
@@ -156,12 +163,27 @@ it("axes that REST off-centre (analog pedals) don't navigate on their own", () =
   expect(keys).toEqual(["ArrowRight"]);
 });
 
+it("stops polling while the window is hidden, and resumes when it comes back", () => {
+  pads = [pad()];
+  begin();
+  tick();
+  expect(pending()).toBe(1);
+  // A hidden window is a backgrounded app: no polling at all, not "throttled".
+  Object.defineProperty(document, "visibilityState", { value: "hidden", configurable: true });
+  document.dispatchEvent(new Event("visibilitychange"));
+  tick();
+  expect(pending()).toBe(0);
+  Object.defineProperty(document, "visibilityState", { value: "visible", configurable: true });
+  document.dispatchEvent(new Event("visibilitychange"));
+  expect(pending()).toBe(1);
+});
+
 it("stops polling when the last pad goes away", () => {
   pads = [pad()];
   begin();
   tick();
-  expect(frames.length).toBe(1);
+  expect(pending()).toBe(1);
   pads = [];
   tick();
-  expect(frames.length).toBe(0);
+  expect(pending()).toBe(0);
 });

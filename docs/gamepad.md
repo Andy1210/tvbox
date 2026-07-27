@@ -44,7 +44,7 @@ built-in table. A pad that isn't in that table is handed to pages in **raw HID
 order** with `mapping: ""`, and an app that must know which button is A/B/X/Y
 refuses it. That is exactly what a Nacon MG-X PRO does here:
 
-```
+```text
 [gamepad] connected: "Nacon MG-X PRO (Vendor: 3285 Product: 0312)" mapping="" buttons=15 axes=8
 ```
 
@@ -68,8 +68,8 @@ button numbers. What differs between pads is where the **right stick** and the
 | Xbox-style (has `ABS_RX`/`ABS_RY`)    | RX / RY     | Z / RZ                  |
 | Android-style (phone pads, the Nacon) | Z / RZ      | BRAKE/GAS or THROTTLE/… |
 
-```
-systemctl --user status tvbox-gamepad     # what it picked, per pad
+```console
+$ systemctl --user status tvbox-gamepad     # what it picked, per pad
 [gamepad-shim] 'Nacon MG-X PRO' vendor=3285:0312 right-stick=ABS_Z/ABS_RZ triggers=ABS_BRAKE/ABS_GAS
 ```
 

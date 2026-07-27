@@ -147,10 +147,26 @@ function hold(action: string, deflection: number) {
   else if (deflection < RELEASE) stickHeld.delete(action);
 }
 
+function stop() {
+  if (frame) cancelAnimationFrame(frame);
+  running = false;
+  frame = 0;
+  nextAt.clear();
+  stickHeld.clear();
+}
+
 function start() {
-  if (running) return;
+  if (running || document.visibilityState === "hidden") return;
   running = true;
   frame = requestAnimationFrame(poll);
+}
+
+// rAF is throttled to a stop in a hidden window, but "throttled by the browser" is a
+// promise we don't have to rely on - stop for real, and pick up again when the window
+// is visible and a pad is still there. Idle heat and power are the point.
+function onVisibility() {
+  if (document.visibilityState === "hidden") stop();
+  else if (navigator.getGamepads && navigator.getGamepads().some(Boolean)) start();
 }
 
 // Call once at startup (the launcher does it in main.tsx). Returns a teardown for
@@ -167,16 +183,14 @@ export function startGamepadNav(): () => void {
     start();
   };
   window.addEventListener("gamepadconnected", onConnect);
+  document.addEventListener("visibilitychange", onVisibility);
   // A pad already active before this ran (page reload) never re-fires
   // gamepadconnected, so check once.
   if (navigator.getGamepads && navigator.getGamepads().some(Boolean)) start();
   return () => {
     window.removeEventListener("gamepadconnected", onConnect);
-    if (frame) cancelAnimationFrame(frame);
-    running = false;
-    frame = 0;
-    nextAt.clear();
-    stickHeld.clear();
+    document.removeEventListener("visibilitychange", onVisibility);
+    stop();
     rest.clear();
   };
 }

@@ -314,7 +314,17 @@ def main():
                         dev.close()
                         continue
                     log("virtual pad up:", OUT_NAME, f"{OUT_VENDOR:04x}:{OUT_PRODUCT:04x}")
-                pads[path] = Pad(dev)
+                try:
+                    pads[path] = Pad(dev)
+                except Exception as ex:
+                    # Never take the daemon down over one odd device: hand it back and
+                    # let it work unshimmed.
+                    log("cannot map", dev.name, "-", ex)
+                    try:
+                        dev.ungrab()
+                    except Exception:
+                        pass
+                    dev.close()
         if not pads:
             time.sleep(max(0.05, next_scan - time.monotonic()))  # nothing to read until the next scan
             continue
