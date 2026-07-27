@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { setFocus } from "@noriginmedia/norigin-spatial-navigation";
-import { fetchStore, storeInstall, storeUninstall, saveAppUrl, type StoreEntry } from "../lib/api";
+import { fetchStore, storeInstall, storeUninstall, storeFlatpakUpdate, saveAppUrl, type StoreEntry } from "../lib/api";
 import { useI18n } from "../lib/i18n";
 import { useInstalls } from "../stores/installs";
 import { FocusButton } from "./FocusButton";
@@ -86,7 +86,7 @@ export function StoreSettings() {
   // Detect installing -> done transitions: announce the result and, if the
   // detail view is open on that app, refocus its now-current action button
   // (the progress indicator that held focus is about to unmount).
-  const pending = useRef<Map<string, "install" | "update">>(new Map());
+  const pending = useRef<Map<string, "install" | "update" | "flatpak">>(new Map());
   const prevInstalling = useRef<Set<string>>(new Set());
   useEffect(() => {
     const now = new Set((entries || []).filter((e) => e.installing).map((e) => e.id));
@@ -95,7 +95,17 @@ export function StoreSettings() {
         const e = (entries || []).find((x) => x.id === id);
         const kind = pending.current.get(id) ?? "install";
         pending.current.delete(id);
-        if (e) {
+        if (e && kind === "flatpak") {
+          // The box reports what the update did: a flatpak can be rebuilt without
+          // its version moving, so "already current" is a real outcome, not a
+          // failure - and the version shown is the one now on the box.
+          const st = e.flatpakStatus;
+          const name = (e.flatpaks || []).filter((f) => f.version)[0]?.name ?? loc(e.name);
+          const v = st?.version ?? "";
+          const key = !st?.ok ? "store.flatpakFailed" : st.changed ? "store.flatpakUpdated" : "store.flatpakCurrent";
+          setStatus({ id: e.id, text: t(key, { name, v }) });
+          if (detailId === id) setTimeout(() => setFocus("detail-flatpak"), 0);
+        } else if (e) {
           const key = e.installed ? (kind === "update" ? "store.updated" : "store.installed") : "store.failed";
           setStatus({ id: e.id, text: t(key, { name: loc(e.name) }) });
           if (detailId === id) setTimeout(() => setFocus(e.installed ? "detail-remove" : "detail-install"), 0);
@@ -130,6 +140,24 @@ export function StoreSettings() {
   };
   const install = (e: StoreEntry) => kickoff(e, "install");
   const update = (e: StoreEntry) => kickoff(e, "update");
+  // Updating the flatpak is not a store install: the app package stays put and the
+  // program it runs (or was built from) moves. It reuses the same progress plumbing
+  // because it is the same kind of wait - hundreds of MB, out of process.
+  const flatpakUpdate = async (e: StoreEntry) => {
+    pending.current.set(e.id, "flatpak");
+    const ok = await storeFlatpakUpdate(e.id);
+    if (!ok) {
+      pending.current.delete(e.id);
+      setStatus({ id: e.id, text: t("store.failed", { name: loc(e.name) }) });
+      setTimeout(() => setFocus("detail-flatpak"), 0);
+      return;
+    }
+    setStatus(null);
+    setEntries((prev) => (prev ? prev.map((x) => (x.id === e.id ? { ...x, installing: true } : x)) : prev));
+    setTimeout(() => setFocus("detail-back"), 0);
+    const d = await fetchStore();
+    if (d) setEntries(d.apps);
+  };
   const remove = async (e: StoreEntry) => {
     const ok = await storeUninstall(e.id);
     setStatus({ id: e.id, text: t(ok ? "store.removed" : "store.failed", { name: loc(e.name) }) });
@@ -162,6 +190,7 @@ export function StoreSettings() {
           status={status && status.id === detailApp.id ? status.text : null}
           onInstall={() => install(detailApp)}
           onUpdate={() => update(detailApp)}
+          onFlatpakUpdate={() => flatpakUpdate(detailApp)}
           onRemove={() => remove(detailApp)}
           onSetUrl={() => setUrlEdit(detailApp)}
           onExit={() => {
