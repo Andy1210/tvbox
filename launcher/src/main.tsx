@@ -1,5 +1,6 @@
 import { createRoot } from "react-dom/client";
 import { init } from "@noriginmedia/norigin-spatial-navigation";
+import { startGamepadNav } from "@sdk/gamepad";
 import { App } from "./App";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 import "./index.css";
@@ -11,6 +12,11 @@ init({
   visualDebug: false,
   // Back/Home/media keys are handled by the shell preload, not here.
 });
+
+// A game controller speaks the Gamepad API, not keys, so the UI never moved for
+// one. Translate a pad into the same arrows/Enter/Back the bridges emit. Idle cost
+// is zero until a pad actually connects.
+startGamepadNav();
 
 // Auto-hide the mouse cursor: hidden by default (D-pad UI), shown for ~2.5s when
 // a mouse actually moves - so a connected mouse works but an idle pointer never

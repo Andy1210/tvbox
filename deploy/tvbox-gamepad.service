@@ -1,0 +1,18 @@
+# tvbox gamepad shim -> re-publishes an unrecognised controller as a standard Xbox
+# pad - systemd USER unit (no root: /dev/input read from the `input` group,
+# /dev/uinput write from the udev rule provision.sh sets up, same as the CEC and
+# remote bridges). Installed to ~/.config/systemd/user/ by deploy.sh; starts at
+# boot via `loginctl enable-linger`.
+[Unit]
+Description=tvbox gamepad shim (unrecognised pad -> standard Xbox mapping)
+
+[Service]
+ExecStart=/usr/bin/python3 %h/.tvbox/gamepad_shim.py
+# on-failure, NOT always: the shim exits 0 when config.gamepad.shim is "off", and
+# `always` turned that documented off-switch into a respawn every RestartSec forever.
+Restart=on-failure
+RestartSec=3
+NoNewPrivileges=yes
+
+[Install]
+WantedBy=default.target
