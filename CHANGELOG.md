@@ -5,6 +5,18 @@ updates). `scripts/make-release.sh` lifts the current version's `hu`/`en`
 blocks into the OTA feed's `notes` - keep both languages, keep it short, and
 write for the person on the couch (what changes for THEM), not for developers.
 
+## 1.14.0
+
+### hu
+
+- Az App Store-ban látszik annak a programnak a verziója is, amit egy alkalmazás valójában futtat (RetroArch), vagy amiből készült (Plex). Ez külön frissítési csatorna, amiről a regiszter nem tud, tehát eddig a store egy olyan verziót mutatott, ami nem arról a programról szólt, amit a néző használ. Mellé egy gomb, amivel most azonnal frissíthető, nem kell megvárni az éjszakai automatikus frissítést.
+- Javítva: a Plex webes felülete a boxon egy MÁSOLAT a flatpakból, ezért amikor az éjszakai frissítés új Plexet töltött le, a másolat csendben a régin maradt - a felület elavult, miközben a szerver már továbblépett. A box most észreveszi, ha a flatpak elmozdult, és újramásolja a felületet: magától, amikor éppen nem használod, vagy azonnal, ha kézzel frissítesz.
+
+### en
+
+- The App Store now shows the version of the program an app actually runs (RetroArch) or was built from (Plex). That is a separate update channel the registry knows nothing about, so until now the store displayed a version that said nothing about the program the viewer uses. Next to it, a button that updates it right away instead of waiting for the nightly update.
+- Fixed: Plex's web interface on the box is a COPY of the one inside its flatpak, so when the nightly update pulled a newer Plex the copy silently stayed behind - a stale interface talking to a server that had moved on. The box now notices when the flatpak has moved and re-copies the interface: on its own while you are not using the box, or immediately when you update by hand.
+
 ## 1.13.0
 
 ### hu

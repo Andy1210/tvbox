@@ -25,6 +25,7 @@ const mqttBridge = require("./mqtt"); // MQTT: now-playing publish + command/not
 const ir = require("./ir"); // IR blaster hub: TV volume/mute over ESPHome or Home Assistant
 const appwins = require("./appwindows"); // background-apps window registry + hidden-set policy (LRU/RAM guard)
 const nativeapp = require("./native"); // native (non-Electron) apps: RetroArch et al own the screen AND the input
+const flatpak = require("./flatpak"); // flatpak refs/versions/commits + updating one
 const firetvir = require("./firetvir"); // Fire TV remote IR programming (venv deps + irdb codesets + BLE tool)
 const apps = require("./install"); // manifests + install-recipe runner (shared with the tvbox CLI)
 const store = require("./store"); // app-store registry client (manifest-only apps -> ~/.tvbox/apps)
@@ -257,6 +258,68 @@ async function provisionFull(id) {
   }
   installing.delete(id);
   setInstallPhase(id, null);
+}
+
+// Manual flatpak update for one app, the counterpart of the nightly
+// tvbox-flatpak-update timer: a flatpak-backed app (RetroArch runs one, Plex's
+// bundle is extracted from one) has a version the registry knows nothing about, so
+// the store needs a way to move it NOW rather than at 03:30.
+//
+// Out of process for the same reason an install is - a flatpak is hundreds of MB -
+// and it reuses `installing` + the progress phase, so the store shows the same
+// progress it does for an install. What actually changed is decided by the commit
+// before and after, since a rebuild can keep the version string.
+const flatpakResult = new Map(); // id -> { ok, changed, version } for the store's status line
+function startFlatpakUpdate(id, res) {
+  const m = apps.manifestById(id);
+  const refs = m ? flatpak.refsFor(m) : [];
+  if (!m || !refs.length) return jsonRes(res, { ok: false, error: "no flatpak" });
+  if (installing.has(id)) return jsonRes(res, { ok: true, installing: true });
+  installing.add(id);
+  flatpakResult.delete(id);
+  (async () => {
+    const before = flatpak.commitsSync(refs);
+    const ok = await spawnCli(["flatpak-update", id], id, "flatpak");
+    flatpak.invalidate();
+    const after = flatpak.commitsSync(refs);
+    const changed = refs.some((f) => before[f.ref] !== after[f.ref]);
+    // The bundle is a copy of the flatpak's files, so a moved flatpak means the
+    // copy is now behind: bring it level in the same action.
+    if (ok && changed && apps.bundleStale(m)) await spawnCli(["install", id, "--force"], id, "bundle");
+    const versions = await flatpak.list({ fresh: true });
+    flatpakResult.set(id, {
+      ok,
+      changed,
+      version: refs.map((f) => (versions.get(f.ref) || {}).version).filter(Boolean)[0] || null,
+    });
+    installing.delete(id);
+    setInstallPhase(id, null);
+  })();
+  return jsonRes(res, { ok: true, updating: true });
+}
+
+// An extracted bundle stays behind when its flatpak moves, and the flatpak moves
+// on its own: the nightly timer updates it with the shell none the wiser. This is
+// what notices - out of process (a bundle can be large) and only when the box is
+// idle, since it replaces files an app may be serving from.
+let bundleRefreshBusy = false;
+async function bundleRefreshTick() {
+  if (bundleRefreshBusy || installing.size || !boxIdle()) return;
+  const stale = apps.getManifests().filter((m) => apps.bundleStale(m));
+  if (!stale.length) return;
+  bundleRefreshBusy = true;
+  try {
+    for (const m of stale) {
+      if (installing.size || !boxIdle()) break; // a wake-up aborts the run
+      console.log("[install] bundle behind its flatpak, refreshing:", m.id);
+      installing.add(m.id);
+      await spawnCli(["install", m.id, "--force"], m.id, "bundle");
+      installing.delete(m.id);
+      setInstallPhase(m.id, null);
+    }
+  } finally {
+    bundleRefreshBusy = false;
+  }
 }
 
 // ---- app manifests + install (the install-recipe runner lives in install.js,
@@ -678,6 +741,9 @@ function handlePost(p, data, res) {
       })
       .catch((e) => jsonRes(res, { ok: false, error: String(e.message || e).slice(0, 120) }));
     return;
+  }
+  if (p === "/tvbox/api/store/flatpak-update") {
+    return startFlatpakUpdate(String(data.id || ""), res);
   }
   if (p === "/tvbox/api/store/uninstall") {
     const id = String(data.id || "");
@@ -1458,6 +1524,7 @@ function serve() {
             ...e,
             installing: installing.has(e.id),
             progress: installProgress.get(e.id) || null,
+            flatpakStatus: flatpakResult.get(e.id) || null, // result of the last manual flatpak update
           }));
           jsonRes(res, { ...d, apps: apps2, installing: [...installing] });
         })
@@ -3344,6 +3411,11 @@ app.whenReady().then(() => {
   });
   updater.startSchedulers(); // boot check + 6h re-check + nightly idle auto-apply
   setInterval(appsAutoTick, 30 * 60 * 1000); // nightly registry app auto-update (same window)
+  // Not gated to the small hours like the registry check: a bundle whose flatpak
+  // moved is BROKEN-ish now (the copy is older than the app it talks to), and the
+  // work is a local file copy, not a download.
+  setTimeout(bundleRefreshTick, 2 * 60 * 1000);
+  setInterval(bundleRefreshTick, 6 * 60 * 60 * 1000);
   setTimeout(btBatteryTick, 5 * 60 * 1000); // early check after boot, then half-hourly
   setInterval(btBatteryTick, 30 * 60 * 1000);
   // Start plugin daemons once the HDMI sink is the default (librespot needs it).

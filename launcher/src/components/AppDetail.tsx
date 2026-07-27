@@ -64,11 +64,13 @@ function InstallProgress({ phase }: { phase?: string | null }) {
   const label =
     phase === "deps"
       ? t("store.phaseDeps")
-      : phase === "bundle"
-        ? t("store.phaseBundle")
-        : phase === "finishing"
-          ? t("store.phaseFinishing")
-          : t("store.installingGeneric");
+      : phase === "flatpak"
+        ? t("store.phaseFlatpak")
+        : phase === "bundle"
+          ? t("store.phaseBundle")
+          : phase === "finishing"
+            ? t("store.phaseFinishing")
+            : t("store.installingGeneric");
   return (
     <div className="flex flex-col gap-[1.1vh] min-w-[32vw]" role="status" aria-live="polite">
       <span className="text-[2.1vh] font-semibold text-sky-200">{label}</span>
@@ -84,6 +86,7 @@ export function AppDetail({
   status,
   onInstall,
   onUpdate,
+  onFlatpakUpdate,
   onRemove,
   onSetUrl,
   onExit,
@@ -92,6 +95,7 @@ export function AppDetail({
   status?: string | null;
   onInstall: () => void;
   onUpdate: () => void;
+  onFlatpakUpdate: () => void;
   onRemove: () => void;
   onSetUrl: () => void;
   onExit: () => void;
@@ -103,12 +107,16 @@ export function AppDetail({
   const entryAnim = useEntryAnim();
   const accent = app.accent || "#4152d8";
   const changelog = app.changelog || [];
+  // Only refs actually on the box have a version to show or a reason to update; a
+  // missing one is already reported as a dependency ("needs RetroArch").
+  const flatpaks = (app.flatpaks || []).filter((f) => f.version);
 
   // The first action that exists for this app - where focus lands on open.
   const firstAction = (): string => {
     if (app.installing) return "detail-back"; // progress replaces the action buttons
     if (!app.builtin && !app.installed) return "detail-install";
     if (!app.builtin && app.updateAvailable) return "detail-update";
+    if (!app.builtin && app.installed && flatpaks.length) return "detail-flatpak";
     if (!app.builtin && app.installed) return "detail-remove";
     if (app.urlConfig) return "detail-url";
     return "detail-back";
@@ -159,6 +167,17 @@ export function AppDetail({
           )}
         </div>
 
+        {/* The flatpak an app runs (RetroArch) or was built from (Plex) has its own
+            version, on its own update channel - the registry never sees it, so
+            without this the store showed a version that says nothing about the
+            program the user actually watches or plays with. */}
+        {flatpaks.length > 0 && (
+          <div className="text-[1.9vh] text-fg-dim mb-[1.6vh]">
+            {flatpaks.map((f) => f.name + " " + f.version).join(" · ")}
+            <span className="text-[1.7vh] opacity-70"> · {t("store.flatpakNote")}</span>
+          </div>
+        )}
+
         {app.description && (
           <div className="text-[2.1vh] text-fg leading-[1.6] max-w-[72vw] mb-[2vh] whitespace-pre-line">
             {loc(app.description)}
@@ -192,6 +211,17 @@ export function AppDetail({
                     className="px-[2.4vw] h-[6vh] rounded-[1.1vh] bg-emerald-500/15 text-emerald-200 flex items-center justify-center text-[2.1vh] font-semibold"
                   >
                     {t("store.update")}
+                  </FocusButton>
+                )}
+                {app.installed && flatpaks.length > 0 && (
+                  <FocusButton
+                    focusKey="detail-flatpak"
+                    onEnter={onFlatpakUpdate}
+                    className="px-[2.4vw] h-[6vh] rounded-[1.1vh] bg-white/5 flex items-center justify-center text-[2.1vh] font-semibold"
+                  >
+                    {flatpaks.length === 1
+                      ? t("store.flatpakUpdate", { name: flatpaks[0].name })
+                      : t("store.flatpakUpdateAll")}
                   </FocusButton>
                 )}
                 {app.installed && (
