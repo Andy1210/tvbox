@@ -101,3 +101,18 @@ test("start refuses a manifest whose native block is unusable and stays idle", (
   assert.strictEqual(native.start({ id: "bogus", runtime: { native: { flatpak: "bad ref" } } }), false);
   assert.strictEqual(native.running(), false);
 });
+
+// The lifecycle against a REAL process, so the pid identity path (stamp, signal,
+// settled) is exercised rather than just the parser. `sleep` is a plain `bin` app
+// with no descendants, which is the branch that signals the spawned process itself.
+test("start then stop drives a real process down, and settled() reports it", async () => {
+  native.init({ childEnv: () => process.env, bridgeCmd: () => {}, onExit: () => {} });
+  assert.strictEqual(native.start({ id: "sleeper", runtime: { native: { bin: "sleep", args: ["30"] } } }), true);
+  assert.strictEqual(native.running(), true);
+  assert.strictEqual(native.id(), "sleeper");
+  native.stop();
+  const deadline = Date.now() + 5000;
+  while (!native.settled() && Date.now() < deadline) await new Promise((r) => setTimeout(r, 50));
+  assert.strictEqual(native.settled(), true, "the process was still alive after stop()");
+  assert.strictEqual(native.running(), false, "the exit should have cleared the state");
+});

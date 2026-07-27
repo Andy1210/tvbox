@@ -228,29 +228,59 @@ function stop() {
   // The app processes, plus the launcher itself as the fallback for a plain `bin`
   // app that has no descendants.
   const appPids = descendants(child.pid, MAX_PROC_DEPTH).map(stamped);
-  targets = appPids.length ? appPids : [stamped(child.pid)];
-  for (const entry of targets) signal(entry, "SIGTERM");
-  setTimeout(() => {
-    if (settled()) return;
+  // `mine` is this teardown's OWN list, and the escalation below closes over it
+  // rather than reading the shared `targets`. Two stops can overlap: leaving one
+  // native app for another calls stop() and then start(), so an older call's grace
+  // timers are still pending when a newer app is already up. A timer that read the
+  // shared list would then judge, and SIGKILL, the app the user is currently using.
+  const mine = appPids.length ? appPids : [stamped(child.pid)];
+  targets = mine; // what settled() reports on, i.e. the most recent teardown
+  for (const entry of mine) signal(entry, "SIGTERM");
+  // unref'd: these are best-effort cleanup and must not be a reason for a process
+  // to stay alive. The shell's own shutdown path does not rely on them (it forces
+  // the app down itself), and in a normal session the event loop is never idle.
+  const escalate = (fn, ms) => {
+    const t = setTimeout(fn, ms);
+    if (t.unref) t.unref();
+    return t;
+  };
+  escalate(() => {
+    if (allGone(mine)) return;
     if (ref) {
       console.warn("[native] app ignored SIGTERM, flatpak kill", ref);
       execFile("flatpak", ["kill", ref], { env: deps.childEnv() }, () => {});
     }
   }, TERM_GRACE_MS);
-  setTimeout(() => {
-    if (settled()) return;
+  escalate(() => {
+    if (allGone(mine)) return;
     console.warn("[native] still alive, SIGKILL");
-    for (const entry of targets.concat(stamped(child.pid))) signal(entry, "SIGKILL");
+    for (const entry of mine) signal(entry, "SIGKILL");
   }, KILL_GRACE_MS);
 }
 
-// Has everything stop() signalled actually gone? Used by the shell's shutdown to
-// give the app its save-and-exit window before the process that owns it goes away,
-// and by the escalation timers above to decide whether they are still needed.
+function allGone(list) {
+  return !list.some(sameProc);
+}
+// Has the most recent teardown's app actually gone? Used by the shell's shutdown to
+// give the app its save-and-exit window before the process that owns it goes away.
 function settled() {
-  return !targets.some(sameProc);
+  return allGone(targets);
+}
+
+// Hard stop for shutdown: the escalation timers in stop() die with the shell, so
+// the shell asks for this once it has waited as long as it is willing to. Without
+// it an app that ignores SIGTERM outlives the shell that was supposed to own it.
+function forceStop() {
+  if (!targets.length) return;
+  console.warn("[native] shutdown: forcing the app down");
+  if (flatpakRef) {
+    try {
+      execFile("flatpak", ["kill", flatpakRef], { env: deps.childEnv() }, () => {});
+    } catch (e) {}
+  }
+  for (const entry of targets) signal(entry, "SIGKILL");
 }
 
 // flatpakRefOk is exported so install.js can validate `requires.flatpak` refs
 // against the SAME rule the launch path applies to runtime.native.flatpak.
-module.exports = { init, start, stop, settled, running, id, parseSpec, flatpakRefOk: refOk };
+module.exports = { init, start, stop, forceStop, settled, running, id, parseSpec, flatpakRefOk: refOk };

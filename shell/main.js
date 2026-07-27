@@ -3362,7 +3362,9 @@ app.whenReady().then(() => {
 // and a bridge left routing Home to a dead shell would swallow the button.
 // How long shutdown waits for a native app to save and exit. Long enough for an
 // emulator to flush its config and save files, short enough that a restart is not
-// visibly stuck; an app that ignores the signal is left to native.js's escalation.
+// visibly stuck. native.js's own escalation timers (3s/6s) are no help here because
+// they die with the shell, so at the deadline this path does the hard stop itself
+// rather than waiting them out and leaving the app behind.
 const NATIVE_SHUTDOWN_WAIT_MS = 2500;
 function shutdown() {
   stopMpv();
@@ -3376,7 +3378,7 @@ function shutdown() {
   const wait = setInterval(() => {
     if (!nativeapp.settled() && Date.now() < deadline) return;
     clearInterval(wait);
-    if (!nativeapp.settled()) console.warn("[native] still running at shutdown, leaving it to --die-with-parent");
+    if (!nativeapp.settled()) nativeapp.forceStop();
     finishShutdown();
   }, 150);
 }
