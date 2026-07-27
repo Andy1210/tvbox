@@ -5,6 +5,20 @@ updates). `scripts/make-release.sh` lifts the current version's `hu`/`en`
 blocks into the OTA feed's `notes` - keep both languages, keep it short, and
 write for the person on the couch (what changes for THEM), not for developers.
 
+## 1.12.0
+
+### hu
+
+- Retro játékok: a RetroArch mostantól felvehető alkalmazásként, és a saját felületét a távirányítóval vagy kontrollerrel lehet kezelni. A Home gomb mindig visszahoz a boxra, akármit is csinálsz benne. A konzolokat (NES, SNES, Game Boy, Mega Drive, PlayStation és társai) a RetroArch saját letöltőjéből lehet hozzáadni.
+- Játékok a telefonodról: Beállítások → Alkalmazások → RetroArch → "Játékok feltöltése", QR-kód, és a telefonon kiválasztod a fájlokat. A konzolt a fájl kiterjesztéséből felismeri. Ugyanitt látod, mi van a boxon, és egy konzol teljes tartalmát egy gombbal törölheted.
+- Játékok a hálózatról: ha a játékok egy NAS-on vagy gépen vannak, a box közvetlenül onnan olvassa őket, és több box is ugyanazt a könyvtárat használhatja. A megosztás nevét és a mappát nem kell fejből tudni: a telefonos űrlapon a szerver felkínálja őket, és koppintással lehet lelépni a jó mappáig.
+
+### en
+
+- Retro games: RetroArch can now be added as an app, and its own interface works with the remote or a controller. The Home button always brings you back to the box, whatever you are doing in it. Consoles (NES, SNES, Game Boy, Mega Drive, PlayStation and the rest) are added from RetroArch's own downloader.
+- Games from your phone: Settings, Apps, RetroArch, "Upload games", scan the QR code and pick the files on your phone. The console is recognised from the file extension. The same page shows what is on the box, and one button clears a whole console.
+- Games from your network: if the games live on a NAS or a computer, the box reads them straight from there, and several boxes can share one library. You do not need to know the share or folder name by heart: the phone form asks the server and you tap your way down to the right folder.
+
 ## 1.11.0
 
 ### hu

@@ -53,8 +53,8 @@
       "description": "Store-detail screenshots (https URLs, e.g. hosted in the registry repo)."
     },
     "type": {
-      "enum": ["webclient"],
-      "description": "webclient = the shell serves/loads the app (a package's own local web/ bundle, the legacy root bundle, or a remote site). Apps are self-contained packages now; there are no launcher-compiled 'builtin' views."
+      "enum": ["webclient", "native"],
+      "description": "webclient = the shell serves/loads the app (a package's own local web/ bundle, the legacy root bundle, or a remote site). native = the app is its own fullscreen Wayland client, spawned by the shell (see runtime.native); every window of the shell's own hides while it runs. Apps are self-contained packages; there are no launcher-compiled 'builtin' views."
     },
     "status": {
       "enum": ["ready", "coming_soon"],
@@ -73,6 +73,24 @@
       "type": "string",
       "pattern": "^[a-z0-9_-]+$",
       "description": "Shell-side plugin name. The app's own plugin.js (shipped in the package) is loaded, deps-gated: only when requires.bin are all present."
+    },
+    "pairing": {
+      "type": "array",
+      "maxItems": 4,
+      "description": "Phone-pairing actions the app offers. Settings > Apps shows a button per entry that starts the pairing kind and displays the QR; the app's own plugin must register a provider for that kind. This is how an app with no screen of its own on the box (a native app) still gets a phone affordance.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["kind", "label"],
+        "properties": {
+          "kind": {
+            "type": "string",
+            "pattern": "^[a-z0-9_-]{1,32}$",
+            "description": "Pairing kind the plugin registers (e.g. \"roms\")."
+          },
+          "label": { "$ref": "#/$defs/localeString" }
+        }
+      }
     },
     "requires": {
       "type": "object",
@@ -112,6 +130,12 @@
               }
             }
           }
+        },
+        "flatpak": {
+          "type": "array",
+          "maxItems": 8,
+          "items": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$" },
+          "description": "Flathub app ids the app needs (e.g. org.libretro.RetroArch). Installed with `flatpak install --user`, so no root: a missing one greys the tile and is installable straight from the UI, like requires.download. The box's own arch is used."
         },
         "apt": {
           "type": "array",
@@ -196,6 +220,28 @@
       "additionalProperties": false,
       "description": "How the shell serves/launches the app and what the preload bridge exposes to it.",
       "properties": {
+        "native": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "type:native only. How to launch the app's own fullscreen client. Exactly one of flatpak/bin; the values reach argv, so they are validated at load time and again at launch.",
+          "properties": {
+            "flatpak": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$",
+              "description": "Flathub app id to `flatpak run` (declare it in requires.flatpak too, so the tile greys out until it is installed)."
+            },
+            "bin": {
+              "type": "string",
+              "description": "Executable to run instead, resolved on PATH (which includes ~/.tvbox/bin) or given as an absolute path."
+            },
+            "args": {
+              "type": "array",
+              "maxItems": 32,
+              "items": { "type": "string" },
+              "description": "Arguments passed to the app, e.g. [\"--fullscreen\"]. No shell is involved."
+            }
+          }
+        },
         "serve": {
           "enum": ["static", "remote", "local"],
           "description": "local: a package app that ships its own web/ UI bundle, served at /<id>/ in the main window (the usual model - apps are packages). static: the legacy single root-mounted bundle (mount:root, e.g. Plex). remote: load a live site in an isolated, hardened window."

@@ -7,6 +7,7 @@ import { useAppPrefsStore, orderIds } from "../stores/appPrefs";
 import { FocusButton } from "./FocusButton";
 import { usePinGuard } from "../lib/usePinGuard";
 import { Icon } from "./Icon";
+import { AppPairing } from "./AppPairing";
 
 // Apps section of the HOME Settings screen: reorder the home-screen apps
 // (move up/down), hide/show them, and uninstall a downloaded bundle (the tile
@@ -84,6 +85,8 @@ export function AppOrderSettings() {
   };
 
   const [status, setStatus] = useState<string | null>(null);
+  // An app-declared phone action is open (its QR overlay); null = none.
+  const [pairing, setPairing] = useState<{ kind: string; title: string } | null>(null);
   const uninstall = async (a: AppManifest) => {
     const ok = await removeApp(a.id);
     setStatus(t(ok ? "appsettings.uninstalled" : "appsettings.uninstallFailed", { name: loc(a.name) }));
@@ -148,6 +151,18 @@ export function AppOrderSettings() {
               >
                 {isHidden ? t("appsettings.show") : t("appsettings.hide")}
               </FocusButton>
+              {/* Phone actions the app itself declares. An app with no screen of
+                  its own on the box (a native app) has nowhere else to put them. */}
+              {(a.pairing || []).map((p) => (
+                <FocusButton
+                  key={p.kind}
+                  focusKey={"apporder-pair-" + a.id + "-" + p.kind}
+                  onEnter={() => setPairing({ kind: p.kind, title: loc(p.label) })}
+                  className="px-[1.6vw] h-[5.4vh] rounded-[1vh] bg-white/5 flex items-center justify-center text-[1.9vh] font-semibold shrink-0"
+                >
+                  {loc(p.label)}
+                </FocusButton>
+              ))}
               {a.installable && a.installed && (
                 <FocusButton
                   focusKey={"apporder-remove-" + a.id}
@@ -168,6 +183,7 @@ export function AppOrderSettings() {
         )}
         {gate}
       </div>
+      {pairing && <AppPairing kind={pairing.kind} title={pairing.title} onClose={() => setPairing(null)} />}
     </div>
   );
 }

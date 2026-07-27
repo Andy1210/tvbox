@@ -76,8 +76,8 @@ test("installDownload validates the entry before touching the network", () => {
   );
 });
 
-test("installDownloadDeps is a no-op (ok) for an app with no download deps", () => {
-  var r = apps.installDownloadDeps({ id: "x", requires: {} });
+test("installUiDeps is a no-op (ok) for an app with no download deps", () => {
+  var r = apps.installUiDeps({ id: "x", requires: {} });
   assert.equal(r.ok, true);
   assert.deepEqual(r.installed, []);
 });
