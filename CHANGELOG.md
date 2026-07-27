@@ -5,6 +5,22 @@ updates). `scripts/make-release.sh` lifts the current version's `hu`/`en`
 blocks into the OTA feed's `notes` - keep both languages, keep it short, and
 write for the person on the couch (what changes for THEM), not for developers.
 
+## 1.11.0
+
+### hu
+
+- Játékkontroller: mostantól a felületet is vezérli (D-pad vagy bal kar, A = OK, B = Vissza), és a felhő-gamingben azok a kontrollerek is működnek, amiket a böngésző nem ismer fel - a box Xbox-kontrollerként adja tovább őket. Az Xbox, PlayStation, Nintendo, Steam, Logitech és 8BitDo padokhoz nem nyúl, azok eddig is mentek.
+- Beírás a TV-n: ha egy alkalmazásban szövegmezőre lépsz, feljön a képernyő-billentyűzet - jelszóhoz pedig telefonon is beírhatod: a Telefon gombra QR-kód jelenik meg, beolvasod, és a telefonon írod be (a jelszókezelőd is működik). A szöveg a helyi hálózaton, titkosítás nélkül megy a TV-hez, ezt a jelszó mezőknél a box ki is írja.
+- Bejelentkezés: az olyan alkalmazások, amelyek külön ablakban kérik a belépést (Microsoft-fiók), most végig tudják vinni. Ha egy oldal ujjlenyomatot vagy PIN-t (passkey) kérne, a box már nem ajánlja fel - azt itt semmilyen ablak nem tudná megjeleníteni -, hanem a jelszós utat kínálja.
+- Az alkalmazások a box nyelvén jönnek fel, nem azon, amit az internetszolgáltató helye szerint kitalálnak.
+
+### en
+
+- Game controllers now drive the interface too (D-pad or left stick, A = OK, B = Back), and cloud gaming accepts controllers the browser doesn't recognise - the box re-publishes them as an Xbox pad. Xbox, PlayStation, Nintendo, Steam, Logitech and 8BitDo pads are left alone; they already worked.
+- Typing on the TV: focusing a text field in an app brings up the on-screen keyboard - and for a password you can type on your phone instead: press Phone for a QR code, scan it, and type there (your password manager works too). The text travels to the TV over your local network unencrypted, which the box says out loud on password fields.
+- Signing in: apps that ask for your account in a separate window (a Microsoft account) can now complete it. If a page would ask for a fingerprint or PIN (a passkey), the box no longer offers that - no window here could ever show it - and steers you to the password instead.
+- Apps come up in the box's language rather than the one guessed from your internet provider's location.
+
 ## 1.10.1
 
 ### hu
