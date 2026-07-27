@@ -5,6 +5,16 @@ updates). `scripts/make-release.sh` lifts the current version's `hu`/`en`
 blocks into the OTA feed's `notes` - keep both languages, keep it short, and
 write for the person on the couch (what changes for THEM), not for developers.
 
+## 1.13.0
+
+### hu
+
+- Beállítások, Alkalmazások: minden alkalmazásnak saját képernyője lett. A listában a neve, a sorrendje és egy Kezelés gomb van, mögötte pedig az, amit az adott alkalmazás kínál: telefonos műveletek (játékok feltöltése, hálózati megosztás, konzolok), elrejtés, eltávolítás. Eddig ezek mind a listasorba voltak zsúfolva, és a hosszabb nevek ki sem látszottak.
+
+### en
+
+- Settings, Apps: every app has its own screen now. The list keeps the name, the ordering and a Manage button, and behind it sits whatever that app offers: phone actions (upload games, network share, consoles), hiding it, removing it. Until now all of that was crammed into the list row, and longer names were pushed out of view.
+
 ## 1.12.1
 
 ### hu

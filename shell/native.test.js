@@ -2,9 +2,33 @@
 // manifest, and a registry manifest dropped into ~/.tvbox/apps/ never sees CI,
 // so parseSpec is the only thing standing between a bad (or hostile) manifest
 // and argv. These tests pin what it accepts.
+const fs = require("fs");
+const os = require("os");
+const path = require("path");
 const test = require("node:test");
 const assert = require("node:assert");
 const native = require("./native");
+
+// Run a real (harmless) native app under a throwaway HOME and hand back what
+// landed in its ~/.tvbox. HOME is honoured by os.homedir() on POSIX, and native.js
+// resolves the log path per launch, so this needs no module reloading.
+async function launchUnderTempHome(id) {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), "tvbox-native-log-"));
+  fs.mkdirSync(path.join(home, ".tvbox"));
+  const prev = process.env.HOME;
+  process.env.HOME = home;
+  try {
+    native.init({ childEnv: () => process.env, bridgeCmd: () => {}, onExit: () => {} });
+    assert.strictEqual(native.start({ id, runtime: { native: { bin: "sleep", args: ["30"] } } }), true);
+    return { home, logs: fs.readdirSync(path.join(home, ".tvbox")) };
+  } finally {
+    native.stop();
+    if (prev === undefined) delete process.env.HOME;
+    else process.env.HOME = prev;
+    const deadline = Date.now() + 5000;
+    while (!native.settled() && Date.now() < deadline) await new Promise((r) => setTimeout(r, 50));
+  }
+}
 
 test("flatpak spec becomes a `flatpak run <ref>` command line", () => {
   const spec = native.parseSpec({ flatpak: "org.libretro.RetroArch", args: ["--fullscreen"] });
@@ -120,4 +144,23 @@ test("start then stop drives a real process down, and settled() reports it", asy
   while (!native.settled() && Date.now() < deadline) await new Promise((r) => setTimeout(r, 50));
   assert.strictEqual(native.settled(), true, "the process was still alive after stop()");
   assert.strictEqual(native.running(), false, "the exit should have cleared the state");
+});
+
+// The log holds whatever the app printed - paths it opened, a share it mounted -
+// so it is the user's, not the world's.
+test("a native app's log is created owner-only", async () => {
+  const { home, logs } = await launchUnderTempHome("sleeper");
+  assert.deepStrictEqual(logs, ["native-sleeper.log"]);
+  const st = fs.statSync(path.join(home, ".tvbox", "native-sleeper.log"));
+  assert.strictEqual(st.mode & 0o777, 0o600, "mode was " + (st.mode & 0o777).toString(8));
+  fs.rmSync(home, { recursive: true, force: true });
+});
+
+// The id names the file, so an id that is not a manifest id (the validator allows
+// only [a-z0-9_-]+) must not be reshaped into some other name - it gets no log,
+// and the app still launches.
+test("an id that is not a manifest id gets no log at all", async () => {
+  const { home, logs } = await launchUnderTempHome("../escape");
+  assert.deepStrictEqual(logs, [], "wrote " + logs.join(", "));
+  fs.rmSync(home, { recursive: true, force: true });
 });
