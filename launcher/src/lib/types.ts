@@ -3,7 +3,9 @@
 export type LocaleString = string | Record<string, string>;
 
 export type AppStatus = "ready" | "coming_soon";
-export type AppType = "webclient"; // apps are self-contained packages the shell serves; no builtin views
+// webclient: a self-contained package the shell serves (there are no builtin views).
+// native: the app is its own fullscreen window, spawned by the shell (RetroArch).
+export type AppType = "webclient" | "native";
 
 // The subset of an app manifest the launcher needs to render a tile. The shell
 // exposes this via GET /tvbox/api/apps (the full manifest also carries install
@@ -27,4 +29,7 @@ export interface AppManifest {
   progress?: { phase: string } | null; // install phase while installing (deps | bundle | finishing), null otherwise
   running?: boolean; // a live (possibly hidden) window exists - background apps; resume is instant
   foreground?: boolean; // it's the currently visible app (never true while HOME is showing)
+  // "Do this from your phone" actions the app declares (QR + code, served by the
+  // app's own plugin). The launcher only starts the session and shows the label.
+  pairing?: { kind: string; label: LocaleString }[];
 }

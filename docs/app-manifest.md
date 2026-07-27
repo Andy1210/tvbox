@@ -30,7 +30,7 @@ Validate yours locally before dropping it on the box:
 npx ajv-cli validate -s docs/app-manifest.schema.json -d my-app.json --spec=draft2020
 ```
 
-## The three app shapes
+## The four app shapes
 
 **1. Remote site** (simplest - YouTube is this): the shell opens the URL in an
 isolated, hardened window (context isolation + sandbox on, no Node, navigation
@@ -71,6 +71,32 @@ shell serves the bundle at `/<id>/` in the main window with the full `window.tvb
 SDK. This is the shape for a rich 10-foot UI. See
 [tvbox-apps/AUTHORING.md](https://github.com/Andy1210/tvbox-apps/blob/main/AUTHORING.md).
 
+**4. Native app** (RetroArch is this): `type: "native"` - not a web app at all.
+The app draws its own full-screen Wayland window and the shell launches and
+supervises it, hiding its own windows while it runs. Use this only when the thing
+you want already exists as a desktop program and re-implementing its UI as a web
+app would be absurd.
+
+```jsonc
+{
+  "id": "retroarch",
+  "manifestVersion": 1,
+  "name": "RetroArch",
+  "type": "native",
+  "status": "ready",
+  "service": "retroarch", // a plugin, because a native app has no page to configure
+  "pairing": [{ "kind": "roms", "label": { "en": "Upload games", "hu": "Játékok feltöltése" } }],
+  "requires": { "flatpak": ["org.libretro.RetroArch"] }, // --user install, no root
+  "runtime": {
+    "native": { "flatpak": "org.libretro.RetroArch", "args": ["--fullscreen"] },
+    "capabilities": [], // a native app has no renderer of ours, so no bridges
+  },
+}
+```
+
+How the shell launches it, how the Home button still works, and why killing a
+flatpak app is not simply killing what you spawned: **[native-apps.md](native-apps.md)**.
+
 ## Field reference
 
 Top level:
@@ -80,23 +106,25 @@ Top level:
 | `id`              | ✔   | `[a-z0-9_-]+`. Tile focus key, `apps-data/<id>` bundle dir, URL mount.             |
 | `manifestVersion` |     | Format version; omitted = `1`. The shell skips versions it doesn't know.           |
 | `name`, `tagline` | ✔ / | A string, or a `{ "<locale>": … }` map.                                            |
-| `type`            | ✔   | `webclient` (the only type - apps are web packages).                               |
+| `type`            | ✔   | `webclient` (a web package) \| `native` (its own full-screen window).              |
 | `status`          | ✔   | `ready` \| `coming_soon` (teaser tile, not launchable).                            |
 | `accent`          |     | Tile accent, **hex only** - anything else is dropped (it's interpolated into CSS). |
 | `icon`            |     | Inline SVG. Rendered sandboxed (`<img>` data: URI) - it can't run script.          |
 | `service`         |     | Shell-side plugin (below).                                                         |
 | `version`         |     | Your app's version, informational.                                                 |
+| `pairing`         |     | Phone actions the app offers (below).                                              |
 
 `requires` - dependencies; a missing binary greys the tile with "needs X",
 nothing crash-loops:
 
-| Field            | What                                                                                                                                                                                    |
-| ---------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `bin`            | Binaries that must resolve on PATH (`~/.tvbox/bin` is on PATH).                                                                                                                         |
-| `download`       | **No-root install** for `tvbox deps`: per-arch (`arm64`/`x64`) `{ url, sha256, extract? }`, verified and placed in `~/.tvbox/bin`. Prefer this whenever upstream ships static binaries. |
-| `apt`            | Debian packages for `tvbox deps` - the one step that asks for sudo. Names are validated against Debian package-name policy.                                                             |
-| `aptRepo`        | **Forbidden** in the registry - a third-party root APT source is risky and avoidable. Ship a `download` binary instead. (CI rejects it.)                                                |
-| `disableService` | System services to disable after the apt install (when the shell supervises the daemon itself).                                                                                         |
+| Field            | What                                                                                                                                                                                                                                               |
+| ---------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `bin`            | Binaries that must resolve on PATH (`~/.tvbox/bin` is on PATH).                                                                                                                                                                                    |
+| `flatpak`        | **No-root install** of flathub app ids (`flatpak install --user`), so a missing one is installable from the UI like `download`. The box's own arch is used, and the install is retried: an app plus its runtime is a large pull that can time out. |
+| `download`       | **No-root install** for `tvbox deps`: per-arch (`arm64`/`x64`) `{ url, sha256, extract? }`, verified and placed in `~/.tvbox/bin`. Prefer this whenever upstream ships static binaries.                                                            |
+| `apt`            | Debian packages for `tvbox deps` - the one step that asks for sudo. Names are validated against Debian package-name policy.                                                                                                                        |
+| `aptRepo`        | **Forbidden** in the registry - a third-party root APT source is risky and avoidable. Ship a `download` binary instead. (CI rejects it.)                                                                                                           |
+| `disableService` | System services to disable after the apt install (when the shell supervises the daemon itself).                                                                                                                                                    |
 
 `install` - the bundle recipe for `type: webclient` + `serve: static` (runs
 user-space from the UI or `tvbox install <id>`):
@@ -112,6 +140,7 @@ user-space from the UI or `tvbox install <id>`):
 
 | Field                 | What                                                                                                                                                                                                                                               |
 | --------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `native`              | `type: native` only: `{ flatpak }` or `{ bin }`, plus `args`. Validated at manifest load AND at launch, with no shell involved. See [native-apps.md](native-apps.md).                                                                              |
 | `serve`               | `local` (own web/ bundle at /<id>/) \| `static` (legacy root bundle) \| `remote` (live site).                                                                                                                                                      |
 | `url` / `urlConfig`   | remote: literal URL, or the config section holding `baseUrl`.                                                                                                                                                                                      |
 | `origins`             | remote: allowed hostnames (+subdomains). Defaults to the URL's host.                                                                                                                                                                               |
@@ -151,6 +180,33 @@ only when the app's `requires.bin` all resolve.
 > **sandboxed capability**, no plugin needed. A plugin is only for a background
 > daemon, an OAuth window, or root-level work. The full capability model, the
 > `fetch` API, and the app tiers are in **[capabilities.md](capabilities.md)**.
+
+## Phone actions (`pairing`)
+
+Some things simply cannot be done well with a remote: picking files, typing a
+server password, entering credentials. And a `native` app has no screen of its own
+on the box to put them on at all.
+
+An app declares what it wants to offer, and the launcher renders a button per
+entry in Settings, Apps:
+
+```jsonc
+"pairing": [
+  { "kind": "roms",  "label": { "en": "Upload games",   "hu": "Játékok feltöltése" } },
+  { "kind": "share", "label": { "en": "Network share",  "hu": "Hálózati megosztás" } },
+],
+```
+
+Pressing one starts that pairing kind, and the TV shows a QR code plus a short URL
+and a 4-digit code. The app's own `plugin.js` must register a provider for the kind
+(`host.pairing.register(kind, { page, routes })`) and ships the page in its
+package. The launcher knows nothing beyond the label: it starts the session and
+draws the QR.
+
+The pairing server is up only while that screen is open, and every route under it
+is code-gated by the shell (`c` in the query for reads, `code` in the body for
+writes). Requests are capped in size; a route that needs a bigger body says so
+(`{ maxBody, handler }`).
 
 ## Checklist for a new app
 

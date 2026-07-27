@@ -33,6 +33,7 @@ Files (all under ~/.tvbox):
   remote-devices.json write  - [{ id, name }] currently-managed remotes (for the UI)
   remote-learned.json write  - { id, code, name } last button captured in learn mode
 /tmp/tvbox-remote-cmd  FIFO  - commands from the shell: reload | learn <id> | learn-off
+                               | native on | native off  (a native app owns the screen)
 """
 import json
 import os
@@ -391,6 +392,10 @@ class Bridge:
         threading.Thread(target=self._post_worker, daemon=True).start()
         self.ui = None
         self.ui_keys = set()
+        # A native app is in front (shell told us over the FIFO): Home becomes an
+        # HTTP request to the shell rather than a key, because nothing of ours has
+        # keyboard focus while such an app runs.
+        self.native = False
         self.learning = None  # device_id we're capturing a button for
         self.learning_since = 0.0  # when learn mode was armed (monotonic)
         self.captured = False  # a button was captured; keep swallowing until learn-off
@@ -672,6 +677,14 @@ class Bridge:
         self.emit(code, value)  # unmapped -> pass through unchanged
 
     def emit(self, code, value):
+        if self.native and code == e.KEY_HOMEPAGE:
+            # A native app (RetroArch et al) owns the screen and the keyboard
+            # focus, so no renderer of ours can see this key and turn it into
+            # "go home". Ask the shell over HTTP instead; it ends the app and
+            # brings the launcher back. Fire on press, swallow press and release.
+            if value == 1:
+                self.shell_post(NAV_URL, {"dest": "home"})
+            return
         try:
             self.ui.write(e.EV_KEY, code, value)
             self.ui.syn()
@@ -804,6 +817,9 @@ class Bridge:
             except OSError:
                 pass
             log("learn mode:", self.learning)
+        elif line == "native on" or line == "native off":
+            self.native = line.endswith("on")
+            log("native app owns the screen:", self.native)
         elif line == "learn-off":
             self.learning = None
             self.captured = False
