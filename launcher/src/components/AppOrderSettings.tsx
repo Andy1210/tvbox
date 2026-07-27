@@ -8,6 +8,7 @@ import { FocusButton } from "./FocusButton";
 import { usePinGuard } from "../lib/usePinGuard";
 import { Icon } from "./Icon";
 import { AppPairing } from "./AppPairing";
+import { AppManage } from "./AppManage";
 
 // Apps section of the HOME Settings screen: reorder the home-screen apps
 // (move up/down), hide/show them, and uninstall a downloaded bundle (the tile
@@ -64,8 +65,8 @@ export function AppOrderSettings() {
     if (focusPlaced.current || !ordered.length) return;
     const id = ordered[0].id;
     // the first row's "move up" is a no-op (nothing above it) - land on an
-    // actionable control: "move down" when another row exists, otherwise "hide"
-    const target = ordered.length > 1 ? "apporder-down-" + id : "apporder-hide-" + id;
+    // actionable control: "move down" when another row exists, otherwise Manage
+    const target = ordered.length > 1 ? "apporder-down-" + id : "apporder-manage-" + id;
     const timer = setTimeout(() => {
       setFocus(target);
       focusPlaced.current = true; // mark done only after focus ran (a cleared timer must retry)
@@ -89,11 +90,24 @@ export function AppOrderSettings() {
   // the focus key of the button that opened it: the overlay is a focus boundary, so
   // without putting focus back the D-pad has no target once it unmounts.
   const [pairing, setPairing] = useState<{ kind: string; title: string; from: string } | null>(null);
+  // Which app's own screen is open. The row cannot hold an app's actions: each app
+  // brings its own (RetroArch declares three phone actions), and they crowded out
+  // the name itself. The row keeps the name and the ordering; the rest is behind it.
+  const [manageId, setManageId] = useState<string | null>(null);
+  // Uninstall is reached from the app's own screen, so on success BOTH that screen
+  // and the row behind it go away: close it and land on the row that takes its
+  // place (or the toggle above the list when it was the last app). On failure the
+  // screen stays open, so focus stays on the button that is still there.
   const uninstall = async (a: AppManifest) => {
     const ok = await removeApp(a.id);
     setStatus(t(ok ? "appsettings.uninstalled" : "appsettings.uninstallFailed", { name: loc(a.name) }));
-    if (ok) fetchApps().then(setApps);
-    setTimeout(() => setFocus("apporder-hide-" + a.id), 0); // the uninstall button is about to unmount
+    if (!ok) return setTimeout(() => setFocus("manage-remove"), 0);
+    const ids = ordered.map((x) => x.id);
+    const i = ids.indexOf(a.id);
+    const next = ids[i + 1] ?? ids[i - 1] ?? null;
+    setManageId(null);
+    fetchApps().then(setApps);
+    setTimeout(() => setFocus(next ? "apporder-manage-" + next : "apporder-getmore"), 0);
   };
 
   return (
@@ -147,35 +161,12 @@ export function AppOrderSettings() {
                 <Chevron />
               </FocusButton>
               <FocusButton
-                focusKey={"apporder-hide-" + a.id}
-                onEnter={() => toggleHidden(a.id)}
+                focusKey={"apporder-manage-" + a.id}
+                onEnter={() => setManageId(a.id)}
                 className="px-[1.6vw] h-[5.4vh] rounded-[1vh] bg-white/5 flex items-center justify-center text-[1.9vh] font-semibold shrink-0"
               >
-                {isHidden ? t("appsettings.show") : t("appsettings.hide")}
+                {t("appsettings.manage")}
               </FocusButton>
-              {/* Phone actions the app itself declares. An app with no screen of
-                  its own on the box (a native app) has nowhere else to put them. */}
-              {(a.pairing || []).map((p) => (
-                <FocusButton
-                  key={p.kind}
-                  focusKey={"apporder-pair-" + a.id + "-" + p.kind}
-                  onEnter={() =>
-                    setPairing({ kind: p.kind, title: loc(p.label), from: "apporder-pair-" + a.id + "-" + p.kind })
-                  }
-                  className="px-[1.6vw] h-[5.4vh] rounded-[1vh] bg-white/5 flex items-center justify-center text-[1.9vh] font-semibold shrink-0"
-                >
-                  {loc(p.label)}
-                </FocusButton>
-              ))}
-              {a.installable && a.installed && (
-                <FocusButton
-                  focusKey={"apporder-remove-" + a.id}
-                  onEnter={() => guard(() => uninstall(a), "apporder-remove-" + a.id)}
-                  className="px-[1.6vw] h-[5.4vh] rounded-[1vh] bg-red-500/15 text-red-200 flex items-center justify-center text-[1.9vh] font-semibold shrink-0"
-                >
-                  {t("appsettings.uninstall")}
-                </FocusButton>
-              )}
             </div>
           );
         })}
@@ -187,6 +178,25 @@ export function AppOrderSettings() {
         )}
         {gate}
       </div>
+      {manageId &&
+        (() => {
+          const a = ordered.find((x) => x.id === manageId);
+          if (!a) return null;
+          return (
+            <AppManage
+              app={a}
+              hidden={hidden.includes(a.id)}
+              onToggleHidden={() => toggleHidden(a.id)}
+              onUninstall={() => guard(() => uninstall(a), "manage-remove")}
+              onPairing={(kind, title) => setPairing({ kind, title, from: "manage-pair-" + kind })}
+              onExit={() => {
+                const id = a.id;
+                setManageId(null);
+                setTimeout(() => setFocus("apporder-manage-" + id), 0);
+              }}
+            />
+          );
+        })()}
       {pairing && (
         <AppPairing
           kind={pairing.kind}
