@@ -53,6 +53,10 @@ CODES = {
     "BTN_THUMBL": 0x13D,
     "BTN_THUMBR": 0x13E,
     "BTN_TOUCH": 0x14A,
+    "BTN_DPAD_UP": 0x220,
+    "BTN_DPAD_DOWN": 0x221,
+    "BTN_DPAD_LEFT": 0x222,
+    "BTN_DPAD_RIGHT": 0x223,
     "KEY_ENTER": 28,
 }
 for name, value in CODES.items():
@@ -113,10 +117,20 @@ def check(label, got, want):
         fails.append(f"{label}: got {got!r}, want {want!r}")
 
 
-def dev(name, axes, keys, vendor=0x1234, product=0x0001, ranges=None):
-    """A fake pad. `ranges` overrides the default 0..255 per axis."""
+def dev(name, axes, keys, vendor=0x1234, product=0x0001, ranges=None, rest=None):
+    """A fake pad. `ranges` overrides the default 0..255 per axis; `rest` the value an
+    axis sits at when untouched - which is how a stick is told from a trigger."""
     ranges = ranges or {}
-    abs_caps = [(a, AbsInfo(min=ranges.get(a, (0, 255))[0], max=ranges.get(a, (0, 255))[1])) for a in axes]
+    rest = rest or {}
+    abs_caps = []
+    for a in axes:
+        lo, hi = ranges.get(a, (0, 255))
+        # Default: sticks/hats rest centred, everything else at its minimum - the
+        # shim reads this exactly as the kernel reports it.
+        # X/Y/RX/RY are sticks by convention; Z/RZ are triggers on an Xbox-style pad
+        # and the RIGHT STICK on an Android-style one, so those tests say where it rests.
+        default = (lo + hi) // 2 if a in (e.ABS_X, e.ABS_Y, e.ABS_RX, e.ABS_RY) else lo
+        abs_caps.append((a, AbsInfo(value=rest.get(a, default), min=lo, max=hi)))
     return InputDevice(name=name, caps={e.EV_KEY: list(keys), e.EV_ABS: abs_caps}, vendor=vendor, product=product)
 
 
@@ -146,6 +160,9 @@ nacon = dev(
     PAD_KEYS + [e.BTN_THUMBL, e.BTN_THUMBR],
     vendor=0x3285,
     product=0x0312,
+    # The real device: Z/RZ are the right STICK (they rest centred) and BRAKE/GAS are
+    # the triggers (they rest at zero). This is what tells the two apart.
+    rest={e.ABS_Z: 128, e.ABS_RZ: 128},
 )
 p = gs.Pad(nacon)
 check("nacon right stick X -> RX", p.axis_map[e.ABS_Z], (e.ABS_RX, False))
@@ -202,3 +219,45 @@ if fails:
         print(" -", f)
     sys.exit(1)
 print("gamepad_shim: all checks passed")
+
+# ---- a trigger pair must never be adopted as the right stick --------------------
+# The bug this pins: RIGHT_STICK_PAIRS falls back to Z/RZ whenever RX/RY are absent,
+# so a pad whose Z/RZ are TRIGGERS (resting at 0) had them mapped to the right stick -
+# and scale() then reported that stick pinned hard up+left forever.
+trigpad = dev("Triggers on Z/RZ", [e.ABS_X, e.ABS_Y, e.ABS_Z, e.ABS_RZ, e.ABS_HAT0X, e.ABS_HAT0Y], PAD_KEYS)
+pt = gs.Pad(trigpad)
+check("Z/RZ resting at zero are triggers", pt.axis_map.get(e.ABS_Z), (e.ABS_Z, True))
+check("…and not the right stick", pt.axis_map.get(e.ABS_Z) != (e.ABS_RX, False), True)
+check("a trigger at rest reads 0, not -32768", pt.scale(e.ABS_Z, 0), (e.ABS_Z, 0))
+
+# ---- a hat pair resting at 0 must not be adopted as triggers -------------------
+hat2 = dev(
+    "Second hat",
+    [e.ABS_X, e.ABS_Y, e.ABS_HAT2X, e.ABS_HAT2Y],
+    PAD_KEYS,
+    ranges={e.ABS_HAT2X: (-1, 1), e.ABS_HAT2Y: (-1, 1)},
+    rest={e.ABS_HAT2X: 0, e.ABS_HAT2Y: 0},
+)
+check("a centred hat is not a trigger", gs.Pad(hat2).axis_map.get(e.ABS_HAT2Y), None)
+
+# ---- a button-only D-pad survives the shim ------------------------------------
+dpad = dev("Buttons-only dpad", [e.ABS_X, e.ABS_Y], PAD_KEYS + [e.BTN_DPAD_UP, e.BTN_DPAD_LEFT])
+pd = gs.Pad(dpad)
+check("dpad button -> hat press", pd.translate(Ev(e.EV_KEY, e.BTN_DPAD_UP, 1)), (e.EV_ABS, e.ABS_HAT0Y, -1))
+check("dpad button -> hat release", pd.translate(Ev(e.EV_KEY, e.BTN_DPAD_LEFT, 0)), (e.EV_ABS, e.ABS_HAT0X, 0))
+check("a pad WITH a hat keeps its hat", gs.Pad(nacon).translate(Ev(e.EV_KEY, e.BTN_DPAD_UP, 1)), None)
+
+# ---- digital shoulder triggers when there are no analog ones -------------------
+digi = dev("Digital LT/RT", [e.ABS_X, e.ABS_Y], PAD_KEYS + [e.BTN_TL2, e.BTN_TR2])
+check("BTN_TL2 -> full-scale Z", gs.Pad(digi).translate(Ev(e.EV_KEY, e.BTN_TL2, 1)), (e.EV_ABS, e.ABS_Z, 255))
+
+# ---- out-of-range values are clamped ------------------------------------------
+check("over-range stick clamps", p.scale(e.ABS_X, 9999), (e.ABS_X, 32767))
+check("under-range trigger clamps", pw.scale(e.ABS_BRAKE, -50), (e.ABS_Z, 0))
+
+if fails:
+    print("FAIL")
+    for f in fails:
+        print(" -", f)
+    sys.exit(1)
+print("gamepad_shim: all checks passed (extended)")

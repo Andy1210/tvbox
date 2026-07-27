@@ -63,14 +63,25 @@ function sendKey(spec: KeySpec) {
     bubbles: true,
     cancelable: true,
   } as KeyboardEventInit;
-  window.dispatchEvent(new KeyboardEvent("keydown", init));
-  window.dispatchEvent(new KeyboardEvent("keyup", init));
+  // The TARGET matters, not just the event: for an event dispatched AT window,
+  // Chromium runs window listeners in registration order and ignores the capture
+  // flag, so a screen that swallows keys in the capture phase (the screensaver, the
+  // About panel's scroll handler) would run AFTER spatial-nav's bubble listener -
+  // waking the ambient screen with A would also launch the focused tile. Dispatching
+  // at the focused element gives the same order a real key has: window capture first.
+  const target: EventTarget = document.activeElement || document.body || window;
+  target.dispatchEvent(new KeyboardEvent("keydown", init));
+  target.dispatchEvent(new KeyboardEvent("keyup", init));
 }
 
 let running = false;
 let frame = 0;
 const nextAt = new Map<string, number>(); // action -> when it may fire again
 const stickHeld = new Set<string>(); // axis directions, with hysteresis
+// pad index -> its axes at rest. An unrecognised pad's axes 6/7 are a hat on one
+// device and analog pedals on another, and a pedal RESTS at -1.0 - indistinguishable
+// from a hat held left unless we know where it started.
+const rest = new Map<number, number[]>();
 
 // Returns true when the action should fire now. A held direction repeats after
 // REPEAT_FIRST_MS; a button (Infinity) fires once and re-arms on release.
@@ -97,6 +108,7 @@ function poll() {
     frame = 0;
     nextAt.clear();
     stickHeld.clear();
+    rest.clear();
     return;
   }
   const now = performance.now();
@@ -105,9 +117,14 @@ function poll() {
   for (const pad of pads) {
     const buttons = pad.mapping === "standard" ? STANDARD_BUTTONS : RAW_BUTTONS;
     for (const [i, action] of buttons) if (pad.buttons[i]?.pressed) held.add(action);
+    if (!rest.has(pad.index)) rest.set(pad.index, pad.axes.slice());
+    const zero = rest.get(pad.index) as number[];
     for (const [xi, yi] of STICKS) {
-      const x = pad.axes[xi] ?? 0;
-      const y = pad.axes[yi] ?? 0;
+      // Relative to rest for the ambiguous pair, absolute for the left stick (whose
+      // centre is 0 by definition in the Gamepad API).
+      const base = xi === 0 ? 0 : 1;
+      const x = (pad.axes[xi] ?? 0) - base * (zero[xi] ?? 0);
+      const y = (pad.axes[yi] ?? 0) - base * (zero[yi] ?? 0);
       // Strongest deflection per direction across every pad and axis pair. Taking
       // the max FIRST matters: applying hysteresis per pair let a centred hat
       // cancel a deflected stick (whichever pair happened to be read last won).
@@ -160,5 +177,6 @@ export function startGamepadNav(): () => void {
     frame = 0;
     nextAt.clear();
     stickHeld.clear();
+    rest.clear();
   };
 }

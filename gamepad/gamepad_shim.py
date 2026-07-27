@@ -95,6 +95,40 @@ TRIGGER_PAIRS = [
 ]
 
 
+# Buttons that aren't in the xpad set but mean something we CAN express: a D-pad
+# reported as buttons becomes the hat, and digital shoulder triggers become full-scale
+# analog ones. Without this a pad whose D-pad is BTN_DPAD_* lost it completely, because
+# the grab hides the raw device.
+DPAD_TO_HAT = {
+    e.BTN_DPAD_UP: (e.ABS_HAT0Y, -1),
+    e.BTN_DPAD_DOWN: (e.ABS_HAT0Y, 1),
+    e.BTN_DPAD_LEFT: (e.ABS_HAT0X, -1),
+    e.BTN_DPAD_RIGHT: (e.ABS_HAT0X, 1),
+}
+DIGITAL_TRIGGERS = {e.BTN_TL2: e.ABS_Z, e.BTN_TR2: e.ABS_RZ}
+
+
+def release_virtual(ui):
+    """Neutralise and remove the virtual pad. Both halves matter: uinput remembers the
+    last state, so a pad that disconnected mid-direction would leave the UI repeating
+    that arrow forever, and a device left registered means the browser never reports
+    the last gamepad gone (the launcher's polling loop would never stop)."""
+    try:
+        for code, info in OUT_ABS:
+            ui.write(e.EV_ABS, code, 0 if info is not STICK else 0)
+        for code in OUT_KEYS:
+            ui.write(e.EV_KEY, code, 0)
+        ui.syn()
+    except Exception:
+        pass
+    try:
+        ui.close()
+    except Exception:
+        pass
+    log("virtual pad removed (no shimmed pads left)")
+    return None
+
+
 def log(*a):
     print("[gamepad-shim]", *a, flush=True)
 
@@ -131,9 +165,24 @@ def needs_shim(dev):
     return vendor not in KNOWN_MAPPED_VENDORS
 
 
-def pick_pair(axes, candidates, used):
+def centred(info):
+    """Does this axis rest near the middle of its range (a stick) or at its end (a
+    trigger)? evdev gives us the current value, which is the only reliable signal -
+    an Android pad's right stick is Z/RZ over 0..255 resting at ~128, and a trigger
+    is 0..255 resting at 0, so the CODE says nothing."""
+    if not info or info.max == info.min:
+        return False
+    mid = (info.min + info.max) / 2.0
+    return abs(info.value - mid) < (info.max - info.min) * 0.25
+
+
+def pick_pair(axes, candidates, used, absinfo=None, want=None):
     for lo, hi in candidates:
         if lo in axes and hi in axes and lo not in used and hi not in used:
+            if want == "stick" and absinfo and not (centred(absinfo[lo]) and centred(absinfo[hi])):
+                continue  # a pair resting at its ends is a trigger pair, not a stick
+            if want == "trigger" and absinfo and (centred(absinfo[lo]) or centred(absinfo[hi])):
+                continue  # a pair resting mid-range is a stick (or a hat), not a trigger
             return lo, hi
     return None
 
@@ -147,10 +196,10 @@ class Pad:
         self.absinfo = {a: info for a, info in caps.get(e.EV_ABS, [])}
         axes = set(self.absinfo)
         used = {e.ABS_X, e.ABS_Y}
-        right = pick_pair(axes, RIGHT_STICK_PAIRS, used)
+        right = pick_pair(axes, RIGHT_STICK_PAIRS, used, self.absinfo, "stick")
         if right:
             used |= set(right)
-        triggers = pick_pair(axes, TRIGGER_PAIRS, used)
+        triggers = pick_pair(axes, TRIGGER_PAIRS, used, self.absinfo, "trigger")
         if triggers:
             used |= set(triggers)
         # source code -> (target code, is_trigger)
@@ -166,6 +215,8 @@ class Pad:
         if e.ABS_HAT0Y in axes:
             self.axis_map[e.ABS_HAT0Y] = (e.ABS_HAT0Y, False)
         self.keys = set(caps.get(e.EV_KEY, []))
+        self.has_hat = e.ABS_HAT0X in axes or e.ABS_HAT0Y in axes
+        self.has_analog_triggers = triggers is not None
         log(
             f"{dev.name!r} vendor={dev.info.vendor:04x}:{dev.info.product:04x}",
             "right-stick=" + (self.name_pair(right) if right else "none"),
@@ -189,13 +240,23 @@ class Pad:
         if not info or info.max == info.min:
             return target, 0
         frac = (value - info.min) / (info.max - info.min)  # 0..1
+        frac = 0.0 if frac < 0 else 1.0 if frac > 1 else frac
         if is_trigger:
             return target, int(round(frac * 255))
         return target, int(round(frac * 65535)) - 32768
 
     def translate(self, ev):
         if ev.type == e.EV_KEY:
-            return (e.EV_KEY, ev.code, ev.value) if ev.code in OUT_KEYS else None
+            if ev.code in OUT_KEYS:
+                return (e.EV_KEY, ev.code, ev.value)
+            # A button-reported D-pad becomes the hat axis (press -> ±1, release -> 0).
+            if ev.code in DPAD_TO_HAT and not self.has_hat:
+                axis, dir = DPAD_TO_HAT[ev.code]
+                return (e.EV_ABS, axis, dir if ev.value else 0)
+            # Digital shoulder triggers, when the pad has no analog ones.
+            if ev.code in DIGITAL_TRIGGERS and not self.has_analog_triggers:
+                return (e.EV_ABS, DIGITAL_TRIGGERS[ev.code], 255 if ev.value else 0)
+            return None
         if ev.type == e.EV_ABS and ev.code in self.axis_map:
             target, value = self.scale(ev.code, ev.value)
             return (e.EV_ABS, target, value)
@@ -232,17 +293,30 @@ def main():
                 if ui is None:
                     # Created lazily, so a box with no odd pad never publishes a
                     # phantom Xbox controller to every app.
-                    ui = UInput(
-                        {e.EV_KEY: OUT_KEYS, e.EV_ABS: OUT_ABS},
-                        name=OUT_NAME,
-                        vendor=OUT_VENDOR,
-                        product=OUT_PRODUCT,
-                        version=OUT_VERSION,
-                    )
+                    try:
+                        ui = UInput(
+                            {e.EV_KEY: OUT_KEYS, e.EV_ABS: OUT_ABS},
+                            name=OUT_NAME,
+                            vendor=OUT_VENDOR,
+                            product=OUT_PRODUCT,
+                            version=OUT_VERSION,
+                        )
+                    except Exception as ex:
+                        # No /dev/uinput, or the input-group grant isn't live yet (a
+                        # fresh provision before reboot). Give the pad back and let it
+                        # work unshimmed rather than exiting into a restart loop that
+                        # flaps the grab every few seconds.
+                        log("cannot open uinput -", ex, "- leaving", dev.name, "unshimmed")
+                        try:
+                            dev.ungrab()
+                        except Exception:
+                            pass
+                        dev.close()
+                        continue
                     log("virtual pad up:", OUT_NAME, f"{OUT_VENDOR:04x}:{OUT_PRODUCT:04x}")
                 pads[path] = Pad(dev)
         if not pads:
-            time.sleep(0.2)
+            time.sleep(max(0.05, next_scan - time.monotonic()))  # nothing to read until the next scan
             continue
         # Read whatever is ready. A pad that disappears (BT off, unplug) raises on
         # read and is dropped; the virtual pad stays up for the others.
@@ -260,6 +334,8 @@ def main():
                 except Exception:
                     pass
                 pads.pop(pad.dev.path, None)
+                if not pads and ui is not None:
+                    ui = release_virtual(ui)
                 continue
             wrote = False
             for ev in events:

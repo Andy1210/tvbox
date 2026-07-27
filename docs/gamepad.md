@@ -25,6 +25,18 @@ Idle cost is zero: the polling loop starts on the first `gamepadconnected` and
 stops when the last pad disappears, and `requestAnimationFrame` is throttled to a
 stop in hidden windows.
 
+Two details that are easy to get wrong, both learned the hard way:
+
+- the synthetic events are dispatched at the **focused element**, not at `window`.
+  For a window-targeted event Chromium runs window listeners in registration order
+  and ignores the capture flag, so a screen that swallows keys in the capture phase
+  (the screensaver, About's scroll handler) would have run _after_ spatial-nav -
+  waking the ambient screen with **A** also launched the focused tile.
+- an unrecognised pad's axes 6/7 are a hat on one device and analog **pedals** on
+  another, and a pedal rests at `-1.0`. Each pad's resting values are sampled on the
+  first frame and deflection is measured from there, so a resting axis is neutral
+  whatever it reports.
+
 ## 2. Making an unrecognised pad usable in cloud gaming
 
 Chromium decides a pad's `Gamepad.mapping` from its vendor:product id against a
@@ -66,8 +78,25 @@ binds the kernel's `playstation` driver and maps as standard), Nintendo, Valve,
 Logitech, 8BitDo - are **left alone**, so a working mapping is never replaced by
 a guess.
 
+A stick is told from a trigger by **where the axis rests**, not by its code: an
+Android-style pad's right stick is `Z`/`RZ` resting mid-range, while a trigger rests
+at its minimum. Going by the code alone pinned the virtual right stick to full
+deflection on pads whose `Z`/`RZ` are triggers. A D-pad reported as buttons
+(`BTN_DPAD_*`) becomes the hat, and digital shoulder triggers become full-scale
+analog ones - without that, a grabbed pad could lose its D-pad entirely.
+
+When the last shimmed pad disconnects the virtual pad is **neutralised and removed**:
+uinput remembers its last state, so a pad that dies mid-direction would otherwise
+leave the UI auto-repeating that arrow forever.
+
 Disable the whole thing with `"gamepad": { "shim": "off" }` in
-`~/.tvbox/config.json` (then restart `tvbox-gamepad`).
+`~/.tvbox/config.json` (then restart `tvbox-gamepad`). The unit is `Restart=on-failure`
+precisely because that off-switch exits cleanly - `always` would respawn it every few
+seconds forever.
+
+> On a box that only ever updates over OTA the new service lands on disk and is
+> enabled, but systemd only picks it up on the next boot (OTA never reboots the box),
+> so the shim starts working then.
 
 Offline unit tests for the pair resolution, the axis scaling and the "don't shim
 this" rules: `python3 gamepad/gamepad_shim_test.py` (also in CI; it stubs `evdev`

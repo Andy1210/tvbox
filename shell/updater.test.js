@@ -60,10 +60,11 @@ test("every file in the infra source dirs is listed in infra.list or consciously
     "deploy.sh", // the dev-deploy driver itself
     "infra.list", // the list itself
     "ir_protocols_test.py", // unit test - runs in CI, never ships to a box
+    "gamepad_shim_test.py", // ditto (stubs evdev, so CI needs no hardware)
   ]);
   const listed = new Set(infraListBasenames());
   const repo = path.join(__dirname, "..");
-  for (const dir of ["deploy", "cec", "remote"]) {
+  for (const dir of ["deploy", "cec", "remote", "gamepad"]) {
     for (const name of fs.readdirSync(path.join(repo, dir))) {
       if (!fs.statSync(path.join(repo, dir, name)).isFile()) continue; // __pycache__ etc.
       if (NOT_SHIPPED.has(name)) continue;

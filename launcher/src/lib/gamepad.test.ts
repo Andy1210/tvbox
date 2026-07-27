@@ -134,9 +134,26 @@ it("an unrecognised pad still navigates via its hat axes", () => {
   pads = [p];
   begin();
   (p.buttons[13] as Btn).pressed = true; // standard-layout index means nothing here
+  tick(); // first frame samples where the axes REST
   (p.axes as number[])[7] = 1; // hat down, where raw HID pads report it
   tick();
   expect(keys).toEqual(["ArrowDown"]);
+});
+
+it("axes that REST off-centre (analog pedals) don't navigate on their own", () => {
+  // The trap this guards: on some unrecognised pads axes 6/7 are a hat, on others
+  // they are pedals - and a pedal reports -1.0 at rest, which used to read as "left
+  // and up held" and auto-repeated forever with nobody touching the pad.
+  const p = pad({ mapping: "" as Gamepad["mapping"], axes: [0, 0, 0, 0, 0, 0, -1, -1] });
+  pads = [p];
+  begin();
+  tick();
+  tick(600);
+  expect(keys).toEqual([]);
+  // …and the same axes still work once they actually move.
+  (p.axes as number[])[6] = 1;
+  tick();
+  expect(keys).toEqual(["ArrowRight"]);
 });
 
 it("stops polling when the last pad goes away", () => {
