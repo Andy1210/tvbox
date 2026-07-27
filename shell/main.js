@@ -497,11 +497,12 @@ function handlePost(p, data, res) {
     return jsonRes(res, { ok: true, dest });
   }
   if (p === "/tvbox/api/apps/quit") {
-    // HOME's running-apps row: really exit a background app (its window and
-    // page state are dropped; next launch is a fresh start).
+    // HOME's running-apps row: really exit an app (its window and page state are
+    // dropped; next launch is a fresh start). Same teardown an app's own "Exit?"
+    // dialog gets - one implementation, so both can't drift.
     const id = String(data.id || "");
     if (!appWindow(id)) return jsonRes(res, { ok: false, error: "not running" });
-    destroyAppWindow(id);
+    exitApp(id);
     return jsonRes(res, { ok: true, id });
   }
   // Fire TV remote IR programming (Settings → Peripherals; shell/firetvir.js)
@@ -2422,6 +2423,22 @@ function navTo(dest) {
   // web/ bundle served at /<id>/ or a remote site - handled above.)
 }
 
+// The app asked to be torn down - a Plex-HTPC-style "Exit?" dialog confirming over
+// QWebChannel, not the user pressing Home. Backgrounding is wrong for this: the app
+// would stay in the switcher and re-entering it would land straight back on its own
+// exit dialog. So destroy the window; a later launch starts the app fresh.
+// Launcher FIRST, then destroy - same order as the uninstall/remove paths above.
+// The reverse leaves a gap with no visible window (bare desktop, or a fullscreen
+// mpv the app was revealing), because it is showLauncher that stops playback and
+// hides the app. It also nulls currentAppId, so the window's own "closed" handler
+// can't fire a second launcher.
+function exitApp(id) {
+  if (!id || !appWindow(id)) return;
+  console.log("[nav] exit", id);
+  if (currentAppId === id) showLauncher();
+  destroyAppWindow(id);
+}
+
 // Cycle foreground through the running apps (the `appswitcher` remap action).
 // From the launcher it foregrounds the most recently used app; from an app it
 // goes to the next running one (wrapping); with nothing running it's a no-op.
@@ -2442,7 +2459,12 @@ function switchApp() {
 // Navigate between the HOME launcher and an app. The launcher calls
 // window.tvbox.launch(id); the Home button calls window.tvbox.home() (local apps)
 // or is caught main-side (remote apps) -> back to the launcher, stopping video.
-ipcMain.on("nav", (_e, dest) => navTo(dest));
+ipcMain.on("nav", (e, dest) => {
+  // "exit" is app-initiated teardown, so it targets the SENDER's app rather than
+  // whatever is foreground - a background app's exit must not close the visible one.
+  if (dest === "exit") return exitApp(windowAppId(e.sender));
+  navTo(dest);
+});
 
 // Which app a capability call belongs to - the SENDER window's own identity
 // (windowAppId), never the global foreground id. Every window is permanently

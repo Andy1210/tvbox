@@ -136,17 +136,21 @@ module.exports.setup = function setup(ctx) {
         } catch (e) {}
       }
 
-      // system.exit / quit / closeApp -> leave the app, back to the HOME launcher.
+      // system.exit / quit / closeApp -> really CLOSE the app, then HOME.
       // A Plex-HTPC-style client's "Exit?" confirmation calls one of these over
       // QWebChannel expecting the host to tear the app down; without this it hit
-      // the generic no-op below, so the dialog's OK did nothing. Anything else
+      // the generic no-op below, so the dialog's OK did nothing. It must be "exit"
+      // and not "home": home only backgrounds the app (instant resume), which left
+      // it in the app switcher with its exit dialog still on screen. Anything else
       // under system.* is logged (not acted on) so an unknown exit verb on a new
-      // client is visible in ~/.tvbox/shell.log and easy to wire up.
-      if (path.indexOf("system.") === 0) {
+      // client is visible in ~/.tvbox/shell.log and easy to wire up. Gated on the
+      // declared `system` capability like every other surface here - tearing the
+      // app down is a host action, so it must not be reachable unconditionally.
+      if (has("system") && path.indexOf("system.") === 0) {
         var leaf = path.slice("system.".length);
         if (leaf === "exit" || leaf === "quit" || leaf === "closeApp" || leaf === "close") {
           try {
-            ipcRenderer.send("nav", "home");
+            ipcRenderer.send("nav", "exit");
           } catch (e) {}
           if (hasCb) cb({ errorCode: Success, result: {} });
           return;

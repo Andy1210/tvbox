@@ -42,6 +42,10 @@ destroy-on-leave behavior - the rollback lever if a box misbehaves.
 - Registry + hidden-set policy: [shell/appwindows.js](../shell/appwindows.js).
   Foreground orchestration (focus, stacking, mpv, video-mode): `shell/main.js`
   (`foregroundApp`/`showLauncher`/`navTo`/`switchApp`).
+- Leaving an app BACKGROUNDS it; only `exitApp` (main.js) really closes one - the
+  ✕ in HOME's running row (`/tvbox/api/apps/quit`) and an app asking to be closed
+  itself (a Plex-style "Exit?" dialog -> `system.exit` -> `nav "exit"`, keyed to
+  the sending window so an app can only ever close itself) both go through it.
 - Only ONE window is ever visible (hidden windows are unmapped in Wayland), so
   CEC key routing and always-on-top stacking behave as in the single-window
   days. The launcher window stays loaded permanently; HOME refetches
