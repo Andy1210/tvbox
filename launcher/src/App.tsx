@@ -9,6 +9,7 @@ import { SetupWizard, markSetupDone } from "./components/SetupWizard";
 import { Settings } from "./components/Settings";
 import { Catalog } from "./components/Catalog";
 import { Ambient } from "./components/Ambient";
+import { TypingOverlay } from "./components/TypingOverlay";
 import { NotificationToast } from "./components/NotificationToast";
 import { InstallWatcher } from "./components/InstallWatcher";
 import { useIdle } from "./lib/useIdle";
@@ -92,7 +93,13 @@ export function App() {
       history.replaceState(null, "", window.location.pathname); // one-shot: a manual reload lands on Home
       nav.open("settings");
     }
-    return window.tvbox?.onNav?.((n) => (n.dest === "settings" ? nav.open("settings") : nav.home()));
+    // "typing" is TypingOverlay's business (it opens over whatever is on screen);
+    // everything else is a view switch.
+    return window.tvbox?.onNav?.((n) => {
+      if (n.dest === "typing") return;
+      if (n.dest === "settings") nav.open("settings");
+      else nav.home();
+    });
   }, []);
 
   // Apps now open as shell windows (webclient), not in-launcher views - the
@@ -144,6 +151,7 @@ export function App() {
       <Backdrop />
       {content}
       <NotificationToast />
+      <TypingOverlay />
       <InstallWatcher />
     </>
   );

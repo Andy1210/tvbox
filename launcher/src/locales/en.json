@@ -70,6 +70,14 @@
     "on": "On",
     "off": "Off"
   },
+  "typing": {
+    "title": "Type here",
+    "asking": "asked for by",
+    "phoneKey": "Phone",
+    "phoneHint": "Press Phone to type on your phone instead.",
+    "qrAlt": "QR code for typing from a phone",
+    "secretHint": "Password field: the text goes to the TV over your local network, unencrypted."
+  },
   "notify": {
     "dismiss": "Back to dismiss"
   },

@@ -20,8 +20,11 @@ export interface TvNotification {
 // Launcher navigation pushed by the shell while the launcher is up (a remapped
 // Settings button on a remote, /tvbox/api/nav). Out of an app the shell reloads
 // the launcher with the #settings hash instead (App.tsx handles both).
+// "typing" is not a view: it opens the typing screen over whatever is on screen
+// (the shell pushes it when a text field takes focus in an app), and the shell
+// pushes "home" when that session ends.
 export interface TvNav {
-  dest: "home" | "settings";
+  dest: "home" | "settings" | "typing";
 }
 
 export interface TvboxBridge {

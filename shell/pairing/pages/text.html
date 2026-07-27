@@ -1,0 +1,134 @@
+<!doctype html>
+<html lang="{{lang}}">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>{{title}}</title>
+    <style>
+      :root {
+        color-scheme: dark;
+      }
+      body {
+        margin: 0;
+        background: #0b0f14;
+        color: #f4f6fa;
+        font:
+          16px/1.5 system-ui,
+          sans-serif;
+        padding: 24px;
+        max-width: 520px;
+        margin: auto;
+      }
+      h1 {
+        font-size: 20px;
+      }
+      p {
+        color: #aab4c2;
+        font-size: 14px;
+      }
+      .fld {
+        width: 100%;
+        box-sizing: border-box;
+        padding: 16px;
+        border-radius: 12px;
+        border: 1px solid #2b3543;
+        background: #131a23;
+        color: #f4f6fa;
+        font-size: 17px;
+        margin-top: 8px;
+      }
+      .lbl {
+        font-size: 13px;
+        color: #7d8a99;
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+      }
+      .btn {
+        display: block;
+        width: 100%;
+        text-align: center;
+        padding: 16px;
+        border-radius: 12px;
+        background: #1f6feb;
+        color: #fff;
+        font-size: 17px;
+        font-weight: 700;
+        margin-top: 16px;
+        border: 0;
+      }
+      .warn {
+        margin-top: 14px;
+        padding: 12px 14px;
+        border-radius: 10px;
+        background: #2a1f0b;
+        color: #ffd08a;
+        font-size: 13px;
+      }
+      #st {
+        margin-top: 16px;
+        text-align: center;
+        font-size: 15px;
+        color: #7d8a99;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>{{title}}</h1>
+    <p>{{hint}}</p>
+    <input id="code" type="hidden" />
+    <div class="lbl" id="fieldLabel">{{field}}</div>
+    <!-- prettier-ignore -->
+    <input id="t" class="fld" type="{{inputType}}" maxlength="{{maxlen}}" autocomplete="off"
+           autocapitalize="off" autocorrect="off" spellcheck="false" />
+    <button class="btn" id="go">{{send}}</button>
+    <div class="warn" id="secretWarn" style="display: none">{{secret}}</div>
+    <div id="st"></div>
+    <script>
+      document.getElementById("code").value = new URLSearchParams(location.search).get("c") || "";
+      function code() {
+        return document.getElementById("code").value;
+      }
+      var st = document.getElementById("st"),
+        input = document.getElementById("t"),
+        go = document.getElementById("go");
+      // What the field is called on the TV. Untrusted text from the app's page, so
+      // it arrives JSON-encoded and is assigned with textContent - never parsed.
+      var FIELD_LABEL = {{labelJson}};
+      if (FIELD_LABEL) document.getElementById("fieldLabel").textContent = FIELD_LABEL;
+      if ("{{isPassword}}") document.getElementById("secretWarn").style.display = "block";
+      input.focus();
+      async function send() {
+        var text = input.value;
+        if (!text) {
+          st.textContent = "{{empty}}";
+          return;
+        }
+        go.disabled = true;
+        st.textContent = "…";
+        try {
+          var r = await fetch("/text?c=" + encodeURIComponent(code()), {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ text: text }),
+          });
+          var j = await r.json();
+          if (j.ok) {
+            st.textContent = "{{sent}}";
+            input.value = "";
+            input.disabled = true;
+          } else {
+            st.textContent = j.error === "expired" ? "{{expired}}" : "{{error}}";
+            go.disabled = false;
+          }
+        } catch (e) {
+          st.textContent = "{{error}}";
+          go.disabled = false;
+        }
+      }
+      go.addEventListener("click", send);
+      input.addEventListener("keydown", function (e) {
+        if (e.key === "Enter") send();
+      });
+    </script>
+  </body>
+</html>

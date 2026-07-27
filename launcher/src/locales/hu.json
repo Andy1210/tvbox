@@ -70,6 +70,14 @@
     "on": "Be",
     "off": "Ki"
   },
+  "typing": {
+    "title": "Írd be",
+    "asking": "kéri",
+    "phoneKey": "Telefon",
+    "phoneHint": "A Telefon gombbal telefonon írhatod be.",
+    "qrAlt": "QR-kód telefonos beíráshoz",
+    "secretHint": "Jelszó mező: a szöveg a helyi hálózaton, titkosítás nélkül megy a TV-hez."
+  },
   "notify": {
     "dismiss": "Vissza a bezáráshoz"
   },
