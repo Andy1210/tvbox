@@ -2535,17 +2535,32 @@ const CEC_CMD_FIFO = "/tmp/tvbox-cec-cmd";
 function cecPower(on) {
   if (fifoCmd(CEC_CMD_FIFO, on ? "on 0" : "standby 0", "cec")) console.log("[cec] power", on ? "on" : "off");
 }
+// FIFOs we've already complained about, so a bridge that simply isn't there (a box
+// with no CEC is normal) doesn't fill the log: bridgesCmd runs on a timer for the
+// whole of a native-app session. Cleared by the next successful write.
+const fifoQuiet = new Set();
 // Write a control line to a bridge FIFO. O_NONBLOCK so a bridge that isn't
-// running (or a box with no CEC) can never hang the shell.
+// running can never hang the shell.
 function fifoCmd(fifo, cmd, tag) {
+  let fd = null;
   try {
-    const fd = fs.openSync(fifo, fs.constants.O_WRONLY | fs.constants.O_NONBLOCK);
+    fd = fs.openSync(fifo, fs.constants.O_WRONLY | fs.constants.O_NONBLOCK);
     fs.writeSync(fd, cmd + "\n");
-    fs.closeSync(fd);
+    fifoQuiet.delete(fifo);
     return true;
   } catch (e) {
-    console.warn("[" + tag + "] cmd failed (bridge running?):", e.message);
+    if (!fifoQuiet.has(fifo)) {
+      fifoQuiet.add(fifo);
+      console.warn("[" + tag + "] cmd failed (bridge running?):", e.message);
+    }
     return false;
+  } finally {
+    // A throwing writeSync would otherwise leak the descriptor, once per attempt.
+    if (fd !== null) {
+      try {
+        fs.closeSync(fd);
+      } catch (e) {}
+    }
   }
 }
 // Tell BOTH uinput bridges the same thing. Used for "native on"/"native off":
@@ -3345,12 +3360,27 @@ app.whenReady().then(() => {
 // shell to escape it. The bridges are taken out of native mode explicitly too,
 // because the app's exit event does not necessarily get to run during shutdown,
 // and a bridge left routing Home to a dead shell would swallow the button.
+// How long shutdown waits for a native app to save and exit. Long enough for an
+// emulator to flush its config and save files, short enough that a restart is not
+// visibly stuck; an app that ignores the signal is left to native.js's escalation.
+const NATIVE_SHUTDOWN_WAIT_MS = 2500;
 function shutdown() {
   stopMpv();
-  if (nativeapp.running()) {
-    nativeForeground = false;
-    nativeapp.stop();
-  }
+  if (!nativeapp.running()) return finishShutdown();
+  // The app was just asked to exit. Quitting immediately would take away the
+  // process that owns it before it has written its files, and the escalation
+  // timers die with us, so poll briefly for it to go on its own.
+  nativeForeground = false;
+  nativeapp.stop();
+  const deadline = Date.now() + NATIVE_SHUTDOWN_WAIT_MS;
+  const wait = setInterval(() => {
+    if (!nativeapp.settled() && Date.now() < deadline) return;
+    clearInterval(wait);
+    if (!nativeapp.settled()) console.warn("[native] still running at shutdown, leaving it to --die-with-parent");
+    finishShutdown();
+  }, 150);
+}
+function finishShutdown() {
   bridgesCmd("native off");
   stopPlugins();
   mqttBridge.stop();

@@ -43,6 +43,7 @@ let appId = null; // manifest id of the running native app
 let flatpakRef = null; // its flatpak ref, for the `flatpak kill` fallback
 let stopping = false; // a teardown is already in flight (don't double-signal)
 let reassert = null; // interval keeping the bridges in native mode
+let targets = []; // [{ pid, stamp }] the last stop() signalled, for escalation + settled()
 
 function init(d) {
   deps = { ...deps, ...d };
@@ -153,6 +154,7 @@ function finish(child, code, signal) {
   stopping = false;
   clearInterval(reassert);
   reassert = null;
+  targets = [];
   deps.bridgeCmd("native off");
   try {
     deps.onExit(wasId, code, signal);
@@ -161,14 +163,34 @@ function finish(child, code, signal) {
   }
 }
 
-// Is a pid still around? (Signal 0 tests existence without delivering anything.)
-function alive(pid) {
+// A pid on its own is not a stable identity. The escalation below fires seconds
+// after the pids are collected, and a process that exits in the meantime can have
+// its number reused, so a later SIGKILL would land on whatever took its place.
+// /proc/<pid>/stat's start time pins the identity: same pid AND same start time.
+function procStamp(pid) {
+  let stat;
   try {
-    process.kill(pid, 0);
-    return true;
+    stat = fs.readFileSync("/proc/" + pid + "/stat", "utf8");
   } catch (e) {
-    return false;
+    return null; // gone
   }
+  // Field 2 (comm) is parenthesised and may itself contain spaces and brackets,
+  // so parse from after its LAST ")". starttime is field 22, i.e. index 19 here.
+  const fields = stat.slice(stat.lastIndexOf(")") + 2).split(" ");
+  return fields[19] || null;
+}
+// { pid, stamp } -> is that exact process still running?
+function sameProc(entry) {
+  return !!entry.stamp && procStamp(entry.pid) === entry.stamp;
+}
+function stamped(pid) {
+  return { pid, stamp: procStamp(pid) };
+}
+function signal(entry, sig) {
+  if (!sameProc(entry)) return; // exited, and the pid may belong to someone else now
+  try {
+    process.kill(entry.pid, sig);
+  } catch (e) {}
 }
 // Every descendant of a pid, from /proc. A flatpak app is not the process we
 // spawned: `flatpak run` is a launcher whose child is the bwrap sandbox, and the
@@ -203,38 +225,32 @@ function stop() {
   stopping = true;
   const child = proc;
   const ref = flatpakRef;
-  const appPids = descendants(child.pid, MAX_PROC_DEPTH);
-  for (const p of appPids) {
-    try {
-      process.kill(p, "SIGTERM");
-    } catch (e) {}
-  }
-  // No descendants means it IS the process we spawned (a plain `bin` app), so
-  // signal that instead.
-  if (!appPids.length) {
-    try {
-      child.kill("SIGTERM");
-    } catch (e) {}
-  }
-  const stillUp = () => appPids.some(alive) || alive(child.pid);
+  // The app processes, plus the launcher itself as the fallback for a plain `bin`
+  // app that has no descendants.
+  const appPids = descendants(child.pid, MAX_PROC_DEPTH).map(stamped);
+  targets = appPids.length ? appPids : [stamped(child.pid)];
+  for (const entry of targets) signal(entry, "SIGTERM");
   setTimeout(() => {
-    if (!stillUp()) return;
+    if (settled()) return;
     if (ref) {
       console.warn("[native] app ignored SIGTERM, flatpak kill", ref);
       execFile("flatpak", ["kill", ref], { env: deps.childEnv() }, () => {});
     }
   }, TERM_GRACE_MS);
   setTimeout(() => {
-    if (!stillUp()) return;
+    if (settled()) return;
     console.warn("[native] still alive, SIGKILL");
-    for (const p of appPids.concat(child.pid)) {
-      try {
-        process.kill(p, "SIGKILL");
-      } catch (e) {}
-    }
+    for (const entry of targets.concat(stamped(child.pid))) signal(entry, "SIGKILL");
   }, KILL_GRACE_MS);
+}
+
+// Has everything stop() signalled actually gone? Used by the shell's shutdown to
+// give the app its save-and-exit window before the process that owns it goes away,
+// and by the escalation timers above to decide whether they are still needed.
+function settled() {
+  return !targets.some(sameProc);
 }
 
 // flatpakRefOk is exported so install.js can validate `requires.flatpak` refs
 // against the SAME rule the launch path applies to runtime.native.flatpak.
-module.exports = { init, start, stop, running, id, parseSpec, flatpakRefOk: refOk };
+module.exports = { init, start, stop, settled, running, id, parseSpec, flatpakRefOk: refOk };

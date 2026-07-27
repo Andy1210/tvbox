@@ -131,8 +131,15 @@ function validateManifest(m, src) {
   if (!m.name) return bad("missing name");
   // A native app's command line reaches argv, so validate it with the very parser
   // the launch path uses rather than a second copy of the rules.
-  if (m.type === "native" && !nativeapp.parseSpec(m.runtime && m.runtime.native))
-    return bad("type native needs a valid runtime.native (flatpak ref or bin)");
+  if (m.type === "native") {
+    const nat = (m.runtime && m.runtime.native) || null;
+    if (!nativeapp.parseSpec(nat)) return bad("type native needs a valid runtime.native (flatpak ref or bin)");
+    // The dep check reads requires.flatpak while the launch reads
+    // runtime.native.flatpak. A manifest that names the ref in only one of them
+    // would report depsOk with nothing installed, and the launch would just fail.
+    if (nat.flatpak && !((m.requires && m.requires.flatpak) || []).includes(nat.flatpak))
+      return bad("runtime.native.flatpak (" + nat.flatpak + ") must also be listed in requires.flatpak");
+  }
   // flatpak deps: `flatpak install --user` needs no root, so unlike apt these are
   // installable straight from the UI. The refs reach argv too.
   const fps = m.requires && m.requires.flatpak;

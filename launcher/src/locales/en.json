@@ -208,7 +208,9 @@
     "pairingHint": "Scan the code with your phone, then use the page it opens.",
     "pairingCode": "Code",
     "pairingDone": "Done",
-    "pairingFailed": "Couldn't start the phone connection."
+    "pairingFailed": "Couldn't start the phone connection.",
+    "pairingRetry": "Try again",
+    "pairingQrAlt": "QR code to scan with your phone"
   },
   "catalog": {
     "title": "Get more apps"

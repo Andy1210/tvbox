@@ -85,8 +85,10 @@ export function AppOrderSettings() {
   };
 
   const [status, setStatus] = useState<string | null>(null);
-  // An app-declared phone action is open (its QR overlay); null = none.
-  const [pairing, setPairing] = useState<{ kind: string; title: string } | null>(null);
+  // An app-declared phone action is open (its QR overlay); null = none. `from` is
+  // the focus key of the button that opened it: the overlay is a focus boundary, so
+  // without putting focus back the D-pad has no target once it unmounts.
+  const [pairing, setPairing] = useState<{ kind: string; title: string; from: string } | null>(null);
   const uninstall = async (a: AppManifest) => {
     const ok = await removeApp(a.id);
     setStatus(t(ok ? "appsettings.uninstalled" : "appsettings.uninstallFailed", { name: loc(a.name) }));
@@ -157,7 +159,9 @@ export function AppOrderSettings() {
                 <FocusButton
                   key={p.kind}
                   focusKey={"apporder-pair-" + a.id + "-" + p.kind}
-                  onEnter={() => setPairing({ kind: p.kind, title: loc(p.label) })}
+                  onEnter={() =>
+                    setPairing({ kind: p.kind, title: loc(p.label), from: "apporder-pair-" + a.id + "-" + p.kind })
+                  }
                   className="px-[1.6vw] h-[5.4vh] rounded-[1vh] bg-white/5 flex items-center justify-center text-[1.9vh] font-semibold shrink-0"
                 >
                   {loc(p.label)}
@@ -183,7 +187,17 @@ export function AppOrderSettings() {
         )}
         {gate}
       </div>
-      {pairing && <AppPairing kind={pairing.kind} title={pairing.title} onClose={() => setPairing(null)} />}
+      {pairing && (
+        <AppPairing
+          kind={pairing.kind}
+          title={pairing.title}
+          onClose={() => {
+            const back = pairing.from;
+            setPairing(null);
+            setTimeout(() => setFocus(back), 0); // after the overlay unmounts
+          }}
+        />
+      )}
     </div>
   );
 }

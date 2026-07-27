@@ -179,3 +179,53 @@ test("installPackage rejects a package whose manifest id doesn't match the insta
     srv.close();
   }
 });
+
+// A native app is launched from runtime.native.flatpak but its dependency is
+// checked through requires.flatpak. Naming the ref in only one of them would make
+// the tile claim it is ready with nothing installed, and the launch would fail, so
+// the manifest validator refuses that shape.
+const NATIVE_BASE = { id: "ra", name: "RA", type: "native", status: "ready" };
+
+test("a native app must list its runtime flatpak ref in requires.flatpak", () => {
+  const m = {
+    ...NATIVE_BASE,
+    requires: { flatpak: ["org.libretro.RetroArch"] },
+    runtime: { native: { flatpak: "org.libretro.RetroArch", args: ["--fullscreen"] } },
+  };
+  assert.ok(apps.validateManifest(m, "ra.json"), "the matching pair is accepted");
+
+  const mismatched = {
+    ...NATIVE_BASE,
+    requires: { flatpak: ["org.libretro.Something.Else"] },
+    runtime: { native: { flatpak: "org.libretro.RetroArch" } },
+  };
+  assert.equal(apps.validateManifest(mismatched, "ra.json"), null, "a ref missing from requires is refused");
+
+  const undeclared = { ...NATIVE_BASE, runtime: { native: { flatpak: "org.libretro.RetroArch" } } };
+  assert.equal(apps.validateManifest(undeclared, "ra.json"), null, "no requires.flatpak at all is refused");
+});
+
+test("a native app declaring a plain bin needs no requires.flatpak", () => {
+  const m = { ...NATIVE_BASE, runtime: { native: { bin: "moonlight" } } };
+  assert.ok(apps.validateManifest(m, "ra.json"));
+});
+
+test("a native app with an unusable runtime.native is refused", () => {
+  for (const native of [undefined, {}, { flatpak: "bad ref" }, { bin: "../../bin/sh" }]) {
+    assert.equal(apps.validateManifest({ ...NATIVE_BASE, runtime: { native } }, "ra.json"), null);
+  }
+});
+
+test("pairing entries are bounded and need a kind plus a label", () => {
+  const withPairing = (pairing) => ({ id: "x", name: "X", type: "webclient", status: "ready", pairing });
+  assert.ok(apps.validateManifest(withPairing([{ kind: "roms", label: "Upload" }]), "x.json"));
+  assert.ok(apps.validateManifest(withPairing([{ kind: "roms", label: { en: "Upload" } }]), "x.json"));
+  assert.equal(apps.validateManifest(withPairing([{ kind: "BAD KIND", label: "x" }]), "x.json"), null);
+  assert.equal(apps.validateManifest(withPairing([{ kind: "roms" }]), "x.json"), null, "label is required");
+  assert.equal(apps.validateManifest(withPairing("roms"), "x.json"), null, "must be an array");
+  assert.equal(
+    apps.validateManifest(withPairing(new Array(5).fill({ kind: "roms", label: "x" })), "x.json"),
+    null,
+    "at most 4",
+  );
+});

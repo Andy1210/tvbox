@@ -20,10 +20,16 @@ export function AppPairing({ kind, title, onClose }: { kind: string; title: stri
   const [info, setInfo] = useState<{ shortUrl: string; code: string } | null>(null);
   const [qr, setQr] = useState("");
   const [failed, setFailed] = useState(false);
+  // Bumping this re-runs the effect, which is how Retry works without a second
+  // copy of the start logic.
+  const [attempt, setAttempt] = useState(0);
 
   useEffect(() => {
     let alive = true;
-    fetch("/tvbox/api/pairing/start", {
+    setFailed(false);
+    setInfo(null);
+    setQr("");
+    const started = fetch("/tvbox/api/pairing/start", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ locale, kind }),
@@ -47,13 +53,22 @@ export function AppPairing({ kind, title, onClose }: { kind: string; title: stri
       });
     return () => {
       alive = false;
-      fetch("/tvbox/api/pairing/stop", { method: "POST" }).catch(() => {});
+      // Stop only AFTER start has settled. Closing the screen while the start
+      // request is still in flight would otherwise race it, and a stop that
+      // arrives first leaves the pairing server up with a live code once the
+      // start lands.
+      started.catch(() => {}).then(() => fetch("/tvbox/api/pairing/stop", { method: "POST" }).catch(() => {}));
     };
-  }, [locale, kind]);
+  }, [locale, kind, attempt]);
 
   useEffect(() => {
     setFocus("app-pairing-done");
   }, []);
+  // Retry appears only after a failure, so move focus onto it: the remote has to
+  // reach the recovery action without the user hunting for it.
+  useEffect(() => {
+    if (failed) setFocus("app-pairing-retry");
+  }, [failed]);
   useBackspace(onClose);
 
   return (
@@ -65,10 +80,25 @@ export function AppPairing({ kind, title, onClose }: { kind: string; title: stri
         <div className="text-[3vh] font-bold">{title}</div>
         <div className="text-[2vh] text-fg-dim max-w-[62vw]">{t("appsettings.pairingHint")}</div>
         {failed ? (
-          <div className="text-[2.2vh] text-warn">{t("appsettings.pairingFailed")}</div>
+          <>
+            <div className="text-[2.2vh] text-warn">{t("appsettings.pairingFailed")}</div>
+            <FocusButton
+              focusKey="app-pairing-retry"
+              onEnter={() => setAttempt((n) => n + 1)}
+              className="px-[3vw] py-[1.6vh] rounded-[1.2vh] bg-white/15 text-[2.2vh] font-semibold"
+            >
+              {t("appsettings.pairingRetry")}
+            </FocusButton>
+          </>
         ) : qr || info ? (
           <>
-            {qr && <img src={qr} alt="QR" className="w-[30vh] h-[30vh] rounded-[1.4vh] bg-white p-[1vh]" />}
+            {qr && (
+              <img
+                src={qr}
+                alt={t("appsettings.pairingQrAlt")}
+                className="w-[30vh] h-[30vh] rounded-[1.4vh] bg-white p-[1vh]"
+              />
+            )}
             <div className="text-[2.2vh] font-semibold tabular-nums">{info?.shortUrl}</div>
             <div className="text-[2vh] text-fg-dim">
               {t("appsettings.pairingCode")}:{" "}
