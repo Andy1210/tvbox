@@ -107,6 +107,14 @@ function publicConfig() {
       // launcher preferences. hourFormat: "auto" (locale default) | "12" | "24"
       hourFormat: (c.ui && ["12", "24"].includes(c.ui.hourFormat) && c.ui.hourFormat) || "auto",
       navSounds: !(c.ui && c.ui.navSounds === false), // D-pad ticks, default on
+      // The launcher's chosen locale, mirrored here BY the launcher (its i18n store
+      // is the source of truth and lives in the renderer). The shell needs it for
+      // things the renderer can't do: the phone pairing pages' language, and the
+      // language a remote web app is told it's running in (shell/lang.js).
+      locale:
+        c.ui && typeof c.ui.locale === "string" && /^[a-z]{2,3}(-[A-Za-z0-9]{2,8})?$/.test(c.ui.locale)
+          ? c.ui.locale
+          : "",
     },
     remote: {
       // Per-device button remap + Power-button policy, consumed by
@@ -359,8 +367,20 @@ function setUi(ui) {
   const c = load();
   const hf = ui && ["auto", "12", "24"].includes(ui.hourFormat) ? ui.hourFormat : undefined;
   const ns = ui && typeof ui.navSounds === "boolean" ? ui.navSounds : undefined;
-  c.ui = { ...c.ui, ...(hf ? { hourFormat: hf } : {}), ...(ns !== undefined ? { navSounds: ns } : {}) };
+  const lc =
+    ui && typeof ui.locale === "string" && /^[a-z]{2,3}(-[A-Za-z0-9]{2,8})?$/.test(ui.locale) ? ui.locale : undefined;
+  c.ui = {
+    ...c.ui,
+    ...(hf ? { hourFormat: hf } : {}),
+    ...(ns !== undefined ? { navSounds: ns } : {}),
+    ...(lc ? { locale: lc } : {}),
+  };
   save(c);
+}
+// The UI locale for everything shell-side that needs a language (pairing pages, the
+// language a remote app is told). "" until the launcher has mirrored it.
+function uiLocale() {
+  return (load().ui || {}).locale || "";
 }
 
 // Remote button remap + Power policy (consumed by remote_input_bridge.py).
@@ -560,6 +580,7 @@ module.exports = {
   setAppConfig,
   rawStore,
   setUi,
+  uiLocale,
   setPlayer,
   rawPlayer,
   setWifi,

@@ -1,14 +1,21 @@
-// tvbox capability preload - for CAPABILITY APPS in the isolated window.
+// tvbox preload for the hardened REMOTE window (contextIsolation + sandbox ON).
 //
-// Unlike preload.js (the main, Node-capable window used by the launcher and
-// local static bundles), this runs in the hardened remote window
-// (contextIsolation + sandbox ON) and exposes the granted capability brokers
-// through contextBridge - the app never touches Node, ipcRenderer, or any
-// surface it didn't declare. It's attached ONLY to apps that declare caps
-// beyond "nav" (see openRemoteApp), so a plain remote site (YouTube) still gets
-// no preload at all. The broker enforcement lives in the main process
-// (app:fetch / app:storage keyed to the active app's manifest); this file is
-// just the thin, capability-gated surface.
+// Two jobs, with very different trust levels:
+//
+//  1. Capability brokers for an app that DECLARED caps beyond "nav" - exposed
+//     through contextBridge, so the app never touches Node, ipcRenderer, or any
+//     surface it didn't ask for. Enforcement lives in the main process
+//     (app:fetch / app:storage keyed to the active app's manifest); this file is
+//     just the thin, capability-gated surface.
+//  2. The text-input bridge, which runs for EVERY remote app - a plain site
+//     (YouTube, xbox.com) included. It watches for focus landing in a text field
+//     and tells the shell, which is how the on-screen keyboard / phone typing
+//     comes up on a TV with no keyboard.
+//
+// Job 2 is why this file is now attached to every remote window, where before a
+// nav-only site got no preload at all. It exposes NOTHING to the page: with no
+// contextBridge call the page cannot see or reach any of it, so an untrusted site
+// gains no API it didn't have - only the shell learns "a field is focused".
 const { contextBridge, ipcRenderer } = require("electron");
 
 const info = (function () {
@@ -81,8 +88,92 @@ if (caps.indexOf("display") >= 0) {
   };
 }
 
+// ---- language: make the page believe it runs in the box's UI language ---------
+// Sites read navigator.language(s) (and get Accept-Language from the session, set
+// shell-side). executeInMainWorld runs BEFORE the page's own scripts, which matters:
+// an SPA reads its locale once at bootstrap. Without this a remote app followed the
+// system locale - or the site's IP guess, which had xbox.com coming up in German on
+// a Hungarian box.
+if (info.language) {
+  try {
+    contextBridge.executeInMainWorld({
+      func: function (tag) {
+        try {
+          var langs = [tag];
+          var base = String(tag).split("-")[0];
+          if (base && base !== tag) langs.push(base);
+          if (base !== "en") langs.push("en");
+          Object.defineProperty(navigator, "language", {
+            get: function () {
+              return tag;
+            },
+            configurable: true,
+          });
+          Object.defineProperty(navigator, "languages", {
+            get: function () {
+              return langs;
+            },
+            configurable: true,
+          });
+        } catch (e) {}
+      },
+      args: [info.language],
+    });
+  } catch (e) {
+    // Older Electron without executeInMainWorld: the Accept-Language header still
+    // applies, so the app is merely less consistent, not broken.
+  }
+}
+
+// ---- text input: tell the shell when a field takes focus ----------------------
+// The 10-foot UI has no keyboard, so a focused <input> is a dead end unless the
+// shell offers a way to type. Only the SIGNAL leaves the page (kind + label, never
+// the value); the text itself is typed back as real key events by the main
+// process, so this side never touches the field.
+(function () {
+  var TEXTY = /^(|text|search|email|url|tel|number|password)$/i;
+  function fieldInfo(el) {
+    if (!el || el.disabled || el.readOnly) return null;
+    var tag = (el.tagName || "").toLowerCase();
+    if (tag === "textarea") return { kind: "textarea", password: false };
+    if (tag === "input" && TEXTY.test(el.getAttribute("type") || "")) {
+      var type = (el.getAttribute("type") || "text").toLowerCase();
+      return { kind: type, password: type === "password" };
+    }
+    if (el.isContentEditable) return { kind: "contenteditable", password: false };
+    return null;
+  }
+  // A label for the TV screen so the user knows WHAT they're typing. Never the
+  // field's value - a placeholder/aria-label is authored text, a value is secret.
+  function labelFor(el) {
+    var t =
+      el.getAttribute("aria-label") ||
+      el.getAttribute("placeholder") ||
+      (el.labels && el.labels[0] && el.labels[0].textContent) ||
+      el.getAttribute("name") ||
+      "";
+    return String(t).trim().slice(0, 80);
+  }
+  document.addEventListener(
+    "focusin",
+    function (ev) {
+      var info = fieldInfo(ev.target);
+      if (!info) return;
+      try {
+        ipcRenderer.send("kbd:focus", { kind: info.kind, password: info.password, label: labelFor(ev.target) });
+      } catch (e) {}
+    },
+    true,
+  );
+})();
+
 try {
-  contextBridge.exposeInMainWorld("tvbox", api);
+  if (
+    caps.some(function (c) {
+      return c && c !== "nav";
+    })
+  )
+    contextBridge.exposeInMainWorld("tvbox", api);
 } catch (e) {
   // contextBridge throws if contextIsolation is off - but this preload is only
   // ever attached to the isolated window, so that path shouldn't happen.

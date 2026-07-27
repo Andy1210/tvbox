@@ -5,7 +5,7 @@
 // window driven over its JSON IPC. Apps get a capability-scoped bridge
 // (preload.js); the remote Home button returns to the launcher from anywhere.
 // Run: electron . --ozone-platform=wayland --no-sandbox
-const { app, BrowserWindow, ipcMain, screen } = require("electron");
+const { app, BrowserWindow, ipcMain, screen, session } = require("electron");
 const { spawn, execFile } = require("child_process");
 const http = require("http");
 const net = require("net");
@@ -16,6 +16,8 @@ const config = require("./config");
 const pairing = require("./pairing");
 const display = require("./display"); // wlr-randr resolution/refresh control
 const displaymode = require("./displaymode"); // adaptive mode: UI mode + per-video claims
+const textinput = require("./textinput"); // typing into a keyboard-less app (OSK / phone)
+const lang = require("./lang"); // what language a remote web app is told it runs in
 const audio = require("./audio"); // wpctl sink list + volume (device audio settings)
 const bluetooth = require("./bluetooth"); // bluetoothctl pair/connect (audio + input devices)
 const ambient = require("./ambient"); // weather + local photos for the idle/ambient screen
@@ -447,6 +449,21 @@ function handlePost(p, data, res) {
     }
     emitConfigChange(changed); // e.g. Live TV drops its channel/EPG cache on a new IPTV source
     return jsonRes(res, { ok: true, config: config.publicConfig() });
+  }
+  if (p === "/tvbox/api/ui/locale") {
+    // The launcher owns the UI language (its i18n store is in the renderer); it
+    // mirrors it here so the shell can hand it to things the renderer can't reach:
+    // the phone pairing pages and every remote web app's language.
+    config.setUi({ locale: String(data.locale || "") });
+    return jsonRes(res, { ok: true, locale: config.uiLocale() });
+  }
+  if (p === "/tvbox/api/textinput/submit") {
+    // Both input paths land here: the launcher's on-screen keyboard and the phone
+    // page (via the pairing provider, which is code-gated).
+    return jsonRes(res, textinput.submit(data.text));
+  }
+  if (p === "/tvbox/api/textinput/cancel") {
+    return jsonRes(res, textinput.cancel());
   }
   if (p === "/tvbox/api/display/refresh") {
     // "Re-detect": recompute the UI mode from the live output and go there. The
@@ -1330,6 +1347,10 @@ function serve() {
       jsonRes(res, backup.pendingLocalStorage());
       return;
     }
+    if (p === "/tvbox/api/textinput/status") {
+      jsonRes(res, textinput.status());
+      return;
+    }
     if (p === "/tvbox/api/display/status") {
       // Read-only: what the output is at now, what the UI mode should be, and who
       // (if anyone) currently holds a video claim. Resolution is automatic, so
@@ -1920,6 +1941,12 @@ function raiseWindow() {
 function showLauncher(hash) {
   if (!win || win.isDestroyed()) return;
   const leaving = currentAppId;
+  // Unconditionally, NOT `if (leaving)`: while the typing screen is up the app is
+  // already backgrounded and currentAppId is null, so a Home press there would have
+  // left the session alive - and a live session makes the next focusin a no-op
+  // (focused() sees the same app+window and only refreshes its label), i.e. the
+  // keyboard would never come up again.
+  textinput.dropFor(null);
   currentAppId = null;
   playingUrl = null;
   stopMpv();
@@ -1949,10 +1976,19 @@ function showLauncher(hash) {
 // for its video is wrong for whatever is on screen now.
 const backgroundApp = (id) => {
   dmode.releaseIfHolder(appClaimId(id));
+  for (const w of popupsOf(id))
+    try {
+      w.hide(); // a sign-in popup must not stay on screen over the launcher
+    } catch (e) {}
   return appwins.background(id);
 };
+// Leaving an app for real (Home, another app, a crash) drops any pending typing
+// session - it could only be delivered to the window that asked for it. The typing
+// screen backgrounds the app deliberately, so it calls textinput itself instead.
+const leftForeground = (id) => textinput.dropFor(id);
 const destroyAppWindow = (id) => {
   dmode.releaseIfHolder(appClaimId(id));
+  closePopups(id);
   return appwins.destroy(id);
 };
 
@@ -1962,6 +1998,7 @@ const destroyAppWindow = (id) => {
 function foregroundApp(id) {
   const w = appWindow(id);
   if (!w) return false;
+  if (currentAppId && currentAppId !== id) leftForeground(currentAppId);
   currentAppId = id;
   appwins.touch(id);
   try {
@@ -1971,6 +2008,16 @@ function foregroundApp(id) {
   w.show();
   w.focus();
   w.moveTop();
+  // A popup that was up when we left comes back on top of its app (a half-finished
+  // sign-in shouldn't vanish because the user checked something else).
+  for (const p of popupsOf(id)) {
+    try {
+      p.setAlwaysOnTop(true, "screen-saver");
+      p.show();
+      p.focus();
+      p.moveTop();
+    } catch (e) {}
+  }
   for (const [oid, ow] of appwins.all()) if (oid !== id && ow.isVisible()) backgroundApp(oid);
   if (win && !win.isDestroyed()) win.hide(); // exactly one visible toplevel
   return true;
@@ -1991,7 +2038,13 @@ function foregroundApp(id) {
 function resolveRemoteUrl(m) {
   const rt = m.runtime || {};
   if (rt.urlConfig) return (config.appConfig(rt.urlConfig) || {}).baseUrl || "";
-  return rt.url || "";
+  // A {locale} placeholder in the URL is how a site that keeps its market in the
+  // PATH follows the box's language (xbox.com ignores Accept-Language and redirects
+  // by IP - measured - so /{locale}/play is the only lever that works there). It is
+  // a template, not a pinned market: change the UI language and the next launch
+  // follows it.
+  const tag = lang.resolve(config.uiLocale(), app.getSystemLocale(), rt.language).tag;
+  return lang.expand(rt.url || "", tag);
 }
 // Loopback / RFC1918 / link-local / mDNS - a self-hosted LAN service (Home
 // Assistant, Jellyfin, ...) can't be a public untrusted site, so plain http to
@@ -2020,7 +2073,49 @@ function openRemoteApp(m, url) {
     console.warn("[nav] remote url not allowed:", url);
     return;
   }
+  // Language, both channels: the header here (the server's view) and
+  // navigator.language in the preload (the page's view). Set on the session, so
+  // subresources and the sign-in popup - which share the partition - agree.
+  const wanted = lang.resolve(config.uiLocale(), app.getSystemLocale(), rt.language);
+  const ses = session.fromPartition("persist:remote-" + m.id);
+  try {
+    ses.setUserAgent(rt.userAgent || ses.getUserAgent(), wanted.accept);
+  } catch (e) {
+    console.warn("[remote] could not set Accept-Language:", e.message);
+  }
   const hosts = allowedRemoteHosts(rt, url);
+  // Cookies a manifest asks for (e.g. a site's own locale cookie), with the same
+  // {locale} templating as the URL. Restricted to the app's DECLARED origins: a
+  // registry manifest must not be able to plant a cookie for an unrelated domain,
+  // and the partition is the app's own anyway. Set before the first load, since the
+  // point is to influence the first response.
+  const cookieJobs = [];
+  for (const c of Array.isArray(rt.cookies) ? rt.cookies.slice(0, 8) : []) {
+    const cUrl = String((c && c.url) || "");
+    let host = "";
+    try {
+      host = new URL(cUrl).hostname.toLowerCase();
+    } catch (e) {
+      host = "";
+    }
+    const allowedHost = host && hosts.some((h) => host === h || host.endsWith("." + h));
+    if (!allowedHost || !c.name) {
+      console.warn("[remote] cookie skipped (host not in origins):", cUrl, c && c.name);
+      continue;
+    }
+    cookieJobs.push(
+      ses.cookies
+        .set({
+          url: cUrl,
+          name: String(c.name),
+          value: lang.expand(String(c.value == null ? "" : c.value), wanted.tag),
+          domain: c.domain ? String(c.domain) : undefined,
+          path: c.path ? String(c.path) : undefined,
+          secure: cUrl.startsWith("https:"),
+        })
+        .catch((e) => console.warn("[remote] cookie failed:", c.name, e.message)),
+    );
+  }
   const allowed = (u) => {
     try {
       const x = new URL(u);
@@ -2033,11 +2128,12 @@ function openRemoteApp(m, url) {
   stopMpv();
   setVideoMode(false); // no mpv behind a remote app; drop any prior session
   currentAppId = m.id; // identity is per-window (windowAppId); this global only tracks foreground
-  // A capability app (declares caps beyond "nav") gets the sandbox-safe
-  // contextBridge preload so it can reach its granted brokers (fetch/storage).
-  // A plain remote site (e.g. YouTube declares only nav) gets NO preload,
-  // exactly as before, so nothing about the existing untrusted path changes.
-  const isCapApp = (rt.capabilities || []).some((c) => c && c !== "nav");
+  // Every remote window gets the sandbox-safe preload now: a capability app needs
+  // it for its granted brokers (fetch/storage), and EVERY remote app needs the
+  // text-input bridge (a focused field must be able to raise the on-screen
+  // keyboard on a TV with no keyboard). The preload only calls contextBridge for
+  // an app that declared caps beyond "nav", so a plain site still gets no API
+  // surface - just the "a field is focused" signal, which it cannot reach.
   const w = new BrowserWindow({
     fullscreen: true,
     frame: false,
@@ -2049,7 +2145,7 @@ function openRemoteApp(m, url) {
       sandbox: true,
       nodeIntegration: false,
       partition: "persist:remote-" + m.id,
-      ...(isCapApp ? { preload: path.join(__dirname, "preload-app.js") } : {}),
+      preload: path.join(__dirname, "preload-app.js"),
     },
   });
   appwins.register(m.id, w); // capability brokers identify THIS window's app by sender (tvboxAppId)
@@ -2069,7 +2165,107 @@ function openRemoteApp(m, url) {
   };
   wc.on("will-navigate", guard);
   wc.on("will-redirect", guard);
-  wc.setWindowOpenHandler(() => ({ action: "deny" })); // no popups / new windows in the kiosk
+  // Popups: a sign-in flow needs one. Microsoft's account sign-in (xbox.com ->
+  // login.live.com, the PIN/passkey step) is a window.open popup, and denying it
+  // meant the button silently did nothing - the flow cannot be completed in-page,
+  // because it postMessages back to its opener. So an ALLOWLISTED url gets a real
+  // child window with the same hardening and the same session partition (it must
+  // share cookies with the app), and anything else is still denied - loudly now.
+  wc.setWindowOpenHandler(({ url }) => {
+    if (!allowed(url)) {
+      console.warn("[remote] blocked popup:", url);
+      return { action: "deny" };
+    }
+    console.log("[remote] popup ->", url.slice(0, 80));
+    return {
+      action: "allow",
+      overrideBrowserWindowOptions: {
+        fullscreen: true, // a 10-foot login screen, not a 400px desktop popup
+        frame: false,
+        backgroundColor: "#000000",
+        autoHideMenuBar: true,
+        skipTaskbar: true,
+        webPreferences: {
+          contextIsolation: true,
+          sandbox: true,
+          nodeIntegration: false,
+          partition: "persist:remote-" + m.id,
+          preload: path.join(__dirname, "preload-app.js"), // the typing bridge: the PIN goes in HERE
+        },
+      },
+    };
+  });
+  // Guard the child the same way as its opener, and let it be closed like a dialog.
+  wc.on("did-create-window", (child, details) => {
+    const list = appPopups.get(m.id) || [];
+    list.push(child);
+    appPopups.set(m.id, list);
+    console.log("[remote] popup window for", m.id, String(details.url || "").slice(0, 60));
+    const cwc = child.webContents;
+    cwc.on("will-navigate", guard);
+    cwc.on("will-redirect", guard);
+    // One level only: a popup opening its own popup is not part of any sign-in flow
+    // we support, and each one is a full-screen window over the app.
+    cwc.setWindowOpenHandler(({ url }) => {
+      console.warn("[remote] blocked nested popup:", url);
+      return { action: "deny" };
+    });
+    cwc.on("console-message", (ev) => {
+      console.log("[popup:" + (CONSOLE_TAG[ev.level] || "?") + "]", ev.message);
+    });
+    cwc.on("dom-ready", () => {
+      cwc.executeJavaScript(NO_WEBAUTHN_JS).catch(() => {}); // the sign-in page lives here
+      cwc.executeJavaScript(IDLEHIDE_JS).catch(() => {});
+    });
+    cwc.on("before-input-event", (e, input) => {
+      if (input.type !== "keyDown") return;
+      // Home leaves the app entirely; Back closes the popup (it IS the dialog) once
+      // the page itself has nowhere left to go.
+      if (input.key === "BrowserHome") {
+        e.preventDefault();
+        showLauncher();
+        return;
+      }
+      if (input.key === "BrowserBack" || input.key === "GoBack" || input.key === "Escape") {
+        // Never let a key handler throw: Back would die with it and the popup would
+        // be inescapable.
+        let canBack;
+        try {
+          canBack = !!(cwc.navigationHistory && cwc.navigationHistory.canGoBack());
+        } catch (err) {
+          canBack = false;
+        }
+        if (canBack) return; // let the page handle its own history first
+        e.preventDefault();
+        child.destroy();
+      }
+    });
+    child.on("closed", () => {
+      appPopups.set(
+        m.id,
+        (appPopups.get(m.id) || []).filter((w) => w !== child && !w.isDestroyed()),
+      );
+      textinput.dropFor(m.id); // a pending typing session belonged to this window
+      if (currentAppId === m.id) foregroundApp(m.id); // back to the app underneath
+    });
+    child.setAlwaysOnTop(true, "screen-saver");
+    child.focus();
+    child.moveTop();
+  });
+  // WebAuthn is advertised by Chromium but cannot complete here: this Electron has
+  // no authenticator UI, so navigator.credentials.get() HANGS - no dialog, no
+  // rejection, not even honouring its own timeout (measured on the box:
+  // platformAuthenticator=false, get() still pending after 6s). A sign-in page that
+  // feature-detects it therefore offers "face / fingerprint / PIN / security key"
+  // and then does nothing at all when picked, which is the worst outcome on a TV.
+  // So tell the truth: remove the interface so sites fall back to a password (or a
+  // device-code flow), and make a direct call reject cleanly instead of spinning
+  // forever. Runs on dom-ready, long before any sign-in click.
+  const NO_WEBAUTHN_JS =
+    "(function(){if(window.__tvnowa)return;window.__tvnowa=1;" +
+    "try{delete window.PublicKeyCredential}catch(e){}" +
+    "try{var n=function(){var e=new Error('WebAuthn is not available on this device');e.name='NotSupportedError';" +
+    "return Promise.reject(e)};if(navigator.credentials){navigator.credentials.get=n;navigator.credentials.create=n}}catch(e){}})();";
   // Auto-hide the OS cursor when idle: a remote site (e.g. YouTube leanback) is
   // D-pad driven, so a stray idle pointer shouldn't linger - show it only while a
   // real mouse moves. Injected into the page (no preload here).
@@ -2080,6 +2276,7 @@ function openRemoteApp(m, url) {
     "document.documentElement.classList.add('tvhide');window.addEventListener('mousemove',show,true);})();";
   wc.on("dom-ready", () => {
     wc.executeJavaScript(IDLEHIDE_JS).catch(() => {});
+    wc.executeJavaScript(NO_WEBAUTHN_JS).catch(() => {});
   });
   // Remote Home key (CEC double-tap Back -> BrowserHome) returns to the launcher.
   // BrowserBack/GoBack (a BT remote's Back button) -> re-injected as Backspace,
@@ -2105,11 +2302,16 @@ function openRemoteApp(m, url) {
   const thisAppId = m.id;
   w.on("closed", () => {
     dmode.releaseIfHolder(appClaimId(thisAppId)); // a gone window can't hold the mode
+    leftForeground(thisAppId);
     if (appwins.get(thisAppId) === w) appwins.destroy(thisAppId);
     if (currentAppId === thisAppId) showLauncher();
   });
   w.setAlwaysOnTop(true, "screen-saver");
-  w.loadURL(url, rt.userAgent ? { userAgent: rt.userAgent } : undefined);
+  // The cookies must be in the jar before the first request, so the load waits for
+  // them (they all resolve or log; nothing can reject the chain).
+  Promise.all(cookieJobs).then(() => {
+    if (!w.isDestroyed()) w.loadURL(url, rt.userAgent ? { userAgent: rt.userAgent } : undefined);
+  });
   w.focus();
   w.moveTop();
   // Hide the (transparent, always-on-top) launcher window and any other visible
@@ -2187,6 +2389,7 @@ function openLocalApp(m) {
   const thisAppId = m.id;
   w.on("closed", () => {
     dmode.releaseIfHolder(appClaimId(thisAppId)); // a gone window can't hold the mode
+    leftForeground(thisAppId);
     if (appwins.get(thisAppId) === w) appwins.destroy(thisAppId);
     if (currentAppId === thisAppId) showLauncher();
   });
@@ -2338,9 +2541,32 @@ ipcMain.on("plog", (_e, p, a) => console.log("[plog]", p, a)); // debug: raw pla
 // caps). Every identity/capability decision keys off THIS, never the global
 // foreground id - a hidden app keeps ITS OWN identity, so a background call is
 // scoped to its own caps/origins/storage (no confused deputy).
+// Sign-in popups a remote app opened (window.open), per app id. They are NOT app
+// windows - the app keeps exactly one - but they share its identity, session and
+// visibility: an OAuth popup is the same app to every broker, hides and comes back
+// with it, and dies with it.
+const appPopups = new Map(); // appId -> BrowserWindow[]
+function popupsOf(id) {
+  const list = appPopups.get(id) || [];
+  const live = list.filter((w) => w && !w.isDestroyed());
+  if (live.length) appPopups.set(id, live);
+  else appPopups.delete(id);
+  return live;
+}
+function closePopups(id) {
+  for (const w of popupsOf(id))
+    try {
+      w.destroy();
+    } catch (e) {}
+  appPopups.delete(id);
+}
+
 function windowAppId(sender) {
   if (win && !win.isDestroyed() && sender === win.webContents) return null;
   for (const [, w] of appwins.all()) if (sender === w.webContents) return w.tvboxAppId;
+  // A popup answers as its opener app: the typing bridge (and any broker) must see
+  // the sign-in window as the same app, not as an unknown sender.
+  for (const [id] of appPopups) for (const w of popupsOf(id)) if (sender === w.webContents) return id;
   return undefined;
 }
 
@@ -2355,10 +2581,14 @@ ipcMain.on("tvbox:app", (e) => {
     return;
   }
   const m = id && apps.manifestById(id);
+  const rt = (m && m.runtime) || {};
   e.returnValue = {
     id,
     capabilities: capsFor(id),
-    bridge: (m && m.runtime && m.runtime.bridge) || null,
+    bridge: rt.bridge || null,
+    // The language the page should believe it is running in - the preload overrides
+    // navigator.language(s) with it before the page's own scripts read them.
+    language: lang.resolve(config.uiLocale(), app.getSystemLocale(), rt.language).tag,
   };
 });
 
@@ -2459,6 +2689,14 @@ function switchApp() {
 // Navigate between the HOME launcher and an app. The launcher calls
 // window.tvbox.launch(id); the Home button calls window.tvbox.home() (local apps)
 // or is caught main-side (remote apps) -> back to the launcher, stopping video.
+// A field took focus in a remote app. Only the FOREGROUND app may raise the typing
+// screen - a background page moving its own focus must not take over the TV.
+ipcMain.on("kbd:focus", (e, field) => {
+  const id = windowAppId(e.sender);
+  if (!id || id !== currentAppId) return;
+  textinput.focused(id, e.sender, field || {});
+});
+
 ipcMain.on("nav", (e, dest) => {
   // "exit" is app-initiated teardown, so it targets the SENDER's app rather than
   // whatever is foreground - a background app's exit must not close the visible one.
@@ -2755,6 +2993,37 @@ app.whenReady().then(() => {
   // host.pairing.register - they ship in the app package, not the shell.
   pairing.register("photos", require("./pairing/photos"));
   pairing.register("backup", backupPairing);
+  pairing.register("text", require("./pairing/text"));
+  // Typing for a keyboard-less app. The screen belongs to the launcher (it owns the
+  // on-screen keyboard and can draw a QR), so the app is backgrounded for the
+  // duration - its page keeps its state AND the focused field, and the text is sent
+  // as keystrokes once it's back in front.
+  textinput.init({
+    onShow: (st) => {
+      const id = st.app;
+      if (!id || !win || win.isDestroyed()) return;
+      backgroundApp(id);
+      currentAppId = null; // the launcher is the foreground surface while typing
+      win.show();
+      try {
+        win.webContents.send("tvbox-nav", { dest: "typing" });
+      } catch (e) {}
+      raiseWindow();
+    },
+    onDone: (appId) => {
+      if (win && !win.isDestroyed()) {
+        try {
+          win.webContents.send("tvbox-nav", { dest: "home" }); // drop the typing view
+        } catch (e) {}
+      }
+      if (!foregroundApp(appId)) showLauncher(); // the app window died meanwhile
+    },
+    pairingStart: () => {
+      const r = pairing.start(config.uiLocale().startsWith("hu") ? "hu" : "en", "text");
+      return { url: r.url, code: r.code };
+    },
+    pairingStop: () => pairing.stop(),
+  });
   // A restore replaced config.json + user apps - plugins only read credentials
   // at boot, so restart the shell shortly after (the phone page + TV UI get a
   // few seconds to show "restored").
