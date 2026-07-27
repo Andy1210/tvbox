@@ -8,6 +8,7 @@ const os = require("os");
 const crypto = require("crypto");
 const { execFileSync } = require("child_process");
 const { isLanUrl, guardedFetch } = require("./netguard"); // shared self-hosted trust rule (plain http only to LAN hosts)
+const nativeapp = require("./native"); // runtime.native parser, shared with the launch path so the rules can't drift
 
 // Installed web-client BUNDLES live OUTSIDE the shell install so they survive
 // OTA + deploys - an OTA runs the shell from a fresh ~/.tvbox/current/shell (the
@@ -122,9 +123,30 @@ function validateManifest(m, src) {
   if (v !== MANIFEST_VERSION)
     return bad("unsupported manifestVersion " + v + " (shell speaks " + MANIFEST_VERSION + ")");
   if (typeof m.id !== "string" || !/^[a-z0-9_-]+$/.test(m.id)) return bad("id must match [a-z0-9_-]+");
-  if (m.type !== "webclient") return bad("type must be webclient"); // apps are packages now; no builtin views
+  // webclient = the shell serves/loads a web UI (a package's own web/ bundle, the
+  // legacy root bundle, or a remote site). native = the app IS its own fullscreen
+  // Wayland client (RetroArch); the shell spawns it and hides its own windows.
+  if (m.type !== "webclient" && m.type !== "native") return bad("type must be webclient|native");
   if (m.status !== "ready" && m.status !== "coming_soon") return bad("status must be ready|coming_soon");
   if (!m.name) return bad("missing name");
+  // A native app's command line reaches argv, so validate it with the very parser
+  // the launch path uses rather than a second copy of the rules.
+  if (m.type === "native") {
+    const nat = (m.runtime && m.runtime.native) || null;
+    if (!nativeapp.parseSpec(nat)) return bad("type native needs a valid runtime.native (flatpak ref or bin)");
+    // The dep check reads requires.flatpak while the launch reads
+    // runtime.native.flatpak. A manifest that names the ref in only one of them
+    // would report depsOk with nothing installed, and the launch would just fail.
+    if (nat.flatpak && !((m.requires && m.requires.flatpak) || []).includes(nat.flatpak))
+      return bad("runtime.native.flatpak (" + nat.flatpak + ") must also be listed in requires.flatpak");
+  }
+  // flatpak deps: `flatpak install --user` needs no root, so unlike apt these are
+  // installable straight from the UI. The refs reach argv too.
+  const fps = m.requires && m.requires.flatpak;
+  if (fps !== undefined) {
+    if (!Array.isArray(fps) || fps.length > 8) return bad("requires.flatpak must be an array of at most 8 refs");
+    for (const r of fps) if (!nativeapp.flatpakRefOk(r)) return bad("bad requires.flatpak ref " + JSON.stringify(r));
+  }
   const serve = m.runtime && m.runtime.serve;
   // "local" = a package app that ships its own web/ UI bundle (served at /<id>/,
   // run in the privileged main window with the full preload.js SDK). "static" is
@@ -155,6 +177,20 @@ function validateManifest(m, src) {
   }
   const ti = m.runtime && m.runtime.textInput;
   if (ti !== undefined && ti !== "auto" && ti !== "off") return bad('runtime.textInput must be "auto" or "off"');
+  // Phone-pairing kinds the app offers (its plugin registers the matching
+  // provider). This is how an app that has no screen of its own on the box, e.g. a
+  // native app, still gets a "do this from your phone" affordance: the launcher
+  // renders a row per entry and knows nothing about what the app does with it.
+  const pairs = m.pairing;
+  if (pairs !== undefined) {
+    if (!Array.isArray(pairs) || pairs.length > 4) return bad("pairing must be an array of at most 4");
+    for (const p of pairs) {
+      if (!p || typeof p !== "object") return bad("pairing entries must be objects");
+      if (!/^[a-z0-9_-]{1,32}$/.test(String(p.kind || ""))) return bad("bad pairing[].kind " + JSON.stringify(p.kind));
+      if (!p.label || (typeof p.label !== "string" && typeof p.label !== "object"))
+        return bad("pairing[].label must be a string or a locale map");
+    }
+  }
   const CAPS = ["nav", "player", "config", "fetch", "storage", "display", "input", "system"];
   const caps = m.runtime && m.runtime.capabilities;
   if (caps != null) {
@@ -254,7 +290,24 @@ function onPath(bin) {
     }
   });
 }
-// Resolve a manifest's `requires.bin` deps -> { depsOk, missing }.
+// flatpak's own arch names differ from Node's (arm64 -> aarch64, x64 -> x86_64).
+// A native app must be the box's REAL arch, unlike a web bundle extracted from a
+// flatpak (Plex), where any arch's files work and the recipe may say x86_64.
+function flatpakArch() {
+  return process.arch === "arm64" ? "aarch64" : process.arch === "x64" ? "x86_64" : process.arch;
+}
+function flatpakAppInstalled(ref) {
+  return !!flatpakRoot(ref, flatpakArch());
+}
+// What a missing flatpak dep is CALLED on the TV: "needs RetroArch" reads far
+// better than "needs org.libretro.RetroArch" on a 10-foot tile.
+function flatpakShortName(ref) {
+  const parts = String(ref).split(".");
+  return parts[parts.length - 1] || String(ref);
+}
+
+// Resolve a manifest's `requires.bin` + `requires.flatpak` deps -> { depsOk,
+// missing, installable }.
 function appDeps(m) {
   const bins = (m && m.requires && m.requires.bin) || [];
   const missing = bins.filter((b) => !onPath(b));
@@ -272,7 +325,14 @@ function appDeps(m) {
       })
       .map((d) => d.bin),
   );
-  const installable = missing.length > 0 && missing.every((b) => dl.has(b));
+  // Missing flatpak apps land in the same `missing` list (so the tile greys out
+  // and says "needs RetroArch"), but they are ALWAYS UI-installable: a --user
+  // install touches no root, which is exactly the bar `installable` describes.
+  const refs = (m && m.requires && m.requires.flatpak) || [];
+  const fpMissing = refs.filter((r) => !flatpakAppInstalled(r)).map(flatpakShortName);
+  missing.push(...fpMissing);
+  const uiInstallable = new Set([...dl, ...fpMissing]);
+  const installable = missing.length > 0 && missing.every((b) => uiInstallable.has(b));
   return { depsOk: missing.length === 0, missing, installable };
 }
 
@@ -417,10 +477,45 @@ async function installPackage(id, baseUrl, files, log) {
   }
 }
 
-// Install ALL of an app's no-root download deps that aren't already on PATH.
-// No root, so it's safe to run from the shell (UI install) - the "remote-only,
-// no CLI" path. apt-only deps are left to `tvbox deps` / the image.
-function installDownloadDeps(m, log) {
+// Ensure the user-scoped flathub remote, then `flatpak install --user` a ref.
+// Root is never involved, which is what makes a flatpak dep UI-installable at all
+// (unlike apt). Retried because an app plus its runtime is a multi-hundred-MB pull
+// that can time out on a slow link; ostree resumes from the objects it already
+// has, so a retry continues rather than restarting.
+const FLATPAK_TRIES = 3;
+function flatpakInstallUser(ref, arch, log) {
+  log = log || (() => {});
+  if (!nativeapp.flatpakRefOk(ref)) throw new Error("bad flatpak ref: " + ref);
+  try {
+    execFileSync(
+      "flatpak",
+      ["remote-add", "--user", "--if-not-exists", "flathub", "https://flathub.org/repo/flathub.flatpakrepo"],
+      { stdio: "inherit" },
+    );
+  } catch (e) {
+    /* may already exist */
+  }
+  let lastErr = null;
+  for (let attempt = 1; attempt <= FLATPAK_TRIES; attempt++) {
+    log("flatpak install --user " + ref + " (" + arch + ")" + (attempt > 1 ? " retry " + attempt : "") + " …");
+    try {
+      execFileSync("flatpak", ["install", "--user", "-y", "--noninteractive", "--arch=" + arch, "flathub", ref], {
+        stdio: "inherit",
+      });
+      return;
+    } catch (e) {
+      lastErr = e;
+      if (flatpakAppInstalled(ref)) return; // it landed despite a nonzero exit
+    }
+  }
+  throw new Error(ref + ": flatpak install failed after " + FLATPAK_TRIES + " tries: " + (lastErr && lastErr.message));
+}
+
+// Install ALL of an app's no-root deps that aren't already present: static
+// `requires.download` binaries AND `requires.flatpak` apps. No root, so it's safe
+// to run from the shell (UI install) - the "remote-only, no CLI" path. apt-only
+// deps are left to `tvbox deps` / the image.
+function installUiDeps(m, log) {
   log = log || (() => {});
   const downloads = (m && m.requires && m.requires.download) || [];
   const installed = [];
@@ -428,6 +523,11 @@ function installDownloadDeps(m, log) {
     if (onPath(entry.bin)) continue; // already present (bundled/system wins)
     installDownload(entry, log);
     installed.push(entry.bin);
+  }
+  for (const ref of (m && m.requires && m.requires.flatpak) || []) {
+    if (flatpakAppInstalled(ref)) continue;
+    flatpakInstallUser(ref, flatpakArch(), log);
+    installed.push(ref);
   }
   const after = appDeps(m);
   return { ok: after.depsOk, installed: installed, missing: after.missing };
@@ -614,7 +714,7 @@ module.exports = {
   removeApp,
   appDeps,
   installDownload,
-  installDownloadDeps,
+  installUiDeps,
   installPackage,
   onPath,
   validateManifest,

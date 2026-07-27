@@ -99,8 +99,9 @@ function installAptRepo(m, r, log) {
   }
 }
 
-// The no-root `requires.download` install logic lives in install.js now (shared
-// with the shell's UI dep-install path) - see apps.installDownloadDeps below.
+// The no-root dep install logic (static `requires.download` binaries plus
+// `requires.flatpak` apps) lives in install.js now, shared with the shell's UI
+// dep-install path - see apps.installUiDeps below.
 
 function list() {
   const ms = apps.getManifests();
@@ -141,15 +142,16 @@ function main() {
     const req = m.requires || {};
     const apt = req.apt || [];
     const downloads = req.download || [];
-    if (!apt.length && !downloads.length) {
+    const flatpaks = req.flatpak || [];
+    if (!apt.length && !downloads.length && !flatpaks.length) {
       console.log(`${m.id}: no binary deps to install`);
       return;
     }
     console.log(`provisioning ${m.id} …`);
     try {
-      // User-space static binaries first (no root). Shared with the shell's
-      // UI path via apps.installDownloadDeps (skips bins already on PATH).
-      apps.installDownloadDeps(m, log);
+      // User-space deps first (no root): static binaries + flatpak apps. Shared
+      // with the shell's UI path via apps.installUiDeps (skips what's present).
+      apps.installUiDeps(m, log);
       // Whatever the downloads covered doesn't need apt anymore; if everything
       // resolves, we're done without ever touching root.
       const still = apps.appDeps(m);

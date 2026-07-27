@@ -24,6 +24,7 @@ const ambient = require("./ambient"); // weather + local photos for the idle/amb
 const mqttBridge = require("./mqtt"); // MQTT: now-playing publish + command/notify (HA integration)
 const ir = require("./ir"); // IR blaster hub: TV volume/mute over ESPHome or Home Assistant
 const appwins = require("./appwindows"); // background-apps window registry + hidden-set policy (LRU/RAM guard)
+const nativeapp = require("./native"); // native (non-Electron) apps: RetroArch et al own the screen AND the input
 const firetvir = require("./firetvir"); // Fire TV remote IR programming (venv deps + irdb codesets + BLE tool)
 const apps = require("./install"); // manifests + install-recipe runner (shared with the tvbox CLI)
 const store = require("./store"); // app-store registry client (manifest-only apps -> ~/.tvbox/apps)
@@ -114,6 +115,11 @@ let mpvStartPending = false; // fullscreen mpv launched paused, waiting for the 
 let mpvSeq = 0; // launch counter, so a stale start-gate timer can't touch a newer launch
 let mpvStartedSeq = 0; // the launch whose start handshake already ran
 let currentAppId = null; // which app is FOREGROUND (null = launcher); drives focus + video-mode targeting
+// A native app is MEANT to own the screen. Separate from nativeapp.running(): a
+// stop() only asks (SIGTERM), and the process can outlive the request by a moment,
+// so raising our own window must key off the intent, not the process. Cleared
+// synchronously by every path that takes the screen back.
+let nativeForeground = false;
 // Background apps: every app runs in its OWN BrowserWindow; leaving an app
 // hides its window (registry + hidden-set policy live in appwindows.js). A
 // window is destroyed only by the HOME quit affordance, the RAM guard, app
@@ -278,9 +284,15 @@ function appTiles() {
       accent: m.accent,
       icon: m.icon,
       // background apps: a live (possibly hidden) window exists; HOME shows a
-      // running badge + quit affordance, resume is instant via navTo
-      running: !!appwins.get(m.id),
+      // running badge + quit affordance, resume is instant via navTo. A native app
+      // has no window of ours, so its own process is what "running" means, and it
+      // is never backgrounded: it either owns the screen or it has exited.
+      running: m.type === "native" ? nativeapp.id() === m.id : !!appwins.get(m.id),
       foreground: m.id === currentAppId,
+      // Phone-pairing affordances the app declares (Settings shows a row each).
+      // Only kind + label: the launcher starts the session and draws the QR, the
+      // app's own plugin owns everything that happens on the phone.
+      pairing: Array.isArray(m.pairing) ? m.pairing.map((p) => ({ kind: p.kind, label: p.label })) : undefined,
       depsOk,
       missing,
       depsInstallable, // every missing binary is a no-root download dep -> UI-installable (no CLI)
@@ -1909,6 +1921,9 @@ function onTvStandby() {
 // showLauncher. All our windows share the Wayland app_id, and only one is
 // visible at a time, so the wlrctl focus lands on the right toplevel.
 function raiseWindow() {
+  // A native app is the visible toplevel and holds keyboard focus; raising a
+  // window of ours over it would both hide the app and steal its input.
+  if (nativeForeground) return;
   const w = foregroundWindow();
   if (w && w !== win && !w.isDestroyed()) {
     try {
@@ -1948,6 +1963,11 @@ function showLauncher(hash) {
   playingUrl = null;
   stopMpv();
   setVideoMode(false);
+  // A native app owns the screen, so Home has to END it, not hide it. Drop the
+  // intent first: the process outlives the SIGTERM by a moment and raiseWindow
+  // below must not stand down for a native app we are already leaving.
+  nativeForeground = false;
+  nativeapp.stop();
   // The launcher page stays loaded permanently now (apps run in their own
   // windows), so returning home is a show(), not a reload. A hash still forces
   // a load (plugins use it to open a view, e.g. host.showLauncher("#spotify")),
@@ -2046,6 +2066,39 @@ function foregroundApp(id) {
   for (const [oid, ow] of appwins.all()) if (oid !== id && ow.isVisible()) backgroundApp(oid);
   if (win && !win.isDestroyed()) win.hide(); // exactly one visible toplevel
   return true;
+}
+
+// ---- native apps (RetroArch et al) ----
+// A native app is not a web page: it maps its OWN fullscreen Wayland toplevel and
+// the compositor hands it keyboard focus. So the shell does the opposite of what it
+// does for mpv (which stays BEHIND a transparent window and is driven over IPC so
+// the launcher keeps focus): every Electron window of ours goes away and
+// raiseWindow() stands down until the app exits.
+//
+// The hide is DELAYED, not immediate: the app needs a couple of seconds to map its
+// window, and hiding first would show the bare desktop in the gap. A freshly mapped
+// toplevel stacks above ours on labwc, so the launcher can stay up until then.
+const NATIVE_HIDE_DELAY_MS = 2500;
+function openNativeApp(m) {
+  const deps = apps.appDeps(m);
+  if (!deps.depsOk) {
+    // Belt and suspenders: the tile is already greyed out via requires, so this
+    // only fires if the manifest changed under us. Never leave a black screen.
+    console.warn("[native] not launching", m.id, "- missing:", deps.missing.join(","));
+    return;
+  }
+  textinput.dropFor(null); // a typing session cannot survive into an app we don't own
+  playingUrl = null;
+  stopMpv(); // the shared player must not hold the GPU, audio, or a mode claim
+  setVideoMode(false);
+  if (!nativeapp.start(m)) return;
+  currentAppId = m.id; // makes boxIdle() false too: no OTA restart mid-game
+  nativeForeground = true;
+  setTimeout(() => {
+    if (!nativeapp.running() || nativeapp.id() !== m.id) return; // exited (or replaced) already
+    for (const [id] of appwins.all()) backgroundApp(id);
+    if (win && !win.isDestroyed()) win.hide();
+  }, NATIVE_HIDE_DELAY_MS);
 }
 
 // ---- isolated window for remote web apps (YouTube etc.) ----
@@ -2480,14 +2533,46 @@ function handleTvNotify(payload) {
 // forwards to cec-client. O_NONBLOCK so we never hang if the bridge isn't running.
 const CEC_CMD_FIFO = "/tmp/tvbox-cec-cmd";
 function cecPower(on) {
+  if (fifoCmd(CEC_CMD_FIFO, on ? "on 0" : "standby 0", "cec")) console.log("[cec] power", on ? "on" : "off");
+}
+// FIFOs we've already complained about, so a bridge that simply isn't there (a box
+// with no CEC is normal) doesn't fill the log: bridgesCmd runs on a timer for the
+// whole of a native-app session. Cleared by the next successful write.
+const fifoQuiet = new Set();
+// Write a control line to a bridge FIFO. O_NONBLOCK so a bridge that isn't
+// running can never hang the shell.
+function fifoCmd(fifo, cmd, tag) {
+  let fd = null;
   try {
-    const fd = fs.openSync(CEC_CMD_FIFO, fs.constants.O_WRONLY | fs.constants.O_NONBLOCK);
-    fs.writeSync(fd, (on ? "on 0" : "standby 0") + "\n");
-    fs.closeSync(fd);
-    console.log("[cec] power", on ? "on" : "off");
+    fd = fs.openSync(fifo, fs.constants.O_WRONLY | fs.constants.O_NONBLOCK);
+    fs.writeSync(fd, cmd + "\n");
+    fifoQuiet.delete(fifo);
+    return true;
   } catch (e) {
-    console.warn("[cec] power failed (bridge running?):", e.message);
+    if (!fifoQuiet.has(fifo)) {
+      fifoQuiet.add(fifo);
+      console.warn("[" + tag + "] cmd failed (bridge running?):", e.message);
+    }
+    return false;
+  } finally {
+    // A throwing writeSync would otherwise leak the descriptor, once per attempt.
+    if (fd !== null) {
+      try {
+        fs.closeSync(fd);
+      } catch (e) {}
+    }
   }
+}
+// Tell BOTH uinput bridges the same thing. Used for "native on"/"native off":
+// while a native app owns the screen it also owns keyboard focus, so the Home
+// button can't reach any renderer of ours. Each bridge then posts Home to
+// /tvbox/api/nav instead of emitting a key, which is the only escape hatch a
+// native app has (rule 7: never a dead end on a keyboardless TV). Both bridges
+// need it because Home arrives from either one: CEC synthesizes it from a
+// double-tap of Back, a BT/USB remote sends it directly.
+function bridgesCmd(cmd) {
+  fifoCmd(CEC_CMD_FIFO, cmd, "cec");
+  fifoCmd(REMOTE_CMD_FIFO, cmd, "remote");
 }
 function forwardCommand(cmd) {
   if (win && !win.isDestroyed()) {
@@ -2510,13 +2595,7 @@ function forwardCommand(cmd) {
 // so we never hang if the bridge isn't running.
 const REMOTE_CMD_FIFO = "/tmp/tvbox-remote-cmd";
 function remoteBridgeCmd(cmd) {
-  try {
-    const fd = fs.openSync(REMOTE_CMD_FIFO, fs.constants.O_WRONLY | fs.constants.O_NONBLOCK);
-    fs.writeSync(fd, cmd + "\n");
-    fs.closeSync(fd);
-  } catch (e) {
-    console.warn("[remote] cmd failed (bridge running?):", e.message);
-  }
+  fifoCmd(REMOTE_CMD_FIFO, cmd, "remote");
 }
 // The bridge publishes its state to small JSON files under ~/.tvbox: the list of
 // currently-managed remotes, and the last button captured in learn mode.
@@ -2696,11 +2775,24 @@ function navTo(dest) {
       setVideoMode(false);
       emit({ type: "finished" });
     }
+    // Leaving a native app for another app ends its process: it has no background
+    // state to keep, and letting it live would leave it holding the GPU and audio
+    // under whatever we bring forward.
+    if (nativeapp.running() && nativeapp.id() !== m.id) {
+      nativeForeground = false;
+      nativeapp.stop();
+    }
   };
   if (appWindow(m.id)) {
     // already running in the background -> instant resume of its live window
     stopPrevPlayback();
     foregroundApp(m.id);
+    return;
+  }
+  if (m.type === "native") {
+    // Its own fullscreen Wayland client, not a page. stopPrevPlayback is folded
+    // into openNativeApp: it stops the shared player before handing over the screen.
+    openNativeApp(m);
     return;
   }
   if (m.type === "webclient") {
@@ -2742,7 +2834,15 @@ function navTo(dest) {
 // hides the app. It also nulls currentAppId, so the window's own "closed" handler
 // can't fire a second launcher.
 function exitApp(id) {
-  if (!id || !appWindow(id)) return;
+  if (!id) return;
+  // A native app has no window to destroy: showLauncher stops its process, which
+  // IS the quit. Nothing of it survives in the background either way.
+  if (nativeapp.id() === id) {
+    console.log("[nav] exit", id, "(native)");
+    showLauncher();
+    return;
+  }
+  if (!appWindow(id)) return;
   console.log("[nav] exit", id);
   if (currentAppId === id) showLauncher();
   destroyAppWindow(id);
@@ -3229,6 +3329,19 @@ app.whenReady().then(() => {
     foregroundId: () => currentAppId,
   });
   setInterval(() => appwins.ramGuardTick(), 60 * 1000); // evict hidden apps under memory pressure
+  nativeapp.init({
+    childEnv: () => ({ ...process.env, ...WL_ENV }), // the session's Wayland vars, same as mpv gets
+    bridgeCmd: bridgesCmd, // "native on" / "native off" to both uinput bridges
+    // The process is gone: its own Quit item, a crash, or our own stop(). Show the
+    // launcher only if that app is still what the shell thinks is in front, or the
+    // TV is left on a bare desktop with no way out. When we stopped it in order to
+    // navigate somewhere else, currentAppId is already the new app and its exit
+    // must not yank the screen back to HOME.
+    onExit: (id) => {
+      nativeForeground = false;
+      if (currentAppId === id) showLauncher();
+    },
+  });
   updater.startSchedulers(); // boot check + 6h re-check + nightly idle auto-apply
   setInterval(appsAutoTick, 30 * 60 * 1000); // nightly registry app auto-update (same window)
   setTimeout(btBatteryTick, 5 * 60 * 1000); // early check after boot, then half-hourly
@@ -3242,24 +3355,43 @@ app.whenReady().then(() => {
   console.log("[main] window up");
 });
 
-app.on("window-all-closed", () => {
+// Everything the shell must let go of before it exits. A native app is killed
+// rather than left behind: it would keep a fullscreen window on the TV with no
+// shell to escape it. The bridges are taken out of native mode explicitly too,
+// because the app's exit event does not necessarily get to run during shutdown,
+// and a bridge left routing Home to a dead shell would swallow the button.
+// How long shutdown waits for a native app to save and exit. Long enough for an
+// emulator to flush its config and save files, short enough that a restart is not
+// visibly stuck. native.js's own escalation timers (3s/6s) are no help here because
+// they die with the shell, so at the deadline this path does the hard stop itself
+// rather than waiting them out and leaving the app behind.
+const NATIVE_SHUTDOWN_WAIT_MS = 2500;
+function shutdown() {
   stopMpv();
+  if (!nativeapp.running()) return finishShutdown();
+  // The app was just asked to exit. Quitting immediately would take away the
+  // process that owns it before it has written its files, and the escalation
+  // timers die with us, so poll briefly for it to go on its own.
+  nativeForeground = false;
+  nativeapp.stop();
+  const deadline = Date.now() + NATIVE_SHUTDOWN_WAIT_MS;
+  const wait = setInterval(() => {
+    if (!nativeapp.settled() && Date.now() < deadline) return;
+    clearInterval(wait);
+    if (!nativeapp.settled()) nativeapp.forceStop();
+    finishShutdown();
+  }, 150);
+}
+function finishShutdown() {
+  bridgesCmd("native off");
   stopPlugins();
   mqttBridge.stop();
   app.quit();
-});
+}
+
+app.on("window-all-closed", shutdown);
 
 // Quit gracefully on signals so localStorage (app logins) flushes and we don't
 // leave an orphaned process holding port 8097 across a restart.
-process.on("SIGTERM", () => {
-  stopMpv();
-  stopPlugins();
-  mqttBridge.stop();
-  app.quit();
-});
-process.on("SIGINT", () => {
-  stopMpv();
-  stopPlugins();
-  mqttBridge.stop();
-  app.quit();
-});
+process.on("SIGTERM", shutdown);
+process.on("SIGINT", shutdown);

@@ -139,6 +139,9 @@ def routes_to_us(addr: str, phys: str) -> bool:
 # When the TV powers off, tell the shell to stop playback (so a stream doesn't
 # keep running on a dark screen). Best-effort, fire-and-forget.
 STANDBY_URL = "http://127.0.0.1:8097/tvbox/api/tv/standby"
+# Where Home goes while a native app (RetroArch et al) owns the screen: such an app
+# holds keyboard focus, so no renderer of ours can turn the key into "go home".
+NAV_URL = "http://127.0.0.1:8097/tvbox/api/nav"
 
 # We own the (single) cec-client and its stdin, so the shell can't run its own
 # to send CEC. Instead it drops a whitelisted command into this FIFO and we
@@ -149,6 +152,8 @@ CEC_CMD_FIFO = "/tmp/tvbox-cec-cmd"
 # from the tracked TV power state (the remote bridge's Power action uses it, so
 # one button both wakes and sleeps the TV - like a TV remote's own power key).
 CEC_CMD_ALLOW = {"on 0", "standby 0", "toggle 0"}
+# Shell-only commands handled here instead of being forwarded to cec-client.
+NATIVE_CMDS = {"native on", "native off"}
 STDIN_LOCK = threading.Lock()          # keep_active_source + cmd_reader both write proc.stdin
 
 
@@ -232,6 +237,23 @@ def notify_standby() -> None:
             pass
     threading.Thread(target=go, daemon=True).start()
 
+
+def nav_home() -> None:
+    """Ask the shell to leave whatever is in front and show the launcher.
+    Best-effort, fire-and-forget, off the key path so a slow reply never stalls
+    the next button press."""
+    def go() -> None:
+        try:
+            req = urllib.request.Request(
+                NAV_URL,
+                data=json.dumps({"dest": "home"}).encode(),
+                headers={"Content-Type": "application/json"},
+            )
+            urllib.request.urlopen(req, timeout=5).read()
+        except Exception as ex:
+            print(f"nav home failed: {ex}", flush=True)
+    threading.Thread(target=go, daemon=True).start()
+
 ALL_KEYS = sorted(set(KEYMAP.values()) | {BACK_KEY, HOME_KEY})
 
 
@@ -266,8 +288,17 @@ class Bridge:
     def __init__(self, ui: UInput) -> None:
         self.ui = ui
         self.last_back_ts = 0.0
+        # Set from the shell over CEC_CMD_FIFO while a native app is in front: Home
+        # then becomes an HTTP request instead of a key (see tap()).
+        self.native = False
 
     def tap(self, key: int) -> None:
+        if self.native and key == HOME_KEY:
+            # Nothing of ours has keyboard focus while a native app runs, so the
+            # key would land in that app (which does not know about HOME) and the
+            # user would be stuck. Route it to the shell instead.
+            nav_home()
+            return
         self.ui.write(e.EV_KEY, key, 1)
         self.ui.syn()
         self.ui.write(e.EV_KEY, key, 0)
@@ -327,9 +358,10 @@ def keep_active_source(proc: subprocess.Popen, tv: TVState) -> None:
         time.sleep(15)
 
 
-def cmd_reader(proc: subprocess.Popen, tv: TVState) -> None:
-    """Forward whitelisted CEC power commands the shell writes to CEC_CMD_FIFO into
-    cec-client's stdin. The FIFO is opened O_RDWR so it never hits EOF (stays
+def cmd_reader(proc: subprocess.Popen, tv: TVState, bridge: Bridge) -> None:
+    """Handle what the shell writes to CEC_CMD_FIFO: whitelisted CEC power commands
+    are forwarded to cec-client's stdin, and `native on/off` is consumed here to
+    flip how Home is delivered. The FIFO is opened O_RDWR so it never hits EOF (stays
     writable for the shell). Bridge and shell run as the same user, so it's
     private (0600); a stale FIFO from an old root install is replaced (best
     effort - /tmp's sticky bit blocks unlinking root's, but provision.sh removes
@@ -353,6 +385,10 @@ def cmd_reader(proc: subprocess.Popen, tv: TVState) -> None:
         with os.fdopen(os.open(CEC_CMD_FIFO, os.O_RDWR), "r") as fifo:
             for line in fifo:
                 cmd = line.strip()
+                if cmd in NATIVE_CMDS:
+                    bridge.native = cmd.endswith("on")
+                    print(f"native app owns the screen: {bridge.native}", flush=True)
+                    continue
                 if cmd not in CEC_CMD_ALLOW:
                     if cmd:
                         print(f"cec cmd ignored: {cmd!r}", flush=True)
@@ -431,10 +467,10 @@ def main() -> None:
         env=env,
     )
     tv = TVState()
-    threading.Thread(target=keep_active_source, args=(proc, tv), daemon=True).start()
-    threading.Thread(target=cmd_reader, args=(proc, tv), daemon=True).start()
     bridge = Bridge(ui)
-    print("bridging keys (tap Back=Esc, double-tap Back=Home)", flush=True)
+    threading.Thread(target=keep_active_source, args=(proc, tv), daemon=True).start()
+    threading.Thread(target=cmd_reader, args=(proc, tv, bridge), daemon=True).start()
+    print("bridging keys (tap Back=Backspace, double-tap Back=Home)", flush=True)
 
     try:
         for line in proc.stdout:
