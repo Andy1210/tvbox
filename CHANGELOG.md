@@ -5,6 +5,16 @@ updates). `scripts/make-release.sh` lifts the current version's `hu`/`en`
 blocks into the OTA feed's `notes` - keep both languages, keep it short, and
 write for the person on the couch (what changes for THEM), not for developers.
 
+## 1.12.1
+
+### hu
+
+- A RetroArch mostantól valóban feltelepíthető a box saját alkalmazás-listájából. Eddig a lista visszautasította, mert nem webes alkalmazás, így csak kézzel lehetett felmásolni.
+
+### en
+
+- RetroArch can now actually be installed from the box's own app list. Until now the list refused it for not being a web app, so it could only be copied over by hand.
+
 ## 1.12.0
 
 ### hu

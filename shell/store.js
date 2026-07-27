@@ -23,13 +23,17 @@ function registryUrl(config) {
 // The registry is CURATED (every app is merge-reviewed - the review is the
 // trust boundary, like Kodi's official repo), so a store app MAY carry a
 // `service` plugin (host Node code) - it ships in the app PACKAGE alongside its
-// web/ UI. Every app is a `webclient` package now. The one hard line - enforced
-// on fetch AND install - is `aptRepo`: a third-party root apt source is risky
-// and avoidable (`requires.download` instead). In sync with build-index.mjs.
+// web/ UI. `native` apps are allowed for the same reason: launching a flathub app
+// the manifest names is no more powerful than the host-process Node code a
+// `service` package already brings, and refusing them here would mean a native
+// app could only ever be installed by hand. The one hard line - enforced on fetch
+// AND install - is `aptRepo`: a third-party root apt source is risky and
+// avoidable (`requires.download` instead). In sync with build-index.mjs.
+const STORE_TYPES = ["webclient", "native"];
 function trustErrors(m) {
   const errs = [];
   if (m.requires && m.requires.aptRepo) errs.push("requires.aptRepo (use requires.download)");
-  if (m.type !== "webclient") errs.push("type must be webclient");
+  if (!STORE_TYPES.includes(m.type)) errs.push("type must be " + STORE_TYPES.join("|"));
   return errs;
 }
 

@@ -23,6 +23,22 @@ test("trustErrors: allows a webclient package that carries a service plugin (cur
   assert.deepEqual(store.trustErrors({ type: "webclient", service: "spotify", runtime: { serve: "local" } }), []);
 });
 
+// A native app is installable from the store for the same reason a `service`
+// package is: the registry is curated, and launching the flathub app the manifest
+// names is no more powerful than the host Node code a plugin already runs. Refusing
+// it here would leave hand-copying as the only way to install one.
+test("trustErrors: allows a native app with its flatpak dep and a plugin", () => {
+  assert.deepEqual(
+    store.trustErrors({
+      type: "native",
+      service: "retroarch",
+      requires: { flatpak: ["org.libretro.RetroArch"] },
+      runtime: { native: { flatpak: "org.libretro.RetroArch" } },
+    }),
+    [],
+  );
+});
+
 test("trustErrors: rejects a builtin type (apps are packages now)", () => {
   assert.match(store.trustErrors({ type: "builtin", service: "x" })[0], /webclient/);
 });
@@ -38,7 +54,10 @@ test("trustErrors: rejects a third-party root aptRepo", () => {
 });
 
 test("trustErrors: rejects an unknown type", () => {
-  assert.match(store.trustErrors({ type: "native" })[0], /type/);
+  // `native` used to be the example here, back when it was not a type the shell
+  // knew. Anything still outside the known set has to be refused.
+  assert.match(store.trustErrors({ type: "widget" })[0], /type/);
+  assert.match(store.trustErrors({})[0], /type/);
 });
 
 // ---- package apps installed end-to-end from a registry index ----
