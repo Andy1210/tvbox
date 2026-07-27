@@ -190,16 +190,26 @@ if (info.language) {
       (el.labels && el.labels[0] && el.labels[0].textContent) ||
       el.getAttribute("name") ||
       "";
-    return String(t).trim().slice(0, 80);
+    // Strip controls and bidi/format characters here as well as shell-side: this text
+    // ends up on the TV and on the phone page, and a right-to-left override can make a
+    // label read as something else entirely.
+    return String(t)
+      .replace(/[\u0000-\u001f\u007f\u200b-\u200f\u202a-\u202e\u2066-\u2069]/g, "")
+      .trim()
+      .slice(0, 80);
   }
   if (info.textInput === "off") return; // the app brings its own keyboard
   document.addEventListener(
     "focusin",
     function (ev) {
-      var info = fieldInfo(ev.target);
+      // composedPath()[0], not ev.target: focusin crosses shadow boundaries, but on a
+      // document listener ev.target is retargeted to the shadow HOST, so a field inside
+      // a web component (common in sign-in widgets) would never be recognised.
+      var el = (ev.composedPath && ev.composedPath()[0]) || ev.target;
+      var info = fieldInfo(el);
       if (!info) return;
       try {
-        ipcRenderer.send("kbd:focus", { kind: info.kind, password: info.password, label: labelFor(ev.target) });
+        ipcRenderer.send("kbd:focus", { kind: info.kind, password: info.password, label: labelFor(el) });
       } catch (e) {}
     },
     true,

@@ -60,7 +60,12 @@ export function TypingOverlay() {
         focusBefore.current = getCurrentFocusKey() || null;
         const mine = ++generation.current;
         fetchTypingStatus().then((s) => {
-          if (mine === generation.current && s?.active) setSt(s);
+          if (mine !== generation.current) return;
+          if (s?.active) setSt(s);
+          // Couldn't read the session (shell hiccup): the app is already hidden, so
+          // sitting here would leave the user on an empty screen with no keyboard and
+          // no way back. Cancelling puts the app back in front.
+          else void cancelTyping();
         });
       } else if (focusBefore.current !== null) {
         close(n.dest === "home"); // a view switch focuses itself; Home doesn't

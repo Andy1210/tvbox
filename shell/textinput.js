@@ -124,6 +124,13 @@ function submit(text) {
   // into it - a field that isn't focused yet would swallow the first characters.
   setTimeout(() => {
     if (!s.wc || s.wc.isDestroyed()) return;
+    // A NEW session for the same window can start inside this beat - a sign-in page
+    // that auto-advances email -> password does exactly that. Delivering now would
+    // type the previous field's text into the new one (the email into the password).
+    if (session && session.wc === s.wc) {
+      console.log("[textinput] dropped", chars.length, "chars - a newer field took over");
+      return;
+    }
     // The user may have pressed Home during the beat we waited: typing into a window
     // that is no longer in front is at best invisible and at worst a surprise later.
     if (!deps.isForeground(s.appId)) {
