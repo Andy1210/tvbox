@@ -755,6 +755,12 @@ function handlePost(p, data, res) {
     setWidget(id, null);
     return jsonRes(res, store.uninstall(id));
   }
+  if (p === "/tvbox/api/setup/done") {
+    // Onboarding state is the BOX's, not the browser's: localStorage can come up
+    // empty (see claimSingleInstance) and a configured box must not offer setup
+    // again because of that. The launcher still keeps its own copy for the fast path.
+    return jsonRes(res, { ok: config.setSetupDone() });
+  }
   if (p === "/tvbox/api/config/app") {
     // Set a urlConfig app's address: { key, baseUrl } (http/https or empty to clear).
     const key = String(data.key || "");
@@ -3257,7 +3263,32 @@ function stopPlugins() {
   supervisor.stopAll();
 }
 
-app.whenReady().then(() => {
+// Two shells must never run at once. The second one loses the race for Chromium's
+// storage lock and silently falls back to an IN-MEMORY localStorage - the launcher
+// then reads no setup flag on a fully configured box, offers onboarding, and cannot
+// save the answer either, so the box asks again every start. The overlap is normally
+// momentary (a predecessor still shutting down), so this WAITS for the lock instead
+// of refusing to start; run-shell.sh does the same wait before it counts an OTA boot
+// attempt, which is why standing down here is rare enough to just exit.
+const SINGLE_INSTANCE_WAIT_MS = 20000;
+const EXIT_ALREADY_RUNNING = 79;
+async function claimSingleInstance() {
+  const deadline = Date.now() + SINGLE_INSTANCE_WAIT_MS;
+  for (;;) {
+    if (app.requestSingleInstanceLock()) return true;
+    if (Date.now() >= deadline) return false;
+    await new Promise((r) => setTimeout(r, 500));
+  }
+}
+// A stray second start (a remapped remote button, a manual launch) should do
+// something sane rather than nothing at all.
+app.on("second-instance", () => raiseWindow());
+
+app.whenReady().then(async () => {
+  if (!(await claimSingleInstance())) {
+    console.warn("[shell] another shell already holds the storage lock - standing down");
+    return app.exit(EXIT_ALREADY_RUNNING);
+  }
   try {
     execFile("pkill", ["-9", "-f", "tvbox-mpv.sock"], () => {});
   } catch (e) {} // reap orphan mpv from a previous run

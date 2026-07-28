@@ -6,6 +6,7 @@ import { useNavStore } from "./stores/nav";
 import { Backdrop } from "./components/Backdrop";
 import { Home } from "./components/Home";
 import { SetupWizard, markSetupDone } from "./components/SetupWizard";
+import { markSetupDoneOnBox } from "./lib/api";
 import { Settings } from "./components/Settings";
 import { Catalog } from "./components/Catalog";
 import { Ambient } from "./components/Ambient";
@@ -43,7 +44,9 @@ export function App() {
   // chosen before the wizard existed) has no flag yet, so on first mount we
   // set it and skip the wizard; only a truly fresh box (no locale, no flag)
   // starts at the wizard's language step.
-  const [setupDone, setSetupDone] = useState<boolean>(() => {
+  // null = not decided yet (the box has not answered), which renders nothing rather
+  // than flashing onboarding at someone who already set this box up.
+  const [setupDone, setSetupDone] = useState<boolean | null>(() => {
     try {
       if (localStorage.getItem("tvbox.setup.done") === "1") return true;
       if (useLocaleStore.getState().locale) {
@@ -51,9 +54,9 @@ export function App() {
         return true;
       }
     } catch {
-      /* no storage: treat as fresh - the wizard is harmless and fully skippable */
+      /* no storage at all: ask the box, same as an empty one */
     }
-    return false;
+    return null;
   });
   const config = useConfigStore((s) => s.config);
   const configError = useConfigStore((s) => s.error);
@@ -76,6 +79,21 @@ export function App() {
   useEffect(() => {
     loadConfig();
   }, [loadConfig]);
+
+  // Our own store said nothing, so ask the BOX. This store is not always the truth:
+  // an Electron instance that lost Chromium's storage lock reads an empty
+  // localStorage, and a configured box was then walked through onboarding again -
+  // and could not save the answer either. The box remembers instead (config.setup),
+  // and a box that already knows is told once, so existing boxes carry over.
+  useEffect(() => {
+    if (setupDone !== null || !config) return;
+    const done = !!config.setup?.done;
+    if (done) markSetupDone();
+    setSetupDone(done);
+  }, [config, setupDone]);
+  useEffect(() => {
+    if (setupDone === true && config && !config.setup?.done) markSetupDoneOnBox();
+  }, [setupDone, config]);
 
   // A settings restore (backup) parked the previous box's launcher storage
   // shell-side; apply it once and reload so locale/app-order/onboarding state
@@ -107,7 +125,7 @@ export function App() {
   // notification overlay is mounted alongside every view, so it can appear on top
   // of anything (Home, Settings, the ambient screen).
   let content: ReactNode;
-  if (!setupDone) content = <SetupWizard onDone={() => setSetupDone(true)} />;
+  if (setupDone === false) content = <SetupWizard onDone={() => setSetupDone(true)} />;
   else if (config === null && configError) {
     // The shell API didn't answer - a transient hiccup must NOT look like a
     // factory-fresh box (it would drop the user into onboarding). Offer retry.

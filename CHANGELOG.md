@@ -5,6 +5,16 @@ updates). `scripts/make-release.sh` lifts the current version's `hu`/`en`
 blocks into the OTA feed's `notes` - keep both languages, keep it short, and
 write for the person on the couch (what changes for THEM), not for developers.
 
+## 1.15.1
+
+### hu
+
+- Javítva: a box bizonyos esetekben minden indulásnál újra végigkérdezte a kezdeti beállítást, pedig már régen be volt állítva - és a válasz sem maradt meg. Ha két rövid ideig egyszerre futott a felület (például mert a munkamenet váratlanul újraindult), a második nem tudta olvasni és írni a saját tárolóját, így úgy látta, mintha vadonatúj box lenne. Mostantól egyszerre csak egy felület indul el, és azt is a box maga jegyzi meg, hogy a beállítás megvolt.
+
+### en
+
+- Fixed: in some cases the box asked for the initial setup again at every start, on a box that had been set up long ago - and did not keep the answer either. When two copies of the interface briefly ran at once (for instance because the session restarted unexpectedly), the second could not read or write its own storage, so it looked like a brand-new box. Only one interface starts now, and the box itself remembers that setup is done.
+
 ## 1.15.0
 
 ### hu

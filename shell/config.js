@@ -55,6 +55,7 @@ function publicConfig() {
       m3u: iptv.m3u ? { url: iptv.m3u.url || "", epgUrl: iptv.m3u.epgUrl || "" } : null,
       configured: iptvConfigured(iptv),
     },
+    setup: { done: !!(c.setup && c.setup.done) },
     parental: {
       pinSet: !!(c.parental && c.parental.pinHash),
       lockedGroups: (c.parental && c.parental.lockedGroups) || [],
@@ -309,6 +310,17 @@ function appConfig(key) {
   const v = load()[key];
   return v && typeof v === "object" ? v : null;
 }
+// Onboarding done. Kept here rather than only in the launcher's localStorage,
+// which can read empty through no fault of the user (an Electron instance that
+// lost Chromium's storage lock) and would then walk a configured box through
+// setup again.
+function setSetupDone() {
+  const c = load();
+  c.setup = { done: true, at: Date.now() };
+  save(c); // save() throws on a real failure; it has no return value
+  return true;
+}
+
 function setAppConfig(key, val) {
   if (!key || !/^[a-z0-9_]+$/i.test(key)) return false;
   const c = load();
@@ -569,6 +581,7 @@ function replaceAll(cfg) {
 }
 
 module.exports = {
+  setSetupDone,
   publicConfig,
   setIptv,
   setParental,

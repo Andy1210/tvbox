@@ -19,6 +19,19 @@ export WAYLAND_DISPLAY="${WAYLAND_DISPLAY:-wayland-0}"
 TVBOX="$HOME/.tvbox"
 UPD="$TVBOX/update"
 
+# Never start while the previous shell is still going. Two Electron instances fight
+# over Chromium's storage lock and the loser silently gets an in-memory
+# localStorage, so the launcher forgets the box was ever set up and offers
+# onboarding again. This waits BEFORE the attempt counter below, so a predecessor
+# that takes a moment to exit never spends an OTA boot attempt; the shell itself
+# waits for the lock too, and exits 79 if it ever loses the race anyway.
+# The pattern matches only a MAIN process - Electron's children carry --type= first.
+i=0
+while [ "$i" -lt 20 ] && pgrep -f 'electron[/]dist/electron --ozone-platform' >/dev/null 2>&1; do
+  sleep 1
+  i=$((i + 1))
+done
+
 if [ -f "$UPD/pending" ]; then
   read -r PREV NEXT < "$UPD/pending"
   N=$(cat "$UPD/attempts" 2>/dev/null || echo 0)
