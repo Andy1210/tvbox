@@ -240,6 +240,30 @@ touched one file, `npx prettier --write <file>` is enough; when in doubt run
   deploys; toggles both ways; the legacy empty `tvbox-sudo` marker also still
   works). It's for a human on the SSH shell - runtime code must still never call
   sudo.
+- **An extracted bundle is a COPY, and its flatpak moves on its own.** Plex's web
+  UI is extracted out of `tv.plex.PlexHTPC` into `apps-data/plex`, while the nightly
+  `tvbox-flatpak-update.timer` updates the flatpak underneath it - so the copy
+  silently stayed at the version it was extracted at (a stale client talking to a
+  moved-on server) until someone reinstalled by hand. `install.js` records what a
+  bundle came from in `apps-data/.sources/<id>.json` (ref + arch + **commit**, since
+  a rebuild can keep the version string) and `bundleStale()` compares it;
+  `main.js`'s `bundleRefreshTick` re-extracts out of process when idle, and the
+  store's manual flatpak update does it inline. The boot pass passes
+  `keepStale: true` on purpose - acquiring anything there would block the Electron
+  main process. A bundle with NO record reads as stale once, so a box that predates
+  this levels up on its own.
+- **Two shells at once silently wipe the launcher's memory.** Electron's second
+  instance loses the race for Chromium's storage lock and falls back to an
+  **in-memory** localStorage: the launcher then reads no setup flag on a fully
+  configured box, offers onboarding, and cannot save the answer either - so the box
+  asks again at every start, and nothing logs an error. Guarded on both sides:
+  `deploy/run-shell.sh` waits for a predecessor **before** it counts an OTA boot
+  attempt (a fast exit would otherwise spend the 3 attempts a release gets and roll
+  a good update back), and `main.js` claims `requestSingleInstanceLock()` - waiting
+  up to 20s, since the overlap is normally a predecessor still shutting down - then
+  exits 79. Onboarding state also lives in `config.json` (`setup.done`, exposed in
+  `publicConfig`), so a storage hiccup cannot resurrect the wizard. A session killed
+  out from under the shell (two compositors for a while) is how this shows up.
 - `deploy.sh` requires an explicit `<pi-ssh-host>` - never hardcode a host.
 - A deployed box is usually someone's actual living-room TV: restarting the
   shell or `mpv` interrupts whatever is playing. Check `pgrep -x mpv` (or ask)

@@ -158,6 +158,10 @@ export async function storeFlatpakUpdate(id: string): Promise<{ ok: boolean; err
     return { ok: false };
   }
 }
+// Tell the box onboarding is finished. Best-effort: the launcher's own copy in
+// localStorage still drives the first render, this is what survives a browser-store
+// hiccup (an instance that lost Chromium's storage lock reads nothing).
+export const markSetupDoneOnBox = () => post("/tvbox/api/setup/done", {});
 // Set a urlConfig app's server address (empty clears it).
 export const saveAppUrl = (key: string, baseUrl: string) => post("/tvbox/api/config/app", { key, baseUrl });
 

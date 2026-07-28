@@ -1,6 +1,7 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { FocusContext, useFocusable, setFocus } from "@noriginmedia/norigin-spatial-navigation";
 import { AVAILABLE_LOCALES, useI18n } from "../lib/i18n";
+import { markSetupDoneOnBox } from "../lib/api";
 import { useBackspace } from "../lib/useBackspace";
 import { FocusButton } from "./FocusButton";
 import { LanguagePicker } from "./LanguagePicker";
@@ -16,6 +17,8 @@ import { KeymapPicker } from "./KeymapPicker";
 // focus into the list once their data arrives.
 const SETUP_DONE_KEY = "tvbox.setup.done";
 export function markSetupDone(): void {
+  // The box is told as well, since this store can come up empty (see App.tsx).
+  markSetupDoneOnBox();
   try {
     localStorage.setItem(SETUP_DONE_KEY, "1");
   } catch {
