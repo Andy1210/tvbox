@@ -106,17 +106,19 @@ resumes from what it already fetched.
 ## Hardware OpenGL
 
 A native app is usually a flatpak, and a flatpak brings its own Mesa. On this
-hardware that matters more than it sounds: the Pi renders on **v3d**
-(`/dev/dri/renderD128`) and scans out on **vc4** (`/dev/dri/card1`, which has no
-render node at all). wlroots advertises the device it opened for KMS - the vc4 one -
+hardware that matters more than it sounds: the Pi renders on **v3d** and scans out on
+**vc4**, which has no render node at all. (The node numbers are whatever the kernel
+handed out - `renderD128` and `card1` on the box this was developed against; the
+session detects the v3d one rather than assuming.) wlroots advertises the device it opened for KMS - the vc4 one -
 as the linux-dmabuf main device, and a Mesa that learns the device only that way
 (anything >= 25.1, which dropped the older `wl_drm` path) finds no render node,
 declines zink because v3dv has no `nullDescriptor`, and falls back to **llvmpipe**.
 The app then renders on the CPU with a perfectly good GPU sitting idle.
 
-The session therefore points wlroots at the render node
+The session therefore points wlroots at the v3d render node
 (`WLR_RENDER_DRM_DEVICE` in `~/.config/labwc/environment`, shipped as
-`deploy/labwc-environment`). Scanout still happens on vc4 through a dmabuf import,
+`deploy/labwc-environment`; `~/.config/labwc/autostart` re-derives the node from
+sysfs on every start, so the shipped default is only a starting point). Scanout still happens on vc4 through a dmabuf import,
 which is what the Pi has always done, and GL clients get V3D. It only takes effect
 at the next session start, since wlroots reads it once when it comes up.
 
