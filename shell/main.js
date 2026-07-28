@@ -3241,6 +3241,12 @@ const host = {
   json: jsonRes, // (res, obj) -> JSON response
   log: (...a) => console.log("[plugin]", ...a),
   childEnv: () => ({ ...process.env, ...WL_ENV }), // spawn env with the session's Wayland vars
+  // Is the box free? Nothing on screen or audible (boxIdle) AND no install running -
+  // the same pair every background job in here already waits for (the auto-update
+  // gate, the bundle refresh, the app auto-update), because an install is exactly
+  // the other thing that wants the network. So a plugin's own background work waits
+  // for the same moment the shell considers free, rather than inventing its own test.
+  idle: () => boxIdle() && installing.size === 0,
   audioSink: () => audioSink, // detected HDMI sink node.name (set by ensureAudio)
   showLauncher, // (hash) -> stop other playback + bring launcher forward
   navTo, // (id) -> open an app by id (e.g. a plugin foregrounds its app on a cast)
