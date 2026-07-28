@@ -101,6 +101,11 @@ export interface StoreEntry {
   changelog: { version: string; notes: string }[]; // release notes, newest version first (English, from the manifest)
   installing: boolean; // a full install (deps + bundle) is currently running in the background
   progress: { phase: string } | null; // install phase while installing (deps | bundle | finishing), null otherwise
+  // The flatpak(s) this app is: what it RUNS (RetroArch) or what its bundle was
+  // extracted FROM (Plex). Its version is the box's, not the registry's, and it
+  // moves through `flatpak update` - the nightly timer or the manual button.
+  flatpaks?: { ref: string; name: string; version: string | null }[];
+  flatpakStatus?: { ok: boolean; changed: boolean; version: string | null } | null; // last manual flatpak update
 }
 export interface StoreList {
   registry: string;
@@ -137,6 +142,22 @@ async function post(url: string, body: unknown): Promise<boolean> {
 
 export const storeInstall = (id: string) => post("/tvbox/api/store/install", { id });
 export const storeUninstall = (id: string) => post("/tvbox/api/store/uninstall", { id });
+// Move the app's flatpak now instead of waiting for the nightly timer. Returns as
+// soon as the update is running; the store polls /store/list for the outcome.
+// The reason matters here: "busy" is a refusal to start, not a failed update.
+export async function storeFlatpakUpdate(id: string): Promise<{ ok: boolean; error?: string }> {
+  try {
+    const res = await fetch("/tvbox/api/store/flatpak-update", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id }),
+    });
+    const d = await res.json();
+    return { ok: !!d.ok, error: d.error };
+  } catch {
+    return { ok: false };
+  }
+}
 // Set a urlConfig app's server address (empty clears it).
 export const saveAppUrl = (key: string, baseUrl: string) => post("/tvbox/api/config/app", { key, baseUrl });
 
