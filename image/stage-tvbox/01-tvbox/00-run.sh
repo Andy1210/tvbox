@@ -375,6 +375,8 @@ su - ${FIRST_USER_NAME} -c '
 # session autostart + flathub user remote (network works in the chroot;
 # harmless to skip - the deploy path re-adds it too)
 su - ${FIRST_USER_NAME} -c 'mkdir -p ~/.config/labwc && cp ~/.tvbox/labwc-autostart ~/.config/labwc/autostart && chmod +x ~/.config/labwc/autostart'
+# The renderer device wlroots uses; labwc reads it before it starts (644, not exec).
+su - ${FIRST_USER_NAME} -c 'cp ~/.tvbox/labwc-environment ~/.config/labwc/environment'
 su - ${FIRST_USER_NAME} -c 'flatpak remote-add --user --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo || true'
 
 # kiosk session manager; graphical.target so greetd actually starts at boot

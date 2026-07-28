@@ -5,6 +5,16 @@ updates). `scripts/make-release.sh` lifts the current version's `hu`/`en`
 blocks into the OTA feed's `notes` - keep both languages, keep it short, and
 write for the person on the couch (what changes for THEM), not for developers.
 
+## 1.15.0
+
+### hu
+
+- Az OpenGL-es játékok végre a videokártyán futnak. A Pi két külön eszközzel dolgozik: a kép a vc4-en megy ki, a rajzolás a v3d-n történik - és eddig a rendszer a kijelző-eszközt hirdette meg az alkalmazásoknak, amelyek így nem találták meg a videokártyát, és a processzoron rendereltek. Ez érintett minden flatpakos alkalmazást: a RetroArch OpenGL-t igénylő emulátorai (OpenLara, Craft és a legtöbb másik) használhatatlanul lassúak voltak, miközben a Vulkan-os úton minden rendben ment. Mostantól a rajzoló eszközt hirdetjük meg, és az OpenGL is a videokártyát kapja. A kép továbbra is a vc4-en megy ki, ahogy eddig is.
+
+### en
+
+- OpenGL games finally run on the GPU. The Pi uses two separate devices - vc4 puts the picture out, v3d does the drawing - and until now the box advertised the display device to applications, which then could not find the GPU and rendered on the processor instead. This affected every flatpak app: RetroArch's emulators that need OpenGL (OpenLara, Craft and most others) were unplayably slow, while its Vulkan path was fine. The box now advertises the drawing device, so OpenGL gets the GPU too. The picture still goes out over vc4, exactly as before.
+
 ## 1.14.0
 
 ### hu

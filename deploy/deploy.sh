@@ -140,6 +140,8 @@ if [ -f ~/.config/labwc/autostart ] && [ ! -f ~/.config/labwc/autostart.pre-tvbo
   cp ~/.config/labwc/autostart ~/.config/labwc/autostart.pre-tvbox
 fi
 cp ~/.tvbox/labwc-autostart ~/.config/labwc/autostart && chmod +x ~/.config/labwc/autostart && ok "session autostart" || bad "autostart install failed"
+# The renderer device wlroots uses - read by labwc at session start, not now.
+cp ~/.tvbox/labwc-environment ~/.config/labwc/environment && ok "session environment" || bad "environment install failed"
 
 echo
 if [ "$FAIL" = 0 ]; then
