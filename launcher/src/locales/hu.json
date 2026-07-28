@@ -554,6 +554,8 @@
       "no_folders": "Válassz legalább egy mappát.",
       "rclone_missing": "Az rclone nincs telepítve.",
       "failed": "Nem sikerült."
-    }
+    },
+    "passClear": "Jelszó törlése",
+    "passClearHint": "ezzel a kiszolgáló leáll"
   }
 }

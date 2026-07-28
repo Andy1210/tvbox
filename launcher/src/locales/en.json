@@ -554,6 +554,8 @@
       "no_folders": "Pick at least one folder.",
       "rclone_missing": "rclone is not installed.",
       "failed": "That did not work."
-    }
+    },
+    "passClear": "Clear password",
+    "passClearHint": "this stops the server"
   }
 }

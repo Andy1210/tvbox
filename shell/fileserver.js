@@ -5,7 +5,7 @@
 // WebDAV, served by rclone - already the box's no-root network tool (the RetroArch
 // package mounts SMB with it). No root anywhere: rclone serves a plain directory as
 // the ordinary user, and what it serves is a directory of SYMLINKS built from the
-// folders the user picked. rclone follows them with -L, writes included.
+// folders the user picked. rclone follows them (--copy-links), writes included.
 //
 // Nothing about which folders exist is written down here. They are DISCOVERED:
 // whatever user data sits in ~/.tvbox (the box's own machinery is filtered out by
@@ -24,8 +24,23 @@ const flatpak = require("./flatpak");
 const HOME = os.homedir();
 const TVBOX = path.join(HOME, ".tvbox");
 const SERVICE = "fileserver"; // supervisor key
-const ROOT = path.join(TVBOX, "fileserver", "root"); // the directory of symlinks rclone serves
+// The directory of symlinks rclone serves. Deliberately NOT under ~/.tvbox, which is
+// itself one of the folders on offer: a link back to ~/.tvbox would put the share
+// root inside the share, and a client walking it would recurse
+// (tvbox/fileserver/root/tvbox/fileserver/root/...) forever. ~/.cache is hidden, so
+// it is never offered.
+const ROOT = path.join(HOME, ".cache", "tvbox", "fileserver-root");
+const LEGACY_ROOT = path.join(TVBOX, "fileserver"); // where it used to live
 const DEFAULT_PORT = 8098; // 8097 is the shell's HTTP, 8099 the pairing server
+// Anything else would fail to bind and then respawn under the supervisor's backoff,
+// which looks like "it just doesn't work" from the TV. Privileged ports are out:
+// nothing here runs as root.
+const MIN_PORT = 1024;
+const MAX_PORT = 65535;
+function portOf(v) {
+  const n = Number(v);
+  return Number.isInteger(n) && n >= MIN_PORT && n <= MAX_PORT ? n : DEFAULT_PORT;
+}
 const DEFAULT_USER = "tvbox";
 const MIN_PASSWORD = 8;
 
@@ -38,7 +53,7 @@ const MACHINERY = new Set([
   "bin", // no-root binaries (rclone, librespot)
   "cache",
   "current", // OTA symlink
-  "fileserver", // our own share root
+  "fileserver", // where the share root used to live (boxes that ran an early build)
   "librespot-cache",
   "pyenv",
   "__pycache__",
@@ -129,6 +144,7 @@ function buildRoot(ids) {
   const want = new Set(Array.isArray(ids) ? ids : []);
   const picked = candidates().filter((c) => want.has(c.id));
   fs.rmSync(ROOT, { recursive: true, force: true });
+  fs.rmSync(LEGACY_ROOT, { recursive: true, force: true }); // only this feature ever made it
   fs.mkdirSync(ROOT, { recursive: true });
   const shared = [];
   const used = new Set();
@@ -165,7 +181,7 @@ let live = null; // { port, user, shared } while served
 // picked - an empty share is a LAN-exposed listening socket for nothing.
 function start(cfg, deps) {
   const c = cfg || {};
-  const port = Number(c.port) || DEFAULT_PORT;
+  const port = portOf(c.port);
   const user = c.user || DEFAULT_USER;
   if (!c.pass || String(c.pass).length < MIN_PASSWORD) return { ok: false, error: "password_required" };
   if (!deps.onPath("rclone")) return { ok: false, error: "rclone_missing" };
@@ -206,7 +222,7 @@ function stop(deps) {
 // everything it could share. Never the password.
 function status(cfg, deps) {
   const c = cfg || {};
-  const port = Number(c.port) || DEFAULT_PORT;
+  const port = portOf(c.port);
   return {
     enabled: !!c.enabled,
     running: !!live,
@@ -224,6 +240,7 @@ function status(cfg, deps) {
 
 module.exports = {
   DEFAULT_PORT,
+  portOf,
   DEFAULT_USER,
   MIN_PASSWORD,
   RCLONE_DOWNLOAD,

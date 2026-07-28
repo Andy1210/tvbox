@@ -104,6 +104,34 @@ test("two folders with the same name both stay reachable", () => {
   fs.rmSync(path.join(HOME, "ambient"), { recursive: true, force: true });
 });
 
+test("the served root is not inside anything it can serve", () => {
+  // Sharing ~/.tvbox used to put the share root INSIDE the share, and the root holds
+  // a link back to ~/.tvbox - a client walking the tree then recurses
+  // (tvbox/fileserver/root/tvbox/...) as deep as it has patience for.
+  const tvbox = path.join(HOME, ".tvbox");
+  assert.ok(!fileserver.ROOT.startsWith(tvbox + path.sep), fileserver.ROOT + " is inside " + tvbox);
+  for (const c of fileserver.candidates())
+    assert.ok(!fileserver.ROOT.startsWith(c.path + path.sep), "reachable through " + c.id);
+  // and sharing the box's own folder still works, it just cannot see the root
+  const r = fileserver.buildRoot(["tvbox:."]);
+  assert.deepStrictEqual(
+    r.shared.map((x) => x.name),
+    ["tvbox"],
+  );
+  assert.strictEqual(fs.existsSync(path.join(HOME, ".tvbox", "fileserver")), false, "the old location is cleaned up");
+});
+
+test("a port rclone could never bind is refused, not passed on", () => {
+  // Anything unbindable turns into a respawn loop under the supervisor, which from
+  // the TV just looks like the feature not working.
+  for (const bad of [0, -1, 80, 1023, 65536, 1.5, "abc", null, undefined, "8098; rm -rf /"])
+    assert.strictEqual(fileserver.portOf(bad), fileserver.DEFAULT_PORT, JSON.stringify(bad));
+  for (const ok of [1024, 8098, 65535, "9000"]) assert.strictEqual(fileserver.portOf(ok), Number(ok));
+  const d = deps(true);
+  fileserver.start({ pass: "goodenough", folders: ["tvbox:roms"], port: 80 }, d);
+  assert.ok(d.supervisor.spawned[0].spec.argv().includes(":" + fileserver.DEFAULT_PORT), "fell back, did not obey");
+});
+
 test("it will not serve without a password", () => {
   const d = deps(true);
   for (const pass of [undefined, "", "short"])

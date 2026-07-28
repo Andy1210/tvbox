@@ -126,6 +126,18 @@ export function FileServerSettings() {
           <span className="text-[1.9vh] text-fg-dim truncate">{st?.user || "-"}</span>
         </FocusButton>
 
+        {/* Clearing it is a shell-side capability the form had no way to reach, and it
+            is the honest way to switch the share off for good: no password, no server. */}
+        {st?.hasPass && (
+          <FocusButton
+            focusKey="fsrv-pass-clear"
+            onEnter={() => apply({ pass: "" })}
+            className="px-[2vw] py-[1.5vh] rounded-[1.1vh] bg-white/5 flex items-center justify-between gap-[1.5vw]"
+          >
+            <span className="text-[2.1vh]">{t("fileserver.passClear")}</span>
+            <span className="text-[1.7vh] text-fg-dim">{t("fileserver.passClearHint")}</span>
+          </FocusButton>
+        )}
         <FocusButton
           focusKey="fsrv-pass"
           onEnter={() => setEditing("pass")}

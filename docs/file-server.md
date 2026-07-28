@@ -15,7 +15,7 @@ rclone is already the box's no-root network tool (the RetroArch package mounts S
 with it), so on most boxes the binary is there; if not, the settings screen offers to
 fetch it - the same sha256-pinned, no-root download every app dep uses.
 
-What it serves is a directory of **symlinks** in `~/.tvbox/fileserver/root`, one per
+What it serves is a directory of **symlinks** in `~/.cache/tvbox/fileserver-root`, one per
 folder you picked, rebuilt from scratch on every change. rclone follows them
 (`--copy-links`), writes included. Nothing runs as root; nothing is mounted.
 
@@ -72,7 +72,17 @@ certificate would only add a warning to click through in every client.
   network twice, which is slow but works.
 - Directory listings are cached for 10s (`--dir-cache-time`), because the box writes
   into these folders too and a stale listing is confusing.
-- The port is 8098 (8097 is the shell's own HTTP, 8099 the pairing server).
+- The port is 8098 (8097 is the shell's own HTTP, 8099 the pairing server). A value
+  outside 1024-65535 falls back to the default rather than being handed to rclone:
+  an unbindable port turns into a respawn loop, which from the TV just looks like the
+  feature not working.
+- The share root deliberately lives **outside** `~/.tvbox`. It used to be inside, and
+  sharing the box's own folder then put the root inside the share - with a link back
+  to `~/.tvbox` in it, so a client walking the tree recursed as deep as it had
+  patience for.
+- Clearing the password (its own row in the form, shown once one is stored) stops the
+  server. An empty entry in the password row means "keep the stored one", like every
+  other credential form here.
 
 ## Code
 
