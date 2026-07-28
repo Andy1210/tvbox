@@ -146,6 +146,18 @@ const queued = { url: null, startPos: 0 };
 function boxIdle() {
   return !mpv && !currentAppId && !(nowPlaying && nowPlaying.state === "playing");
 }
+// Is the box free to start something substantial? Idle as above, no install in
+// flight, and none of the shell's OWN background maintenance running. The last
+// part is not redundant: the nightly app auto-update spends its registry download
+// with the `installing` set still empty (it only fills during provisionFull), so
+// idle+installing alone would call the box free while it is already saturating the
+// link. Everything that starts background work asks this - the OTA auto-apply, the
+// bundle refresh, the app auto-update, and a plugin through `host.idle()` - so the
+// answers cannot drift apart. The flags it reads are declared with the jobs they
+// guard, below; nothing calls this before those run.
+function boxFree() {
+  return boxIdle() && installing.size === 0 && !bundleRefreshBusy && !appsAutoBusy;
+}
 // Restart the shell in-place: quit cleanly (localStorage flush, plugin stop);
 // the labwc respawn loop relaunches run-shell.sh, which follows the `current` symlink.
 function restartShell(why) {
@@ -308,13 +320,14 @@ function startFlatpakUpdate(id, res) {
 // idle, since it replaces files an app may be serving from.
 let bundleRefreshBusy = false;
 async function bundleRefreshTick() {
-  if (bundleRefreshBusy || installing.size || !boxIdle()) return;
+  if (!boxFree()) return;
   const stale = apps.getManifests().filter((m) => apps.bundleStale(m));
   if (!stale.length) return;
   bundleRefreshBusy = true;
   try {
     for (const m of stale) {
-      if (installing.size || !boxIdle()) break; // a wake-up aborts the run
+      // a wake-up aborts the run; not boxFree(), whose flag this run itself holds
+      if (installing.size || !boxIdle()) break;
       console.log("[install] bundle behind its flatpak, refreshing:", m.id);
       installing.add(m.id);
       await spawnCli(["install", m.id, "--force"], m.id, "bundle");
@@ -907,14 +920,15 @@ async function appsAutoTick() {
   if (u.appsAuto === false) return;
   const h = new Date().getHours();
   if (h < 3 || h > 5) return;
-  if (appsAutoBusy || installing.size || !boxIdle()) return;
+  if (!boxFree()) return;
   appsAutoBusy = true;
   try {
     const l = await store.listForUi(config)(true);
     for (const id of l.updates || []) {
       // re-checked per app: a user install started during the awaited registry
       // refresh (or a provisionFull that just scheduled a service restart)
-      // must stop the run - store.install would swap ~/.tvbox/apps/<id> under it
+      // must stop the run - store.install would swap ~/.tvbox/apps/<id> under it.
+      // Not boxFree(), whose flag this run itself holds.
       if (!boxIdle() || installing.size) break;
       console.log("[store] nightly app auto-update:", id);
       const r = await store.install(config, id);
@@ -3241,6 +3255,11 @@ const host = {
   json: jsonRes, // (res, obj) -> JSON response
   log: (...a) => console.log("[plugin]", ...a),
   childEnv: () => ({ ...process.env, ...WL_ENV }), // spawn env with the session's Wayland vars
+  // Is the box free? The very predicate every background job in here waits for
+  // (boxFree: nothing on screen or audible, no install, no maintenance of the
+  // shell's own), so a plugin's background work waits for the same moment the shell
+  // considers free instead of inventing its own test from process lists.
+  idle: boxFree,
   audioSink: () => audioSink, // detected HDMI sink node.name (set by ensureAudio)
   showLauncher, // (hash) -> stop other playback + bring launcher forward
   navTo, // (id) -> open an app by id (e.g. a plugin foregrounds its app on a cast)
@@ -3432,10 +3451,12 @@ app.whenReady().then(async () => {
     restoredAt = Date.now();
     setTimeout(() => restartShell("backup restored"), 4000);
   });
-  // isIdle includes "no install in flight": the OTA auto-apply must never
-  // restart the shell under a half-finished app provision (store.install has
-  // already swapped the manifest by then, so the nightly would never retry).
-  updater.init({ isIdle: () => boxIdle() && installing.size === 0, restart: () => restartShell("update applied") });
+  // boxFree, not boxIdle: the OTA auto-apply must never restart the shell under a
+  // half-finished app provision (store.install has already swapped the manifest by
+  // then, so the nightly would never retry) - and its 03-06h window is the same one
+  // the nightly app auto-update runs in, whose download the `installing` set does
+  // not cover.
+  updater.init({ isIdle: boxFree, restart: () => restartShell("update applied") });
   loadPlugins(); // require plugins + register their routes (deps-gated)
   apps.installAll((s) => console.log("[install]", s));
   serve();
