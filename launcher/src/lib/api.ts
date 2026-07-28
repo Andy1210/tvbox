@@ -162,6 +162,54 @@ export async function storeFlatpakUpdate(id: string): Promise<{ ok: boolean; err
 // localStorage still drives the first render, this is what survives a browser-store
 // hiccup (an instance that lost Chromium's storage lock reads nothing).
 export const markSetupDoneOnBox = () => post("/tvbox/api/setup/done", {});
+// ---- LAN file server (WebDAV) ----
+// The candidate folders come from the BOX (it discovers them); the launcher only
+// renders them and sends back which ids are shared. The password is write-only:
+// `hasPass` says whether one is stored, omitting it keeps it.
+export interface FileServerStatus {
+  enabled: boolean;
+  running: boolean;
+  user: string;
+  hasPass: boolean;
+  port: number;
+  url: string | null; // the LAN address to type on a computer
+  folders: string[]; // candidate ids currently shared
+  shared: string[]; // the names a computer sees
+  rclone: boolean; // the binary that serves it is present
+  installing?: boolean; // ...and is being fetched right now
+  minPassword: number;
+  candidates: { id: string; kind: string; name: string; warn: boolean }[];
+}
+export async function fetchFileServer(): Promise<FileServerStatus | null> {
+  try {
+    const res = await fetch("/tvbox/api/fileserver", { cache: "no-store" });
+    if (!res.ok) throw new Error("HTTP " + res.status);
+    return (await res.json()) as FileServerStatus;
+  } catch (e) {
+    console.warn("[launcher] file server status failed:", e);
+    return null;
+  }
+}
+export async function saveFileServer(patch: {
+  enabled?: boolean;
+  user?: string;
+  port?: number;
+  folders?: string[];
+  pass?: string;
+}): Promise<{ ok: boolean; error?: string; status?: FileServerStatus }> {
+  try {
+    const res = await fetch("/tvbox/api/fileserver", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(patch),
+    });
+    return await res.json();
+  } catch {
+    return { ok: false, error: "failed" };
+  }
+}
+export const installRclone = () => post("/tvbox/api/fileserver/install-rclone", {});
+
 // Set a urlConfig app's server address (empty clears it).
 export const saveAppUrl = (key: string, baseUrl: string) => post("/tvbox/api/config/app", { key, baseUrl });
 

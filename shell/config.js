@@ -325,6 +325,32 @@ function setSetupDone() {
   return true;
 }
 
+// The LAN file server (WebDAV). The password lives here like every other secret -
+// config.json is chmod 600 - and never reaches the launcher: it asks
+// /tvbox/api/fileserver, which reports whether one is SET, not what it is.
+//
+// `pass` follows the same rule as the other credential forms: omitted keeps what is
+// stored, "" clears it. Clearing it stops the server, since it must not serve
+// without one.
+function setFileserver(fileserver) {
+  const c = load();
+  const cur = c.fileserver || {};
+  const f = fileserver || {};
+  const next = {
+    enabled: f.enabled === undefined ? !!cur.enabled : !!f.enabled,
+    user: (f.user === undefined ? cur.user : String(f.user).trim()) || "",
+    port: Number(f.port === undefined ? cur.port : f.port) || 0,
+    folders: Array.isArray(f.folders) ? f.folders.filter((x) => typeof x === "string").slice(0, 64) : cur.folders || [],
+    pass: f.pass === undefined ? cur.pass || "" : String(f.pass),
+  };
+  c.fileserver = next;
+  save(c);
+  return next;
+}
+function rawFileserver() {
+  return (load() || {}).fileserver || {};
+}
+
 function setAppConfig(key, val) {
   if (!key || !/^[a-z0-9_]+$/i.test(key)) return false;
   const c = load();
@@ -585,6 +611,8 @@ function replaceAll(cfg) {
 }
 
 module.exports = {
+  setFileserver,
+  rawFileserver,
   setSetupDone,
   publicConfig,
   setIptv,

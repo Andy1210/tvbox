@@ -8,6 +8,7 @@ import { RegionSettings } from "./RegionSettings";
 import { HostnameSettings } from "./HostnameSettings";
 import { WifiSettings } from "./WifiSettings";
 import { MqttSettings } from "./MqttSettings";
+import { FileServerSettings } from "./FileServerSettings";
 import { DisplaySettings } from "./DisplaySettings";
 import { AudioSettings } from "./AudioSettings";
 import { BluetoothSettings } from "./BluetoothSettings";
@@ -89,6 +90,7 @@ const CATEGORIES: Category[] = [
     render: () => (
       <>
         <WifiSettings />
+        <FileServerSettings />
         <MqttSettings />
       </>
     ),
