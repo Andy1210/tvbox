@@ -67,7 +67,9 @@ const MACHINERY = new Set([
   "versions", // OTA releases
 ]);
 // Friendlier, stable, ASCII names for the folders a computer will see. Anything not
-// named here keeps its own directory name.
+// named here keeps its own directory name. These names are also what the launcher
+// lists, untranslated: the picker names the folder someone will go looking for in a
+// file manager, so a localized label there would name something that isn't served.
 const SHARE_NAMES = { ambient: "screensaver", roms: "games" };
 
 // rclone is the same pinned build the RetroArch package installs, so a box that has
@@ -108,36 +110,53 @@ function subdirs(dir) {
   }
 }
 // A share name has to survive being a path segment on someone else's computer.
+const MAX_NAME = 64;
+const NAME_RE = new RegExp("^[A-Za-z0-9][A-Za-z0-9._-]{0," + (MAX_NAME - 1) + "}$");
 function nameOk(n) {
-  return typeof n === "string" && /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/.test(n);
+  return typeof n === "string" && NAME_RE.test(n);
 }
 
 // Everything the box could offer, with a stable id per folder. The id is what the
 // launcher stores, so it must not change when the list around it does.
 function candidates() {
   const out = [];
-  const add = (id, dir, kind, name, warn) => {
+  const used = new Set();
+  const add = (id, dir, name, warn) => {
     if (!isDir(dir) || !nameOk(name)) return;
-    out.push({ id, path: dir, kind, name, warn: !!warn });
+    // Two folders can share a basename (~/Videos and ~/.tvbox/Videos); the second one
+    // gets a suffix rather than silently replacing the first. Resolved HERE, over
+    // every candidate in a fixed order, rather than over the picked ones while
+    // building the share root: the name is then the same whatever else is shared, so
+    // the picker can name what a client will browse and a bookmark cannot move
+    // because someone unshared an unrelated folder.
+    // The suffix comes out of the name's own length budget, not on top of it: a
+    // 64-character folder must not be advertised as a 66-character one.
+    let unique = name;
+    for (let i = 2; used.has(unique); i++) {
+      const suffix = "-" + i;
+      unique = name.slice(0, MAX_NAME - suffix.length) + suffix;
+    }
+    used.add(unique);
+    out.push({ id, path: dir, name: unique, warn: !!warn });
   };
 
   // user content under ~/.tvbox (machinery filtered out, so new folders appear)
   for (const d of subdirs(TVBOX)) {
     if (MACHINERY.has(d) || d.startsWith(".")) continue;
-    add("tvbox:" + d, path.join(TVBOX, d), SHARE_NAMES[d] ? d : "other", SHARE_NAMES[d] || d);
+    add("tvbox:" + d, path.join(TVBOX, d), SHARE_NAMES[d] || d);
   }
   // the box user's own folders (Videos, Music, … - only if they exist)
   for (const d of subdirs(HOME)) {
     if (d.startsWith(".")) continue;
-    add("home:" + d, path.join(HOME, d), "home", d);
+    add("home:" + d, path.join(HOME, d), d);
   }
   // each installed flatpak app's data dir: saves, states and the BIOS folder an
   // emulator reads, which is the whole reason this exists
   for (const d of subdirs(path.join(HOME, ".var", "app"))) {
-    add("flatpak:" + d, path.join(HOME, ".var", "app", d), "flatpak", flatpak.shortName(d));
+    add("flatpak:" + d, path.join(HOME, ".var", "app", d), flatpak.shortName(d));
   }
   // and the box's own directory, which is not something to hand out lightly
-  add("tvbox:.", TVBOX, "tvbox", "tvbox", true);
+  add("tvbox:.", TVBOX, "tvbox", true);
   return out;
 }
 
@@ -159,16 +178,12 @@ function buildRoot(ids) {
     return { root: ROOT, shared: [], error: "share_failed" };
   }
   const shared = [];
-  const used = new Set();
   for (const c of picked) {
-    // two folders can share a basename (~/Videos and ~/.tvbox/Videos); the second
-    // one gets a suffix rather than silently replacing the first
-    let name = c.name;
-    for (let i = 2; used.has(name); i++) name = c.name + "-" + i;
-    used.add(name);
+    // c.name is already unique across every candidate (see candidates()), so there is
+    // nothing left to resolve here - which is what makes it the name the picker showed
     try {
-      fs.symlinkSync(c.path, path.join(ROOT, name));
-      shared.push({ id: c.id, name, path: c.path });
+      fs.symlinkSync(c.path, path.join(ROOT, c.name));
+      shared.push({ id: c.id, name: c.name, path: c.path });
     } catch (e) {
       console.warn("[fileserver] could not share", c.path, "-", e.message);
     }
@@ -247,7 +262,7 @@ function status(cfg, deps) {
     shared: live ? live.shared.map((s) => s.name) : [],
     rclone: !!(deps && deps.onPath("rclone")),
     minPassword: MIN_PASSWORD,
-    candidates: candidates().map((x) => ({ id: x.id, kind: x.kind, name: x.name, warn: x.warn })),
+    candidates: candidates().map((x) => ({ id: x.id, name: x.name, warn: x.warn })),
   };
 }
 

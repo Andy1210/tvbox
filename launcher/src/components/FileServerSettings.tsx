@@ -13,6 +13,12 @@ import { Osk } from "./Osk";
 // future app introduces appears here on its own. `warn` marks the one folder that
 // deserves a second thought: ~/.tvbox holds the box's settings and the apps' logins.
 //
+// A folder is listed under the exact name it will have over the network, never a
+// translated one: the name here is what to look for in the computer's file manager,
+// and a label the share does not carry would send someone hunting for it. The box
+// settles name clashes (`Videos-2`) when it discovers a folder, so what it reports is
+// already that name - there is nothing to adjust for here.
+//
 // A password is mandatory on the box's side; the row shows only whether one is set
 // and an empty entry keeps the stored one, like the other credential forms. Saving
 // applies immediately - the box starts or stops the server - so there is nothing to
@@ -97,9 +103,6 @@ export function FileServerSettings() {
   const folders = st?.folders || [];
   const toggle = (id: string) =>
     apply({ folders: folders.includes(id) ? folders.filter((x) => x !== id) : [...folders, id] });
-  // The box says what a folder IS; only the known kinds get a name of our own.
-  const label = (c: { kind: string; name: string }) =>
-    c.kind === "ambient" || c.kind === "roms" || c.kind === "tvbox" ? t("fileserver.kind." + c.kind) : c.name;
 
   return (
     <div className="mt-[3vh]">
@@ -193,7 +196,7 @@ export function FileServerSettings() {
               className="px-[2vw] py-[1.5vh] rounded-[1.1vh] bg-white/5 flex items-center justify-between gap-[1.5vw]"
             >
               <span className="text-[2.1vh] truncate">
-                {label(c)}
+                {c.name}
                 {c.warn && <span className="text-[1.7vh] text-warn ml-[1vw]">{t("fileserver.warnTvbox")}</span>}
               </span>
               <span className={["text-[1.9vh]", picked ? "text-accent" : "text-fg-dim"].join(" ")}>
