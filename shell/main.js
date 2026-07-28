@@ -274,7 +274,10 @@ function startFlatpakUpdate(id, res) {
   const m = apps.manifestById(id);
   const refs = m ? flatpak.refsFor(m) : [];
   if (!m || !refs.length) return jsonRes(res, { ok: false, error: "no flatpak" });
-  if (installing.has(id)) return jsonRes(res, { ok: true, installing: true });
+  // Busy is a refusal, not a start. Reporting `installing` here would make the
+  // launcher wait for a flatpak result that a bundle install is never going to
+  // produce, and then read its absence as a failure.
+  if (installing.has(id)) return jsonRes(res, { ok: false, error: "busy" });
   installing.add(id);
   flatpakResult.delete(id);
   (async () => {

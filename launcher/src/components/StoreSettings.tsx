@@ -98,12 +98,16 @@ export function StoreSettings() {
         if (e && kind === "flatpak") {
           // The box reports what the update did: a flatpak can be rebuilt without
           // its version moving, so "already current" is a real outcome, not a
-          // failure - and the version shown is the one now on the box.
+          // failure - and the version shown is the one now on the box. With no
+          // result at all (a shell restart mid-run) nothing is claimed either way;
+          // the version line, which refreshes with the list, is the answer then.
           const st = e.flatpakStatus;
-          const name = (e.flatpaks || []).filter((f) => f.version)[0]?.name ?? loc(e.name);
-          const v = st?.version ?? "";
-          const key = !st?.ok ? "store.flatpakFailed" : st.changed ? "store.flatpakUpdated" : "store.flatpakCurrent";
-          setStatus({ id: e.id, text: t(key, { name, v }) });
+          const named = (e.flatpaks || []).filter((f) => f.version);
+          const name = named.length === 1 ? named[0].name : loc(e.name);
+          if (st) {
+            const key = !st.ok ? "store.flatpakFailed" : st.changed ? "store.flatpakUpdated" : "store.flatpakCurrent";
+            setStatus({ id: e.id, text: t(key, { name, v: st.version ?? "" }) });
+          }
           if (detailId === id) setTimeout(() => setFocus("detail-flatpak"), 0);
         } else if (e) {
           const key = e.installed ? (kind === "update" ? "store.updated" : "store.installed") : "store.failed";
@@ -145,10 +149,13 @@ export function StoreSettings() {
   // because it is the same kind of wait - hundreds of MB, out of process.
   const flatpakUpdate = async (e: StoreEntry) => {
     pending.current.set(e.id, "flatpak");
-    const ok = await storeFlatpakUpdate(e.id);
-    if (!ok) {
+    const r = await storeFlatpakUpdate(e.id);
+    if (!r.ok) {
       pending.current.delete(e.id);
-      setStatus({ id: e.id, text: t("store.failed", { name: loc(e.name) }) });
+      // The box refusing because it is already installing something is worth saying
+      // as such: waiting a moment fixes it, unlike a failure.
+      const text = r.error === "busy" ? t("store.busy") : t("store.failed", { name: loc(e.name) });
+      setStatus({ id: e.id, text });
       setTimeout(() => setFocus("detail-flatpak"), 0);
       return;
     }

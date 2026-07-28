@@ -305,7 +305,8 @@
     "flatpakUpdated": "{name} updated to {v}",
     "flatpakCurrent": "{name} is already current ({v}).",
     "flatpakFailed": "Could not update {name}.",
-    "phaseFlatpak": "Downloading the program..."
+    "phaseFlatpak": "Downloading the program...",
+    "busy": "The box is busy with something else. Try again in a moment."
   },
   "install": {
     "done": "{name} installed",
