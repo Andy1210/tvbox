@@ -102,3 +102,43 @@ resumes from what it already fetched.
 - **No screen of its own on the box.** This is why an app like this declares
   `pairing` entries: a form on a phone is the only sensible place to configure it,
   and it is also a better place to type a password than a TV remote.
+
+## Hardware OpenGL
+
+A native app is usually a flatpak, and a flatpak brings its own Mesa. On this
+hardware that matters more than it sounds: the Pi renders on **v3d** and scans out on
+**vc4**, which has no render node at all. (The node numbers are whatever the kernel
+handed out - `renderD128` and `card1` on the box this was developed against; the
+session detects the v3d one rather than assuming.) wlroots advertises the device it opened for KMS - the vc4 one -
+as the linux-dmabuf main device, and a Mesa that learns the device only that way
+(anything >= 25.1, which dropped the older `wl_drm` path) finds no render node,
+declines zink because v3dv has no `nullDescriptor`, and falls back to **llvmpipe**.
+The app then renders on the CPU with a perfectly good GPU sitting idle.
+
+The session therefore points wlroots at the v3d render node
+(`WLR_RENDER_DRM_DEVICE` in `~/.config/labwc/environment`, shipped as
+`deploy/labwc-environment`; `~/.config/labwc/autostart` re-derives the node from
+sysfs on every start, so the shipped default is only a starting point). Scanout still happens on vc4 through a dmabuf import,
+which is what the Pi has always done, and GL clients get V3D. It only takes effect
+at the next session start, since wlroots reads it once when it comes up.
+
+What this hardware serves, for an app deciding which API to ask for:
+
+| API                                   | available                                                             |
+| ------------------------------------- | --------------------------------------------------------------------- |
+| desktop OpenGL, compatibility profile | 3.1                                                                   |
+| OpenGL ES                             | 3.1                                                                   |
+| desktop OpenGL, **core** profile      | not above 3.1 - a core-profile 3.3 request fails with `EGL_BAD_MATCH` |
+| Vulkan                                | yes (v3dv)                                                            |
+
+RetroArch's package uses exactly that table: it sets the global video driver to
+`gl` when the session provides hardware GL, and writes a per-core override for a
+core whose own `required_hw_api` says GL cannot serve it (Beetle PSX HW asks for
+either a GL core profile >= 3.3 or Vulkan, so it gets Vulkan).
+
+To check what an app actually got, ask inside its sandbox rather than guessing:
+
+```sh
+# hardware? then GL_RENDERER says V3D, not llvmpipe
+flatpak run --command=python3 org.libretro.RetroArch /path/to/an/egl/probe.py
+```

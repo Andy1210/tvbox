@@ -1,0 +1,23 @@
+# tvbox session environment (installed to ~/.config/labwc/environment).
+# labwc reads this BEFORE wlroots starts, which is the only point where the
+# renderer's device can still be chosen.
+#
+# The Pi splits display and render across two DRM devices: vc4 drives HDMI
+# (card1, no render node at all) and v3d renders (renderD128). wlroots renders
+# through the device it opened for KMS - the vc4 one - and advertises that as the
+# linux-dmabuf "main device". A client whose Mesa learns the device ONLY that way
+# then has no render node to open: it finds no driver, tries zink (which v3dv
+# cannot back - no nullDescriptor) and lands on llvmpipe. Software rendering, on
+# a box with a working GPU.
+#
+# That is every flatpak app on a current runtime, because Mesa >= 25.1 dropped
+# the older wl_drm path that the host's own Mesa still uses. It is why RetroArch's
+# OpenGL cores ran on the CPU while its Vulkan path was fine - Vulkan enumerates
+# /dev/dri itself and never asks the compositor.
+#
+# Pointing wlroots at the RENDER node makes it advertise v3d, and a GL client
+# gets the GPU. Scanout still happens on vc4 through a dmabuf import, which is
+# what the Pi has always done. ~/.config/labwc/autostart re-checks this value
+# against the hardware on every session start, so a box whose render node is
+# somewhere else (or absent) is never left pointing at a device that isn't there.
+WLR_RENDER_DRM_DEVICE=/dev/dri/renderD128

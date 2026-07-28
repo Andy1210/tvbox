@@ -70,6 +70,7 @@ const INFRA_FILES = [
   "provision.sh",
   "install-libcec8.sh", // provision builds libcec >= 8 from it (no distro package yet)
   "labwc-autostart",
+  "labwc-environment", // wlroots render device (read by labwc before it starts)
   "tvbox-cec.service",
   "tvbox-remote.service",
   "tvbox-gamepad.service",
@@ -432,13 +433,21 @@ function syncInfra(rel) {
     fs.copyFileSync(f, path.join(TVBOX, name));
     if (EXECUTABLE.includes(name)) fs.chmodSync(path.join(TVBOX, name), 0o755);
   }
-  // labwc session autostart + systemd user units live outside ~/.tvbox
+  // labwc session autostart + environment + systemd user units live outside ~/.tvbox
   const auto = path.join(src, "labwc-autostart");
   if (fs.existsSync(auto)) {
     const dst = path.join(os.homedir(), ".config", "labwc", "autostart");
     fs.mkdirSync(path.dirname(dst), { recursive: true });
     fs.copyFileSync(auto, dst);
     fs.chmodSync(dst, 0o755);
+  }
+  // Not executable: labwc parses it as KEY=VALUE lines. It only takes effect at
+  // the next session start, since wlroots reads it once when it comes up.
+  const env = path.join(src, "labwc-environment");
+  if (fs.existsSync(env)) {
+    const dst = path.join(os.homedir(), ".config", "labwc", "environment");
+    fs.mkdirSync(path.dirname(dst), { recursive: true });
+    fs.copyFileSync(env, dst);
   }
   const unitDir = path.join(os.homedir(), ".config", "systemd", "user");
   fs.mkdirSync(unitDir, { recursive: true });

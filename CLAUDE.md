@@ -203,6 +203,25 @@ touched one file, `npx prettier --write <file>` is enough; when in doubt run
   later is harmless (~0.1%) and recovery when the TV returns is clean, so the fix
   is `vc4.force_hotplug=1` on the cmdline - vc4 then ignores HPD and an output
   always exists. Not fixable by upgrading: 0.9.8 is the newest packaged.
+- **The Pi renders and displays on DIFFERENT DRM devices, and that breaks GL for
+  sandboxed apps.** vc4 drives HDMI with no render node at all; v3d renders. (Node
+  numbers are the kernel's business - `card1` and `renderD128` on the dev box; the
+  session derives the v3d one from sysfs, so don't hardcode either.) wlroots renders through the device it opened for KMS - the vc4 one
+  - and advertises that as the linux-dmabuf **main device**. A client whose Mesa
+    learns the device only that way then has no render node to open: no driver, zink
+    refused (v3dv has no `nullDescriptor`), **llvmpipe**. That is every flatpak app on
+    a current runtime, because Mesa >= 25.1 dropped the `wl_drm` path the host's own
+    Mesa still uses - which is why mpv and Chromium were always fine and RetroArch's
+    GL cores ran on the CPU while its Vulkan path was perfect (Vulkan enumerates
+    `/dev/dri` itself and never asks the compositor). Fix: `WLR_RENDER_DRM_DEVICE`
+    in `deploy/labwc-environment` (labwc reads it before wlroots starts; the session
+    autostart re-derives the node from sysfs every start, so a box that numbers its
+    nodes differently is corrected and one with no v3d render node has the line
+    removed rather than left pointing at a missing device - wlroots would then not
+    come up at all). Diagnose from inside the sandbox:
+    `flatpak run --command=python3 <app>` + an EGL probe, or just
+    `EGL_PLATFORM=surfaceless` - if surfaceless says V3D and wayland says llvmpipe,
+    this is it. **Only takes effect at the next session start.**
 - The Pi 5 has **no H.264 hardware decode** - mpv runs `--vo=gpu` with
   software decode; don't add hwdec flags blindly.
 - mpv PiP runs under **XWayland** (`DISPLAY`, no `WAYLAND_DISPLAY`) because
