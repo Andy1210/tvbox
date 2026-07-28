@@ -45,6 +45,10 @@ export interface PublicConfig {
     m3u: { url: string; epgUrl: string } | null;
     configured: boolean;
   };
+  // Onboarding done, remembered by the BOX. The launcher keeps its own copy in
+  // localStorage for a synchronous first render, but that store can read empty
+  // through no fault of the user, and then this is what says the box is set up.
+  setup: { done: boolean };
   parental: { pinSet: boolean; lockedGroups: string[]; requirePin: boolean };
   spotify: { deviceName: string; hasCredentials: boolean; enabled: boolean };
   ambient: { enabled: boolean; idleMinutes: number; city: string; sleepMinutes: number; bing: boolean };

@@ -44,6 +44,7 @@ export const CONFIG: PublicConfig = {
     m3u: { url: "https://demo.tvbox.invalid/playlist.m3u", epgUrl: "https://demo.tvbox.invalid/xmltv.xml" },
     configured: true,
   },
+  setup: { done: true }, // the demo box is past onboarding
   parental: { pinSet: false, lockedGroups: [], requirePin: false },
   spotify: { deviceName: "tvbox demo", hasCredentials: true, enabled: true },
   ambient: { enabled: true, idleMinutes: 5, city: "Budapest", sleepMinutes: 0, bing: false },
