@@ -542,11 +542,6 @@
     "notShared": "no",
     "noFolders": "Nothing to share.",
     "warnTvbox": "holds the box's settings and the apps' logins",
-    "kind": {
-      "ambient": "Screensaver images",
-      "roms": "Games",
-      "tvbox": "The box's own folder"
-    },
     "installRclone": "Install rclone (it does the serving)",
     "installing": "installing...",
     "err": {

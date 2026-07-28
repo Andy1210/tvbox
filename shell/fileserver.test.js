@@ -40,8 +40,10 @@ const deps = (onPath) => ({
 
 test("user content is offered and the box's machinery is not", () => {
   const c = byId();
-  assert.ok(c.has("tvbox:ambient"), "screensaver images");
-  assert.ok(c.has("tvbox:roms"), "games");
+  // the offered name IS the served one - the picker names what to look for on the
+  // computer, so these must not drift apart
+  assert.strictEqual(c.get("tvbox:ambient").name, "screensaver");
+  assert.strictEqual(c.get("tvbox:roms").name, "games");
   for (const m of ["shell", "shell-userdata", "versions", "bin"])
     assert.strictEqual(c.has("tvbox:" + m), false, m + " is machinery, not content");
 });
@@ -59,7 +61,6 @@ test("an installed app's data dir is offered under the app's name", () => {
   const entry = byId().get("flatpak:org.libretro.RetroArch");
   assert.ok(entry);
   assert.strictEqual(entry.name, "RetroArch", "not the reverse-DNS id");
-  assert.strictEqual(entry.kind, "flatpak");
 });
 
 test("the home folder's own directories are offered", () => {
@@ -96,12 +97,34 @@ test("an id that is not a candidate is ignored, not turned into a path", () => {
   assert.deepStrictEqual(fs.readdirSync(fileserver.ROOT), []);
 });
 
-test("two folders with the same name both stay reachable", () => {
-  mk("ambient"); // ~/ambient next to ~/.tvbox/ambient
-  const r = fileserver.buildRoot(["home:ambient", "tvbox:ambient"]);
-  assert.strictEqual(r.shared.length, 2);
-  assert.strictEqual(new Set(r.shared.map((s) => s.name)).size, 2, "one must not replace the other");
-  fs.rmSync(path.join(HOME, "ambient"), { recursive: true, force: true });
+test("two folders with the same name both stay reachable, under the name they were offered as", () => {
+  mk(".tvbox", "Videos"); // the box's own Videos, next to the home folder's
+  const c = byId();
+  assert.strictEqual(c.get("tvbox:Videos").name, "Videos");
+  assert.strictEqual(c.get("home:Videos").name, "Videos-2", "the clash is settled where the folder is offered");
+  const both = fileserver.buildRoot(["home:Videos", "tvbox:Videos"]);
+  assert.deepStrictEqual(both.shared.map((s) => s.name).sort(), ["Videos", "Videos-2"], "neither replaces the other");
+  // and the suffix does not depend on what else happens to be shared: a client's
+  // bookmark must not move because someone unshared an unrelated folder
+  const alone = fileserver.buildRoot(["home:Videos"]);
+  assert.deepStrictEqual(
+    alone.shared.map((s) => s.name),
+    ["Videos-2"],
+  );
+  fs.rmSync(path.join(HOME, ".tvbox", "Videos"), { recursive: true, force: true });
+});
+
+test("a name at the length limit stays within it once it is suffixed", () => {
+  const long = "L".repeat(64); // exactly what nameOk allows
+  mk(".tvbox", long);
+  mk(long);
+  const c = byId();
+  assert.strictEqual(c.get("tvbox:" + long).name, long);
+  const second = c.get("home:" + long).name;
+  assert.strictEqual(second.length, 64, "the suffix comes out of the budget, not on top of it");
+  assert.strictEqual(second, "L".repeat(62) + "-2");
+  fs.rmSync(path.join(HOME, ".tvbox", long), { recursive: true, force: true });
+  fs.rmSync(path.join(HOME, long), { recursive: true, force: true });
 });
 
 test("the served root is not inside anything it can serve", () => {

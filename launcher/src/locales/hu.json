@@ -542,11 +542,6 @@
     "notShared": "nincs",
     "noFolders": "Nincs megosztható mappa.",
     "warnTvbox": "a box beállításai és az appok bejelentkezései is benne vannak",
-    "kind": {
-      "ambient": "Képernyővédő képek",
-      "roms": "Játékok",
-      "tvbox": "A box saját mappája"
-    },
     "installRclone": "Az rclone telepítése (ez szolgálja ki)",
     "installing": "telepítés...",
     "err": {
