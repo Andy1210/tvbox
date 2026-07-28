@@ -25,8 +25,13 @@ export function FileServerSettings() {
   const [st, setSt] = useState<FileServerStatus | null>(null);
   const [editing, setEditing] = useState<Field | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [unreachable, setUnreachable] = useState(false);
 
-  const load = useCallback(async () => setSt(await fetchFileServer()), []);
+  const load = useCallback(async () => {
+    const s = await fetchFileServer();
+    setUnreachable(!s);
+    if (s) setSt(s);
+  }, []);
   useEffect(() => {
     load();
   }, [load]);
@@ -43,6 +48,25 @@ export function FileServerSettings() {
     if (r.status) setSt(r.status);
     else load();
   };
+
+  // The shell not answering is not the same as the server being off, and the controls
+  // below would all fail: offer the way out instead, like the store does.
+  if (unreachable)
+    return (
+      <div className="mt-[3vh]">
+        <div className="text-[2.4vh] font-semibold mb-[0.6vh]">{t("fileserver.title")}</div>
+        <div className="flex items-center gap-[1.5vw]">
+          <span className="text-[1.9vh] text-warn">{t("app.shellUnreachable")}</span>
+          <FocusButton
+            focusKey="fsrv-retry"
+            onEnter={load}
+            className="px-[1.6vw] h-[5vh] rounded-[1vh] bg-white/5 flex items-center justify-center text-[1.9vh] font-semibold"
+          >
+            {t("app.retry")}
+          </FocusButton>
+        </div>
+      </div>
+    );
 
   if (editing) {
     const f = editing;
@@ -67,6 +91,9 @@ export function FileServerSettings() {
   }
 
   const on = !!st?.enabled;
+  // Without rclone there is nothing to start, so that control is greyed rather than
+  // quietly accepting a configuration the box cannot honour.
+  const needsRclone = !!st && !st.rclone;
   const folders = st?.folders || [];
   const toggle = (id: string) =>
     apply({ folders: folders.includes(id) ? folders.filter((x) => x !== id) : [...folders, id] });
@@ -108,8 +135,11 @@ export function FileServerSettings() {
 
         <FocusButton
           focusKey="fsrv-enabled"
-          onEnter={() => apply({ enabled: !on })}
-          className="px-[2vw] py-[1.5vh] rounded-[1.1vh] bg-white/5 flex items-center justify-between gap-[1.5vw]"
+          onEnter={() => (needsRclone ? setError("rclone_missing") : apply({ enabled: !on }))}
+          className={[
+            "px-[2vw] py-[1.5vh] rounded-[1.1vh] bg-white/5 flex items-center justify-between gap-[1.5vw]",
+            needsRclone ? "opacity-40" : "",
+          ].join(" ")}
         >
           <span className="text-[2.1vh]">{t("fileserver.enabled")}</span>
           <span className={["text-[1.9vh]", on ? "text-accent" : "text-fg-dim"].join(" ")}>

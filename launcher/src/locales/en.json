@@ -553,7 +553,8 @@
       "password_required": "Set a password first - it will not start without one.",
       "no_folders": "Pick at least one folder.",
       "rclone_missing": "rclone is not installed.",
-      "failed": "That did not work."
+      "failed": "That did not work.",
+      "share_failed": "Could not prepare the share (write error)."
     },
     "passClear": "Clear password",
     "passClearHint": "this stops the server"

@@ -127,9 +127,32 @@ test("a port rclone could never bind is refused, not passed on", () => {
   for (const bad of [0, -1, 80, 1023, 65536, 1.5, "abc", null, undefined, "8098; rm -rf /"])
     assert.strictEqual(fileserver.portOf(bad), fileserver.DEFAULT_PORT, JSON.stringify(bad));
   for (const ok of [1024, 8098, 65535, "9000"]) assert.strictEqual(fileserver.portOf(ok), Number(ok));
+  // and the ports the shell itself is already listening on: rclone would lose the
+  // bind and land in the same loop
+  for (const taken of [8097, 8099]) assert.strictEqual(fileserver.portOf(taken), fileserver.DEFAULT_PORT);
   const d = deps(true);
   fileserver.start({ pass: "goodenough", folders: ["tvbox:roms"], port: 80 }, d);
   assert.ok(d.supervisor.spawned[0].spec.argv().includes(":" + fileserver.DEFAULT_PORT), "fell back, did not obey");
+});
+
+test("a filesystem it cannot write to is reported, not thrown", () => {
+  // start() runs straight from the settings POST, so a throw here would travel into
+  // the HTTP handler and take the shell down over one feature's bad day.
+  const parent = path.dirname(fileserver.ROOT);
+  fs.mkdirSync(parent, { recursive: true });
+  fs.rmSync(fileserver.ROOT, { recursive: true, force: true });
+  fs.chmodSync(parent, 0o500); // read-only: mkdir of the root must fail
+  try {
+    const built = fileserver.buildRoot(["tvbox:ambient"]);
+    assert.strictEqual(built.error, "share_failed");
+    assert.deepStrictEqual(built.shared, []);
+    assert.deepStrictEqual(fileserver.start({ pass: "goodenough", folders: ["tvbox:ambient"] }, deps(true)), {
+      ok: false,
+      error: "share_failed",
+    });
+  } finally {
+    fs.chmodSync(parent, 0o700);
+  }
 });
 
 test("it will not serve without a password", () => {

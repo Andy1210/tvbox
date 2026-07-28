@@ -553,7 +553,8 @@
       "password_required": "Adj meg jelszót, addig nem indul el.",
       "no_folders": "Válassz legalább egy mappát.",
       "rclone_missing": "Az rclone nincs telepítve.",
-      "failed": "Nem sikerült."
+      "failed": "Nem sikerült.",
+      "share_failed": "Nem sikerült előkészíteni a megosztást (írási hiba)."
     },
     "passClear": "Jelszó törlése",
     "passClearHint": "ezzel a kiszolgáló leáll"

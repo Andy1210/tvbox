@@ -23,11 +23,12 @@ const STATUS = (hasPass: boolean) => ({
   candidates: [{ id: "tvbox:ambient", kind: "ambient", name: "screensaver", warn: false }],
 });
 
-function stubShell(hasPass: boolean) {
+function stubShell(hasPass: boolean, over: Partial<ReturnType<typeof STATUS>> = {}) {
   const posted: unknown[] = [];
-  vi.stubGlobal("fetch", (url: string, init?: RequestInit) => {
+  vi.stubGlobal("fetch", (_url: string, init?: RequestInit) => {
     if (init?.method === "POST") posted.push(JSON.parse(String(init.body)));
-    const body = init?.method === "POST" ? { ok: true, status: STATUS(false) } : STATUS(hasPass);
+    const body =
+      init?.method === "POST" ? { ok: true, status: { ...STATUS(false), ...over } } : { ...STATUS(hasPass), ...over };
     return Promise.resolve(new Response(JSON.stringify(body), { headers: { "Content-Type": "application/json" } }));
   });
   return posted;
@@ -45,10 +46,11 @@ describe("the file server form", () => {
     const posted = stubShell(true);
     render(<FileServerSettings />);
     await settle();
-    const clear = screen.getByText("Clear password");
-    await act(async () =>
-      clear.closest("[data-focus-key], div, button")?.dispatchEvent(new MouseEvent("click", { bubbles: true })),
-    );
+    expect(screen.queryByText("Clear password")).not.toBeNull();
+    // Driven the way the box is: focus the control, press OK. That also proves the
+    // focus key is reachable at all, which a synthetic click would not.
+    await setFocus("fsrv-pass-clear");
+    await remote.ok();
     await settle();
     expect(posted).toContainEqual({ pass: "" });
   });
@@ -60,6 +62,28 @@ describe("the file server form", () => {
     expect(screen.queryByText("Clear password")).toBeNull();
     // and it says what is missing instead
     expect(screen.queryByText(/at least 8 characters/)).not.toBeNull();
+  });
+
+  it("offers a way out when the shell does not answer, instead of looking stopped", async () => {
+    // "stopped" plus a full set of controls that all fail is the wrong story: the box
+    // is not reachable, and every control below would just error.
+    vi.stubGlobal("fetch", () => Promise.reject(new Error("no shell")));
+    render(<FileServerSettings />);
+    await settle();
+    expect(screen.queryByText("Try again")).not.toBeNull(); // app.retry, shared with the store
+    expect(screen.queryByText("Can't reach the box")).not.toBeNull();
+    expect(screen.queryByText("Enabled")).toBeNull(); // and none of the controls that would fail
+  });
+
+  it("greys the switch while the binary that serves it is missing", async () => {
+    const posted = stubShell(true, { rclone: false });
+    render(<FileServerSettings />);
+    await settle();
+    await setFocus("fsrv-enabled");
+    await remote.ok();
+    await settle();
+    expect(posted).toEqual([]); // nothing was configured that the box cannot honour
+    expect(screen.queryByText("rclone is not installed.")).not.toBeNull();
   });
 
   it("renders the folders the box discovered, not a list of its own", async () => {

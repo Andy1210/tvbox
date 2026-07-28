@@ -338,6 +338,16 @@ const fileserverDeps = { onPath: apps.onPath, childEnv: () => ({ ...process.env 
 let rcloneInstalling = false;
 
 function applyFileserver() {
+  try {
+    return applyFileserverInner();
+  } catch (e) {
+    // The settings POST calls this synchronously; one feature's bad day must not be
+    // the shell's last.
+    console.warn("[fileserver] apply failed:", e.message);
+    return { ok: false, error: "failed" };
+  }
+}
+function applyFileserverInner() {
   const cfg = config.rawFileserver();
   if (!cfg.enabled) {
     fileserver.stop(fileserverDeps);

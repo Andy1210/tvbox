@@ -37,9 +37,13 @@ const DEFAULT_PORT = 8098; // 8097 is the shell's HTTP, 8099 the pairing server
 // nothing here runs as root.
 const MIN_PORT = 1024;
 const MAX_PORT = 65535;
+// The shell is already listening on these, so rclone would lose the bind and end up
+// in the same respawn loop an out-of-range port causes.
+const RESERVED_PORTS = new Set([8097, 8099]);
 function portOf(v) {
   const n = Number(v);
-  return Number.isInteger(n) && n >= MIN_PORT && n <= MAX_PORT ? n : DEFAULT_PORT;
+  const usable = Number.isInteger(n) && n >= MIN_PORT && n <= MAX_PORT && !RESERVED_PORTS.has(n);
+  return usable ? n : DEFAULT_PORT;
 }
 const DEFAULT_USER = "tvbox";
 const MIN_PASSWORD = 8;
@@ -143,9 +147,17 @@ function candidates() {
 function buildRoot(ids) {
   const want = new Set(Array.isArray(ids) ? ids : []);
   const picked = candidates().filter((c) => want.has(c.id));
-  fs.rmSync(ROOT, { recursive: true, force: true });
-  fs.rmSync(LEGACY_ROOT, { recursive: true, force: true }); // only this feature ever made it
-  fs.mkdirSync(ROOT, { recursive: true });
+  // A permissions or disk problem here is this feature's business, not the shell's:
+  // start() is called straight from the settings POST, so a throw would travel up
+  // into the HTTP handler and take the whole process with it.
+  try {
+    fs.rmSync(ROOT, { recursive: true, force: true });
+    fs.rmSync(LEGACY_ROOT, { recursive: true, force: true }); // only this feature ever made it
+    fs.mkdirSync(ROOT, { recursive: true });
+  } catch (e) {
+    console.warn("[fileserver] could not prepare the share root:", e.message);
+    return { root: ROOT, shared: [], error: "share_failed" };
+  }
   const shared = [];
   const used = new Set();
   for (const c of picked) {
@@ -185,7 +197,8 @@ function start(cfg, deps) {
   const user = c.user || DEFAULT_USER;
   if (!c.pass || String(c.pass).length < MIN_PASSWORD) return { ok: false, error: "password_required" };
   if (!deps.onPath("rclone")) return { ok: false, error: "rclone_missing" };
-  const { root, shared } = buildRoot(c.folders);
+  const { root, shared, error } = buildRoot(c.folders);
+  if (error) return { ok: false, error };
   if (!shared.length) return { ok: false, error: "no_folders" };
   deps.supervisor.spawn(SERVICE, {
     // The credentials go through the environment, never argv: anyone on the box can
