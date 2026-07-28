@@ -26,6 +26,7 @@ const ir = require("./ir"); // IR blaster hub: TV volume/mute over ESPHome or Ho
 const appwins = require("./appwindows"); // background-apps window registry + hidden-set policy (LRU/RAM guard)
 const nativeapp = require("./native"); // native (non-Electron) apps: RetroArch et al own the screen AND the input
 const flatpak = require("./flatpak"); // flatpak refs/versions/commits + updating one
+const fileserver = require("./fileserver"); // the box's folders over WebDAV (rclone, no root)
 const firetvir = require("./firetvir"); // Fire TV remote IR programming (venv deps + irdb codesets + BLE tool)
 const apps = require("./install"); // manifests + install-recipe runner (shared with the tvbox CLI)
 const store = require("./store"); // app-store registry client (manifest-only apps -> ~/.tvbox/apps)
@@ -323,6 +324,61 @@ async function bundleRefreshTick() {
   } finally {
     bundleRefreshBusy = false;
   }
+}
+
+// ---- LAN file server (WebDAV) ----
+//
+// Copying a screensaver image onto the box, or a console BIOS into the folder an
+// emulator reads, is not something a TV can do - and should not need ssh. The module
+// owns the decisions (which folders are offered, what gets served, refusing to serve
+// without a password); this is the wiring: config in, supervisor out.
+// PATH matters here (rclone lands in ~/.tvbox/bin, which install.js prepends);
+// the Wayland vars do not - this serves files, it draws nothing.
+const fileserverDeps = { onPath: apps.onPath, childEnv: () => ({ ...process.env }), supervisor };
+let rcloneInstalling = false;
+
+function applyFileserver() {
+  try {
+    return applyFileserverInner();
+  } catch (e) {
+    // The settings POST calls this synchronously; one feature's bad day must not be
+    // the shell's last.
+    console.warn("[fileserver] apply failed:", e.message);
+    return { ok: false, error: "failed" };
+  }
+}
+function applyFileserverInner() {
+  const cfg = config.rawFileserver();
+  if (!cfg.enabled) {
+    fileserver.stop(fileserverDeps);
+    return { ok: true, stopped: true };
+  }
+  const r = fileserver.start(cfg, fileserverDeps);
+  if (!r.ok) {
+    fileserver.stop(fileserverDeps); // never leave a half-started share behind
+    console.warn("[fileserver] not started:", r.error);
+  } else {
+    console.log("[fileserver] serving", r.shared.length, "folder(s) on", r.url || ":" + r.port);
+  }
+  return r;
+}
+
+// rclone is a ~20MB download, so it runs out of process like every other no-root
+// binary install - the UI polls the status for `rclone`.
+function installRclone() {
+  if (rcloneInstalling || apps.onPath("rclone")) return false;
+  rcloneInstalling = true;
+  const child = spawn(process.execPath, [path.join(__dirname, "cli.js"), "fileserver-deps"], {
+    env: { ...process.env, ...WL_ENV, ELECTRON_RUN_AS_NODE: "1" },
+    stdio: "ignore",
+  });
+  const done = () => {
+    rcloneInstalling = false;
+    if (apps.onPath("rclone") && config.rawFileserver().enabled) applyFileserver();
+  };
+  child.on("error", done);
+  child.on("exit", done);
+  return true;
 }
 
 // ---- app manifests + install (the install-recipe runner lives in install.js,
@@ -760,6 +816,26 @@ function handlePost(p, data, res) {
     // empty (see claimSingleInstance) and a configured box must not offer setup
     // again because of that. The launcher still keeps its own copy for the fast path.
     return jsonRes(res, { ok: config.setSetupDone() });
+  }
+  if (p === "/tvbox/api/fileserver") {
+    // One writer for the whole form: enable/disable, credentials, folders. Applying
+    // is immediate, because a setting nobody can see the effect of is a trap.
+    config.setFileserver({
+      enabled: data.enabled,
+      user: data.user,
+      port: data.port,
+      folders: data.folders,
+      pass: data.pass, // omitted keeps the stored one, "" clears it
+    });
+    const r = applyFileserver();
+    return jsonRes(res, {
+      ok: !!r.ok,
+      error: r.error || null,
+      status: fileserver.status(config.rawFileserver(), fileserverDeps),
+    });
+  }
+  if (p === "/tvbox/api/fileserver/install-rclone") {
+    return jsonRes(res, { ok: true, installing: installRclone() || rcloneInstalling });
   }
   if (p === "/tvbox/api/config/app") {
     // Set a urlConfig app's address: { key, baseUrl } (http/https or empty to clear).
@@ -1522,6 +1598,10 @@ function serve() {
       return;
     }
     // App-store registry (Settings → Store). ?refresh=1 bypasses the 5-min cache.
+    if (p === "/tvbox/api/fileserver") {
+      const st = fileserver.status(config.rawFileserver(), fileserverDeps);
+      return jsonRes(res, { ...st, installing: rcloneInstalling });
+    }
     if (p === "/tvbox/api/store/list") {
       const refresh = (req.url || "").includes("refresh=1");
       store
@@ -3261,6 +3341,7 @@ function stopPlugins() {
     } catch (e) {}
   }
   supervisor.stopAll();
+  fileserver.stop(null); // the symlinked view of the box's folders is not left behind
 }
 
 // Two shells must never run at once. The second one loses the race for Chromium's
@@ -3440,6 +3521,7 @@ app.whenReady().then(async () => {
     },
   });
   updater.startSchedulers(); // boot check + 6h re-check + nightly idle auto-apply
+  if (config.rawFileserver().enabled) applyFileserver(); // the LAN share survives a restart
   setInterval(appsAutoTick, 30 * 60 * 1000); // nightly registry app auto-update (same window)
   // Not gated to the small hours like the registry check: a bundle whose flatpak
   // moved is BROKEN-ish now (the copy is older than the app it talks to), and the

@@ -21,7 +21,9 @@ const DYNAMIC = [
   "ir.action.",
   "ir.backend.",
   "firetvir.key.",
-]; // built at runtime (Clock, Ambient weather, Settings categories, remap actions, power options, keyboard-layout names, IR blaster actions/backends, Fire TV IR key names)
+  "fileserver.kind.",
+  "fileserver.err.",
+]; // built at runtime (Clock, Ambient weather, Settings categories, remap actions, power options, keyboard-layout names, IR blaster actions/backends, Fire TV IR key names, shareable-folder kinds + the box's file-server error codes)
 
 function flatten(obj: Record<string, unknown>, prefix = ""): string[] {
   return Object.entries(obj).flatMap(([k, v]) => {

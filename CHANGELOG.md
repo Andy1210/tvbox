@@ -5,6 +5,16 @@ updates). `scripts/make-release.sh` lifts the current version's `hu`/`en`
 blocks into the OTA feed's `notes` - keep both languages, keep it short, and
 write for the person on the couch (what changes for THEM), not for developers.
 
+## 1.16.0
+
+### hu
+
+- Új: fájlkiszolgáló. A box mappái elérhetők a hálózaton, így számítógépről tudsz rá másolni és róla törölni - képernyővédő képeket, játékokat egyszerre sokat, vagy egy konzol BIOS-át pontosan oda, ahol az emulátor keresi. Beállítások → Hálózat → Fájlkiszolgáló: jelszó (kötelező), és te választod ki, mely mappák legyenek megoszthatók. A box magától megkeresi, mit lehet megosztani, tehát egy új alkalmazás mappája is megjelenik a listában. A saját beállítási mappája is megosztható, de figyelmeztetéssel: abban a box beállításai és az alkalmazások bejelentkezései is benne vannak.
+
+### en
+
+- New: a file server. The box's folders are reachable over the network, so you can copy to it and delete from it with a computer - screensaver images, many games at once, or a console BIOS exactly where the emulator looks for it. Settings → Network → File server: a password (required), and you choose which folders may be shared. The box finds what can be shared itself, so a new app's folder shows up in the list on its own. Its own settings folder can be shared too, with a warning: that one holds the box's settings and the apps' logins.
+
 ## 1.15.1
 
 ### hu

@@ -523,5 +523,40 @@
     "pickSecondFor": "Second device for {key}",
     "cancel": "Cancel",
     "perKeyHint": "Each button can use a different brand - e.g. a soundbar on volume. A second device makes one press blast both (the TV's own power still goes over HDMI-CEC)."
+  },
+  "fileserver": {
+    "title": "File server",
+    "running": "running",
+    "stopped": "stopped",
+    "hint": "The box's folders over the network, so you can copy to it from a computer: screensaver images, games, or a console BIOS into the folder the emulator reads. It will not start without a password.",
+    "urlHint": "Type this into your computer's file manager. Username: {user}",
+    "enabled": "Enabled",
+    "onWord": "yes",
+    "offWord": "no",
+    "user": "Username",
+    "pass": "Password",
+    "passMissing": "needed, at least {n} characters",
+    "folders": "Shared folders",
+    "foldersHint": "The box finds what can be shared itself, so a new folder shows up here on its own.",
+    "shared": "shared",
+    "notShared": "no",
+    "noFolders": "Nothing to share.",
+    "warnTvbox": "holds the box's settings and the apps' logins",
+    "kind": {
+      "ambient": "Screensaver images",
+      "roms": "Games",
+      "tvbox": "The box's own folder"
+    },
+    "installRclone": "Install rclone (it does the serving)",
+    "installing": "installing...",
+    "err": {
+      "password_required": "Set a password first - it will not start without one.",
+      "no_folders": "Pick at least one folder.",
+      "rclone_missing": "rclone is not installed.",
+      "failed": "That did not work.",
+      "share_failed": "Could not prepare the share (write error)."
+    },
+    "passClear": "Clear password",
+    "passClearHint": "this stops the server"
   }
 }
