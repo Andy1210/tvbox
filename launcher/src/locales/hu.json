@@ -523,5 +523,37 @@
     "pickSecondFor": "{key} második készüléke",
     "cancel": "Mégse",
     "perKeyHint": "Minden gombhoz más márka is választható - pl. soundbar a hangerőre. A második készülékkel egy nyomás mindkettőnek szól (a TV-t a HDMI-CEC amúgy is kapcsolja)."
+  },
+  "fileserver": {
+    "title": "Fájlkiszolgáló",
+    "running": "fut",
+    "stopped": "áll",
+    "hint": "A box mappái elérhetők a hálózaton, így számítógépről tudsz rá másolni: képernyővédő képeket, játékokat, vagy egy konzol BIOS-át oda, ahol az emulátor keresi. Jelszó nélkül nem indul el.",
+    "urlHint": "Ezt írd be a számítógép fájlkezelőjébe. Felhasználó: {user}",
+    "enabled": "Bekapcsolva",
+    "onWord": "igen",
+    "offWord": "nem",
+    "user": "Felhasználó",
+    "pass": "Jelszó",
+    "passMissing": "kell, legalább {n} karakter",
+    "folders": "Megosztott mappák",
+    "foldersHint": "A box maga keresi meg, mit lehet megosztani, ezért új mappa magától megjelenik itt.",
+    "shared": "megosztva",
+    "notShared": "nincs",
+    "noFolders": "Nincs megosztható mappa.",
+    "warnTvbox": "a box beállításai és az appok bejelentkezései is benne vannak",
+    "kind": {
+      "ambient": "Képernyővédő képek",
+      "roms": "Játékok",
+      "tvbox": "A box saját mappája"
+    },
+    "installRclone": "Az rclone telepítése (ez szolgálja ki)",
+    "installing": "telepítés...",
+    "err": {
+      "password_required": "Adj meg jelszót, addig nem indul el.",
+      "no_folders": "Válassz legalább egy mappát.",
+      "rclone_missing": "Az rclone nincs telepítve.",
+      "failed": "Nem sikerült."
+    }
   }
 }

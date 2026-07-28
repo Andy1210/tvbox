@@ -238,6 +238,24 @@ function main() {
     return;
   }
 
+  // The file server's own binary. Same no-root, sha256-pinned download every app
+  // dep uses; separate verb because the file server is a shell feature, not an app.
+  if (cmd === "fileserver-deps") {
+    const fileserver = require("./fileserver");
+    if (apps.onPath("rclone")) {
+      console.log("rclone already installed");
+      return;
+    }
+    try {
+      apps.installDownload(fileserver.RCLONE_DOWNLOAD, log);
+      console.log("done.");
+    } catch (e) {
+      console.error("rclone install failed: " + e.message);
+      process.exit(1);
+    }
+    return;
+  }
+
   if (cmd === "remove") {
     const id = argv[1];
     if (!id) {
@@ -306,7 +324,7 @@ function main() {
   }
 
   console.log(
-    "usage: tvbox <list | deps <id> | install <id> [-f] | flatpak-update <id> | remove <id> | update [--check] | backup <file> | restore <file>>",
+    "usage: tvbox <list | deps <id> | install <id> [-f] | flatpak-update <id> | fileserver-deps | remove <id> | update [--check] | backup <file> | restore <file>>",
   );
   process.exit(1);
 }
