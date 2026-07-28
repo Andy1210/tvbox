@@ -17,6 +17,7 @@ remote/firetv_hid_probe.py
 remote/firetv_tv_codes.example.json
 deploy/run-shell.sh
 deploy/labwc-autostart
+deploy/labwc-environment
 deploy/cursor_idle_hide.py
 deploy/tvbox
 deploy/provision.sh
