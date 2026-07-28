@@ -14,6 +14,7 @@ const os = require("os");
 const path = require("path");
 const { execFileSync } = require("child_process");
 const apps = require("./install");
+const flatpak = require("./flatpak");
 
 function nameOf(m) {
   return typeof m.name === "string" ? m.name : (m.name && (m.name.en || m.name.hu)) || m.id;
@@ -211,6 +212,32 @@ function main() {
     return;
   }
 
+  // The flatpak an app IS (RetroArch) or was extracted FROM (Plex). Separate from
+  // `install`, which is about the app package: this moves the flatpak itself, the
+  // same thing the nightly tvbox-flatpak-update timer does for every ref at once.
+  // The shell drives it out of process for the store's manual update button.
+  if (cmd === "flatpak-update") {
+    const id = argv[1];
+    const m = apps.manifestById(id);
+    if (!m) {
+      console.error("unknown app: " + id);
+      process.exit(1);
+    }
+    const refs = flatpak.refsFor(m);
+    if (!refs.length) {
+      console.error(`${m.id} uses no flatpak`);
+      process.exit(1);
+    }
+    try {
+      flatpak.updateSync(refs, log);
+      console.log("done.");
+    } catch (e) {
+      console.error("flatpak update failed: " + e.message);
+      process.exit(1);
+    }
+    return;
+  }
+
   if (cmd === "remove") {
     const id = argv[1];
     if (!id) {
@@ -279,7 +306,7 @@ function main() {
   }
 
   console.log(
-    "usage: tvbox <list | deps <id> | install <id> [-f] | remove <id> | update [--check] | backup <file> | restore <file>>",
+    "usage: tvbox <list | deps <id> | install <id> [-f] | flatpak-update <id> | remove <id> | update [--check] | backup <file> | restore <file>>",
   );
   process.exit(1);
 }

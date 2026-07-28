@@ -80,6 +80,36 @@ git tag v1.2.0 && git push origin v1.2.0
 box you rsync to runs the dev tree again (release dirs stay for the next OTA).
 CLI on the box: `tvbox update [--check]`.
 
+## Flatpak-backed apps (RetroArch, Plex)
+
+Some apps are not only a package from the registry - they depend on a flatpak, in
+one of two ways:
+
+| how                                                            | example                    | what "update" means                                            |
+| -------------------------------------------------------------- | -------------------------- | -------------------------------------------------------------- |
+| `requires.flatpak` - the app RUNS it                           | RetroArch (a `native` app) | updating the flatpak IS updating the app                       |
+| `install.source.flatpak` - its web bundle is EXTRACTED from it | Plex                       | the flatpak moves, then the extracted copy has to be refreshed |
+
+Three things move them:
+
+- **`tvbox-flatpak-update.timer`** (nightly, 03:30 + jitter) runs
+  `flatpak update --user` for every ref. This is the normal path and needs no
+  interaction.
+- **The store's update button.** Settings → Store → the app: alongside the
+  registry version it shows the flatpak's own version and offers to update it now.
+  That runs `tvbox flatpak-update <id>` out of process (a flatpak is hundreds of
+  MB) and reports whether anything actually changed - decided by the ref's commit
+  before and after, since a rebuild can ship new files under the same version.
+- **The bundle refresh.** An extracted bundle is a copy, so it does not follow the
+  flatpak. What a bundle came from is recorded in
+  `~/.tvbox/apps-data/.sources/<id>.json`; when the flatpak's commit no longer
+  matches, the shell re-extracts it (`tvbox install <id> --force`) two minutes
+  after boot and every six hours, only while the box is idle. A manual flatpak
+  update does it immediately, in the same action.
+
+`tvbox flatpak-update <id>` and `tvbox install <id> --force` are the CLI
+equivalents of the last two.
+
 ## OS updates - install everything, reboot nothing
 
 `provision.sh` configures `unattended-upgrades` with Debian security + the

@@ -6,6 +6,7 @@
 const fs = require("fs");
 const path = require("path");
 const apps = require("./install");
+const flatpak = require("./flatpak");
 const { isAllowedFetchUrl, guardedFetch } = require("./netguard"); // https anywhere, or LAN http; re-guards redirects
 
 const DEFAULT_REGISTRY = "https://raw.githubusercontent.com/Andy1210/tvbox-apps/main/index.json";
@@ -154,6 +155,10 @@ function listForUi(config) {
   return async (refresh) => {
     const { entries, error, url } = await getEntries(config, refresh);
     apps.loadManifests();
+    // One `flatpak list` for the whole panel: a flatpak-backed app carries a
+    // second version that the registry knows nothing about, and its update path
+    // is `flatpak update` rather than a manifest bump.
+    const fps = await flatpak.list();
     const builtinIds = new Set(
       apps
         .getManifests()
@@ -184,6 +189,13 @@ function listForUi(config) {
         installedVersion,
         updateAvailable: !!(installed && verGt(version, installedVersion)),
         changelog: Array.isArray(m.changelog) ? m.changelog : [], // [{version, notes}] (English), newest-first - for the store detail view
+        // the flatpaks this app is: what it RUNS (RetroArch) or what its bundle was
+        // extracted FROM (Plex). version is null when the ref isn't installed.
+        flatpaks: flatpak.refsFor(m).map((f) => ({
+          ref: f.ref,
+          name: flatpak.shortName(f.ref),
+          version: (fps.get(f.ref) || {}).version || null,
+        })),
         urlConfig: rt.urlConfig || null,
         baseUrl: rt.urlConfig ? (config.appConfig(rt.urlConfig) || {}).baseUrl || "" : "",
         missing,

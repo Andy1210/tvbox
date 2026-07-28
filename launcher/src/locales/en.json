@@ -298,7 +298,15 @@
     "screenshots": "Screenshots",
     "whatsNew": "What's new",
     "noNotes": "No release notes",
-    "back": "Back"
+    "back": "Back",
+    "flatpakNote": "updates on its own channel",
+    "flatpakUpdate": "Update {name}",
+    "flatpakUpdateAll": "Update programs",
+    "flatpakUpdated": "{name} updated to {v}",
+    "flatpakCurrent": "{name} is already current ({v}).",
+    "flatpakFailed": "Could not update {name}.",
+    "phaseFlatpak": "Downloading the program...",
+    "busy": "The box is busy with something else. Try again in a moment."
   },
   "install": {
     "done": "{name} installed",

@@ -229,3 +229,71 @@ test("pairing entries are bounded and need a kind plus a label", () => {
     "at most 4",
   );
 });
+
+// ---- an extracted bundle vs the flatpak it came from ----
+//
+// A bundle is a COPY of the flatpak's files, and the flatpak moves on its own (the
+// nightly update timer), so the copy goes stale with nothing in it changing to say
+// so. This is the check that notices; the commit is read through the flatpak module,
+// which is stubbed here so no flatpak has to be installed to run the tests.
+const flatpak = require("./flatpak");
+const PLEXISH = { id: "plex", type: "webclient", install: { source: { type: "flatpak", ref: "tv.plex.PlexHTPC" } } };
+
+function withFlatpakAt(commit, fn) {
+  const realRoot = flatpak.root,
+    realCommit = flatpak.commitSync;
+  flatpak.root = () => "/fake/flatpak/active";
+  flatpak.commitSync = () => commit;
+  try {
+    return fn();
+  } finally {
+    flatpak.root = realRoot;
+    flatpak.commitSync = realCommit;
+  }
+}
+// installApp records where a bundle came from; do the same without running an
+// extract, since acquiring anything would need a real flatpak.
+function recordSource(id, ident) {
+  const dir = path.join(TMP, ".tvbox", "apps-data", ".sources");
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(path.join(dir, id + ".json"), JSON.stringify(ident));
+}
+
+test("a bundle with nothing recorded is refreshed once, then tracked", () => {
+  // plex is installed by the migration test above
+  fs.rmSync(path.join(TMP, ".tvbox", "apps-data", ".sources"), { recursive: true, force: true });
+  withFlatpakAt("commit-a", () => {
+    assert.strictEqual(apps.bundleStale(PLEXISH), true, "an untracked bundle must be levelled once");
+    recordSource("plex", { type: "flatpak", ref: "tv.plex.PlexHTPC", arch: "x86_64", commit: "commit-a" });
+    assert.strictEqual(apps.bundleStale(PLEXISH), false, "same commit is not stale");
+  });
+});
+
+test("a bundle is stale exactly when its flatpak's commit moved", () => {
+  recordSource("plex", { type: "flatpak", ref: "tv.plex.PlexHTPC", arch: "x86_64", commit: "commit-a" });
+  // A rebuild can keep the version string, so the commit is what decides.
+  withFlatpakAt("commit-b", () => assert.strictEqual(apps.bundleStale(PLEXISH), true));
+  withFlatpakAt("commit-a", () => assert.strictEqual(apps.bundleStale(PLEXISH), false));
+});
+
+test("nothing is stale without a flatpak to compare against", () => {
+  recordSource("plex", { type: "flatpak", ref: "tv.plex.PlexHTPC", arch: "x86_64", commit: "commit-a" });
+  // An absent or unreadable flatpak says nothing: answering true here would ask for
+  // a re-extract that can only fail (or trigger a fresh download at boot).
+  withFlatpakAt(null, () => assert.strictEqual(apps.bundleStale(PLEXISH), false));
+  assert.strictEqual(apps.bundleStale(PLEXISH), false, "no flatpak installed at all");
+});
+
+test("only a flatpak source can go stale on its own", () => {
+  // url/git sources are pinned by the manifest: they change through a registry
+  // update, which re-extracts anyway.
+  for (const source of [
+    { type: "url", url: "https://example.test/app.tgz", sha256: "a".repeat(64) },
+    { type: "git", url: "https://example.test/app.git", commit: "b".repeat(40) },
+  ])
+    withFlatpakAt("commit-b", () =>
+      assert.strictEqual(apps.bundleStale({ id: "plex", type: "webclient", install: { source } }), false, source.type),
+    );
+  // and an app with no bundle installed has nothing to refresh
+  withFlatpakAt("commit-b", () => assert.strictEqual(apps.bundleStale({ ...PLEXISH, id: "not-installed-app" }), false));
+});

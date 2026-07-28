@@ -298,7 +298,15 @@
     "screenshots": "Képernyőképek",
     "whatsNew": "Újdonságok",
     "noNotes": "Nincsenek megjegyzések",
-    "back": "Vissza"
+    "back": "Vissza",
+    "flatpakNote": "saját frissítési csatorna",
+    "flatpakUpdate": "{name} frissítése",
+    "flatpakUpdateAll": "Programok frissítése",
+    "flatpakUpdated": "{name} frissítve: {v}",
+    "flatpakCurrent": "{name} már a legfrissebb ({v}).",
+    "flatpakFailed": "{name} frissítése nem sikerült.",
+    "phaseFlatpak": "Program letöltése...",
+    "busy": "A box most mással van elfoglalva. Próbáld újra egy kis idő múlva."
   },
   "install": {
     "done": "{name} telepítve",

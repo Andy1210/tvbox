@@ -9,6 +9,7 @@ const crypto = require("crypto");
 const { execFileSync } = require("child_process");
 const { isLanUrl, guardedFetch } = require("./netguard"); // shared self-hosted trust rule (plain http only to LAN hosts)
 const nativeapp = require("./native"); // runtime.native parser, shared with the launch path so the rules can't drift
+const flatpak = require("./flatpak"); // the one place that knows flatpak: refs, versions, commits, installing
 
 // Installed web-client BUNDLES live OUTSIDE the shell install so they survive
 // OTA + deploys - an OTA runs the shell from a fresh ~/.tvbox/current/shell (the
@@ -16,7 +17,6 @@ const nativeapp = require("./native"); // runtime.native parser, shared with the
 // lost on every update and the tile reverted to "Install". Persist it next to
 // the user manifests instead (migrateAppsData below moves any old in-shell copy).
 const APPS_DATA = path.join(os.homedir(), ".tvbox", "apps-data");
-const FLATPAK_BASES = ["/var/lib/flatpak/app", path.join(os.homedir(), ".local", "share", "flatpak", "app")];
 
 // User-space binaries installed by `tvbox deps` from a manifest's
 // `requires.download` (static builds - no root, no apt) live here. Prepend it
@@ -290,22 +290,6 @@ function onPath(bin) {
     }
   });
 }
-// flatpak's own arch names differ from Node's (arm64 -> aarch64, x64 -> x86_64).
-// A native app must be the box's REAL arch, unlike a web bundle extracted from a
-// flatpak (Plex), where any arch's files work and the recipe may say x86_64.
-function flatpakArch() {
-  return process.arch === "arm64" ? "aarch64" : process.arch === "x64" ? "x86_64" : process.arch;
-}
-function flatpakAppInstalled(ref) {
-  return !!flatpakRoot(ref, flatpakArch());
-}
-// What a missing flatpak dep is CALLED on the TV: "needs RetroArch" reads far
-// better than "needs org.libretro.RetroArch" on a 10-foot tile.
-function flatpakShortName(ref) {
-  const parts = String(ref).split(".");
-  return parts[parts.length - 1] || String(ref);
-}
-
 // Resolve a manifest's `requires.bin` + `requires.flatpak` deps -> { depsOk,
 // missing, installable }.
 function appDeps(m) {
@@ -329,7 +313,7 @@ function appDeps(m) {
   // and says "needs RetroArch"), but they are ALWAYS UI-installable: a --user
   // install touches no root, which is exactly the bar `installable` describes.
   const refs = (m && m.requires && m.requires.flatpak) || [];
-  const fpMissing = refs.filter((r) => !flatpakAppInstalled(r)).map(flatpakShortName);
+  const fpMissing = refs.filter((r) => !flatpak.isInstalled(r)).map(flatpak.shortName);
   missing.push(...fpMissing);
   const uiInstallable = new Set([...dl, ...fpMissing]);
   const installable = missing.length > 0 && missing.every((b) => uiInstallable.has(b));
@@ -477,40 +461,6 @@ async function installPackage(id, baseUrl, files, log) {
   }
 }
 
-// Ensure the user-scoped flathub remote, then `flatpak install --user` a ref.
-// Root is never involved, which is what makes a flatpak dep UI-installable at all
-// (unlike apt). Retried because an app plus its runtime is a multi-hundred-MB pull
-// that can time out on a slow link; ostree resumes from the objects it already
-// has, so a retry continues rather than restarting.
-const FLATPAK_TRIES = 3;
-function flatpakInstallUser(ref, arch, log) {
-  log = log || (() => {});
-  if (!nativeapp.flatpakRefOk(ref)) throw new Error("bad flatpak ref: " + ref);
-  try {
-    execFileSync(
-      "flatpak",
-      ["remote-add", "--user", "--if-not-exists", "flathub", "https://flathub.org/repo/flathub.flatpakrepo"],
-      { stdio: "inherit" },
-    );
-  } catch (e) {
-    /* may already exist */
-  }
-  let lastErr = null;
-  for (let attempt = 1; attempt <= FLATPAK_TRIES; attempt++) {
-    log("flatpak install --user " + ref + " (" + arch + ")" + (attempt > 1 ? " retry " + attempt : "") + " …");
-    try {
-      execFileSync("flatpak", ["install", "--user", "-y", "--noninteractive", "--arch=" + arch, "flathub", ref], {
-        stdio: "inherit",
-      });
-      return;
-    } catch (e) {
-      lastErr = e;
-      if (flatpakAppInstalled(ref)) return; // it landed despite a nonzero exit
-    }
-  }
-  throw new Error(ref + ": flatpak install failed after " + FLATPAK_TRIES + " tries: " + (lastErr && lastErr.message));
-}
-
 // Install ALL of an app's no-root deps that aren't already present: static
 // `requires.download` binaries AND `requires.flatpak` apps. No root, so it's safe
 // to run from the shell (UI install) - the "remote-only, no CLI" path. apt-only
@@ -525,8 +475,8 @@ function installUiDeps(m, log) {
     installed.push(entry.bin);
   }
   for (const ref of (m && m.requires && m.requires.flatpak) || []) {
-    if (flatpakAppInstalled(ref)) continue;
-    flatpakInstallUser(ref, flatpakArch(), log);
+    if (flatpak.isInstalled(ref)) continue;
+    flatpak.installUser(ref, flatpak.arch(), log);
     installed.push(ref);
   }
   const after = appDeps(m);
@@ -540,46 +490,20 @@ function sourceUrlOk(u) {
   return /^https:\/\//i.test(u || "") || isLanUrl(u);
 }
 
-// The flatpak app's "active" dir (extract paths like "files/resources/..." are
-// resolved against it). Considered installed once its files/ subdir exists.
-function flatpakRoot(ref, arch) {
-  const a = arch || "x86_64";
-  for (const base of FLATPAK_BASES) {
-    const root = path.join(base, ref, a, "stable", "active");
-    if (fs.existsSync(path.join(root, "files"))) return root;
-  }
-  return null;
-}
-
 // Acquire the app's source and return a local directory that contains its files
 // (the root that `extract` is resolved against).
 function acquireSource(source, log) {
   if (!source || !source.type) throw new Error("manifest has no install.source");
   if (source.type === "flatpak") {
     if (!source.ref) throw new Error("flatpak source needs a ref");
-    let root = flatpakRoot(source.ref, source.arch);
-    if (!root) {
-      log("flatpak install --user " + source.ref + " …");
-      // Ensure the user-scoped flathub remote so an on-demand UI/CLI install needs
-      // no root (deploy.sh keeps to a baseline and doesn't pre-install any app).
-      try {
-        execFileSync(
-          "flatpak",
-          ["remote-add", "--user", "--if-not-exists", "flathub", "https://flathub.org/repo/flathub.flatpakrepo"],
-          { stdio: "inherit" },
-        );
-      } catch (e) {
-        /* may already exist */
-      }
-      execFileSync(
-        "flatpak",
-        ["install", "--user", "-y", "--arch=" + (source.arch || "x86_64"), "flathub", source.ref],
-        { stdio: "inherit" },
-      );
-      root = flatpakRoot(source.ref, source.arch);
+    const a = source.arch || "x86_64";
+    let dir = flatpak.root(source.ref, a);
+    if (!dir) {
+      flatpak.installUser(source.ref, a, log);
+      dir = flatpak.root(source.ref, a);
     }
-    if (!root) throw new Error("flatpak files not found for " + source.ref);
-    return root;
+    if (!dir) throw new Error("flatpak files not found for " + source.ref);
+    return dir;
   }
   if (source.type === "url") {
     if (!source.url) throw new Error("url source needs a url");
@@ -654,8 +578,67 @@ function applyPatches(m, dir, log) {
   }
 }
 
+// What a bundle was extracted FROM, recorded next to the extracted files (not
+// inside them - apps-data/<id> is served to the app as its web root).
+//
+// An extracted bundle is a COPY, so nothing in it changes when its source moves,
+// and only a flatpak source moves on its own: the nightly `flatpak update` timer
+// pulls a new Plex and the copy silently stays at the old one, which is how a web
+// client goes stale until someone reinstalls it by hand. url/git sources are pinned
+// by the manifest and can only change through a registry update, which re-extracts.
+const SOURCES_DIR = path.join(APPS_DATA, ".sources");
+function sourceStatePath(id) {
+  return path.join(SOURCES_DIR, id + ".json");
+}
+function readSourceState(id) {
+  try {
+    return JSON.parse(fs.readFileSync(sourceStatePath(id), "utf8"));
+  } catch (e) {
+    return null;
+  }
+}
+function writeSourceState(id, ident) {
+  if (!ident) return;
+  try {
+    fs.mkdirSync(SOURCES_DIR, { recursive: true });
+    fs.writeFileSync(sourceStatePath(id), JSON.stringify(ident));
+  } catch (e) {
+    console.warn("[install]", id, "could not record its source:", e.message);
+  }
+}
+// The identity of a source as it stands right now. The commit, not the version:
+// a flatpak can be rebuilt with new files under the same version string.
+function sourceIdent(source) {
+  if (!source) return null;
+  if (source.type === "flatpak") {
+    const a = source.arch || "x86_64";
+    if (!flatpak.root(source.ref, a)) return null; // absent: nothing to compare against
+    return { type: "flatpak", ref: source.ref, arch: a, commit: flatpak.commitSync(source.ref, a) };
+  }
+  if (source.type === "url") return { type: "url", url: source.url, sha256: source.sha256 || null };
+  if (source.type === "git") return { type: "git", url: source.url, commit: source.commit || null };
+  return null;
+}
+// Is an installed bundle behind the flatpak it came from? Answering true is a
+// request to re-extract, so it stays conservative: an unreadable or absent
+// flatpak says nothing rather than triggering a download.
+function bundleStale(m) {
+  const source = m && m.type === "webclient" && m.install && m.install.source;
+  if (!source || source.type !== "flatpak" || !isInstalled(m.id)) return false;
+  const now = sourceIdent(source);
+  if (!now || !now.commit) return false;
+  const was = readSourceState(m.id);
+  // Nothing recorded means the bundle predates this bookkeeping: level it with the
+  // flatpak once, then it is tracked like any other.
+  if (!was || was.type !== "flatpak" || !was.commit) return true;
+  return was.commit !== now.commit;
+}
+
 // Install one web-client app. Idempotent at startup (skips the copy if already
-// present, only re-patches); `force` re-extracts cleanly (CLI reinstall).
+// present, only re-patches); `force` re-extracts cleanly (CLI reinstall). A bundle
+// whose flatpak has moved is re-extracted too, unless `keepStale` says not to -
+// the boot pass sets that, because acquiring anything there would block the
+// Electron main process.
 function installApp(m, opts) {
   opts = opts || {};
   const log = opts.log || (() => {});
@@ -665,17 +648,22 @@ function installApp(m, opts) {
     return false;
   }
   const dst = appDataDir(m.id);
-  if (isInstalled(m.id) && !opts.force) {
+  const stale = !opts.keepStale && !opts.force && bundleStale(m);
+  if (isInstalled(m.id) && !opts.force && !stale) {
     applyPatches(m, dst, log);
     return true;
   }
+  if (stale) log(m.id + ": its flatpak moved, re-extracting the bundle");
   const srcRoot = acquireSource(m.install.source, log);
   const src = path.join(srcRoot, m.install.extract || "");
   if (!fs.existsSync(src)) throw new Error("extract path not found: " + src);
   fs.mkdirSync(APPS_DATA, { recursive: true });
-  if (opts.force) fs.rmSync(dst, { recursive: true, force: true });
+  // A refresh replaces rather than merges: a file the new version dropped would
+  // otherwise linger from the old one.
+  if (opts.force || stale) fs.rmSync(dst, { recursive: true, force: true });
   fs.cpSync(src, dst, { recursive: true });
   applyPatches(m, dst, log);
+  writeSourceState(m.id, sourceIdent(m.install.source));
   log(m.id + ": installed -> " + dst);
   return true;
 }
@@ -683,12 +671,13 @@ function installApp(m, opts) {
 // Boot pass: only RE-PATCH already-installed web clients. Fresh acquisition
 // (flatpak/url/git download) is opt-in and must NOT run here - it would block the
 // Electron main process for minutes on a fresh box. New bundles are acquired only
-// via `tvbox install <id>` / the on-demand UI install path.
+// via `tvbox install <id>` / the on-demand UI install path, and a stale bundle is
+// refreshed out of process once the box is up (main.js's bundleRefreshTick).
 function installAll(log) {
   for (const m of manifests) {
     if (m.type === "webclient" && m.status === "ready" && isInstalled(m.id)) {
       try {
-        installApp(m, { log: log || (() => {}) });
+        installApp(m, { log: log || (() => {}), keepStale: true });
       } catch (e) {
         console.warn("[install]", m.id, "failed:", e.message);
       }
@@ -705,6 +694,7 @@ function removeApp(id) {
 
 module.exports = {
   loadManifests,
+  bundleStale,
   getManifests,
   manifestById,
   appDataDir,
