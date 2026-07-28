@@ -40,8 +40,10 @@ const deps = (onPath) => ({
 
 test("user content is offered and the box's machinery is not", () => {
   const c = byId();
-  assert.ok(c.has("tvbox:ambient"), "screensaver images");
-  assert.ok(c.has("tvbox:roms"), "games");
+  // the offered name IS the served one - the picker names what to look for on the
+  // computer, so these must not drift apart
+  assert.strictEqual(c.get("tvbox:ambient").name, "screensaver");
+  assert.strictEqual(c.get("tvbox:roms").name, "games");
   for (const m of ["shell", "shell-userdata", "versions", "bin"])
     assert.strictEqual(c.has("tvbox:" + m), false, m + " is machinery, not content");
 });
@@ -59,7 +61,6 @@ test("an installed app's data dir is offered under the app's name", () => {
   const entry = byId().get("flatpak:org.libretro.RetroArch");
   assert.ok(entry);
   assert.strictEqual(entry.name, "RetroArch", "not the reverse-DNS id");
-  assert.strictEqual(entry.kind, "flatpak");
 });
 
 test("the home folder's own directories are offered", () => {

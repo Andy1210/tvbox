@@ -67,7 +67,9 @@ const MACHINERY = new Set([
   "versions", // OTA releases
 ]);
 // Friendlier, stable, ASCII names for the folders a computer will see. Anything not
-// named here keeps its own directory name.
+// named here keeps its own directory name. These names are also what the launcher
+// lists, untranslated: the picker names the folder someone will go looking for in a
+// file manager, so a localized label there would name something that isn't served.
 const SHARE_NAMES = { ambient: "screensaver", roms: "games" };
 
 // rclone is the same pinned build the RetroArch package installs, so a box that has
@@ -116,28 +118,28 @@ function nameOk(n) {
 // launcher stores, so it must not change when the list around it does.
 function candidates() {
   const out = [];
-  const add = (id, dir, kind, name, warn) => {
+  const add = (id, dir, name, warn) => {
     if (!isDir(dir) || !nameOk(name)) return;
-    out.push({ id, path: dir, kind, name, warn: !!warn });
+    out.push({ id, path: dir, name, warn: !!warn });
   };
 
   // user content under ~/.tvbox (machinery filtered out, so new folders appear)
   for (const d of subdirs(TVBOX)) {
     if (MACHINERY.has(d) || d.startsWith(".")) continue;
-    add("tvbox:" + d, path.join(TVBOX, d), SHARE_NAMES[d] ? d : "other", SHARE_NAMES[d] || d);
+    add("tvbox:" + d, path.join(TVBOX, d), SHARE_NAMES[d] || d);
   }
   // the box user's own folders (Videos, Music, … - only if they exist)
   for (const d of subdirs(HOME)) {
     if (d.startsWith(".")) continue;
-    add("home:" + d, path.join(HOME, d), "home", d);
+    add("home:" + d, path.join(HOME, d), d);
   }
   // each installed flatpak app's data dir: saves, states and the BIOS folder an
   // emulator reads, which is the whole reason this exists
   for (const d of subdirs(path.join(HOME, ".var", "app"))) {
-    add("flatpak:" + d, path.join(HOME, ".var", "app", d), "flatpak", flatpak.shortName(d));
+    add("flatpak:" + d, path.join(HOME, ".var", "app", d), flatpak.shortName(d));
   }
   // and the box's own directory, which is not something to hand out lightly
-  add("tvbox:.", TVBOX, "tvbox", "tvbox", true);
+  add("tvbox:.", TVBOX, "tvbox", true);
   return out;
 }
 
@@ -247,7 +249,7 @@ function status(cfg, deps) {
     shared: live ? live.shared.map((s) => s.name) : [],
     rclone: !!(deps && deps.onPath("rclone")),
     minPassword: MIN_PASSWORD,
-    candidates: candidates().map((x) => ({ id: x.id, kind: x.kind, name: x.name, warn: x.warn })),
+    candidates: candidates().map((x) => ({ id: x.id, name: x.name, warn: x.warn })),
   };
 }
 

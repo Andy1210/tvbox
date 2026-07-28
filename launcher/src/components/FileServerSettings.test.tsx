@@ -20,7 +20,7 @@ const STATUS = (hasPass: boolean) => ({
   shared: [],
   rclone: true,
   minPassword: 8,
-  candidates: [{ id: "tvbox:ambient", kind: "ambient", name: "screensaver", warn: false }],
+  candidates: [{ id: "tvbox:ambient", name: "screensaver", warn: false }],
 });
 
 function stubShell(hasPass: boolean, over: Partial<ReturnType<typeof STATUS>> = {}) {
@@ -90,7 +90,9 @@ describe("the file server form", () => {
     stubShell(true);
     render(<FileServerSettings />);
     await settle();
-    expect(screen.queryByText("Screensaver images")).not.toBeNull(); // known kind, our own name
+    // verbatim: this is the name the folder has over the network, so it is the name
+    // to go looking for in a file manager - a translated label would name nothing
+    expect(screen.queryByText("screensaver")).not.toBeNull();
     expect(screen.queryByText(/holds the box's settings/)).toBeNull(); // no warn candidate in this fixture
   });
 });

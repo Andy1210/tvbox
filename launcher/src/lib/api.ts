@@ -178,7 +178,7 @@ export interface FileServerStatus {
   rclone: boolean; // the binary that serves it is present
   installing?: boolean; // ...and is being fetched right now
   minPassword: number;
-  candidates: { id: string; kind: string; name: string; warn: boolean }[];
+  candidates: { id: string; name: string; warn: boolean }[]; // name = what a computer will see
 }
 export async function fetchFileServer(): Promise<FileServerStatus | null> {
   try {

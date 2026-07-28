@@ -37,6 +37,10 @@ of shareable folders: `shell`, `shell-userdata`, `versions`, `update`, `bin`,
 Two folders can share a name (`~/Videos` and `~/.tvbox/Videos`); the second one gets a
 `-2` suffix rather than replacing the first.
 
+The settings screen lists each folder under the exact name it gets over the network -
+`games`, not a translated "Játékok" - because that name is what to look for in the
+computer's file manager.
+
 ## Credentials
 
 - A password is **mandatory** (8 characters minimum). Without one the server does not
