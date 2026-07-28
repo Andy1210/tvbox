@@ -114,6 +114,19 @@ test("two folders with the same name both stay reachable, under the name they we
   fs.rmSync(path.join(HOME, ".tvbox", "Videos"), { recursive: true, force: true });
 });
 
+test("a name at the length limit stays within it once it is suffixed", () => {
+  const long = "L".repeat(64); // exactly what nameOk allows
+  mk(".tvbox", long);
+  mk(long);
+  const c = byId();
+  assert.strictEqual(c.get("tvbox:" + long).name, long);
+  const second = c.get("home:" + long).name;
+  assert.strictEqual(second.length, 64, "the suffix comes out of the budget, not on top of it");
+  assert.strictEqual(second, "L".repeat(62) + "-2");
+  fs.rmSync(path.join(HOME, ".tvbox", long), { recursive: true, force: true });
+  fs.rmSync(path.join(HOME, long), { recursive: true, force: true });
+});
+
 test("the served root is not inside anything it can serve", () => {
   // Sharing ~/.tvbox used to put the share root INSIDE the share, and the root holds
   // a link back to ~/.tvbox - a client walking the tree then recurses

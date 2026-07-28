@@ -110,8 +110,10 @@ function subdirs(dir) {
   }
 }
 // A share name has to survive being a path segment on someone else's computer.
+const MAX_NAME = 64;
+const NAME_RE = new RegExp("^[A-Za-z0-9][A-Za-z0-9._-]{0," + (MAX_NAME - 1) + "}$");
 function nameOk(n) {
-  return typeof n === "string" && /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/.test(n);
+  return typeof n === "string" && NAME_RE.test(n);
 }
 
 // Everything the box could offer, with a stable id per folder. The id is what the
@@ -127,8 +129,13 @@ function candidates() {
     // building the share root: the name is then the same whatever else is shared, so
     // the picker can name what a client will browse and a bookmark cannot move
     // because someone unshared an unrelated folder.
+    // The suffix comes out of the name's own length budget, not on top of it: a
+    // 64-character folder must not be advertised as a 66-character one.
     let unique = name;
-    for (let i = 2; used.has(unique); i++) unique = name + "-" + i;
+    for (let i = 2; used.has(unique); i++) {
+      const suffix = "-" + i;
+      unique = name.slice(0, MAX_NAME - suffix.length) + suffix;
+    }
     used.add(unique);
     out.push({ id, path: dir, name: unique, warn: !!warn });
   };
