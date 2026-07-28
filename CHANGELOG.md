@@ -5,6 +5,18 @@ updates). `scripts/make-release.sh` lifts the current version's `hu`/`en`
 blocks into the OTA feed's `notes` - keep both languages, keep it short, and
 write for the person on the couch (what changes for THEM), not for developers.
 
+## 1.17.0
+
+### hu
+
+- Az alkalmazások mostantól meg tudják kérdezni, szabad-e a box, így a nagyobb háttérmunkájuk megvárja a nyugodt pillanatot - a RetroArch borítóletöltése például akkor indul, amikor nem nézel és nem hallgatsz semmit. A box maga is jobban ügyel erre: éjszaka nem indítja újra magát egy frissítés kedvéért, amíg épp egy alkalmazást tölt le.
+- Javítva: a fájlkiszolgálónál a mappák listája már azt a nevet mutatja, amit a számítógépen is látni fogsz (`games`, `screensaver`), nem lefordított címkét - eddig „Játékok" állt a TV-n, a hálózaton meg `games` néven jelent meg, és nem lehetett megtalálni. Ha két mappát ugyanúgy hívnak, a második neve (`Videos-2`) is állandó marad: nem változik meg attól, hogy egy másik mappa megosztását ki- vagy bekapcsolod.
+
+### en
+
+- Apps can now ask whether the box is free, so their heavier background work waits for a quiet moment - RetroArch's cover download, for instance, starts when you are not watching or listening to anything. The box holds itself to the same rule: at night it no longer restarts for an update while it is downloading an app.
+- Fixed: the file server's folder list now shows the name you will see on the computer (`games`, `screensaver`) instead of a translated label - the TV used to say "Games" for a folder that appears as `games` on the network, which is not something you can find. When two folders share a name, the second one's name (`Videos-2`) also stays put: it no longer changes because you shared or unshared a different folder.
+
 ## 1.16.0
 
 ### hu
