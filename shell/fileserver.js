@@ -118,9 +118,19 @@ function nameOk(n) {
 // launcher stores, so it must not change when the list around it does.
 function candidates() {
   const out = [];
+  const used = new Set();
   const add = (id, dir, name, warn) => {
     if (!isDir(dir) || !nameOk(name)) return;
-    out.push({ id, path: dir, name, warn: !!warn });
+    // Two folders can share a basename (~/Videos and ~/.tvbox/Videos); the second one
+    // gets a suffix rather than silently replacing the first. Resolved HERE, over
+    // every candidate in a fixed order, rather than over the picked ones while
+    // building the share root: the name is then the same whatever else is shared, so
+    // the picker can name what a client will browse and a bookmark cannot move
+    // because someone unshared an unrelated folder.
+    let unique = name;
+    for (let i = 2; used.has(unique); i++) unique = name + "-" + i;
+    used.add(unique);
+    out.push({ id, path: dir, name: unique, warn: !!warn });
   };
 
   // user content under ~/.tvbox (machinery filtered out, so new folders appear)
@@ -161,16 +171,12 @@ function buildRoot(ids) {
     return { root: ROOT, shared: [], error: "share_failed" };
   }
   const shared = [];
-  const used = new Set();
   for (const c of picked) {
-    // two folders can share a basename (~/Videos and ~/.tvbox/Videos); the second
-    // one gets a suffix rather than silently replacing the first
-    let name = c.name;
-    for (let i = 2; used.has(name); i++) name = c.name + "-" + i;
-    used.add(name);
+    // c.name is already unique across every candidate (see candidates()), so there is
+    // nothing left to resolve here - which is what makes it the name the picker showed
     try {
-      fs.symlinkSync(c.path, path.join(ROOT, name));
-      shared.push({ id: c.id, name, path: c.path });
+      fs.symlinkSync(c.path, path.join(ROOT, c.name));
+      shared.push({ id: c.id, name: c.name, path: c.path });
     } catch (e) {
       console.warn("[fileserver] could not share", c.path, "-", e.message);
     }

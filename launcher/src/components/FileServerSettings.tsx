@@ -15,7 +15,9 @@ import { Osk } from "./Osk";
 //
 // A folder is listed under the exact name it will have over the network, never a
 // translated one: the name here is what to look for in the computer's file manager,
-// and a label the share does not carry would send someone hunting for it.
+// and a label the share does not carry would send someone hunting for it. The box
+// settles name clashes (`Videos-2`) when it discovers a folder, so what it reports is
+// already that name - there is nothing to adjust for here.
 //
 // A password is mandatory on the box's side; the row shows only whether one is set
 // and an empty entry keeps the stored one, like the other credential forms. Saving

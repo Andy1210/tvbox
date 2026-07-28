@@ -97,12 +97,21 @@ test("an id that is not a candidate is ignored, not turned into a path", () => {
   assert.deepStrictEqual(fs.readdirSync(fileserver.ROOT), []);
 });
 
-test("two folders with the same name both stay reachable", () => {
-  mk("ambient"); // ~/ambient next to ~/.tvbox/ambient
-  const r = fileserver.buildRoot(["home:ambient", "tvbox:ambient"]);
-  assert.strictEqual(r.shared.length, 2);
-  assert.strictEqual(new Set(r.shared.map((s) => s.name)).size, 2, "one must not replace the other");
-  fs.rmSync(path.join(HOME, "ambient"), { recursive: true, force: true });
+test("two folders with the same name both stay reachable, under the name they were offered as", () => {
+  mk(".tvbox", "Videos"); // the box's own Videos, next to the home folder's
+  const c = byId();
+  assert.strictEqual(c.get("tvbox:Videos").name, "Videos");
+  assert.strictEqual(c.get("home:Videos").name, "Videos-2", "the clash is settled where the folder is offered");
+  const both = fileserver.buildRoot(["home:Videos", "tvbox:Videos"]);
+  assert.deepStrictEqual(both.shared.map((s) => s.name).sort(), ["Videos", "Videos-2"], "neither replaces the other");
+  // and the suffix does not depend on what else happens to be shared: a client's
+  // bookmark must not move because someone unshared an unrelated folder
+  const alone = fileserver.buildRoot(["home:Videos"]);
+  assert.deepStrictEqual(
+    alone.shared.map((s) => s.name),
+    ["Videos-2"],
+  );
+  fs.rmSync(path.join(HOME, ".tvbox", "Videos"), { recursive: true, force: true });
 });
 
 test("the served root is not inside anything it can serve", () => {
