@@ -33,6 +33,7 @@ test("re-confirming it keeps when onboarding actually finished", () => {
   // The launcher re-confirms this on any start where its own copy went missing, so
   // the timestamp has to survive that - otherwise it drifts to "last seen" and
   // stops answering the only question it is there for.
+  config.setSetupDone(); // stand on our own feet, not on the previous test's write
   const first = JSON.parse(fs.readFileSync(FILE, "utf8")).setup.at;
   config.setSetupDone();
   config.setSetupDone();
