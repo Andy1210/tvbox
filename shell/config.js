@@ -316,6 +316,10 @@ function appConfig(key) {
 // setup again.
 function setSetupDone() {
   const c = load();
+  // Idempotent: the launcher re-confirms this on a start where its own copy went
+  // missing, and `at` has to keep saying when onboarding was FINISHED (it is also a
+  // pointless disk write otherwise).
+  if (c.setup && c.setup.done) return true;
   c.setup = { done: true, at: Date.now() };
   save(c); // save() throws on a real failure; it has no return value
   return true;

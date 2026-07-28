@@ -22,15 +22,32 @@ UPD="$TVBOX/update"
 # Never start while the previous shell is still going. Two Electron instances fight
 # over Chromium's storage lock and the loser silently gets an in-memory
 # localStorage, so the launcher forgets the box was ever set up and offers
-# onboarding again. This waits BEFORE the attempt counter below, so a predecessor
-# that takes a moment to exit never spends an OTA boot attempt; the shell itself
-# waits for the lock too, and exits 79 if it ever loses the race anyway.
-# The pattern matches only a MAIN process - Electron's children carry --type= first.
+# onboarding again.
+#
+# This runs BEFORE the attempt counter below and gives up rather than falling
+# through: a shell that starts anyway would spend one of the three boot attempts a
+# release gets, and a wedged predecessor could roll a perfectly good update back.
+# The respawn loop simply tries again a second later (and during an update the boot
+# watchdog kills a wedged shell, which is what breaks the tie).
+#
+# A main process is any electron whose argv carries no --type= (every child -
+# renderer, GPU, utility - does). Matching argv ORDER instead would be brittle: the
+# app path and the flags trade places depending on how electron is invoked.
+shell_running() {
+  for pid in $(pgrep -f 'electron[/]dist/electron' 2>/dev/null); do
+    tr '\0' '\n' < "/proc/$pid/cmdline" 2>/dev/null | grep -q '^--type=' || return 0
+  done
+  return 1
+}
 i=0
-while [ "$i" -lt 20 ] && pgrep -f 'electron[/]dist/electron --ozone-platform' >/dev/null 2>&1; do
+while [ "$i" -lt 20 ] && shell_running; do
   sleep 1
   i=$((i + 1))
 done
+if shell_running; then
+  echo "tvbox: another shell is still running after ${i}s - not starting a second one" >&2
+  exit 0
+fi
 
 if [ -f "$UPD/pending" ]; then
   read -r PREV NEXT < "$UPD/pending"

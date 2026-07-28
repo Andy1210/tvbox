@@ -3270,22 +3270,18 @@ function stopPlugins() {
 // momentary (a predecessor still shutting down), so this WAITS for the lock instead
 // of refusing to start; run-shell.sh does the same wait before it counts an OTA boot
 // attempt, which is why standing down here is rare enough to just exit.
-const SINGLE_INSTANCE_WAIT_MS = 20000;
+// Asked exactly once, which is the only supported use: a failed call also notifies
+// the holder (that is how it gets `second-instance`), so retrying would both be
+// off-label and spam the running shell. Waiting for a predecessor to finish is
+// run-shell.sh's job, before it counts an OTA boot attempt; this is the last-resort
+// guard for losing the race anyway, and the respawn loop retries in a second.
 const EXIT_ALREADY_RUNNING = 79;
-async function claimSingleInstance() {
-  const deadline = Date.now() + SINGLE_INSTANCE_WAIT_MS;
-  for (;;) {
-    if (app.requestSingleInstanceLock()) return true;
-    if (Date.now() >= deadline) return false;
-    await new Promise((r) => setTimeout(r, 500));
-  }
-}
 // A stray second start (a remapped remote button, a manual launch) should do
 // something sane rather than nothing at all.
 app.on("second-instance", () => raiseWindow());
 
 app.whenReady().then(async () => {
-  if (!(await claimSingleInstance())) {
+  if (!app.requestSingleInstanceLock()) {
     console.warn("[shell] another shell already holds the storage lock - standing down");
     return app.exit(EXIT_ALREADY_RUNNING);
   }

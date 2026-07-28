@@ -29,6 +29,16 @@ test("recording it lands on disk, not just in memory", () => {
   assert.ok(typeof onDisk.setup.at === "number", "when, for anyone debugging later");
 });
 
+test("re-confirming it keeps when onboarding actually finished", () => {
+  // The launcher re-confirms this on any start where its own copy went missing, so
+  // the timestamp has to survive that - otherwise it drifts to "last seen" and
+  // stops answering the only question it is there for.
+  const first = JSON.parse(fs.readFileSync(FILE, "utf8")).setup.at;
+  config.setSetupDone();
+  config.setSetupDone();
+  assert.strictEqual(JSON.parse(fs.readFileSync(FILE, "utf8")).setup.at, first);
+});
+
 test("it is the launcher's only secret-free view of it", () => {
   // publicConfig is everything the launcher may see; the flag has to be in there or
   // the launcher has nothing to fall back on when its own store reads empty.
