@@ -5,6 +5,18 @@ updates). `scripts/make-release.sh` lifts the current version's `hu`/`en`
 blocks into the OTA feed's `notes` - keep both languages, keep it short, and
 write for the person on the couch (what changes for THEM), not for developers.
 
+## 1.17.1
+
+### hu
+
+- Biztonsági frissítés. A box böngészőmotorja - ez rajzolja a felületet, és ez futtatja a benne megnyíló oldalakat, például a felhős játékokat és a streaming alkalmazásokat - megkapta a Chromium két legutóbbi hibajavítás-csomagját. Nincs új funkció, a kezelésben nem változik semmi.
+- Ez a frissítés a szokásosnál hosszabb ideig települ, néhány percig, mert a böngészőmotort teljes egészében újra le kell töltenie. A TV addig azt írja, hogy telepít - hagyd befejezni.
+
+### en
+
+- A security update. The box's browser engine - the part that draws the interface and runs the pages that open inside it, like the cloud games and the streaming apps - picked up Chromium's two most recent rounds of fixes. Nothing new to use, and nothing changes in how the box works.
+- This update takes longer to install than usual, a few minutes, because the browser engine has to be downloaded again in full. The TV will say it is installing until then - let it finish.
+
 ## 1.17.0
 
 ### hu
