@@ -95,4 +95,12 @@ fi
 # Capture this session's shell output (main-process + renderer console, mpv) to a
 # log for on-device debugging over ssh - `cat ~/.tvbox/shell.log`. Truncated each
 # boot so it stays bounded to one session. Harmless on a kiosk (no console shown).
-exec ./node_modules/.bin/electron . --ozone-platform=wayland --no-sandbox >"$TVBOX/shell.log" 2>&1
+# Deliberately NO --no-sandbox. That switch is process-wide: it also stripped the
+# OS sandbox off the remote-app windows, which ask for `sandbox: true` precisely
+# because they load someone else's web content. Chromium sandboxes them through
+# the namespace layer here - own pid+user namespace, seccomp-BPF - which needs
+# unprivileged user namespaces (the Pi kernel allows them) and NOT a setuid
+# chrome-sandbox, so the npm-installed helper staying non-setuid is fine. Windows
+# that opt out per-window (the launcher, local apps - they need Node in the
+# preload) are unaffected either way.
+exec ./node_modules/.bin/electron . --ozone-platform=wayland >"$TVBOX/shell.log" 2>&1
