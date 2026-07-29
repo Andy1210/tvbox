@@ -4,7 +4,7 @@
 // bundle and composited over mpv, which plays video BEHIND the transparent
 // window driven over its JSON IPC. Apps get a capability-scoped bridge
 // (preload.js); the remote Home button returns to the launcher from anywhere.
-// Run: electron . --ozone-platform=wayland --no-sandbox
+// Run: electron . --ozone-platform=wayland
 const { app, BrowserWindow, ipcMain, screen, session } = require("electron");
 const { spawn, execFile } = require("child_process");
 const http = require("http");

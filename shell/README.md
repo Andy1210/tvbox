@@ -201,7 +201,7 @@ Key learnings baked in:
 ```sh
 npm install   # once (downloads Electron ARM64)
 ELECTRON_OZONE_PLATFORM_HINT=wayland XDG_RUNTIME_DIR=/run/user/1000 WAYLAND_DISPLAY=wayland-0 \
-  ./node_modules/.bin/electron . --ozone-platform=wayland --no-sandbox
+  ./node_modules/.bin/electron . --ozone-platform=wayland
 ```
 
 Deployed + boot-wired by [`../deploy/deploy.sh`](../deploy/deploy.sh); needs the
