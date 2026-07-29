@@ -5,6 +5,16 @@ updates). `scripts/make-release.sh` lifts the current version's `hu`/`en`
 blocks into the OTA feed's `notes` - keep both languages, keep it short, and
 write for the person on the couch (what changes for THEM), not for developers.
 
+## 1.17.2
+
+### hu
+
+- Biztonsági javítás. Azok az alkalmazások, amelyek egy internetes oldalt nyitnak meg a boxon - a YouTube, a felhős játékok -, mostantól a rendszer többi részétől elzárva futnak. A box eddig is nekik szánta ezt a védelmet, csak egy indítási beállítás csendben kikapcsolta. A használatukban nem változik semmi; a védelem a box következő elindulásakor lép életbe.
+
+### en
+
+- A security fix. The apps that open a website on the box - YouTube, the cloud games - now run walled off from the rest of the system. The box always meant that protection for them; a startup setting had been quietly switching it off. Nothing changes in how you use them, and the protection takes effect the next time the box starts.
+
 ## 1.17.1
 
 ### hu
