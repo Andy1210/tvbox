@@ -80,6 +80,24 @@ to change a build-wide value, and there is nothing to keep in sync.
 
 Notes:
 
+- **The image ships its rootfs nearly full, and a service grows it on first boot.**
+  pi-gen sizes the root partition to the stage's own contents plus
+  `ROOT_SIZE * 0.2 + 200 MB`, and the `init=` hook that normally expands it is
+  **not** installed here — `DISABLE_FIRST_BOOT_USER_RENAME=1` makes pi-gen skip it
+  (see the `custom.toml` section below). Measured on the v1.18.0 image: a 3.49 GiB
+  rootfs with 0.34 GiB free, half of that reserved for root, so **174 MB for
+  everything else — on any size card**. `tvbox-expand-rootfs.service` (a
+  `sysinit.target` oneshot, ordered before the host-key generation and
+  `tvbox-firstboot`) grows the last partition with `sfdisk` and the filesystem
+  online with `resize2fs`; it is idempotent, so it also covers an image later moved
+  to a bigger card, and no-ops once there is under 64 MiB of spare tail.
+  **Don't remove it.** Without it a fresh box fills up on its first boot and ext4
+  aborts the filesystem (`failed to convert unwritten extents to written extents`,
+  remount read-only) — which does not look like a full disk at all: `ssh-keygen`
+  cannot write the host keys pi-gen deliberately deletes, so sshd accepts TCP and
+  closes with no banner; the shell cannot write, so it crash-loops behind a black
+  screen with the SD LED going constantly; and the box is unreachable by every
+  route at once.
 - **`WPA_COUNTRY` is the image's WLAN region, and it does two jobs.** It sets the
   driver-honoured country, and it is what stops pi-gen writing
   `WirelessEnabled=false`: that line lives in the `elif` of `[ -v WPA_COUNTRY ]`

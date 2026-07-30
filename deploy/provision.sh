@@ -325,6 +325,90 @@ systemctl daemon-reload 2>/dev/null || true
 systemctl enable tvbox-bt-ertm.service >/dev/null 2>&1 && ok "bluetooth ERTM unit" || warn "bluetooth ERTM unit enable failed"
 /usr/local/sbin/tvbox-bt-ertm && ok "bluetooth ERTM applied" || warn "bluetooth ERTM apply failed"
 
+echo "==> root filesystem grows to fill the card (flashed images ship it nearly full)"
+# A flashed image sizes its rootfs to its own contents plus pi-gen's margin and
+# this image installs no first-boot resize hook, so without this a fresh box has
+# ~174 MB of usable space on any size card - measured on v1.18.0 - and fills up on
+# its first boot. ext4 then aborts the filesystem and remounts read-only, which
+# does NOT look like a full disk: ssh-keygen cannot write host keys so sshd
+# accepts connections and closes them with no banner, and the shell cannot write
+# so it crash-loops behind a black screen. Idempotent, so it also covers a card
+# swapped for a bigger one. KEEP IN SYNC with image/stage-tvbox/01-tvbox/00-run.sh.
+# Quoted heredoc: nothing here is substituted at provision time, and it keeps the
+# script's own $ and backtick-free comments intact.
+cat > /usr/local/sbin/tvbox-expand-rootfs <<'XSEOF'
+#!/bin/sh
+# tvbox: grow the root partition + filesystem to fill the card. Idempotent - it
+# runs at every boot and does nothing once there is no spare tail worth taking.
+PART=$(findmnt -no SOURCE / 2>/dev/null) || exit 0
+case "$PART" in /dev/*) ;; *) exit 0 ;; esac       # not a plain block device
+NAME=$(basename "$PART")
+NUM=$(printf '%s' "$NAME" | grep -o '[0-9]*$')
+[ -n "$NUM" ] || exit 0
+PK=$(lsblk -no pkname "$PART" 2>/dev/null | head -n1)
+[ -n "$PK" ] || exit 0
+DISK="/dev/$PK"
+[ -b "$DISK" ] || exit 0
+# Refuse unless root is the LAST partition - growing any other would run into its
+# neighbour.
+if [ "$(lsblk -lno NAME "$DISK" | tail -n1)" != "$NAME" ]; then
+  echo "tvbox-expand-rootfs: $PART is not the last partition on $DISK - leaving it alone"
+  exit 0
+fi
+DISK_SZ=$(blockdev --getsz "$DISK" 2>/dev/null) || exit 0
+START=$(cat "/sys/class/block/$NAME/start" 2>/dev/null) || exit 0
+PART_SZ=$(blockdev --getsz "$PART" 2>/dev/null) || exit 0
+SPARE=$((DISK_SZ - START - PART_SZ))
+# 64 MiB in 512-byte sectors: below that it is already grown, which is what makes
+# this safe to run unconditionally.
+[ "$SPARE" -ge 131072 ] || exit 0
+echo "tvbox-expand-rootfs: growing $PART by $((SPARE / 2048)) MiB to fill $DISK"
+# sfdisk rewrites only the last partition's size and keeps its start sector; the
+# kernel cannot re-read the table while root is mounted, hence partx -u.
+if ! echo ", +" | sfdisk -N "$NUM" --force "$DISK"; then
+  echo "tvbox-expand-rootfs: sfdisk failed - filesystem left untouched" >&2
+  exit 0
+fi
+partx -u "$DISK" 2>/dev/null || true
+# ext4 grows online, so the mounted root needs neither a reboot nor an fsck.
+if resize2fs "$PART"; then
+  echo "tvbox-expand-rootfs: done - $(df -h / | awk 'NR==2{print $4" free of "$2}')"
+else
+  echo "tvbox-expand-rootfs: resize2fs failed - the partition grew, the fs did not" >&2
+fi
+exit 0
+XSEOF
+chmod 755 /usr/local/sbin/tvbox-expand-rootfs
+if [ -x /usr/local/sbin/tvbox-expand-rootfs ]; then
+  cat > /etc/systemd/system/tvbox-expand-rootfs.service <<'XREOF'
+[Unit]
+Description=tvbox: grow the root filesystem to fill the card
+# Same shape as Raspberry Pi's own regenerate_ssh_host_keys.service: very early,
+# root already read-write, and BEFORE the things that need somewhere to write.
+# Before=systemd-growfs-root.service matters: the base image's rpi-resize.service
+# delegates to growfs, which grows the FILESYSTEM to its partition and never
+# repartitions - so it no-ops on an image whose partition was never widened.
+# Going first means growfs has real room to grow into.
+DefaultDependencies=no
+After=systemd-remount-fs.service
+Before=systemd-growfs-root.service tvbox-firstboot.service ssh.service sshd-keygen.service regenerate_ssh_host_keys.service
+Conflicts=shutdown.target
+Before=shutdown.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/local/sbin/tvbox-expand-rootfs
+
+[Install]
+WantedBy=sysinit.target
+XREOF
+  systemctl daemon-reload 2>/dev/null || true
+  systemctl enable tvbox-expand-rootfs.service >/dev/null 2>&1 && ok "expand-rootfs unit" || warn "expand-rootfs unit enable failed"
+  # run it now too - a no-op on an already-expanded box
+  /usr/local/sbin/tvbox-expand-rootfs && ok "root filesystem checked" || warn "expand-rootfs run failed"
+fi
+
 echo "==> user-service lingering (CEC bridge starts at boot, before login)"
 loginctl enable-linger "$TVBOX_USER" 2>/dev/null && ok "linger enabled for $TVBOX_USER" || warn "enable-linger failed"
 
