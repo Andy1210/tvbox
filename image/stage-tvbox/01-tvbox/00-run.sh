@@ -57,13 +57,19 @@ install -m 644 conf/10-tvbox-logind.conf "${ROOTFS_DIR}/etc/systemd/logind.conf.
 #       - and at boot run Raspberry Pi's own `do_wifi_country` (country + nmcli
 #         radio on + rfkill unblock + rfkill state), self-healing every boot.
 #     Then the owner just picks a network from the TV (Settings → Network).
-#     A country is REQUIRED for the radio to come up at all, so the build needs
-#     some value here - but it is only the weakest of three, and nothing burns it
-#     in: override the image at build time (TVBOX_WIFI_COUNTRY=DE ./build-image.sh),
-#     per box at flash time (WIFI_COUNTRY=DE in the boot partition's tvbox.conf),
-#     or afterwards on the TV (Settings → Wi-Fi → Wi-Fi country, which persists to
-#     ~/.tvbox/config.json and is re-applied by tvbox-wifi-country every boot).
-WIFI_COUNTRY="${TVBOX_WIFI_COUNTRY:-HU}"
+#     Note WHY the radio-off blocker exists: pi-gen writes WirelessEnabled=false
+#     only as the `elif` of `[ -v WPA_COUNTRY ]` (stage2/02-net-tweaks/01-run.sh),
+#     so with WPA_COUNTRY set in image/config that branch is skipped and stage2
+#     applies the country itself. The steps above are kept anyway - they are what
+#     re-applies the OWNER's choice on every boot, which a build-time value cannot.
+#     The region is settable at three levels, weakest first: WPA_COUNTRY in
+#     image/config (build), WIFI_COUNTRY= in the boot partition's tvbox.conf (flash,
+#     per box), and Settings → Wi-Fi → Wi-Fi country on the TV, which persists to
+#     ~/.tvbox/config.json and wins. WPA_COUNTRY is read here rather than a tvbox
+#     variable of our own because pi-gen EXPORTS it: this script is run as a child
+#     process (`./00-run.sh`), so it only ever sees exported variables, and pi-gen
+#     exports just its own documented set.
+WIFI_COUNTRY="${WPA_COUNTRY:-HU}"
 # Exactly two ASCII letters or fall back - this value is interpolated BOTH into
 # cmdline.txt (where a space would smuggle in extra kernel parameters) and into
 # the root applier generated below (where an unquoted heredoc would let shell
