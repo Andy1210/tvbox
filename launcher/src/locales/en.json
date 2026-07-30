@@ -141,7 +141,9 @@
     "pairing": "Pairing {name}…",
     "failed": "Failed: {name}",
     "lowBattery": "Remote battery low",
-    "lowBatteryMsg": "{name}: {pct}%. Charge it or replace the batteries soon."
+    "lowBatteryMsg": "{name}: {pct}%. Charge it or replace the batteries soon.",
+    "ertm": "Disable ERTM (troubleshooting)",
+    "ertmHint": "Turn this on only if a controller's buttons stick or register twice. Some controllers - Xbox ones especially - handle Bluetooth ERTM retransmission badly and behave better without it. It applies to EVERY Bluetooth device though, and removes L2CAP's own error recovery, which can upset audio devices. Takes effect after a restart."
   },
   "remote": {
     "title": "Remote buttons",

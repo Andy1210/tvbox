@@ -59,7 +59,10 @@ apt-get install -y -qq $HARD && ok "core deps ($HARD)" || bad "core apt deps - i
 # image's 00-packages).
 # grim: Wayland screenshot tool - not used by the box itself, but lets a dev
 # capture the running UI over ssh (`grim ~/shot.png`) to see what's on screen.
-SOFT="jq flatpak kanshi curl git unzip ca-certificates gcc libc6-dev swaybg fonts-dejavu-core grim"
+# iw: turns WiFi power saving off on the RUNNING radio, so the drop-in below
+# doesn't have to wait for a reconnect. Soft on purpose - without it the setting
+# still lands, just at the next boot instead of immediately.
+SOFT="jq flatpak kanshi curl git unzip ca-certificates gcc libc6-dev swaybg fonts-dejavu-core grim iw"
 apt-get install -y -qq $SOFT && ok "extra deps ($SOFT)" || warn "some extra deps missing: $SOFT"
 
 # Shared media stack in the core (kept in sync with image/stage-tvbox): mpv is
@@ -199,6 +202,39 @@ polkit.addRule(function(action, subject) {
 RULES
 ok "polkit rule (netdev -> NetworkManager)"
 
+echo "==> WiFi power saving off (a mains-powered box only pays its latency cost)"
+# NM defaults wifi.powersave to enabled, and the Pi's brcmfmac honours it hard:
+# with PSM on, rate control collapses to the 802.11b floor even at -54 dBm.
+# Measured on a Pi 5 at 2.4GHz/HT20, same AP and signal, PSM on -> off:
+# TX rate 5.5-7.2 -> 72.2 Mbit/s, 30MB transfer >120s -> 10.6s, LAN ping
+# avg/max 18.7/209 -> 5.2/29.5 ms, jitter 25.7 -> 3.9 ms, 6.7% -> 0% loss.
+# A drop-in (not per-connection) so it also covers networks added later; a
+# profile left at "0 (default)" takes this value on its next activation.
+# It matters twice over on a Pi: WiFi and Bluetooth share one antenna, so the
+# airtime PSM wastes on retries is airtime the gamepad's HID reports don't get.
+mkdir -p /etc/NetworkManager/conf.d
+cat > /etc/NetworkManager/conf.d/10-tvbox-wifi.conf <<'NMCONF'
+# tvbox: never power-save the WiFi radio (2 = disable). See deploy/provision.sh.
+[connection]
+wifi.powersave=2
+NMCONF
+ok "wifi.powersave=2 drop-in"
+# The drop-in only takes hold when a connection is next activated, and this box
+# may be provisioned OVER that connection - bouncing it would kill the SSH
+# session mid-provision (and a WiFi-only box has no second route). `iw set
+# power_save off` changes the running radio with no disassociation, so apply it
+# straight to every wireless interface and let the drop-in cover future boots.
+systemctl reload NetworkManager 2>/dev/null || true
+# Glob the cfg80211 marker rather than listing /sys/class/net: it selects exactly
+# the wireless interfaces, and cfg80211 is what `iw` talks to anyway.
+for PHYLINK in /sys/class/net/*/phy80211; do
+  [ -e "$PHYLINK" ] || continue # no wireless interface at all - the glob stayed literal
+  IFACE=$(basename "$(dirname "$PHYLINK")")
+  iw dev "$IFACE" set power_save off 2>/dev/null &&
+    ok "power save off on $IFACE (live, no reconnect)" ||
+    warn "could not turn power save OFF on $IFACE now (applies on the next connect)"
+done
+
 # Timezone, keyboard layout and hostname from the box user (first-boot wizard +
 # Settings). set-timezone is already allowed for an active local session;
 # set-keyboard / set-locale / hostname1 require admin auth by default, so grant
@@ -249,6 +285,45 @@ systemctl daemon-reload 2>/dev/null || true
 systemctl enable tvbox-wifi-country.service >/dev/null 2>&1 && ok "wifi country unit" || warn "wifi country unit enable failed"
 # apply immediately too - provision runs as root anyway
 /usr/local/sbin/tvbox-wifi-country && ok "wifi country applied" || warn "wifi country apply failed (raspi-config missing?)"
+
+echo "==> Bluetooth ERTM toggle (root apply of the Settings pick at every boot)"
+# Off by default (the kernel default, ERTM on). It exists because some gamepads -
+# Xbox ones especially - handle L2CAP Enhanced Retransmission Mode badly and drop
+# or repeat HID reports; a lost button-RELEASE report reads as a stuck button.
+# Not on unconditionally: ERTM is the layer's own error recovery and turning it
+# off is global, so it can make other links (audio) worse. Same shape as the wifi
+# country - the shell stores bluetooth.disableErtm rootlessly, this applies it.
+# KEEP IN SYNC with image/stage-tvbox/01-tvbox/00-run.sh.
+cat > /usr/local/sbin/tvbox-bt-ertm <<BTEOF
+#!/bin/sh
+# tvbox: apply the Bluetooth ERTM setting (root - modprobe.d + live module param).
+ON=\$(sed -n 's/.*"disableErtm"[[:space:]]*:[[:space:]]*\(true\|false\).*/\1/p' /home/$TVBOX_USER/.tvbox/config.json 2>/dev/null | head -n1)
+[ "\$ON" = "true" ] && V=1 || V=0
+# For the next boot: the bluetooth module is loaded long before this unit runs.
+printf 'options bluetooth disable_ertm=%s\n' "\$V" > /etc/modprobe.d/tvbox-bluetooth.conf
+# And live, so starting this unit by hand applies to links made from now on
+# (the parameter is only consulted when an L2CAP connection is set up).
+P=/sys/module/bluetooth/parameters/disable_ertm
+[ -w "\$P" ] && printf '%s\n' "\$V" > "\$P"
+exit 0
+BTEOF
+chmod 755 /usr/local/sbin/tvbox-bt-ertm
+cat > /etc/systemd/system/tvbox-bt-ertm.service <<'BTEOF'
+[Unit]
+Description=tvbox: apply the Bluetooth ERTM setting picked in Settings
+After=bluetooth.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=-/usr/local/sbin/tvbox-bt-ertm
+
+[Install]
+WantedBy=multi-user.target
+BTEOF
+systemctl daemon-reload 2>/dev/null || true
+systemctl enable tvbox-bt-ertm.service >/dev/null 2>&1 && ok "bluetooth ERTM unit" || warn "bluetooth ERTM unit enable failed"
+/usr/local/sbin/tvbox-bt-ertm && ok "bluetooth ERTM applied" || warn "bluetooth ERTM apply failed"
 
 echo "==> user-service lingering (CEC bridge starts at boot, before login)"
 loginctl enable-linger "$TVBOX_USER" 2>/dev/null && ok "linger enabled for $TVBOX_USER" || warn "enable-linger failed"

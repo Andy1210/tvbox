@@ -141,7 +141,9 @@
     "pairing": "{name} párosítása…",
     "failed": "Nem sikerült: {name}",
     "lowBattery": "Merül a távirányító",
-    "lowBatteryMsg": "{name}: {pct}%. Hamarosan tölteni vagy elemet cserélni kell."
+    "lowBatteryMsg": "{name}: {pct}%. Hamarosan tölteni vagy elemet cserélni kell.",
+    "ertm": "ERTM kikapcsolása (hibaelhárítás)",
+    "ertmHint": "Csak akkor kapcsold be, ha egy kontroller gombjai beragadnak vagy duplán nyomnak. Néhány kontroller - jellemzően az Xbox-osok - hibásan kezelik a Bluetooth ERTM újraküldését; kikapcsolva stabilabbak lesznek. Viszont MINDEN Bluetooth-eszközre érvényes, és elveszi az L2CAP saját hibajavítását, ami a hangeszközöket megzavarhatja. Újraindítás után lép életbe."
   },
   "remote": {
     "title": "Távirányító gombok",

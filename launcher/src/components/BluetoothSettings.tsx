@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { setFocus } from "@noriginmedia/norigin-spatial-navigation";
 import { useI18n } from "../lib/i18n";
 import { fetchBtStatus, fetchBtDevices, btScan, btAction, type BtDevice, type BtStatus } from "../lib/bluetooth";
+import { useConfigStore } from "../stores/config";
 import { FocusButton } from "./FocusButton";
 
 // Bluetooth section of the HOME Settings screen: scan, pair, connect/disconnect
@@ -51,6 +52,12 @@ function BtGlyph({ type }: { type: string }) {
 
 export function BluetoothSettings() {
   const { t } = useI18n();
+  const setBluetooth = useConfigStore((st) => st.setBluetooth);
+  // `bluetooth?` as well as `config?`: this store is shared with app packages via
+  // @tvbox/app-sdk, so a newer SDK can run against an older shell whose
+  // publicConfig has no bluetooth section - and a throw inside a selector would
+  // take the whole Settings screen down (hard rule 7: never a dead end on a TV).
+  const disableErtm = useConfigStore((st) => st.config?.bluetooth?.disableErtm) ?? false;
   const [status, setStatus] = useState<BtStatus | null>(null);
   const [devices, setDevices] = useState<BtDevice[] | null>(null); // null = first fetch in flight
   const [scanning, setScanning] = useState(false);
@@ -167,6 +174,20 @@ export function BluetoothSettings() {
           </div>
         ))}
         {devices && !devices.length && <div className="text-[1.9vh] text-fg-dim">{t("bt.none")}</div>}
+
+        <FocusButton
+          focusKey="bt-ertm"
+          onEnter={() => void setBluetooth({ disableErtm: !disableErtm })}
+          className="mt-[1.4vh] w-full px-[2vw] py-[1.5vh] rounded-[1.1vh] bg-white/5 flex items-center justify-between gap-[1.5vw]"
+        >
+          <span className="text-[2.1vh]">{t("bt.ertm")}</span>
+          <span
+            className={["text-[1.9vh] font-semibold shrink-0", disableErtm ? "text-accent" : "text-fg-dim"].join(" ")}
+          >
+            {disableErtm ? t("display.on") : t("display.off")}
+          </span>
+        </FocusButton>
+        <div className="text-[1.7vh] text-fg-dim mt-[0.5vh]">{t("bt.ertmHint")}</div>
       </div>
     </div>
   );
