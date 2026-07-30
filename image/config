@@ -1,5 +1,7 @@
-# pi-gen config for LOCAL image builds (CI passes the same values as
-# usimd/pi-gen-action inputs - keep the two in sync). See docs/sd-image.md.
+# pi-gen config for image builds. BOTH paths use this exact file - the local
+# scripts/build-image.sh and CI's .github/workflows/image.yml each `cp image/config
+# pi-gen/config` before running pi-gen - so this is the one place to change a
+# build-wide value. See docs/sd-image.md.
 IMG_NAME=tvbox
 RELEASE=trixie
 ARM64=1
@@ -15,3 +17,14 @@ DISABLE_FIRST_BOOT_USER_RENAME=1
 FIRST_USER_PASS="$(head -c 24 /dev/urandom | base64)"
 ENABLE_SSH=1
 DEPLOY_COMPRESSION=xz
+# WLAN regulatory domain for the built image, and the ONLY thing that needs
+# changing to build for another region. It does two jobs, both in pi-gen's own
+# stage2/02-net-tweaks: it sets the driver-honoured country, AND it is what stops
+# pi-gen writing `WirelessEnabled=false` - that branch is an `elif` on this being
+# unset, which is why an image built without it ships with the radio off.
+# pi-gen exports WPA_COUNTRY, so stage-tvbox reads it too (a child process sees
+# only exported variables - a bespoke variable in this file would NOT reach it).
+# A code that isn't in iso3166.tab makes do_wifi_country fail the build rather
+# than ship a wrong region. Per-box and on-TV overrides still win at runtime -
+# see the WiFi block in image/stage-tvbox/01-tvbox/00-run.sh.
+WPA_COUNTRY=HU

@@ -126,6 +126,7 @@ What the image gives you:
   HOSTNAME=living-room
   WIFI_SSID=MyNetwork
   WIFI_PASSWORD=secret        # omit for open
+  WIFI_COUNTRY=DE             # radio region; also on the TV (Settings → Wi-Fi)
   SUDO=true                   # passwordless sudo over SSH for power users
   SSH_AUTHORIZED_KEY=ssh-ed25519 AAAA... you@host
   ```

@@ -69,13 +69,30 @@ and `${FIRST_USER_NAME}` are provided by pi-gen). The committed
    labwc session autostart, the flathub user remote, `systemctl enable
 greetd` + `set-default graphical.target`.
 
-## `image/config` (pi-gen's own config, local builds)
+## `image/config` (pi-gen's own config)
 
-The committed [`image/config`](../image/config) mirrors what CI passes as
-action inputs: `RELEASE=trixie`, `ARM64=1`, `FIRST_USER_NAME=tv`,
-`DISABLE_FIRST_BOOT_USER_RENAME=1`, `ENABLE_SSH=1`, xz compression.
+The committed [`image/config`](../image/config) holds `RELEASE=trixie`,
+`ARM64=1`, `FIRST_USER_NAME=tv`, `DISABLE_FIRST_BOOT_USER_RENAME=1`,
+`ENABLE_SSH=1`, `WPA_COUNTRY`, xz compression. **Both** build paths use this
+exact file — `scripts/build-image.sh` and `.github/workflows/image.yml` each
+`cp image/config pi-gen/config` before running pi-gen — so it is the one place
+to change a build-wide value, and there is nothing to keep in sync.
 
 Notes:
+
+- **`WPA_COUNTRY` is the image's WLAN region, and it does two jobs.** It sets the
+  driver-honoured country, and it is what stops pi-gen writing
+  `WirelessEnabled=false`: that line lives in the `elif` of `[ -v WPA_COUNTRY ]`
+  in pi-gen's own `stage2/02-net-tweaks/01-run.sh`, so an image built without it
+  ships with the WiFi radio off. To build for another region, change this one
+  line. A code that isn't in `iso3166.tab` makes `do_wifi_country` fail the build
+  rather than ship a wrong region — which is the preferable failure.
+  Per-box (`tvbox.conf`) and on-TV (Settings) overrides still win at runtime.
+- **Only pi-gen's own documented variables reach the stage scripts.** pi-gen runs
+  `00-run.sh` as a child process (`./00-run.sh`) and exports just its own set, so
+  a variable invented in `image/config` — or exported in the shell that calls
+  `build-image.sh` — will **not** be visible there. That is why the stage reads
+  `WPA_COUNTRY` rather than a tvbox-specific name.
 
 - **User/password + SSH access**: the image ships the fixed `tv` user with a
   **locked password** - no first-boot wizard (it would need a keyboard), greetd
@@ -98,6 +115,7 @@ Notes:
   HOSTNAME=living-room            # name this box (several would clash on the LAN)
   WIFI_SSID=YourNetwork           # for an ethernet-less box (else set WiFi on the TV)
   WIFI_PASSWORD=your-wifi-pass    # omit for an open network
+  WIFI_COUNTRY=DE                 # radio regulatory region (ISO 3166-1 alpha-2)
   SUDO=true                       # passwordless sudo over SSH for power users (default off)
   PASSWORD=hunter2                # optional: unlock the tv account for password login
   SSH_AUTHORIZED_KEY=ssh-ed25519 AAAA... you@host   # your PUBLIC key -> `ssh tv@<box-ip>`
@@ -117,6 +135,15 @@ Notes:
     itself always runs rootless - this only affects a human on the SSH shell.
   - **HOSTNAME** - the image default is `tvbox`; set this so multiple boxes are
     distinct (also editable later on the TV: Settings → General → Device name).
+  - **WIFI_COUNTRY** - the radio won't transmit on a channel its regulatory
+    domain forbids, so a box flashed for another region needs this _before_ it
+    ever associates - which is why it's here and not only in Settings. Weakest
+    source first: the image's build-time `WPA_COUNTRY` (see _Building the image_),
+    then this, then the on-TV pick (Settings → Wi-Fi → Wi-Fi country), which
+    persists to `~/.tvbox/config.json` and is re-applied every boot. A value that
+    isn't exactly two letters is ignored rather than repaired - filtering junk out
+    of `D1E` would hand back `DE`, and quietly picking a _different_ valid region
+    is worse than picking none.
 
   Applied every boot (idempotent); the file may stay on the card (the key is
   public; the WiFi/account passwords are plaintext on the FAT partition - the
@@ -125,8 +152,10 @@ Notes:
   fallbacks. Without any WiFi preseed, set it up from the TV (Settings → Network).
 
 - **WiFi**: set up **from the TV** once booted (Settings → Network) - the image
-  brings the radio up (NetworkManager ships it off) and sets the WiFi country
-  (HU) so it scans out of the box. Or preseed it (see _Headless provisioning_).
+  brings the radio up (NetworkManager ships it off) and sets a WiFi country so it
+  scans out of the box. Outside that country, correct it with `WIFI_COUNTRY=` at
+  flash time or Settings → Wi-Fi → Wi-Fi country afterwards. Or preseed the whole
+  thing (see _Headless provisioning_).
 - **Ethernet**: works out of the box (DHCP, no config).
 - **`custom.toml` / Raspberry Pi Imager customisation - NOT supported by this
   image.** Two separate dead ends:
