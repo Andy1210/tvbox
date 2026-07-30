@@ -5,6 +5,18 @@ updates). `scripts/make-release.sh` lifts the current version's `hu`/`en`
 blocks into the OTA feed's `notes` - keep both languages, keep it short, and
 write for the person on the couch (what changes for THEM), not for developers.
 
+## 1.18.1
+
+### hu
+
+- Beállítások visszatöltése után egy alkalmazás eltűnhetett a főképernyőről - a Plex volt ilyen -, és az Alkalmazások alatt már telepítettnek látszott, úgyhogy előbb el kellett távolítani, majd újra telepíteni. A box ezt most magától rendbe teszi: bekapcsolás után pár percen belül letölti, ami hiányzik, és az alkalmazás megjelenik. Neked nem kell tenned semmit.
+- Frissen telepített boxokon a tárhely eddig nem nyúlt ki a memóriakártya teljes méretére, hanem alig pár száz megabájton maradt, és emiatt az első bekapcsolás után furcsa hibák jöhettek: néma fekete képernyő, vagy egy box, ami el sem indult rendesen. Ez javítva - az új telepítések a kártya egészét használják. Meglévő boxokat nem érint.
+
+### en
+
+- After restoring your settings, an app could vanish from the home screen - Plex did - while Apps still listed it as installed, so the only way back was to remove it and install it again. The box now sorts this out on its own: within a few minutes of starting up it fetches what was missing and the app reappears. Nothing for you to do.
+- On newly installed boxes the storage was not being expanded to the full size of the memory card, leaving only a few hundred megabytes, and that could cause odd trouble after the first start: a silent black screen, or a box that never came up properly. Fixed - new installs now use the whole card. Existing boxes are unaffected.
+
 ## 1.18.0
 
 ### hu
