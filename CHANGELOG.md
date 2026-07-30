@@ -5,6 +5,20 @@ updates). `scripts/make-release.sh` lifts the current version's `hu`/`en`
 blocks into the OTA feed's `notes` - keep both languages, keep it short, and
 write for the person on the couch (what changes for THEM), not for developers.
 
+## 1.18.0
+
+### hu
+
+- Sokkal gyorsabb és stabilabb wifi. A box eddig energiatakarékos módban járatta a wifit, ami egy hálózatról működő készüléknek semmit nem ad, viszont erősen visszafogta: mérve több mint tízszeresére gyorsult az adatátvitel, és a kapcsolat sokkal ritkábban akad meg. A távirányító és a kontrollerek is jól járnak vele, mert a wifi és a Bluetooth ugyanazt az antennát használja - amit a wifi nem foglal, azon a gombnyomások pontosabban érnek célba.
+- A Wi-Fi ország beállítás mostantól tényleg érvényre jut. Ha a boxot más országban használod, mint amire készült, a Beállítások → Wi-Fi alatt átállíthatod: eddig megjegyezte a választást, de a rádióhoz nem jutott el, és így hálózatok maradhattak láthatatlanok.
+- Új, alapból kikapcsolt lehetőség a Beállítások → Perifériák alatt azokhoz a kontrollerekhez, amelyeknél beragadnak vagy duplán érkeznek a gombnyomások. A beállítás alatti leírás elmondja, mikor érdemes bekapcsolni - és hogy minden Bluetooth-eszközre hatással van, ezért nem alapból aktív.
+
+### en
+
+- Much faster, steadier Wi-Fi. The box had been running its Wi-Fi in a power-saving mode that gains a mains-powered device nothing while holding it back badly: measured, data now moves more than ten times faster and the connection stalls far less often. The remote and the game controllers gain too, because Wi-Fi and Bluetooth share one aerial - whatever Wi-Fi is not occupying, your button presses get.
+- The Wi-Fi country setting now really takes effect. If you use the box in a different country than it was built for, you can correct it under Settings → Wi-Fi: until now it remembered your choice but never passed it on to the radio, which could leave networks invisible.
+- A new option, off by default, under Settings → Peripherals, for controllers whose buttons stick or register twice. The text under it says when to turn it on - and that it affects every Bluetooth device, which is why it is not on to begin with.
+
 ## 1.17.2
 
 ### hu
