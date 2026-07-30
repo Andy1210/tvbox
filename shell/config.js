@@ -109,7 +109,10 @@ function publicConfig() {
       // Default false = the kernel default (ERTM on). Applied by the root-side
       // tvbox-bt-ertm service; see its comment for why this is a toggle and not
       // simply on. Escape-hatch for controllers whose ERTM handling is broken.
-      disableErtm: !!(c.bluetooth && c.bluetooth.disableErtm),
+      // Strict `=== true`, not a coercion: tvbox-bt-ertm greps config.json for a
+      // literal JSON true/false, so anything else there means OFF to the applier -
+      // and the row must not claim "on" while the radio is left alone.
+      disableErtm: (c.bluetooth && c.bluetooth.disableErtm) === true,
     },
     ui: {
       // launcher preferences. hourFormat: "auto" (locale default) | "12" | "24"
@@ -412,11 +415,13 @@ function rawWifi() {
 }
 
 // Bluetooth radio tuning. Only { disableErtm: bool } - the root-side applier
-// reads it, the shell just stores it.
+// reads it, the shell just stores it. A REAL boolean only: this takes parsed JSON
+// straight off the HTTP API, and coercing would turn the string "false" into a
+// global Bluetooth change nobody asked for.
 function setBluetooth(bluetooth) {
   const c = load();
-  if (bluetooth && bluetooth.disableErtm !== undefined) {
-    c.bluetooth = { ...c.bluetooth, disableErtm: !!bluetooth.disableErtm };
+  if (bluetooth && typeof bluetooth.disableErtm === "boolean") {
+    c.bluetooth = { ...c.bluetooth, disableErtm: bluetooth.disableErtm };
   }
   save(c);
 }

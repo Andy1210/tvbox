@@ -64,6 +64,16 @@ install -m 644 conf/10-tvbox-logind.conf "${ROOTFS_DIR}/etc/systemd/logind.conf.
 #     or afterwards on the TV (Settings → Wi-Fi → Wi-Fi country, which persists to
 #     ~/.tvbox/config.json and is re-applied by tvbox-wifi-country every boot).
 WIFI_COUNTRY="${TVBOX_WIFI_COUNTRY:-HU}"
+# Exactly two ASCII letters or fall back - this value is interpolated BOTH into
+# cmdline.txt (where a space would smuggle in extra kernel parameters) and into
+# the root applier generated below (where an unquoted heredoc would let shell
+# metacharacters run at boot). Reject rather than repair: stripping junk out of
+# "D1E" would silently pick DE, and a wrong regulatory region is the exact fault
+# this is meant to prevent.
+case "$WIFI_COUNTRY" in
+  [A-Za-z][A-Za-z]) WIFI_COUNTRY=$(printf '%s' "$WIFI_COUNTRY" | tr '[:lower:]' '[:upper:]') ;;
+  *) WIFI_COUNTRY=HU ;;
+esac
 CMDLINE="${ROOTFS_DIR}/boot/firmware/cmdline.txt"
 [ -f "$CMDLINE" ] || CMDLINE="${ROOTFS_DIR}/boot/cmdline.txt"
 if [ -f "$CMDLINE" ] && ! grep -q ieee80211_regdom "$CMDLINE"; then
@@ -278,10 +288,16 @@ fi
 # is why this is here and not only in Settings. Precedence, weakest first:
 # the image's build-time bootstrap default, then this, then the Settings pick
 # (~/.tvbox/config.json, applied by tvbox-wifi-country at every boot). ---
-CC=$(conf_get WIFI_COUNTRY | tr -cd 'A-Za-z' | cut -c1-2 | tr '[:lower:]' '[:upper:]')
+# Rejected, not repaired: filtering junk out of "D1E" would hand back DE, and
+# quietly picking a DIFFERENT valid region is worse than ignoring the typo.
+CC=$(conf_get WIFI_COUNTRY | tr -d '[:space:]')
+case "$CC" in
+  [A-Za-z][A-Za-z]) CC=$(printf '%s' "$CC" | tr '[:lower:]' '[:upper:]') ;;
+  *) CC= ;;
+esac
 if [ -n "$CC" ] && command -v raspi-config >/dev/null 2>&1; then
-  # do_wifi_country validates against iso3166.tab and returns 1 on a bad code,
-  # leaving the current setting alone - so a typo degrades to the default.
+  # do_wifi_country also validates against iso3166.tab and returns 1 on a code
+  # that is well-formed but not a real country, leaving the setting alone.
   raspi-config nonint do_wifi_country "$CC" >/dev/null 2>&1 || true
 fi
 

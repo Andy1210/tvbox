@@ -297,7 +297,12 @@
         const host = cleanHost(el.hostname.value);
         const ssid = el.ssid.value.trim();
         const wifipw = el.wifipw.value;
-        const country = el.wificountry.value.replace(/[^A-Za-z]/g, "").toUpperCase();
+        // Exactly two letters or nothing, matching what the box accepts. Rejected
+        // rather than repaired: stripping junk out of "D1E" would emit DE, and
+        // quietly writing a DIFFERENT valid region is worse than writing none.
+        // Checked on the raw value because maxlength guards typing, not an import.
+        const countryRaw = el.wificountry.value.trim();
+        const country = /^[A-Za-z]{2}$/.test(countryRaw) ? countryRaw.toUpperCase() : "";
         const sshkey = el.sshkey.value.trim().replace(/\s+/g, " ");
         const password = el.password.value;
 

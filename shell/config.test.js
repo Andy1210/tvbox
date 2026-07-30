@@ -53,6 +53,34 @@ test("nothing else in the config is disturbed by recording it", () => {
   assert.strictEqual(config.publicConfig().setup.done, true);
 });
 
+// The ERTM toggle is a GLOBAL Bluetooth change reached over the HTTP config API,
+// and the root applier greps config.json for a literal JSON true/false - so the
+// only safe thing to store is a real boolean, and what the launcher is shown has
+// to agree with what the applier will do.
+test("the ERTM toggle stores a real boolean and ignores anything else", () => {
+  assert.strictEqual(config.publicConfig().bluetooth.disableErtm, false, "defaults off");
+
+  config.setBluetooth({ disableErtm: true });
+  assert.strictEqual(config.publicConfig().bluetooth.disableErtm, true);
+  config.setBluetooth({ disableErtm: false });
+  assert.strictEqual(config.publicConfig().bluetooth.disableErtm, false);
+
+  // A truthy non-boolean must not enable it: "false" is exactly what a hand-rolled
+  // curl sends, and coercion would turn it on.
+  for (const junk of ["false", "true", 1, 0, "", null, {}, []]) {
+    config.setBluetooth({ disableErtm: junk });
+    assert.strictEqual(config.publicConfig().bluetooth.disableErtm, false, `junk ${JSON.stringify(junk)} stayed off`);
+  }
+
+  // Junk already ON disk reads as off too - the applier would leave the radio alone,
+  // so the row must not claim otherwise.
+  config.setBluetooth({ disableErtm: true });
+  const raw = JSON.parse(fs.readFileSync(FILE, "utf8"));
+  raw.bluetooth.disableErtm = "false";
+  fs.writeFileSync(FILE, JSON.stringify(raw));
+  assert.strictEqual(config.publicConfig().bluetooth.disableErtm, false);
+});
+
 test.after(() => {
   fs.rmSync(HOME, { recursive: true, force: true });
   if (REAL_HOME === undefined) delete process.env.HOME;
