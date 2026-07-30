@@ -232,7 +232,7 @@ for PHYLINK in /sys/class/net/*/phy80211; do
   IFACE=$(basename "$(dirname "$PHYLINK")")
   iw dev "$IFACE" set power_save off 2>/dev/null &&
     ok "power save off on $IFACE (live, no reconnect)" ||
-    warn "could not set power save on $IFACE (applies on the next connect)"
+    warn "could not turn power save OFF on $IFACE now (applies on the next connect)"
 done
 
 # Timezone, keyboard layout and hostname from the box user (first-boot wizard +

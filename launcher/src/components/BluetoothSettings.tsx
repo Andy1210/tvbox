@@ -53,7 +53,11 @@ function BtGlyph({ type }: { type: string }) {
 export function BluetoothSettings() {
   const { t } = useI18n();
   const setBluetooth = useConfigStore((st) => st.setBluetooth);
-  const disableErtm = useConfigStore((st) => st.config?.bluetooth.disableErtm) ?? false;
+  // `bluetooth?` as well as `config?`: this store is shared with app packages via
+  // @tvbox/app-sdk, so a newer SDK can run against an older shell whose
+  // publicConfig has no bluetooth section - and a throw inside a selector would
+  // take the whole Settings screen down (hard rule 7: never a dead end on a TV).
+  const disableErtm = useConfigStore((st) => st.config?.bluetooth?.disableErtm) ?? false;
   const [status, setStatus] = useState<BtStatus | null>(null);
   const [devices, setDevices] = useState<BtDevice[] | null>(null); // null = first fetch in flight
   const [scanning, setScanning] = useState(false);
