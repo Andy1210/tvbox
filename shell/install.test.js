@@ -297,3 +297,30 @@ test("only a flatpak source can go stale on its own", () => {
   // and an app with no bundle installed has nothing to refresh
   withFlatpakAt("commit-b", () => assert.strictEqual(apps.bundleStale({ ...PLEXISH, id: "not-installed-app" }), false));
 });
+
+// The state a settings restore leaves behind: the backup carries the manifest
+// (~/.tvbox/apps/<id>.json) but never the extracted bundle. bundleStale answers
+// false for it on purpose - there is no bundle to compare against the flatpak - so
+// something else has to notice, or the app is stranded: HOME hides it (ready:false)
+// and the store calls it installed because the manifest is there, leaving
+// remove-then-install by hand on a TV as the only way out.
+test("an app whose bundle is missing entirely is flagged for the refresh tick", () => {
+  // plex's bundle was seeded+migrated by the tests above, so use a fresh id
+  const RESTORED = { ...PLEXISH, id: "restored-app" };
+  assert.strictEqual(apps.isInstalled("restored-app"), false, "precondition: no bundle on disk");
+  assert.strictEqual(apps.bundleMissing(RESTORED), true, "a manifest with no bundle must be picked up");
+  // ...and bundleStale still says false, which is exactly why bundleMissing exists
+  withFlatpakAt("commit-a", () => assert.strictEqual(apps.bundleStale(RESTORED), false));
+
+  // once the bundle exists it is no longer "missing" (the tick must not loop on it)
+  fs.mkdirSync(apps.appDataDir("restored-app"), { recursive: true });
+  assert.strictEqual(apps.bundleMissing(RESTORED), false, "a present bundle is not missing");
+
+  // and it must NOT drag in apps that have no bundle to begin with: a pure manifest
+  // app (youtube/xcloud/jellyfin - just a remote URL) restores complete, and a
+  // native app (retroarch) has no install.source either. Flagging those would send
+  // the tick installing things forever.
+  assert.strictEqual(apps.bundleMissing({ id: "youtube", type: "webclient" }), false, "pure manifest");
+  assert.strictEqual(apps.bundleMissing({ id: "retroarch", type: "native", install: {} }), false, "native app");
+  assert.strictEqual(apps.bundleMissing(null), false, "no manifest at all");
+});

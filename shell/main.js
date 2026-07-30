@@ -321,14 +321,22 @@ function startFlatpakUpdate(id, res) {
 let bundleRefreshBusy = false;
 async function bundleRefreshTick() {
   if (!boxFree()) return;
-  const stale = apps.getManifests().filter((m) => apps.bundleStale(m));
+  // Behind its flatpak OR absent entirely. The second case is a settings restore:
+  // the manifest comes back, the bundle does not, and nothing else would ever pick
+  // that up (see bundleMissing in install.js).
+  const stale = apps.getManifests().filter((m) => apps.bundleStale(m) || apps.bundleMissing(m));
   if (!stale.length) return;
   bundleRefreshBusy = true;
   try {
     for (const m of stale) {
       // a wake-up aborts the run; not boxFree(), whose flag this run itself holds
       if (installing.size || !boxIdle()) break;
-      console.log("[install] bundle behind its flatpak, refreshing:", m.id);
+      console.log(
+        apps.bundleMissing(m)
+          ? "[install] bundle missing, acquiring:"
+          : "[install] bundle behind its flatpak, refreshing:",
+        m.id,
+      );
       installing.add(m.id);
       await spawnCli(["install", m.id, "--force"], m.id, "bundle");
       installing.delete(m.id);
