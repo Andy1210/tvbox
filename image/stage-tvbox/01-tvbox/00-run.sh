@@ -202,6 +202,99 @@ EOF
 ln -sf ../tvbox-bt-ertm.service \
   "${ROOTFS_DIR}/etc/systemd/system/multi-user.target.wants/tvbox-bt-ertm.service"
 
+# 2b-iii) Grow the rootfs to fill the card on the first boot. THIS IMAGE CANNOT
+#     SHIP WITHOUT IT. pi-gen sizes the root partition to the stage's own contents
+#     plus ROOT_SIZE * 0.2 + 200 MB, and the init= hook that normally expands it on
+#     first boot is not installed here - DISABLE_FIRST_BOOT_USER_RENAME=1 makes
+#     pi-gen skip it (see docs/sd-image.md). Measured on the v1.18.0 image: a
+#     3.49 GiB rootfs with 0.34 GiB free, half of that reserved for root, so 174 MB
+#     for everything else, on any size card, forever.
+#     What that actually did on a fresh flash: the box filled up on its first boot
+#     and ext4 aborted the filesystem ("failed to convert unwritten extents to
+#     written extents", remount read-only) - and the damage read like three
+#     unrelated bugs. ssh-keygen could not write the host keys pi-gen deletes on
+#     purpose, so sshd accepted TCP and closed with no banner; the shell could not
+#     write, so it crash-looped behind a black screen with the SD LED going
+#     constantly; and the box was unreachable by any route at once.
+#     Idempotent, so it also grows a rootfs later moved to a bigger card.
+cat > "${ROOTFS_DIR}/usr/local/sbin/tvbox-expand-rootfs" <<'XSEOF'
+#!/bin/sh
+# tvbox: grow the root partition + filesystem to fill the card. Idempotent - it
+# runs at every boot and does nothing once there is no spare tail worth taking.
+PART=$(findmnt -no SOURCE / 2>/dev/null) || exit 0
+case "$PART" in /dev/*) ;; *) exit 0 ;; esac       # not a plain block device
+NAME=$(basename "$PART")
+NUM=$(printf '%s' "$NAME" | grep -o '[0-9]*$')
+[ -n "$NUM" ] || exit 0
+PK=$(lsblk -no pkname "$PART" 2>/dev/null | head -n1)
+[ -n "$PK" ] || exit 0
+DISK="/dev/$PK"
+[ -b "$DISK" ] || exit 0
+# Refuse unless root is the LAST partition - growing any other would run into its
+# neighbour.
+if [ "$(lsblk -lno NAME "$DISK" | tail -n1)" != "$NAME" ]; then
+  echo "tvbox-expand-rootfs: $PART is not the last partition on $DISK - leaving it alone"
+  exit 0
+fi
+DISK_SZ=$(blockdev --getsz "$DISK" 2>/dev/null) || exit 0
+START=$(cat "/sys/class/block/$NAME/start" 2>/dev/null) || exit 0
+PART_SZ=$(blockdev --getsz "$PART" 2>/dev/null) || exit 0
+SPARE=$((DISK_SZ - START - PART_SZ))
+# 64 MiB in 512-byte sectors: below that it is already grown, which is what makes
+# this safe to run unconditionally.
+[ "$SPARE" -ge 131072 ] || exit 0
+echo "tvbox-expand-rootfs: growing $PART by $((SPARE / 2048)) MiB to fill $DISK"
+# sfdisk rewrites only the last partition's size and keeps its start sector; the
+# kernel cannot re-read the table while root is mounted, hence partx -u.
+if ! echo ", +" | sfdisk -N "$NUM" --force "$DISK"; then
+  echo "tvbox-expand-rootfs: sfdisk failed - filesystem left untouched" >&2
+  exit 0
+fi
+partx -u "$DISK" 2>/dev/null || true
+# ext4 grows online, so the mounted root needs neither a reboot nor an fsck.
+if resize2fs "$PART"; then
+  echo "tvbox-expand-rootfs: done - $(df -h / | awk 'NR==2{print $4" free of "$2}')"
+else
+  echo "tvbox-expand-rootfs: resize2fs failed - the partition grew, the fs did not" >&2
+fi
+exit 0
+XSEOF
+chmod 755 "${ROOTFS_DIR}/usr/local/sbin/tvbox-expand-rootfs"
+
+cat > "${ROOTFS_DIR}/etc/systemd/system/tvbox-expand-rootfs.service" <<'EOF'
+[Unit]
+Description=tvbox: grow the root filesystem to fill the card
+# Same shape as Raspberry Pi's own regenerate_ssh_host_keys.service: very early,
+# root already read-write, and BEFORE everything that needs somewhere to write -
+# including the host-key generation whose failure is how this bug first showed up.
+#
+# Before=systemd-growfs-root.service is the load-bearing one. The base image DOES
+# ship a first-boot resize - rpi-resize.service - but it is a shim: ExecStart is
+# /usr/bin/true and the work is delegated to systemd-growfs-root, which grows the
+# FILESYSTEM to fit its partition and never touches the partition table. Growing
+# the partition is the job of the init= firstboot hook, which pi-gen does not
+# install when DISABLE_FIRST_BOOT_USER_RENAME=1 - so growfs expands a 3.6 GB
+# filesystem to fill a 3.6 GB partition and achieves nothing. Ordering ahead of it
+# makes the two cooperate: we widen the partition, growfs then has real room to
+# grow into (our own resize2fs stays as a belt for when growfs is not pulled in).
+DefaultDependencies=no
+After=systemd-remount-fs.service
+Before=systemd-growfs-root.service tvbox-firstboot.service ssh.service sshd-keygen.service regenerate_ssh_host_keys.service
+Conflicts=shutdown.target
+Before=shutdown.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/local/sbin/tvbox-expand-rootfs
+
+[Install]
+WantedBy=sysinit.target
+EOF
+install -d "${ROOTFS_DIR}/etc/systemd/system/sysinit.target.wants"
+ln -sf ../tvbox-expand-rootfs.service \
+  "${ROOTFS_DIR}/etc/systemd/system/sysinit.target.wants/tvbox-expand-rootfs.service"
+
 # 2c) Headless provisioning WITHOUT custom.toml (which this image can't process).
 #     The account password is locked, so there's no way into a fresh box until
 #     an SSH key is present. First-boot config is driven by ONE file on the boot
