@@ -51,6 +51,7 @@ export const CONFIG: PublicConfig = {
   update: { auto: true, appsAuto: true },
   ui: { hourFormat: "auto", navSounds: true },
   wifi: { country: "" },
+  bluetooth: { disableErtm: false },
   player: { audioLang: "", subLang: "" },
   remote: { devices: {}, power: "tv" },
   mqtt: {

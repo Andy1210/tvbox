@@ -98,6 +98,7 @@ Notes:
   HOSTNAME=living-room            # name this box (several would clash on the LAN)
   WIFI_SSID=YourNetwork           # for an ethernet-less box (else set WiFi on the TV)
   WIFI_PASSWORD=your-wifi-pass    # omit for an open network
+  WIFI_COUNTRY=DE                 # radio regulatory region (ISO 3166-1 alpha-2)
   SUDO=true                       # passwordless sudo over SSH for power users (default off)
   PASSWORD=hunter2                # optional: unlock the tv account for password login
   SSH_AUTHORIZED_KEY=ssh-ed25519 AAAA... you@host   # your PUBLIC key -> `ssh tv@<box-ip>`
@@ -117,6 +118,13 @@ Notes:
     itself always runs rootless - this only affects a human on the SSH shell.
   - **HOSTNAME** - the image default is `tvbox`; set this so multiple boxes are
     distinct (also editable later on the TV: Settings → General → Device name).
+  - **WIFI_COUNTRY** - the radio won't transmit on a channel its regulatory
+    domain forbids, so a box flashed for another region needs this _before_ it
+    ever associates - which is why it's here and not only in Settings. Weakest
+    source first: the image's build-time default (`TVBOX_WIFI_COUNTRY`, `HU` if
+    unset), then this, then the on-TV pick (Settings → Wi-Fi → Wi-Fi country),
+    which persists to `~/.tvbox/config.json` and is re-applied every boot. A code
+    that isn't a valid ISO 3166-1 alpha-2 is ignored, leaving the default.
 
   Applied every boot (idempotent); the file may stay on the card (the key is
   public; the WiFi/account passwords are plaintext on the FAT partition - the
@@ -125,8 +133,10 @@ Notes:
   fallbacks. Without any WiFi preseed, set it up from the TV (Settings → Network).
 
 - **WiFi**: set up **from the TV** once booted (Settings → Network) - the image
-  brings the radio up (NetworkManager ships it off) and sets the WiFi country
-  (HU) so it scans out of the box. Or preseed it (see _Headless provisioning_).
+  brings the radio up (NetworkManager ships it off) and sets a WiFi country so it
+  scans out of the box. Outside that country, correct it with `WIFI_COUNTRY=` at
+  flash time or Settings → Wi-Fi → Wi-Fi country afterwards. Or preseed the whole
+  thing (see _Headless provisioning_).
 - **Ethernet**: works out of the box (DHCP, no config).
 - **`custom.toml` / Raspberry Pi Imager customisation - NOT supported by this
   image.** Two separate dead ends:

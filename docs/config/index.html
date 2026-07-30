@@ -224,6 +224,14 @@
             <label for="wifipw">WiFi password</label>
             <input type="text" id="wifipw" placeholder="(blank for an open network)" autocomplete="off" />
           </div>
+          <div class="field">
+            <label for="wificountry">WiFi country</label>
+            <input type="text" id="wificountry" placeholder="DE" maxlength="2" autocomplete="off" />
+            <p class="hint">
+              Two-letter country code where the box will be used. The radio may only use the channels your region
+              allows, so a wrong one can hide 5&nbsp;GHz networks entirely. Changeable later on the TV.
+            </p>
+          </div>
           <div class="field toggle">
             <input type="checkbox" id="sudo" />
             <label for="sudo">Passwordless <code>sudo</code> over SSH (power users)</label>
@@ -270,7 +278,7 @@
     </div>
 
     <script>
-      const ids = ["hostname", "ssid", "wifipw", "sudo", "sshkey", "password"];
+      const ids = ["hostname", "ssid", "wifipw", "wificountry", "sudo", "sshkey", "password"];
       const el = {};
       ids.forEach((id) => (el[id] = document.getElementById(id)));
       const preview = document.getElementById("preview");
@@ -289,12 +297,16 @@
         const host = cleanHost(el.hostname.value);
         const ssid = el.ssid.value.trim();
         const wifipw = el.wifipw.value;
+        const country = el.wificountry.value.replace(/[^A-Za-z]/g, "").toUpperCase();
         const sshkey = el.sshkey.value.trim().replace(/\s+/g, " ");
         const password = el.password.value;
 
         if (host) lines.push("HOSTNAME=" + host);
         if (ssid) lines.push("WIFI_SSID=" + ssid);
         if (ssid && wifipw) lines.push("WIFI_PASSWORD=" + wifipw);
+        // Independent of SSID: a box that joins WiFi from the TV still needs the
+        // right region set before it can see every channel.
+        if (country) lines.push("WIFI_COUNTRY=" + country);
         if (el.sudo.checked) lines.push("SUDO=true");
         if (password) lines.push("PASSWORD=" + password);
         if (sshkey) lines.push("SSH_AUTHORIZED_KEY=" + sshkey);
@@ -337,6 +349,7 @@
         HOSTNAME: "hostname",
         WIFI_SSID: "ssid",
         WIFI_PASSWORD: "wifipw",
+        WIFI_COUNTRY: "wificountry",
         PASSWORD: "password",
         SSH_AUTHORIZED_KEY: "sshkey",
       };

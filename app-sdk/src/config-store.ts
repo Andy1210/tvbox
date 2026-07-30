@@ -17,6 +17,7 @@ import {
   savePlayer,
   type PlayerInput,
   saveWifi,
+  saveBluetooth,
   saveMqtt,
   type MqttInput,
   saveIr,
@@ -39,6 +40,7 @@ interface ConfigState {
   setUi: (ui: UiInput) => Promise<void>;
   setPlayer: (player: PlayerInput) => Promise<void>;
   setWifi: (wifi: { country: string }) => Promise<void>;
+  setBluetooth: (bluetooth: { disableErtm: boolean }) => Promise<void>;
   setMqtt: (mqtt: MqttInput) => Promise<void>;
   setIr: (ir: IrInput) => Promise<void>;
   setRemote: (devices: Record<string, RemoteDeviceConfig>) => Promise<void>;
@@ -61,6 +63,7 @@ export const useConfigStore = create<ConfigState>((set) => ({
   setUi: async (ui) => set({ config: await saveUi(ui) }),
   setPlayer: async (player) => set({ config: await savePlayer(player) }),
   setWifi: async (wifi) => set({ config: await saveWifi(wifi) }),
+  setBluetooth: async (bluetooth) => set({ config: await saveBluetooth(bluetooth) }),
   setMqtt: async (mqtt) => set({ config: await saveMqtt(mqtt) }),
   setIr: async (ir) => set({ config: await saveIr(ir) }),
   setRemote: async (devices) => set({ config: await saveRemote(devices) }),

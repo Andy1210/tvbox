@@ -104,6 +104,13 @@ function publicConfig() {
       // image default.
       country: (c.wifi && c.wifi.country) || "",
     },
+    bluetooth: {
+      // Turn L2CAP Enhanced Retransmission Mode off for ALL Bluetooth links.
+      // Default false = the kernel default (ERTM on). Applied by the root-side
+      // tvbox-bt-ertm service; see its comment for why this is a toggle and not
+      // simply on. Escape-hatch for controllers whose ERTM handling is broken.
+      disableErtm: !!(c.bluetooth && c.bluetooth.disableErtm),
+    },
     ui: {
       // launcher preferences. hourFormat: "auto" (locale default) | "12" | "24"
       hourFormat: (c.ui && ["12", "24"].includes(c.ui.hourFormat) && c.ui.hourFormat) || "auto",
@@ -404,6 +411,19 @@ function rawWifi() {
   return load().wifi || null;
 }
 
+// Bluetooth radio tuning. Only { disableErtm: bool } - the root-side applier
+// reads it, the shell just stores it.
+function setBluetooth(bluetooth) {
+  const c = load();
+  if (bluetooth && bluetooth.disableErtm !== undefined) {
+    c.bluetooth = { ...c.bluetooth, disableErtm: !!bluetooth.disableErtm };
+  }
+  save(c);
+}
+function rawBluetooth() {
+  return load().bluetooth || null;
+}
+
 // Launcher UI preferences (clock format). Whitelisted so junk can't persist.
 function setUi(ui) {
   const c = load();
@@ -630,6 +650,8 @@ module.exports = {
   rawPlayer,
   setWifi,
   rawWifi,
+  setBluetooth,
+  rawBluetooth,
   setAudio,
   rawAudio,
   setAmbient,

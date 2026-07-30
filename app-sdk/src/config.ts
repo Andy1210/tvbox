@@ -55,6 +55,7 @@ export interface PublicConfig {
   ui: { hourFormat: "auto" | "12" | "24"; navSounds: boolean };
   update: { auto: boolean; appsAuto: boolean };
   wifi: { country: string };
+  bluetooth: { disableErtm: boolean };
   player: { audioLang: string; subLang: string };
   remote: { devices: Record<string, RemoteDeviceConfig>; power: RemotePower };
   // MQTT bridge (Home Assistant / any broker). Secret-free: hasPassword says
@@ -157,6 +158,12 @@ export async function saveAmbient(ambient: AmbientInput): Promise<PublicConfig> 
 // at the next boot by the root-side unit; the shell only stores it.
 export async function saveWifi(wifi: { country: string }): Promise<PublicConfig> {
   return postConfig({ wifi });
+}
+
+// Bluetooth radio tuning (L2CAP ERTM off). Same shape as the country: applied at
+// the next boot by a root-side unit, the shell only stores it.
+export async function saveBluetooth(bluetooth: { disableErtm: boolean }): Promise<PublicConfig> {
+  return postConfig({ bluetooth });
 }
 
 // Launcher UI preferences (clock format; "auto" = whatever the locale does).

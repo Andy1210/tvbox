@@ -574,6 +574,10 @@ function handlePost(p, data, res) {
       config.setWifi(data.wifi); // regulatory country - applied by the root boot unit
       changed.push("wifi");
     }
+    if (data.bluetooth) {
+      config.setBluetooth(data.bluetooth); // ERTM off - applied by the root boot unit
+      changed.push("bluetooth");
+    }
     if (data.mqtt) {
       config.setMqtt(data.mqtt); // whitelisted/sanitized in config.js; empty host clears = integration off
       applyMqttConfig(); // reconnect the bridge to the new broker right away

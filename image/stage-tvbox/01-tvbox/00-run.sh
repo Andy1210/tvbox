@@ -57,9 +57,13 @@ install -m 644 conf/10-tvbox-logind.conf "${ROOTFS_DIR}/etc/systemd/logind.conf.
 #       - and at boot run Raspberry Pi's own `do_wifi_country` (country + nmcli
 #         radio on + rfkill unblock + rfkill state), self-healing every boot.
 #     Then the owner just picks a network from the TV (Settings → Network).
-#     Country defaults to HU (the box's locale); the planned on-TV first-boot
-#     wizard will make it selectable + persist a change.
-WIFI_COUNTRY=HU
+#     A country is REQUIRED for the radio to come up at all, so the build needs
+#     some value here - but it is only the weakest of three, and nothing burns it
+#     in: override the image at build time (TVBOX_WIFI_COUNTRY=DE ./build-image.sh),
+#     per box at flash time (WIFI_COUNTRY=DE in the boot partition's tvbox.conf),
+#     or afterwards on the TV (Settings → Wi-Fi → Wi-Fi country, which persists to
+#     ~/.tvbox/config.json and is re-applied by tvbox-wifi-country every boot).
+WIFI_COUNTRY="${TVBOX_WIFI_COUNTRY:-HU}"
 CMDLINE="${ROOTFS_DIR}/boot/firmware/cmdline.txt"
 [ -f "$CMDLINE" ] || CMDLINE="${ROOTFS_DIR}/boot/cmdline.txt"
 if [ -f "$CMDLINE" ] && ! grep -q ieee80211_regdom "$CMDLINE"; then
@@ -91,14 +95,33 @@ NMSTATE="${ROOTFS_DIR}/var/lib/NetworkManager/NetworkManager.state"
 if [ -f "$NMSTATE" ] && grep -q '^WirelessEnabled=' "$NMSTATE"; then
   sed -i 's/^WirelessEnabled=.*/WirelessEnabled=true/' "$NMSTATE"
 fi
-# Root-side country apply: the Settings pick (shell config, rootless) wins,
-# the image default (HU) is the fallback. A separate script because systemd
-# ExecStart would need $$-escaping for the shell substitutions.
+# WiFi power saving off. NM defaults it ON and the Pi's brcmfmac honours it hard:
+# with PSM on, rate control collapses to the 802.11b floor even at a -54 dBm
+# signal. Measured on a Pi 5 at 2.4GHz/HT20, same AP, PSM on -> off: TX rate
+# 5.5-7.2 -> 72.2 Mbit/s, a 30MB transfer >120s -> 10.6s, LAN ping avg/max
+# 18.7/209 -> 5.2/29.5 ms, 6.7% -> 0% loss. It matters twice on a Pi: WiFi and
+# Bluetooth share one antenna, so airtime wasted on retries is airtime a
+# gamepad's HID reports don't get. A drop-in, not a per-connection value, so it
+# also covers networks added later. KEEP IN SYNC with deploy/provision.sh.
+install -d "${ROOTFS_DIR}/etc/NetworkManager/conf.d"
+cat > "${ROOTFS_DIR}/etc/NetworkManager/conf.d/10-tvbox-wifi.conf" <<'NMCONF'
+# tvbox: never power-save the WiFi radio (2 = disable). See deploy/provision.sh.
+[connection]
+wifi.powersave=2
+NMCONF
+# Root-side country apply, weakest source last: the Settings pick (shell config,
+# rootless) wins, then whatever is ALREADY set, then the image default. Falling
+# back to what is already set is what keeps this from stomping a country chosen
+# some other way - `WIFI_COUNTRY=` in tvbox.conf is applied by tvbox-firstboot,
+# and running unconditionally with the image default would undo it every boot.
+# A separate script because systemd ExecStart would need $$-escaping for the
+# shell substitutions.
 cat > "${ROOTFS_DIR}/usr/local/sbin/tvbox-wifi-country" <<EOF
 #!/bin/sh
 # tvbox: apply the Wi-Fi regulatory country (root - do_wifi_country needs it).
 CC=\$(sed -n 's/.*"country"[[:space:]]*:[[:space:]]*"\([A-Za-z][A-Za-z]\)".*/\1/p' /home/${FIRST_USER_NAME}/.tvbox/config.json 2>/dev/null | head -n1)
-exec /usr/bin/raspi-config nonint do_wifi_country "\${CC:-HU}"
+[ -n "\$CC" ] || CC=\$(/usr/bin/raspi-config nonint get_wifi_country 2>/dev/null | tr -cd 'A-Za-z' | cut -c1-2)
+exec /usr/bin/raspi-config nonint do_wifi_country "\${CC:-${WIFI_COUNTRY}}"
 EOF
 chmod 755 "${ROOTFS_DIR}/usr/local/sbin/tvbox-wifi-country"
 
@@ -126,13 +149,51 @@ install -d "${ROOTFS_DIR}/etc/systemd/system/multi-user.target.wants"
 ln -sf ../tvbox-wifi-unblock.service \
   "${ROOTFS_DIR}/etc/systemd/system/multi-user.target.wants/tvbox-wifi-unblock.service"
 
+# 2b-ii) Bluetooth ERTM toggle. Off by default (the kernel default, ERTM on). It
+#     exists because some gamepads - Xbox ones especially - handle L2CAP Enhanced
+#     Retransmission Mode badly and drop or repeat HID reports; a lost button-
+#     RELEASE report reads as a stuck button. NOT on unconditionally: ERTM is the
+#     layer's own error recovery and disabling it is global, so it can make other
+#     links (audio) worse. KEEP IN SYNC with deploy/provision.sh.
+cat > "${ROOTFS_DIR}/usr/local/sbin/tvbox-bt-ertm" <<EOF
+#!/bin/sh
+# tvbox: apply the Bluetooth ERTM setting (root - modprobe.d + live module param).
+ON=\$(sed -n 's/.*"disableErtm"[[:space:]]*:[[:space:]]*\(true\|false\).*/\1/p' /home/${FIRST_USER_NAME}/.tvbox/config.json 2>/dev/null | head -n1)
+[ "\$ON" = "true" ] && V=1 || V=0
+# For the next boot: the bluetooth module is loaded long before this unit runs.
+printf 'options bluetooth disable_ertm=%s\n' "\$V" > /etc/modprobe.d/tvbox-bluetooth.conf
+# And live, so starting this unit by hand applies to links made from now on
+# (the parameter is only consulted when an L2CAP connection is set up).
+P=/sys/module/bluetooth/parameters/disable_ertm
+[ -w "\$P" ] && printf '%s\n' "\$V" > "\$P"
+exit 0
+EOF
+chmod 755 "${ROOTFS_DIR}/usr/local/sbin/tvbox-bt-ertm"
+
+cat > "${ROOTFS_DIR}/etc/systemd/system/tvbox-bt-ertm.service" <<'EOF'
+[Unit]
+Description=tvbox: apply the Bluetooth ERTM setting picked in Settings
+After=bluetooth.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=-/usr/local/sbin/tvbox-bt-ertm
+
+[Install]
+WantedBy=multi-user.target
+EOF
+ln -sf ../tvbox-bt-ertm.service \
+  "${ROOTFS_DIR}/etc/systemd/system/multi-user.target.wants/tvbox-bt-ertm.service"
+
 # 2c) Headless provisioning WITHOUT custom.toml (which this image can't process).
 #     The account password is locked, so there's no way into a fresh box until
 #     an SSH key is present. First-boot config is driven by ONE file on the boot
 #     (FAT) partition - tvbox.conf (KEY=value, editable on any OS; there's a
 #     click-together generator under docs/config/) - applied every boot by
 #     tvbox-firstboot:
-#       HOSTNAME=  WIFI_SSID=/WIFI_PASSWORD=  SUDO=true  PASSWORD=  SSH_AUTHORIZED_KEY=
+#       HOSTNAME=  WIFI_SSID=/WIFI_PASSWORD=  WIFI_COUNTRY=  SUDO=true  PASSWORD=
+#       SSH_AUTHORIZED_KEY=
 #     Legacy standalone files (authorized_keys, tvbox-wifi.conf) still work.
 #     Runs every boot, idempotent; the config may stay on the card.
 
@@ -209,6 +270,19 @@ if [ -n "$NAME" ] && [ "$NAME" != "$(cat /etc/hostname 2>/dev/null)" ]; then
   else
     printf '127.0.1.1\t%s\n' "$NAME" >> /etc/hosts
   fi
+fi
+
+# --- WiFi regulatory country: WIFI_COUNTRY=DE in tvbox.conf. The radio will not
+# transmit on a channel its regulatory domain does not allow, so a box flashed
+# for another region has to be able to say so BEFORE it ever associates - which
+# is why this is here and not only in Settings. Precedence, weakest first:
+# the image's build-time bootstrap default, then this, then the Settings pick
+# (~/.tvbox/config.json, applied by tvbox-wifi-country at every boot). ---
+CC=$(conf_get WIFI_COUNTRY | tr -cd 'A-Za-z' | cut -c1-2 | tr '[:lower:]' '[:upper:]')
+if [ -n "$CC" ] && command -v raspi-config >/dev/null 2>&1; then
+  # do_wifi_country validates against iso3166.tab and returns 1 on a bad code,
+  # leaving the current setting alone - so a typo degrades to the default.
+  raspi-config nonint do_wifi_country "$CC" >/dev/null 2>&1 || true
 fi
 
 # --- WiFi: auto-connect for an ethernet-less box (else set it up from the TV:
