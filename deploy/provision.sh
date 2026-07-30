@@ -225,8 +225,11 @@ ok "wifi.powersave=2 drop-in"
 # power_save off` changes the running radio with no disassociation, so apply it
 # straight to every wireless interface and let the drop-in cover future boots.
 systemctl reload NetworkManager 2>/dev/null || true
-for IFACE in $(ls /sys/class/net 2>/dev/null); do
-  [ -d "/sys/class/net/$IFACE/wireless" ] || [ -e "/sys/class/net/$IFACE/phy80211" ] || continue
+# Glob the cfg80211 marker rather than listing /sys/class/net: it selects exactly
+# the wireless interfaces, and cfg80211 is what `iw` talks to anyway.
+for PHYLINK in /sys/class/net/*/phy80211; do
+  [ -e "$PHYLINK" ] || continue # no wireless interface at all - the glob stayed literal
+  IFACE=$(basename "$(dirname "$PHYLINK")")
   iw dev "$IFACE" set power_save off 2>/dev/null &&
     ok "power save off on $IFACE (live, no reconnect)" ||
     warn "could not set power save on $IFACE (applies on the next connect)"
