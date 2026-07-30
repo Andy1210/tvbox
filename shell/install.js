@@ -622,6 +622,21 @@ function sourceIdent(source) {
 // Is an installed bundle behind the flatpak it came from? Answering true is a
 // request to re-extract, so it stays conservative: an unreadable or absent
 // flatpak says nothing rather than triggering a download.
+// A web-client app whose bundle is not there AT ALL - the manifest exists but the
+// content it points at does not. That is what a settings restore leaves behind: the
+// backup carries `~/.tvbox/apps/<id>.json` but never the extracted bundle, and for
+// Plex the flatpak it was extracted from is gone too.
+//
+// bundleStale() deliberately answers false here - its `isInstalled` guard means
+// "there is no bundle to compare against the flatpak" - so without this the app is
+// STRANDED: HOME hides it (ready:false), the store calls it installed because the
+// manifest file exists and therefore offers only Remove, and the refresh tick skips
+// it forever. The only way out was remove-then-install, by hand, on a TV.
+function bundleMissing(m) {
+  const source = m && m.type === "webclient" && m.install && m.install.source;
+  return !!source && !isInstalled(m.id);
+}
+
 function bundleStale(m) {
   const source = m && m.type === "webclient" && m.install && m.install.source;
   if (!source || source.type !== "flatpak" || !isInstalled(m.id)) return false;
@@ -695,6 +710,7 @@ function removeApp(id) {
 module.exports = {
   loadManifests,
   bundleStale,
+  bundleMissing,
   getManifests,
   manifestById,
   appDataDir,
