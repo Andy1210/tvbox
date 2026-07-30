@@ -438,6 +438,11 @@ sh ${USER_HOME}/.tvbox/install-libcec8.sh || echo "WARN: libcec 8 build failed -
 # (Kodi binary-addon style). NOTE: this on_chroot heredoc is UNQUOTED so the
 # FIRST_USER_NAME / USER_HOME variables expand at build time - keep backticks
 # and command substitution OUT of these comments, or the build shell runs them.
+# No markdown-style backtick quoting in ANY comment down to the CHROOT
+# terminator - not even around the word backtick, as this line demonstrates.
+# The symptom is misleading: the build shell attributes the failure to the line
+# the heredoc OPENS on, so you get "00-run.sh: line <opener>: foo: command not
+# found" for a command that appears nowhere near it.
 # The image only ships the shared media stack it
 # needs: mpv + the runtime libs libpulse0/libasound2 (via 00-packages), like
 # Kodi's core provides ffmpeg/system libs while addons ship their own binaries.
@@ -449,9 +454,14 @@ passwd -l ${FIRST_USER_NAME}
 
 # Electron npm install INSIDE the arm64 chroot - a host-side install would
 # fetch the x86_64 Electron binary. Slowest custom step (~200 MB download).
-# `npm ci` (not `npm install`) for a reproducible tree: shell/ ships a committed
+# npm ci (not npm install) for a reproducible tree: shell/ ships a committed
 # package-lock.json and node_modules is excluded from the copied tree, so ci
 # installs exactly the locked versions.
+# The npm WARN EBADENGINE lines this prints are expected and not a failure:
+# trixie packages node 20, Electron 43 asks for >= 22.12 in its own engines
+# field, and npm warns but installs. It is advisory for Electron's install
+# tooling - the shell itself runs on the Node that Electron BUNDLES (22.x), and
+# only the tvbox CLI (shell/cli.js, "#!/usr/bin/env node") uses the system one.
 su - ${FIRST_USER_NAME} -c 'cd ~/.tvbox/shell && npm ci --no-audit --no-fund'
 
 # tvbox CLI on PATH
