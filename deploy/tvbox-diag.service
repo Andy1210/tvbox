@@ -15,7 +15,14 @@ Description=tvbox: write diagnostics to the boot partition
 # the root mount and costs nothing; naming only /boot/firmware would leave the unit
 # unordered against the partition it writes to on the other layout.
 RequiresMountsFor=/boot/firmware /boot
-After=tvbox-safemode.service network.target
+# Ordered after the safe-mode decision only, so the report can name it. NOT after
+# network.target: a NetworkManager that hangs on start holds that target for its
+# whole timeout, and the report would arrive 90 seconds into exactly the boot
+# someone is about to power-cycle in frustration. The network section says "still
+# starting" under 120s of uptime and the timer rewrites the file two minutes in, so
+# nothing is lost by writing early - and a broken network stack is a thing this
+# report exists to describe, not to wait for.
+After=tvbox-safemode.service
 Conflicts=shutdown.target
 Before=shutdown.target
 
