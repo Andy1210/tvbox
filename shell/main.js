@@ -2282,6 +2282,11 @@ function openNativeApp(m, extraArgs) {
   stopMpv(); // the shared player must not hold the GPU, audio, or a mode claim
   setVideoMode(false);
   if (!nativeapp.start(m, extraArgs)) return false;
+  // Where the screen goes when the program exits: this app's own window if it has one
+  // (a game started from its grid), else HOME. Set HERE, after the program is really
+  // running and in the one place both callers pass through, so a launch that failed
+  // cannot leave a return target behind for whatever exits next.
+  nativeHostApp = m.type === "native" ? null : m.id;
   currentAppId = m.id; // makes boxIdle() false too: no OTA restart mid-game
   nativeForeground = true;
   setTimeout(() => {
@@ -2304,9 +2309,6 @@ function launchNativeFor(id, extraArgs) {
     console.warn("[native] no launchable native app:", id);
     return false;
   }
-  // An app with its own UI is where the screen belongs once the program exits;
-  // a `type: native` app has no window, so that path still ends at HOME.
-  nativeHostApp = m.type === "native" ? null : m.id;
   return openNativeApp(m, extraArgs);
 }
 
