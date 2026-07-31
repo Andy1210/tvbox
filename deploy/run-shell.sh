@@ -19,6 +19,18 @@ export WAYLAND_DISPLAY="${WAYLAND_DISPLAY:-wayland-0}"
 TVBOX="$HOME/.tvbox"
 UPD="$TVBOX/update"
 
+# Safe mode keeps the session down at the greetd layer, so normally nothing gets
+# this far. This is the belt for a box whose session comes up some other way (a
+# display manager without our drop-in): the point of safe mode is that the shell
+# is NOT what the box is trying to run. Before the attempt counter below, because a
+# safe-mode boot must not spend one of the three tries a release gets. The sleep
+# keeps the respawn loop from spinning on the exit.
+if [ -e /run/tvbox-safe-mode ]; then
+  echo "tvbox: safe mode - not starting the shell ($(cat /run/tvbox-safe-mode 2>/dev/null))" >&2
+  sleep 60
+  exit 0
+fi
+
 # Never start while the previous shell is still going. Two Electron instances fight
 # over Chromium's storage lock and the loser silently gets an in-memory
 # localStorage, so the launcher forgets the box was ever set up and offers

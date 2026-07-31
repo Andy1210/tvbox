@@ -108,9 +108,44 @@ echo "==> always-on HDMI output (vc4.force_hotplug=1 - labwc spins with no outpu
 # it differs, which keeps this idempotent and leaves the file alone when correct.
 CMDLINE=/boot/firmware/cmdline.txt
 [ -f "$CMDLINE" ] || CMDLINE=/boot/cmdline.txt
+# Replace, never truncate in place. `> file` on the FAT boot partition allocates
+# the new chain before the directory entry is flushed, so a power cut between the
+# two leaves the file with a size of zero and its contents orphaned into a
+# FSCK*.REC by the next fsck.fat - and the box then boots on the firmware's
+# fallback command line, without root=PARTUUID, the regulatory domain, or
+# force_hotplug, none of which is visible from a running system.
+write_cmdline() {
+  TMPC="$CMDLINE.tvbox-new"
+  if ! printf '%s\n' "$1" > "$TMPC" 2>/dev/null; then
+    rm -f "$TMPC" 2>/dev/null
+    return 1
+  fi
+  sync
+  if ! mv -f "$TMPC" "$CMDLINE" 2>/dev/null; then
+    rm -f "$TMPC" 2>/dev/null
+    return 1
+  fi
+  sync
+}
 if [ ! -f "$CMDLINE" ]; then
   warn "no cmdline.txt found - skipping (a box booted with the TV off will spin)"
 else
+  # An empty cmdline.txt is that truncation, already happened. Restore our own
+  # backup rather than editing nothing onto nothing: the box is booting on the
+  # firmware fallback until this is fixed.
+  if [ ! -s "$CMDLINE" ] && [ -s "$CMDLINE.bak-tvbox" ]; then
+    if write_cmdline "$(cat "$CMDLINE.bak-tvbox")"; then
+      ok "$CMDLINE was EMPTY - restored from cmdline.txt.bak-tvbox"
+    else
+      warn "$CMDLINE is EMPTY and could not be restored from cmdline.txt.bak-tvbox"
+    fi
+  elif [ ! -s "$CMDLINE" ]; then
+    warn "$CMDLINE is EMPTY and there is no backup - the box boots on the firmware fallback"
+  fi
+  for REC in "$(dirname "$CMDLINE")"/FSCK*.REC; do
+    [ -f "$REC" ] || continue
+    warn "$(basename "$REC") on the boot partition: fsck.fat recovered a lost cluster chain, so something there was truncated - compare it with cmdline.txt and config.txt"
+  done
   CUR=$(cat "$CMDLINE")
   WANT=$(printf '%s' "$CUR" | sed -E 's/(^| )vc4\.force_hotplug=[^ ]*/\1vc4.force_hotplug=1/g')
   case "$WANT" in *vc4.force_hotplug=1*) ;; *) WANT="$WANT vc4.force_hotplug=1" ;; esac
@@ -119,7 +154,7 @@ else
   elif [ ! -f "$CMDLINE.bak-tvbox" ] && ! cp "$CMDLINE" "$CMDLINE.bak-tvbox"; then
     # Never edit the boot cmdline without a way back.
     warn "could not back up $CMDLINE - leaving it unchanged"
-  elif printf '%s\n' "$WANT" > "$CMDLINE"; then
+  elif write_cmdline "$WANT"; then
     ok "vc4.force_hotplug=1 set (takes effect on the next boot)"
   else
     warn "could not edit $CMDLINE"
@@ -277,6 +312,14 @@ After=NetworkManager.service
 Type=oneshot
 RemainAfterExit=yes
 ExecStart=-/usr/local/sbin/tvbox-wifi-country
+# raspi-config's do_wifi_country rewrites /boot/firmware/cmdline.txt with an
+# unconditional sed -i, so this unit rewrites the kernel command line on the FAT
+# partition at EVERY boot. On vfat a rename can reach the disk before the data it
+# points at, and a box cut off before writeback then boots with a zero-byte
+# cmdline.txt - found on a real box, with the lost text orphaned into a FSCK*.REC.
+# Flushing straight away shrinks that window from the writeback delay to
+# milliseconds. KEEP IN SYNC with image/stage-tvbox/01-tvbox/00-run.sh.
+ExecStartPost=-/bin/sync
 
 [Install]
 WantedBy=multi-user.target
@@ -407,6 +450,64 @@ XREOF
   systemctl enable tvbox-expand-rootfs.service >/dev/null 2>&1 && ok "expand-rootfs unit" || warn "expand-rootfs unit enable failed"
   # run it now too - a no-op on an already-expanded box
   /usr/local/sbin/tvbox-expand-rootfs && ok "root filesystem checked" || warn "expand-rootfs run failed"
+fi
+
+echo "==> out-of-band diagnostics + safe mode (a report on the boot partition, and a way in)"
+# A box that cannot start is a box that cannot be asked anything: the screen, the
+# network and sshd all went down together the one time it happened. The FAT boot
+# partition is the only medium the firmware, this box and any laptop can all read,
+# so the report goes there, and safe mode is what brings the box up far enough to
+# be asked. Both are root: the boot partition mounts fmask=0022 and greetd is a
+# system unit. The shell stays rootless (hard rule #1) - its only part in this is
+# a marker file in its own home (shell/boothealth.js).
+#
+# Real files installed from ~/.tvbox/, not heredocs generated here: they also have
+# to reach flashed images (image/stage-tvbox installs the same files) and they are
+# unit-tested in CI, which a heredoc cannot be. An OTA release refreshes the copies
+# in ~/.tvbox/ but cannot install them here, so a box that only ever updates over
+# OTA keeps the version it was provisioned with until the next provision.
+HERE="$(cd "$(dirname "$0")" && pwd)"
+DIAG_OK=1
+for PAIR in tvbox-diag.sh:tvbox-diag tvbox-safemode.sh:tvbox-safemode; do
+  SRC="$HERE/${PAIR%%:*}"
+  DST="/usr/local/sbin/${PAIR##*:}"
+  if [ ! -f "$SRC" ]; then
+    warn "$(basename "$SRC") missing - skipping (diagnostics unavailable)"
+    DIAG_OK=0
+  elif ! install -m 755 -o root -g root "$SRC" "$DST"; then
+    warn "could not install $DST"
+    DIAG_OK=0
+  fi
+done
+if [ "$DIAG_OK" = 1 ]; then
+  for U in tvbox-diag.service tvbox-diag.timer tvbox-safemode.service tvbox-safemode-screen.service; do
+    [ -f "$HERE/$U" ] && install -m 644 "$HERE/$U" "/etc/systemd/system/$U"
+  done
+  # Safe mode on the session side is one condition on greetd. A drop-in rather than
+  # an edited unit so a greetd package update cannot undo it; harmless on a box
+  # whose session comes up some other way, which run-shell.sh covers instead.
+  if [ -f "$HERE/greetd-tvbox-safemode.conf" ]; then
+    install -d /etc/systemd/system/greetd.service.d
+    install -m 644 "$HERE/greetd-tvbox-safemode.conf" \
+      /etc/systemd/system/greetd.service.d/10-tvbox-safemode.conf
+  fi
+  systemctl daemon-reload 2>/dev/null || true
+  if systemctl enable tvbox-safemode.service tvbox-safemode-screen.service \
+    tvbox-diag.service tvbox-diag.timer >/dev/null 2>&1; then
+    ok "tvbox-safemode + tvbox-diag units enabled"
+  else
+    warn "could not enable the diagnostics/safe-mode units"
+  fi
+  # Write the first report now: it is the file someone reads when the box has
+  # stopped answering, so it should exist before the first thing goes wrong.
+  # tvbox-safemode is deliberately NOT started here - it would clear the running
+  # session's healthy marker and count this boot as a failed start. The timer IS,
+  # so the report keeps up to date on a box that is not rebooted for weeks
+  # (`enable` alone only takes effect at the next boot).
+  /usr/local/sbin/tvbox-diag && ok "wrote the boot-partition report (tvbox-diag.txt)" ||
+    warn "could not write the report (boot partition full or read-only?)"
+  systemctl start tvbox-diag.timer >/dev/null 2>&1 && ok "diagnostics refresh timer running" ||
+    warn "could not start tvbox-diag.timer (it will start at the next boot)"
 fi
 
 echo "==> user-service lingering (CEC bridge starts at boot, before login)"

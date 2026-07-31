@@ -16,6 +16,8 @@ remote/ir_protocols.py
 remote/firetv_hid_probe.py
 remote/firetv_tv_codes.example.json
 deploy/run-shell.sh
+deploy/tvbox-diag.sh
+deploy/tvbox-safemode.sh
 deploy/labwc-autostart
 deploy/labwc-environment
 deploy/cursor_idle_hide.py
@@ -27,3 +29,12 @@ deploy/tvbox-remote.service
 deploy/tvbox-gamepad.service
 deploy/tvbox-flatpak-update.service
 deploy/tvbox-flatpak-update.timer
+# System (root) units + the greetd drop-in for the diagnostics/safe-mode pair.
+# They ship here so every channel carries them, but only provision.sh and the
+# image stage install them under /etc - an OTA release cannot touch root paths, so
+# on an OTA-only box these land in ~/.tvbox/ and take effect at the next provision.
+deploy/tvbox-diag.service
+deploy/tvbox-diag.timer
+deploy/tvbox-safemode.service
+deploy/tvbox-safemode-screen.service
+deploy/greetd-tvbox-safemode.conf
