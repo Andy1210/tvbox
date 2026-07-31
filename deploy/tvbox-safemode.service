@@ -1,0 +1,24 @@
+# tvbox: decide whether this boot goes into safe mode (deploy/tvbox-safemode.sh).
+# SYSTEM unit, root: it reads the boot partition (mounted root-only) and writes
+# /run/tvbox-safe-mode, which greetd's drop-in refuses to start alongside.
+#
+# It has to run before greetd and after /boot/firmware is mounted, so the mount is
+# named as a requirement rather than ordered by hand: systemd derives the mount
+# unit itself, and this keeps working if the partition ever moves.
+[Unit]
+Description=tvbox: safe-mode decision for this boot
+RequiresMountsFor=/boot/firmware /var/lib
+Before=greetd.service display-manager.service
+Conflicts=shutdown.target
+Before=shutdown.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+# '-': a box whose root filesystem has gone read-only cannot write the counter,
+# and that must not turn into a failed unit on top of everything else - the script
+# already says so on stderr, and the report picks it up from there.
+ExecStart=-/usr/local/sbin/tvbox-safemode
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,26 @@
+# tvbox: write the diagnostics report to the FAT boot partition
+# (deploy/tvbox-diag.sh). SYSTEM unit, root - the boot partition mounts fmask=0022.
+#
+# Runs once per boot here and every 30 minutes from tvbox-diag.timer, so the file
+# describes a box that failed three hours in as well as one that failed at boot.
+# --logs adds the journal/shell.log dump only in safe mode: it is large, and on a
+# healthy box nobody reads it.
+[Unit]
+Description=tvbox: write diagnostics to the boot partition
+RequiresMountsFor=/boot/firmware
+After=tvbox-safemode.service network.target
+Conflicts=shutdown.target
+Before=shutdown.target
+
+[Service]
+Type=oneshot
+# Deliberately NOT RemainAfterExit=yes, unlike the other tvbox oneshots. This one
+# is triggered again by tvbox-diag.timer, and starting a unit that is still
+# "active" is a no-op - the report would freeze at the boot-time write and the
+# half-hourly refresh would silently never happen (measured on a box).
+# '-': an unwritable boot partition is worth a journal line, not a failed unit.
+ExecStart=-/usr/local/sbin/tvbox-diag
+ExecStart=-/bin/sh -c '[ -f /run/tvbox-safe-mode ] && exec /usr/local/sbin/tvbox-diag --logs; exit 0'
+
+[Install]
+WantedBy=multi-user.target

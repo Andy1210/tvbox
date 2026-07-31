@@ -253,6 +253,16 @@
             />
             <p class="hint">Only set this if you want to log in with a password. Otherwise SSH key access is enough.</p>
           </div>
+          <div class="field toggle">
+            <input type="checkbox" id="safemode" />
+            <label for="safemode">Safe mode (recovery)</label>
+          </div>
+          <div class="field">
+            <p class="hint">
+              Only for a box that will not start. It comes up with networking and SSH but no TV screen, and shows what
+              is wrong. Leave this off for a normal setup, and turn it off again to get the box back.
+            </p>
+          </div>
         </div>
 
         <div class="out">
@@ -278,7 +288,7 @@
     </div>
 
     <script>
-      const ids = ["hostname", "ssid", "wifipw", "wificountry", "sudo", "sshkey", "password"];
+      const ids = ["hostname", "ssid", "wifipw", "wificountry", "sudo", "sshkey", "password", "safemode"];
       const el = {};
       ids.forEach((id) => (el[id] = document.getElementById(id)));
       const preview = document.getElementById("preview");
@@ -315,6 +325,8 @@
         if (el.sudo.checked) lines.push("SUDO=true");
         if (password) lines.push("PASSWORD=" + password);
         if (sshkey) lines.push("SSH_AUTHORIZED_KEY=" + sshkey);
+        // Last, and only when asked: this one keeps the TV screen off on purpose.
+        if (el.safemode.checked) lines.push("SAFE_MODE=true");
 
         const has = lines.length > 0;
         empty.style.display = has ? "none" : "block";
@@ -372,8 +384,10 @@
           if (i <= 0) continue;
           const key = raw.slice(0, i);
           const val = raw.slice(i + 1);
-          if (key === "SUDO") {
-            el.sudo.checked = ["true", "1", "yes"].includes(val.trim().toLowerCase());
+          if (key === "SUDO" || key === "SAFE_MODE") {
+            const on = ["true", "1", "yes"].includes(val.trim().toLowerCase());
+            if (key === "SUDO") el.sudo.checked = on;
+            else el.safemode.checked = on;
             n++;
           } else if (FIELD_BY_KEY[key]) {
             el[FIELD_BY_KEY[key]].value = val;

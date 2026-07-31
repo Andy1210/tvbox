@@ -129,6 +129,7 @@ What the image gives you:
   WIFI_COUNTRY=DE             # radio region; also on the TV (Settings → Wi-Fi)
   SUDO=true                   # passwordless sudo over SSH for power users
   SSH_AUTHORIZED_KEY=ssh-ed25519 AAAA... you@host
+  SAFE_MODE=true              # boot with network + SSH but no TV session
   ```
 
   The `tv` account is password-locked, so an **SSH key** is how you get in
@@ -139,6 +140,12 @@ What the image gives you:
 
 - **Self-updating.** OTA app/box updates from the releases feed, plus OS
   security updates, both without ever auto-rebooting.
+- **It says why when it does not start.** The box writes a plain-text report,
+  `tvbox-diag.txt`, next to `tvbox.conf` on the boot partition, so it is readable
+  from any laptop with a card reader even when the box answers nothing at all. If
+  three starts in a row fail, it comes up in **safe mode** instead: network and
+  SSH but no TV session, with the report on the TV. See
+  [docs/diagnostics.md](docs/diagnostics.md).
 
 Preseed steps and details: [docs/sd-image.md](docs/sd-image.md#notes).
 Raspberry Pi Imager "OS customisation" and `custom.toml` do **not** work on a
@@ -400,6 +407,25 @@ under Settings → Network - topics and examples in
 
 Ports: **8097** (shell HTTP, `127.0.0.1`) and **8099** (on-demand phone-pairing
 server, LAN, only while pairing).
+
+## When the box will not start
+
+The box writes a diagnostics report to the **boot partition**, next to `tvbox.conf`,
+where a card reader can get at it even when the box answers nothing:
+
+```sh
+sudo cat /boot/firmware/tvbox-diag.txt    # or read the card on any computer
+```
+
+It leads with what is wrong (free space, a read-only root filesystem, missing SSH
+host keys, a truncated `cmdline.txt`, failed units) and is rewritten at every boot
+and every 30 minutes. **Safe mode** brings the box up with networking and SSH but no
+TV session, and prints the report on the TV: create an empty `tvbox-safe-mode` file
+on the boot partition or set `SAFE_MODE=true` in `tvbox.conf`, and reboot. Three
+starts in a row that never reach the launcher engage it on their own, for one boot.
+
+Full story, including what it deliberately does not cover:
+[docs/diagnostics.md](docs/diagnostics.md).
 
 ## Updates and backup
 

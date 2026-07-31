@@ -34,6 +34,7 @@ const appfetch = require("./appfetch"); // capability: scoped server-side fetch 
 const netguard = require("./netguard"); // shared loopback/LAN/public host classification + lanIp
 const appdata = require("./appdata"); // capability: per-app key/value storage under ~/.tvbox/appdata
 const updater = require("./updater"); // OTA self-update (versions/ + `current` symlink flip)
+const boothealth = require("./boothealth"); // "this boot reached the launcher" - the root-side safe-mode counter reads it
 const backup = require("./backup"); // encrypted settings backup/restore (phone pairing page)
 const backupPairing = require("./pairing/backup");
 const { Supervisor } = require("./service_supervisor"); // generic supervised child procs (plugins use it)
@@ -3523,12 +3524,15 @@ app.whenReady().then(async () => {
   // video) so the transparent window never reveals the desktop. insertCSS is
   // per-document, so re-arm on every navigation (launcher <-> app).
   // The first successful load is also the OTA health signal: it commits a
-  // freshly flipped update (clears the rollback markers, syncs infra files).
+  // freshly flipped update (clears the rollback markers, syncs infra files) and
+  // records that this boot got far enough to have a launcher, which is what keeps
+  // the box out of safe mode (deploy/tvbox-safemode.sh).
   win.webContents.on("did-finish-load", () => {
     win.tvboxStyleInjected = false;
     ensureStyle(win);
     setVideoMode(false, win);
     updater.onLauncherLoaded();
+    boothealth.markHealthy(pkg.version);
   });
   // Background-apps policy hooks (registry lives in appwindows.js).
   appwins.init({
