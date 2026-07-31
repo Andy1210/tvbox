@@ -5,6 +5,22 @@ updates). `scripts/make-release.sh` lifts the current version's `hu`/`en`
 blocks into the OTA feed's `notes` - keep both languages, keep it short, and
 write for the person on the couch (what changes for THEM), not for developers.
 
+## 1.19.0
+
+### hu
+
+- A box mostantól megmondja, mi a baja akkor is, ha egyáltalán nem indul el. Eddig ha a képernyő fekete maradt és a hálózaton sem válaszolt, semmilyen módon nem lehetett megkérdezni tőle, mi történt. Most minden bekapcsoláskor kiír egy `tvbox-diag.txt` nevű szöveges fájlt a memóriakártyára, oda, ahol a beállításfájl is van: elég kivenni a kártyát és bármelyik gépen megnyitni. A fájl elején az áll, mit talált gyanúsnak, és utána a részletek, a szabad hely, a hálózat és a hőmérséklet.
+- Új biztonsági mód arra az esetre, ha a box nem jut el a főképernyőig. Ilyenkor hálózattal és távoli eléréssel indul el, de a TV-műsor helyett magát a hibajelentést mutatja a tévén, benne a box IP-címével és azzal, mit tehetsz. Kérheted te is: hozz létre egy `tvbox-safe-mode` nevű üres fájlt a kártyán, vagy írd bele a beállításfájlba, hogy `SAFE_MODE=true`. Ha háromszor egymás után nem sikerül elindulnia, magától belép, egyetlen bekapcsolás erejéig, tehát nem tud beragadni.
+- Javítva egy hiba, ami miatt egy box a saját indítási beállításai nélkül kapcsolt be, és ezt semmi nem jelezte. A rendszer minden bekapcsolásnál újraírt egy fájlt a memóriakártyán, és ha eközben elment az áram, a fájl kiürült. Ez most már nem tud így elveszni, és ha egy boxon már megtörtént, a következő telepítés helyreállítja.
+- Az új dolgok frissen telepített vagy újratelepített boxokon lépnek életbe: a jelentést és a biztonsági módot a rendszer olyan részei végzik, amiket egy szokásos szoftverfrissítés nem tud lecserélni. Ha a boxod már megy, ebben a verzióban nem fog máshogy működni.
+
+### en
+
+- The box can now tell you what is wrong even when it does not start at all. Until now, if the screen stayed black and it answered nothing over the network, there was no way left to ask it anything. It now writes a text file called `tvbox-diag.txt` onto the memory card at every start, next to the settings file: take the card out and open it on any computer. The top of the file says what looked wrong, and the rest has the detail, the free space, the network and the temperature.
+- A new safe mode for a box that cannot reach the home screen. It comes up with networking and remote access, but instead of your TV screen it shows the report itself on the TV, including the box's address and what you can do. You can ask for it yourself: create an empty file named `tvbox-safe-mode` on the card, or put `SAFE_MODE=true` in the settings file. After three starts in a row that fail, it enters safe mode on its own for a single start, so it cannot get stuck there.
+- Fixed a fault that left a box starting up without its own boot settings, with nothing to show it had happened. The system was rewriting a file on the memory card at every start, and a power cut during that emptied the file. It can no longer be lost that way, and on a box where it already happened the next install restores it.
+- The new parts take effect on freshly installed or reinstalled boxes: the report and safe mode are done by parts of the system a normal software update cannot replace. If your box is already working, nothing about it changes in this version.
+
 ## 1.18.1
 
 ### hu
