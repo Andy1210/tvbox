@@ -4,7 +4,9 @@
 # Runs once per boot here and every 30 minutes from tvbox-diag.timer, so the file
 # describes a box that failed three hours in as well as one that failed at boot.
 # --logs adds the journal/shell.log dump only in safe mode: it is large, and on a
-# healthy box nobody reads it.
+# healthy box nobody reads it. ONE invocation either way - `--logs` writes the report
+# too, so running both would rewrite it twice and sync four times, on the very
+# partition whose health is in question.
 [Unit]
 Description=tvbox: write diagnostics to the boot partition
 RequiresMountsFor=/boot/firmware
@@ -19,8 +21,7 @@ Type=oneshot
 # "active" is a no-op - the report would freeze at the boot-time write and the
 # half-hourly refresh would silently never happen (measured on a box).
 # '-': an unwritable boot partition is worth a journal line, not a failed unit.
-ExecStart=-/usr/local/sbin/tvbox-diag
-ExecStart=-/bin/sh -c '[ -f /run/tvbox-safe-mode ] && exec /usr/local/sbin/tvbox-diag --logs; exit 0'
+ExecStart=-/bin/sh -c '[ -f /run/tvbox-safe-mode ] && exec /usr/local/sbin/tvbox-diag --logs; exec /usr/local/sbin/tvbox-diag'
 
 [Install]
 WantedBy=multi-user.target

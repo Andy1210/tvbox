@@ -30,7 +30,7 @@ It is rewritten at every boot and every 30 minutes, so a box that failed three
 hours into a session is described from then, not from boot. The top of the file is
 the answer:
 
-```
+```text
 tvbox diagnostics
 Written by tvbox-diag at every boot and every 30 minutes. Overwritten each time.
 verdict:      2 problem(s) found, see the WARNING lines

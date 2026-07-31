@@ -419,6 +419,17 @@ test("the timer-driven unit can actually be retriggered", () => {
   assert.ok(/^OnUnitActiveSec=/m.test(timer), "and the timer is what restarts it");
 });
 
+test("--logs cannot be combined with a mode that writes nothing", () => {
+  // "print it, write nothing" has to be true, so a combination that would quietly
+  // write a file anyway is refused rather than half-honoured.
+  const box = fakeBox();
+  for (const mode of ["--stdout", "--brief"]) {
+    assert.throws(() => report(box, ["--logs", mode]), /status 2|Command failed/, mode);
+    assert.strictEqual(fs.existsSync(p(box, "boot", "firmware", "tvbox-diag-logs.txt")), false);
+    assert.strictEqual(fs.existsSync(p(box, "boot", "firmware", "tvbox-diag.txt")), false);
+  }
+});
+
 test("an unknown argument fails loudly instead of writing something unexpected", () => {
   const box = fakeBox();
   assert.throws(() => report(box, ["--everything"]), /status 2|Command failed/);
