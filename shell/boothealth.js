@@ -18,12 +18,17 @@ const path = require("path");
 const MARKER = path.join(os.homedir(), ".tvbox", "healthy");
 
 let marked = false;
+let warned = false;
 
 // The launcher fires did-finish-load on every navigation (launcher <-> app), and
-// the marker's content only concerns the boot, so write it once per process.
+// the marker's content only concerns the boot, so write it once per process. Once
+// SUCCESSFULLY, though: a write that failed leaves nothing on disk, and giving up
+// after it would let a box whose home was briefly unwritable count a boot that
+// reached the launcher as a failed one, three of which engage safe mode. So a
+// failure leaves the guard down and the next navigation tries again, while the
+// warning is logged once - a box in that state would otherwise fill its log with it.
 function markHealthy(version) {
   if (marked) return false;
-  marked = true;
   const bootId = readBootId();
   try {
     fs.mkdirSync(path.dirname(MARKER), { recursive: true });
@@ -31,11 +36,15 @@ function markHealthy(version) {
       MARKER,
       "boot=" + bootId + "\nat=" + new Date().toISOString() + "\nversion=" + (version || "") + "\n",
     );
+    marked = true;
     return true;
   } catch (e) {
     // A box that cannot write here is a box in the trouble this marker exists to
     // report, so say so and carry on: never take the shell down over it.
-    console.warn("[boothealth] cannot record a healthy boot: " + e.message);
+    if (!warned) {
+      warned = true;
+      console.warn("[boothealth] cannot record a healthy boot: " + e.message);
+    }
     return false;
   }
 }

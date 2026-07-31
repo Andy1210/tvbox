@@ -112,6 +112,9 @@ function report(box, args = ["--stdout"]) {
 }
 const p = (box, ...rel) => path.join(box.root, ...rel);
 const warnings = (text) => text.split("\n").filter((l) => l.startsWith("WARNING:"));
+// chmod means nothing to uid 0, so a test that proves something by making a write
+// fail only proves it as a normal user.
+const rootless = { skip: process.getuid?.() === 0 ? "needs a non-root uid" : false };
 
 test("a healthy box reports every section and finds nothing wrong", () => {
   const out = report(fakeBox());
@@ -143,6 +146,34 @@ test("user units that could not be asked about are not reported as fine", () => 
   // put would hide exactly the failure someone opens this file to find.
   const out = report(fakeBox());
   assert.match(out, /user: *could not ask/, "no box user resolvable in a fake root");
+});
+
+// A resolvable box user, so the user-unit query is actually attempted. `runuser`
+// then decides the outcome.
+const RESOLVABLE_USER = { id: "#!/bin/sh\necho 1000\n" };
+
+test("a user-unit query that fails is not reported as no failures", () => {
+  // The status has to come from runuser, not from the pipeline it feeds: a pipeline
+  // reports its LAST command, and `head` succeeds no matter what happened upstream.
+  const box = fakeBox({}, { ...RESOLVABLE_USER, runuser: "#!/bin/sh\nexit 1\n" });
+  assert.match(report(box), /user: *could not ask/);
+});
+
+test("a user-unit query that succeeds with nothing failed says so plainly", () => {
+  const box = fakeBox({}, { ...RESOLVABLE_USER, runuser: "#!/bin/sh\nexit 0\n" });
+  const out = report(box);
+  assert.match(out, /user: *none/);
+  assert.deepStrictEqual(warnings(out), []);
+});
+
+test("a failed user unit is named and warned about", () => {
+  const box = fakeBox(
+    {},
+    { ...RESOLVABLE_USER, runuser: "#!/bin/sh\necho 'tvbox-cec.service loaded failed failed tvbox CEC bridge'\n" },
+  );
+  const out = report(box);
+  assert.match(out, /user: *tvbox-cec\.service/);
+  assert.ok(warnings(out).some((w) => /failed user units.*tvbox-cec/.test(w)));
 });
 
 test("the report is plain LF text, small enough to sit on a boot partition", () => {
@@ -231,6 +262,20 @@ test("firmware throttling points at the power supply", () => {
 const NO_ROUTE_IP =
   '#!/bin/sh\ncase "$*" in *route*) exit 0 ;; *addr*) echo "1: wlan0    inet 192.168.1.24/24 scope global wlan0" ;; esac\nexit 0\n';
 
+test("an SSID with a colon in it survives the report", () => {
+  // nmcli -t writes a ':' inside a value as '\:', so splitting on every colon
+  // truncates the name of any network that has one.
+  const box = fakeBox(
+    {},
+    {
+      nmcli:
+        '#!/bin/sh\ncase "$*" in *"device wifi"*) echo "yes:64:Guest\\\\:5G" ;; *radio*) echo enabled ;; esac\nexit 0\n',
+    },
+  );
+  const out = report(box);
+  assert.match(out, /wifi: *SSID "Guest:5G" signal 64%/);
+});
+
 test("no default route is reported as no way off the LAN", () => {
   // A box that looks connected - link up, address assigned - and cannot reach
   // anything, so it silently stops updating itself.
@@ -306,7 +351,7 @@ test("writing lands on the boot partition and replaces the previous report", () 
   assert.ok(!fs.existsSync(p(box, "boot", "firmware", ".tvbox-diag.tmp")), "no temp file left behind");
 });
 
-test("a boot partition it cannot write leaves the OLD report intact", () => {
+test("a boot partition it cannot write leaves the OLD report intact", rootless, () => {
   // The regression that matters: the previous report is evidence, and a failed
   // write must not be what destroys it.
   const box = fakeBox();

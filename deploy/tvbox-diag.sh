@@ -245,10 +245,14 @@ RAW="$(
     echo "addr:         unknown (no ip command)"
   fi
   if command -v nmcli > /dev/null 2>&1; then
-    # The connected network only. -t escapes ':' inside values as '\:', so unescape
-    # after splitting or an SSID with a colon shifts every field.
-    nmcli -t -f ACTIVE,SIGNAL,SSID device wifi 2> /dev/null | sed -n 's/^yes://p' | head -n1 |
-      awk -F: '{ print "wifi:         SSID \"" $2 "\" signal " $1 "%" }'
+    # The connected network only, "<signal>:<ssid>" once the ACTIVE field is off.
+    # Split on the FIRST colon and unescape afterwards: nmcli -t writes a ':' inside
+    # a value as '\:', so splitting on every colon truncates any SSID that has one.
+    # The signal is digits, so it can never contain the separator itself.
+    WIFI="$(nmcli -t -f ACTIVE,SIGNAL,SSID device wifi 2> /dev/null | sed -n 's/^yes://p' | head -n1)"
+    if [ -n "$WIFI" ]; then
+      echo "wifi:         SSID \"$(printf '%s' "${WIFI#*:}" | sed 's/\\:/:/g')\" signal ${WIFI%%:*}%"
+    fi
     echo "nm radio:     $(nmcli radio wifi 2> /dev/null || echo unknown)"
   fi
   NS="$(sed -n 's/^nameserver[[:space:]]*//p' "$ETC/resolv.conf" 2> /dev/null | tr '\n' ' ' | sed 's/[[:space:]]*$//')"
@@ -333,9 +337,15 @@ RAW="$(
     if [ -n "$BOX_USER" ] && command -v runuser > /dev/null 2>&1; then
       UID_N="$(id -u "$BOX_USER" 2> /dev/null)"
       if [ -n "$UID_N" ]; then
-        U="$(runuser -u "$BOX_USER" -- env "XDG_RUNTIME_DIR=$RUN/user/$UID_N" \
-          systemctl --user list-units --state=failed --no-legend --plain 2> /dev/null |
-          awk '{ print $1 }' | head -n 15)" && UOK=yes
+        # Take runuser's own exit status, NOT a pipeline's: a pipeline reports the
+        # status of its LAST command, and `head` succeeds whether or not the query
+        # upstream of it did - which would report "none" for every box that has no
+        # user session, the exact case this distinction exists for.
+        if RAW_U="$(runuser -u "$BOX_USER" -- env "XDG_RUNTIME_DIR=$RUN/user/$UID_N" \
+          systemctl --user list-units --state=failed --no-legend --plain 2> /dev/null)"; then
+          UOK=yes
+          U="$(printf '%s\n' "$RAW_U" | awk 'NF { print $1 }' | head -n 15)"
+        fi
       fi
     fi
     if [ -n "$U" ]; then

@@ -59,6 +59,9 @@ const stateOf = (box) => {
   return kv;
 };
 const safeModeOn = (box) => fs.existsSync(p(box, "run", "tvbox-safe-mode"));
+// chmod means nothing to uid 0, so a test that proves something by making a write
+// fail only proves it as a normal user.
+const rootless = { skip: process.getuid?.() === 0 ? "needs a non-root uid" : false };
 
 test("the first boot counts as attempt 1 and does not engage safe mode", () => {
   const box = fakeBox();
@@ -188,7 +191,7 @@ test("a corrupt counter is treated as zero rather than crashing the boot", () =>
   }
 });
 
-test("a read-only root filesystem does not stop the boot-partition request", () => {
+test("a read-only root filesystem does not stop the boot-partition request", rootless, () => {
   // This is the failure the whole feature is for: when / cannot be written the
   // counter is lost, so the marker on the FAT partition has to be enough on its own.
   const box = fakeBox({ "boot/firmware/tvbox-safe-mode": "" });

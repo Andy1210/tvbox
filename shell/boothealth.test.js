@@ -59,7 +59,11 @@ test("only the first load of a boot writes it", () => {
   assert.strictEqual(fs.readFileSync(MARKER, "utf8"), first, "and does not rewrite it");
 });
 
-test("a box that cannot write the marker keeps running", () => {
+// chmod means nothing to uid 0, so a test that proves something by making a write
+// fail only proves it as a normal user.
+const rootless = { skip: process.getuid?.() === 0 ? "needs a non-root uid" : false };
+
+test("a box that cannot write the marker keeps running", rootless, () => {
   const home3 = fs.mkdtempSync(path.join(os.tmpdir(), "tvbox-boothealth-ro-"));
   fs.chmodSync(home3, 0o555);
   process.env.HOME = home3;
@@ -69,6 +73,26 @@ test("a box that cannot write the marker keeps running", () => {
   } finally {
     process.env.HOME = HOME;
     fs.chmodSync(home3, 0o755);
+  }
+});
+
+test("a failed write is retried, not given up on", rootless, () => {
+  // The write-once guard must close on SUCCESS. Giving up after a failure would let
+  // a box whose home was briefly unwritable count a boot that DID reach the launcher
+  // as a failed one, and three of those engage safe mode.
+  const home4 = fs.mkdtempSync(path.join(os.tmpdir(), "tvbox-boothealth-retry-"));
+  fs.chmodSync(home4, 0o555);
+  process.env.HOME = home4;
+  try {
+    const boothealth = freshModule();
+    assert.strictEqual(boothealth.markHealthy("1.2.3"), false);
+    fs.chmodSync(home4, 0o755); // whatever it was, it passed
+    assert.strictEqual(boothealth.markHealthy("1.2.3"), true, "the next launcher load records it");
+    assert.ok(fs.existsSync(path.join(home4, ".tvbox", "healthy")));
+    assert.strictEqual(boothealth.markHealthy("1.2.3"), false, "and only once after that");
+  } finally {
+    process.env.HOME = HOME;
+    fs.chmodSync(home4, 0o755);
   }
 });
 
