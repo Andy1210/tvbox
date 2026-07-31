@@ -3594,13 +3594,22 @@ app.whenReady().then(async () => {
     onExit: (id) => {
       nativeForeground = false;
       if (currentAppId !== id) return;
-      // An app that launched the program from its own UI gets the screen back
-      // (navTo resumes its hidden window, or reopens it if the RAM guard took it):
-      // a game that ends should land in the list it was started from. Cleared
-      // first, so a failure to come back cannot strand the flag on.
       const back = nativeHostApp;
       nativeHostApp = null;
-      if (back === id) navTo(id);
+      // The screen may already be back. Navigating to an app's own UI while its program
+      // runs stops that program (one visible toplevel), shows the window, and leaves
+      // currentAppId as it was - and this callback arrives a moment later. Without this
+      // the intentional stop would be followed by a jump to HOME.
+      const win = appWindow(id);
+      if (win && !win.isDestroyed() && win.isVisible()) return;
+      // An app that launched the program from its own UI gets the screen back (navTo
+      // resumes its hidden window, or reopens it if the RAM guard took it): a game that
+      // ends should land in the list it was started from. Only while that app is still
+      // launchable, though - manifests reload live, and navTo returns without showing
+      // anything for an app that has been removed or disabled, which would leave the
+      // TV on the bare desktop with every window of ours hidden.
+      const m = back === id && apps.manifestById(id);
+      if (m && m.status === "ready") navTo(id);
       else showLauncher();
     },
   });

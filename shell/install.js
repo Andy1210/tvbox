@@ -143,7 +143,13 @@ function validateManifest(m, src) {
     // The dep check reads requires.flatpak while the launch reads
     // runtime.native.flatpak. A manifest that names the ref in only one of them
     // would report depsOk with nothing installed, and the launch would just fail.
-    if (nat.flatpak && !((m.requires && m.requires.flatpak) || []).includes(nat.flatpak))
+    //
+    // Array.isArray, not `|| []`: this runs BEFORE requires.flatpak is validated as an
+    // array below, and a manifest carrying an object there would throw a TypeError out
+    // of the validator instead of being skipped through bad() - a validator is the one
+    // place that must survive any shape a dropped-in manifest has.
+    const declared = m.requires && m.requires.flatpak;
+    if (nat.flatpak && (!Array.isArray(declared) || !declared.includes(nat.flatpak)))
       return bad("runtime.native.flatpak (" + nat.flatpak + ") must also be listed in requires.flatpak");
   }
   // flatpak deps: `flatpak install --user` needs no root, so unlike apt these are
