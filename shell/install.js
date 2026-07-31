@@ -131,13 +131,25 @@ function validateManifest(m, src) {
   if (!m.name) return bad("missing name");
   // A native app's command line reaches argv, so validate it with the very parser
   // the launch path uses rather than a second copy of the rules.
-  if (m.type === "native") {
+  //
+  // `runtime.native` is validated wherever it appears, not only on a `type: native`
+  // app: a webclient app may declare one too (RetroArch - our own UI browses the
+  // games, the emulator itself is the native program it launches per game), and an
+  // unvalidated command line would then reach argv through the very path that exists
+  // to keep it out.
+  if (m.type === "native" || (m.runtime && m.runtime.native !== undefined)) {
     const nat = (m.runtime && m.runtime.native) || null;
-    if (!nativeapp.parseSpec(nat)) return bad("type native needs a valid runtime.native (flatpak ref or bin)");
+    if (!nativeapp.parseSpec(nat)) return bad("runtime.native must be a valid flatpak ref or bin");
     // The dep check reads requires.flatpak while the launch reads
     // runtime.native.flatpak. A manifest that names the ref in only one of them
     // would report depsOk with nothing installed, and the launch would just fail.
-    if (nat.flatpak && !((m.requires && m.requires.flatpak) || []).includes(nat.flatpak))
+    //
+    // Array.isArray, not `|| []`: this runs BEFORE requires.flatpak is validated as an
+    // array below, and a manifest carrying an object there would throw a TypeError out
+    // of the validator instead of being skipped through bad() - a validator is the one
+    // place that must survive any shape a dropped-in manifest has.
+    const declared = m.requires && m.requires.flatpak;
+    if (nat.flatpak && (!Array.isArray(declared) || !declared.includes(nat.flatpak)))
       return bad("runtime.native.flatpak (" + nat.flatpak + ") must also be listed in requires.flatpak");
   }
   // flatpak deps: `flatpak install --user` needs no root, so unlike apt these are
