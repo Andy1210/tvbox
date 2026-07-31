@@ -136,12 +136,18 @@ fi
 
 if [ -n "$REASON" ]; then
   mkdir -p "$RUN" 2> /dev/null
-  printf '%s\n' "$REASON" > "$FLAG" 2> /dev/null ||
+  if printf '%s\n' "$REASON" > "$FLAG" 2> /dev/null; then
+    echo "tvbox-safemode: SAFE MODE. $REASON" >&2
+    # A safe-mode boot is not a failed attempt at the session, so it does not count
+    # as one. That is also what makes the automatic trigger a single boot.
+    ATTEMPTS=0
+  else
+    # The flag IS safe mode: without it greetd starts and the session comes up as
+    # usual. Recording it as engaged would then leave the state file and the report
+    # describing a boot that did not happen, so record what did.
     echo "tvbox-safemode: cannot write $FLAG - the session will start normally" >&2
-  echo "tvbox-safemode: SAFE MODE. $REASON" >&2
-  # A safe-mode boot is not a failed attempt at the session, so it does not count
-  # as one. That is also what makes the automatic trigger a single boot.
-  ATTEMPTS=0
+    REASON=""
+  fi
 fi
 
 # The counter lives on the root filesystem, not the boot partition: it changes at

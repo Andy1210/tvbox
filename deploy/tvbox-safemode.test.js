@@ -205,6 +205,23 @@ test("a read-only root filesystem does not stop the boot-partition request", roo
   }
 });
 
+test("a flag it could not write is not recorded as safe mode either", rootless, () => {
+  // The flag IS safe mode: without it greetd starts and the session comes up as
+  // usual. Recording it as engaged would leave the state file and the report
+  // describing a boot that never happened.
+  const box = fakeBox({ "boot/firmware/tvbox-safe-mode": "" });
+  fs.chmodSync(p(box, "run"), 0o555);
+  try {
+    run(box);
+    assert.strictEqual(safeModeOn(box), false);
+    const s = stateOf(box);
+    assert.strictEqual(s["safe-mode"], "no", "what actually happened, not what was asked for");
+    assert.strictEqual(s.attempts, "1", "and the boot still counts as a normal start");
+  } finally {
+    fs.chmodSync(p(box, "run"), 0o755);
+  }
+});
+
 test("--screen does nothing when safe mode is off", () => {
   const box = fakeBox();
   const tty = p(box, "dev", "tty1");

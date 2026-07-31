@@ -52,6 +52,13 @@ for a in "$@"; do
       ;;
   esac
 done
+# The printing modes write nothing, so asking for the log dump alongside one of them
+# is a contradiction. Refused rather than half-honoured: silently writing a file
+# while claiming to write none is worse than saying no.
+if [ "$WANT_LOGS" = yes ] && [ "$MODE" != "report" ]; then
+  echo "tvbox-diag: --logs writes a file, so it cannot be combined with --$MODE" >&2
+  exit 2
+fi
 
 # The box user is whoever owns a ~/.tvbox tree. Discovered rather than hardcoded
 # or baked in at install time, so one unit file works on a box whose user is not

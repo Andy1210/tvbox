@@ -67,7 +67,7 @@ and `${FIRST_USER_NAME}` are provided by pi-gen). The committed
    Same files `deploy/provision.sh` installs (they ship via `deploy/infra.list`),
    so there is no second copy of the logic here -
    [docs/diagnostics.md](diagnostics.md);
-6. in the chroot: group membership, `chown` of the tree, **`npm install`
+6. in the chroot: group membership, `chown` of the tree, **`npm ci`
    INSIDE the arm64 chroot** (host-side would fetch the x86 Electron), the
    `tvbox` CLI symlink, user units "enabled" via hand-made
    `*.target.wants` symlinks (CEC bridge + nightly flatpak-update timer),
