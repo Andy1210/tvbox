@@ -166,8 +166,13 @@ while the flag is present, which covers it.
   previous boot to show.
 - **The automatic trigger needs a writable root.** The counter lives on `/`, so a
   read-only root loses it. That is why the boot-partition marker exists.
-- **The boot-time report is written before the box has settled.** It runs after
-  `network.target`, deliberately not `network-online.target`, because a diagnostic
-  must never wait for the thing it is diagnosing. So at boot there may be no route
-  and no shell yet; both are reported as "still starting" rather than as faults, and
-  the timer rewrites the file two minutes in with the settled picture.
+- **The boot-time report is written before the box has settled.** It is ordered
+  against the boot partition and the safe-mode decision, and nothing else: not
+  `network-online.target`, and not even `network.target`, because a
+  NetworkManager that hangs on start holds that target for its whole timeout and the
+  report would arrive ninety seconds into the boot someone is about to power-cycle. A
+  broken network stack is something this report describes, not something it waits
+  for. So at boot there may be no route and no shell yet; both read "still starting"
+  rather than as faults, and the timer rewrites the file two minutes in with the
+  settled picture. The recovery screen is the one part that does wait for
+  `network.target`, since an address on the TV is most of what makes it useful.

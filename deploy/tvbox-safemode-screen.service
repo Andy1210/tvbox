@@ -2,6 +2,12 @@
 # Separate from tvbox-safemode.service because the decision has to be made before
 # greetd, while this wants a box that has finished coming up: an IP address and a
 # report worth reading are the two things the person in front of the TV needs.
+#
+# This one DOES order after network.target, unlike tvbox-diag.service. The trade-off
+# is the other way round here: the report on the card is already written by then
+# whatever happens, and an address on the screen is most of what makes the screen
+# useful, while the cost of a hung NetworkManager is a screen that appears late to
+# somebody who is going to be standing there for minutes anyway.
 [Unit]
 Description=tvbox: safe-mode recovery screen
 ConditionPathExists=/run/tvbox-safe-mode
