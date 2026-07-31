@@ -25,7 +25,7 @@ cp -r files/shell "${ROOTFS_DIR}${USER_HOME}/.tvbox/"
 for f in files/*; do
   [ -d "$f" ] && continue # shell/ - copied above
   case "$(basename "$f")" in
-    run-shell.sh | tvbox | *.py) mode=755 ;;
+    *.sh | tvbox | *.py) mode=755 ;;
     *) mode=644 ;;
   esac
   install -m "$mode" "$f" "${ROOTFS_DIR}${USER_HOME}/.tvbox/"
@@ -157,6 +157,13 @@ RemainAfterExit=yes
 ExecStart=-/usr/sbin/rfkill unblock wifi
 ExecStart=-/usr/local/sbin/tvbox-wifi-country
 ExecStart=-/bin/sh -c 'for i in 1 2 3 4 5; do nmcli radio wifi on && exit 0; sleep 2; done; exit 0'
+# do_wifi_country rewrites /boot/firmware/cmdline.txt with an unconditional sed -i,
+# so this unit rewrites the kernel command line on the FAT partition at EVERY boot.
+# On vfat a rename can reach the disk before the data it points at, and a box cut
+# off before writeback then boots with a zero-byte cmdline.txt - seen on a real box,
+# with the lost text orphaned into a FSCK*.REC. Flushing straight away shrinks that
+# window to milliseconds. KEEP IN SYNC with deploy/provision.sh.
+ExecStartPost=-/bin/sync
 
 [Install]
 WantedBy=multi-user.target
@@ -295,6 +302,37 @@ install -d "${ROOTFS_DIR}/etc/systemd/system/sysinit.target.wants"
 ln -sf ../tvbox-expand-rootfs.service \
   "${ROOTFS_DIR}/etc/systemd/system/sysinit.target.wants/tvbox-expand-rootfs.service"
 
+# 2b-iv) Out-of-band diagnostics + safe mode. A flashed box is exactly the case
+#     these exist for: no SSH key until tvbox.conf is read, no screen until the
+#     session starts, and nothing to ask if the first boot goes wrong. tvbox-diag
+#     writes a plain-text report onto THIS partition, which the firmware, the box
+#     and any laptop can all read; tvbox-safemode brings the box up with networking
+#     and sshd but no session, either on request (tvbox-safe-mode / SAFE_MODE=true
+#     here on the boot partition) or after three starts that never reach the
+#     launcher. Both are shipped as real files via deploy/infra.list and installed
+#     from ~/.tvbox/ - same files deploy/provision.sh installs, so there is no
+#     second copy of the logic to keep in sync, and CI unit-tests them.
+install -m 755 "${ROOTFS_DIR}${USER_HOME}/.tvbox/tvbox-diag.sh" "${ROOTFS_DIR}/usr/local/sbin/tvbox-diag"
+install -m 755 "${ROOTFS_DIR}${USER_HOME}/.tvbox/tvbox-safemode.sh" "${ROOTFS_DIR}/usr/local/sbin/tvbox-safemode"
+for u in tvbox-diag.service tvbox-diag.timer tvbox-safemode.service tvbox-safemode-screen.service; do
+  install -m 644 "${ROOTFS_DIR}${USER_HOME}/.tvbox/$u" "${ROOTFS_DIR}/etc/systemd/system/$u"
+done
+install -d "${ROOTFS_DIR}/etc/systemd/system/multi-user.target.wants"
+ln -sf ../tvbox-safemode.service \
+  "${ROOTFS_DIR}/etc/systemd/system/multi-user.target.wants/tvbox-safemode.service"
+ln -sf ../tvbox-safemode-screen.service \
+  "${ROOTFS_DIR}/etc/systemd/system/multi-user.target.wants/tvbox-safemode-screen.service"
+ln -sf ../tvbox-diag.service \
+  "${ROOTFS_DIR}/etc/systemd/system/multi-user.target.wants/tvbox-diag.service"
+install -d "${ROOTFS_DIR}/etc/systemd/system/timers.target.wants"
+ln -sf ../tvbox-diag.timer \
+  "${ROOTFS_DIR}/etc/systemd/system/timers.target.wants/tvbox-diag.timer"
+# Safe mode on the session side: one condition on greetd, as a drop-in so a greetd
+# package update cannot undo it.
+install -d "${ROOTFS_DIR}/etc/systemd/system/greetd.service.d"
+install -m 644 "${ROOTFS_DIR}${USER_HOME}/.tvbox/greetd-tvbox-safemode.conf" \
+  "${ROOTFS_DIR}/etc/systemd/system/greetd.service.d/10-tvbox-safemode.conf"
+
 # 2c) Headless provisioning WITHOUT custom.toml (which this image can't process).
 #     The account password is locked, so there's no way into a fresh box until
 #     an SSH key is present. First-boot config is driven by ONE file on the boot
@@ -303,6 +341,7 @@ ln -sf ../tvbox-expand-rootfs.service \
 #     tvbox-firstboot:
 #       HOSTNAME=  WIFI_SSID=/WIFI_PASSWORD=  WIFI_COUNTRY=  SUDO=true  PASSWORD=
 #       SSH_AUTHORIZED_KEY=
+#     SAFE_MODE=true in the same file is read by tvbox-safemode (2b-iv), not here.
 #     Legacy standalone files (authorized_keys, tvbox-wifi.conf) still work.
 #     Runs every boot, idempotent; the config may stay on the card.
 

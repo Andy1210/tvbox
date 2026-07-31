@@ -62,7 +62,12 @@ and `${FIRST_USER_NAME}` are provided by pi-gen). The committed
 3. writes the **greetd autologin** config (labwc session on vt7, kiosk - the
    account password can stay locked, autologin doesn't need one);
 4. creates the **linger flag file** for the user;
-5. in the chroot: group membership, `chown` of the tree, **`npm install`
+5. installs the **diagnostics + safe-mode** pair from `~/.tvbox/` into
+   `/usr/local/sbin` with their system units and the greetd condition drop-in.
+   Same files `deploy/provision.sh` installs (they ship via `deploy/infra.list`),
+   so there is no second copy of the logic here -
+   [docs/diagnostics.md](diagnostics.md);
+6. in the chroot: group membership, `chown` of the tree, **`npm ci`
    INSIDE the arm64 chroot** (host-side would fetch the x86 Electron), the
    `tvbox` CLI symlink, user units "enabled" via hand-made
    `*.target.wants` symlinks (CEC bridge + nightly flatpak-update timer),
@@ -137,9 +142,16 @@ Notes:
   SUDO=true                       # passwordless sudo over SSH for power users (default off)
   PASSWORD=hunter2                # optional: unlock the tv account for password login
   SSH_AUTHORIZED_KEY=ssh-ed25519 AAAA... you@host   # your PUBLIC key -> `ssh tv@<box-ip>`
+  SAFE_MODE=true                  # boot with network + SSH but no TV session (recovery)
   ```
 
   Notes on the fields:
+  - **SAFE_MODE** - read by `tvbox-safemode`, not `tvbox-firstboot`, and the one way
+    into a box whose root filesystem has gone read-only, since it needs nothing
+    writable. An empty `tvbox-safe-mode` file next to `tvbox.conf` does the same and
+    is easier to create from a file manager. Sticky until removed;
+    [docs/diagnostics.md](diagnostics.md) has the rest, including the automatic
+    trigger and the report this pairs with.
   - **SSH_AUTHORIZED_KEY / PASSWORD** - the `tv` account ships password-locked;
     a key gets you in with no password. Multiple keys? use a standalone
     `authorized_keys` file (still honoured). `PASSWORD=` unlocks the account for

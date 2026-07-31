@@ -50,6 +50,11 @@ jobs:
           done
       - name: shell unit tests (node --test, no Electron)
         run: node --test shell/*.test.js
+      # The root-side boot scripts (diagnostics + safe mode) are POSIX sh, and they
+      # are tested the same way: each runs against a fake root with its commands
+      # stubbed onto PATH, so no test touches the runner's real state.
+      - name: boot-script unit tests (diagnostics + safe mode)
+        run: node --test deploy/*.test.js
       - name: manifest loader runs (apps now come from the tvbox-apps registry)
         run: cd shell && node -e "const a=require('./install');a.loadManifests();console.log('manifest loader ok (installed apps:',a.getManifests().length+')')"
 
@@ -82,9 +87,22 @@ jobs:
           # gate CI on real errors, not style
           shellcheck -S error \
             deploy/deploy.sh deploy/provision.sh deploy/run-shell.sh deploy/labwc-autostart deploy/tvbox \
+            deploy/tvbox-diag.sh deploy/tvbox-safemode.sh \
             scripts/copy-infra.sh scripts/make-release.sh scripts/build-image.sh \
             scripts/install-libcec8.sh \
             shell/audio-default.sh
+      - name: systemd unit files parse
+        run: |
+          # A typo in a unit is silent: systemd logs it and skips the directive, so
+          # the box quietly loses an ordering or a condition and nothing says why.
+          # "is not executable" is expected and filtered: these units point at paths
+          # that exist on a box (/usr/local/sbin, flatpak), not on a CI runner.
+          out=$(systemd-analyze verify deploy/*.service deploy/*.timer 2>&1 || true)
+          echo "$out"
+          if echo "$out" | grep -v 'is not executable' | grep -q .; then
+            echo "::error::systemd-analyze verify reported the problem(s) above"
+            exit 1
+          fi
       - name: python syntax (input bridges + helpers)
         run: |
           python3 -m py_compile cec/cec_uinput_bridge.py remote/remote_input_bridge.py deploy/cursor_idle_hide.py

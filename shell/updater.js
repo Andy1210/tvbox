@@ -69,6 +69,15 @@ const INFRA_FILES = [
   "tvbox",
   "provision.sh",
   "install-libcec8.sh", // provision builds libcec >= 8 from it (no distro package yet)
+  // Diagnostics + safe mode. Root-side, so a release only refreshes the copies in
+  // ~/.tvbox/ - provision.sh is what installs them under /usr/local/sbin and /etc.
+  "tvbox-diag.sh",
+  "tvbox-safemode.sh",
+  "tvbox-diag.service",
+  "tvbox-diag.timer",
+  "tvbox-safemode.service",
+  "tvbox-safemode-screen.service",
+  "greetd-tvbox-safemode.conf",
   "labwc-autostart",
   "labwc-environment", // wlroots render device (read by labwc before it starts)
   "tvbox-cec.service",
@@ -84,7 +93,7 @@ const USER_UNITS = [
   "tvbox-flatpak-update.service",
   "tvbox-flatpak-update.timer",
 ];
-const EXECUTABLE = ["run-shell.sh", "tvbox"];
+const EXECUTABLE = ["run-shell.sh", "tvbox", "tvbox-diag.sh", "tvbox-safemode.sh"];
 // Where each shipped user unit gets its "enable" symlink (its [Install]
 // WantedBy). syncInfra creates these directly - same trick as the image build:
 // a box that only ever updates via OTA must still START a newly shipped unit

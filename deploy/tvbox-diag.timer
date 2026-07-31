@@ -1,0 +1,14 @@
+# tvbox: keep the diagnostics report current (see tvbox-diag.service).
+# A box that dies hours into a session needs a report from then, not from boot.
+# One small file rewritten twice an hour is nothing next to what journald already
+# writes to the same card, and AccuracySec lets systemd batch it with other work.
+[Unit]
+Description=tvbox: refresh the diagnostics report
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=30min
+AccuracySec=5min
+
+[Install]
+WantedBy=timers.target
