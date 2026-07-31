@@ -8,10 +8,18 @@
   "additionalProperties": false,
   "$defs": {
     "localeString": {
-      "description": "A plain string (brand names) or a per-locale map, e.g. { \"en\": \"Live TV\", \"hu\": \"Élő TV\" }.",
+      "description": "A plain string (brand names) or a per-locale map, e.g. { \"en\": \"Live TV\", \"hu\": \"\u00c9l\u0151 TV\" }.",
       "oneOf": [
-        { "type": "string" },
-        { "type": "object", "additionalProperties": { "type": "string" }, "minProperties": 1 }
+        {
+          "type": "string"
+        },
+        {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          },
+          "minProperties": 1
+        }
       ]
     }
   },
@@ -38,23 +46,38 @@
         "additionalProperties": false,
         "required": ["version", "notes"],
         "properties": {
-          "version": { "type": "string", "description": "The version these notes describe." },
-          "notes": { "type": "string", "description": "What changed, in English (plain text)." }
+          "version": {
+            "type": "string",
+            "description": "The version these notes describe."
+          },
+          "notes": {
+            "type": "string",
+            "description": "What changed, in English (plain text)."
+          }
         }
       }
     },
-    "name": { "$ref": "#/$defs/localeString" },
-    "tagline": { "$ref": "#/$defs/localeString" },
-    "description": { "$ref": "#/$defs/localeString" },
+    "name": {
+      "$ref": "#/$defs/localeString"
+    },
+    "tagline": {
+      "$ref": "#/$defs/localeString"
+    },
+    "description": {
+      "$ref": "#/$defs/localeString"
+    },
     "screenshots": {
       "type": "array",
-      "items": { "type": "string", "pattern": "^https?://" },
+      "items": {
+        "type": "string",
+        "pattern": "^https?://"
+      },
       "maxItems": 8,
       "description": "Store-detail screenshots (https URLs, e.g. hosted in the registry repo)."
     },
     "type": {
       "enum": ["webclient", "native"],
-      "description": "webclient = the shell serves/loads the app (a package's own local web/ bundle, the legacy root bundle, or a remote site). native = the app is its own fullscreen Wayland client, spawned by the shell (see runtime.native); every window of the shell's own hides while it runs. Apps are self-contained packages; there are no launcher-compiled 'builtin' views."
+      "description": "webclient = the shell serves/loads the app (a package's own local web/ bundle, the legacy root bundle, or a remote site). native = the app is its own fullscreen Wayland client, spawned by the shell (see runtime.native); every window of the shell's own hides while it runs. A webclient app may declare runtime.native too, to launch that program per item from its own UI. Apps are self-contained packages; there are no launcher-compiled 'builtin' views."
     },
     "status": {
       "enum": ["ready", "coming_soon"],
@@ -88,7 +111,9 @@
             "pattern": "^[a-z0-9_-]{1,32}$",
             "description": "Pairing kind the plugin registers (e.g. \"roms\")."
           },
-          "label": { "$ref": "#/$defs/localeString" }
+          "label": {
+            "$ref": "#/$defs/localeString"
+          }
         }
       }
     },
@@ -99,7 +124,9 @@
       "properties": {
         "bin": {
           "type": "array",
-          "items": { "type": "string" },
+          "items": {
+            "type": "string"
+          },
           "description": "Binaries that must resolve on PATH (~/.tvbox/bin is on PATH) for the app to be launchable."
         },
         "download": {
@@ -110,7 +137,10 @@
             "required": ["bin", "arch"],
             "additionalProperties": false,
             "properties": {
-              "bin": { "type": "string", "pattern": "^[a-zA-Z0-9_-]+$" },
+              "bin": {
+                "type": "string",
+                "pattern": "^[a-zA-Z0-9_-]+$"
+              },
               "arch": {
                 "type": "object",
                 "description": "Keyed by Node process.arch (arm64, x64).",
@@ -119,8 +149,14 @@
                   "required": ["url", "sha256"],
                   "additionalProperties": false,
                   "properties": {
-                    "url": { "type": "string", "pattern": "^https://" },
-                    "sha256": { "type": "string", "pattern": "^[0-9a-fA-F]{64}$" },
+                    "url": {
+                      "type": "string",
+                      "pattern": "^https://"
+                    },
+                    "sha256": {
+                      "type": "string",
+                      "pattern": "^[0-9a-fA-F]{64}$"
+                    },
                     "extract": {
                       "type": "string",
                       "description": "Path of the binary inside the archive (.tar.gz/.zip). Omit for a raw binary download or when it equals bin."
@@ -134,12 +170,18 @@
         "flatpak": {
           "type": "array",
           "maxItems": 8,
-          "items": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$" },
+          "items": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$"
+          },
           "description": "Flathub app ids the app needs (e.g. org.libretro.RetroArch). Installed with `flatpak install --user`, so no root: a missing one greys the tile and is installable straight from the UI, like requires.download. The box's own arch is used."
         },
         "apt": {
           "type": "array",
-          "items": { "type": "string", "pattern": "^[a-z0-9][a-z0-9.+-]*$" },
+          "items": {
+            "type": "string",
+            "pattern": "^[a-z0-9][a-z0-9.+-]*$"
+          },
           "description": "Debian packages `tvbox deps <id>` installs (the one step that asks for sudo). Only used for bins download can't cover (e.g. mpv)."
         },
         "aptRepo": {
@@ -148,15 +190,29 @@
           "additionalProperties": false,
           "description": "Optional third-party APT repo for the apt deps (e.g. raspotify). All fields are validated by the CLI before touching root.",
           "properties": {
-            "keyUrl": { "type": "string", "pattern": "^https://" },
-            "keyring": { "type": "string", "pattern": "^/usr/share/keyrings/[\\w.-]+$" },
-            "line": { "type": "string", "pattern": "^deb [^\\r\\n]+$" },
-            "list": { "type": "string", "pattern": "^/etc/apt/sources\\.list\\.d/[\\w.-]+$" }
+            "keyUrl": {
+              "type": "string",
+              "pattern": "^https://"
+            },
+            "keyring": {
+              "type": "string",
+              "pattern": "^/usr/share/keyrings/[\\w.-]+$"
+            },
+            "line": {
+              "type": "string",
+              "pattern": "^deb [^\\r\\n]+$"
+            },
+            "list": {
+              "type": "string",
+              "pattern": "^/etc/apt/sources\\.list\\.d/[\\w.-]+$"
+            }
           }
         },
         "disableService": {
           "type": "array",
-          "items": { "type": "string" },
+          "items": {
+            "type": "string"
+          },
           "description": "System services `tvbox deps` disables after the apt install (e.g. raspotify's own daemon - the shell supervises librespot itself)."
         }
       }
@@ -172,7 +228,9 @@
           "required": ["type"],
           "additionalProperties": false,
           "properties": {
-            "type": { "enum": ["flatpak", "url", "git"] },
+            "type": {
+              "enum": ["flatpak", "url", "git"]
+            },
             "ref": {
               "type": "string",
               "description": "flatpak: the app ref (e.g. tv.plex.PlexHTPC), installed --user from flathub."
@@ -197,7 +255,10 @@
             }
           }
         },
-        "extract": { "type": "string", "description": "Subpath inside the acquired source that holds the web client." },
+        "extract": {
+          "type": "string",
+          "description": "Subpath inside the acquired source that holds the web client."
+        },
         "patch": {
           "type": "array",
           "items": {
@@ -205,7 +266,9 @@
             "required": ["op"],
             "additionalProperties": false,
             "properties": {
-              "op": { "enum": ["strip-script"] },
+              "op": {
+                "enum": ["strip-script"]
+              },
               "match": {
                 "type": "string",
                 "description": "strip-script: remove <script> tags whose attributes contain this substring from the entry HTML."
@@ -223,7 +286,7 @@
         "native": {
           "type": "object",
           "additionalProperties": false,
-          "description": "type:native only. How to launch the app's own fullscreen client. Exactly one of flatpak/bin; the values reach argv, so they are validated at load time and again at launch.",
+          "description": "How to launch a native program: a fullscreen Wayland client of its own. Required on type:native (the app IS that program) and allowed on type:webclient, where the app's own UI starts the program per item through host.launchNative (RetroArch: a games grid running `retroarch -L <core> <rom>`, and the screen returns to that UI when the program exits). Exactly one of flatpak/bin; the values reach argv, so they are validated wherever this block appears - at load time and again at launch.",
           "properties": {
             "flatpak": {
               "type": "string",
@@ -237,7 +300,9 @@
             "args": {
               "type": "array",
               "maxItems": 32,
-              "items": { "type": "string" },
+              "items": {
+                "type": "string"
+              },
               "description": "Arguments passed to the app, e.g. [\"--fullscreen\"]. No shell is involved."
             }
           }
@@ -246,10 +311,22 @@
           "enum": ["static", "remote", "local"],
           "description": "local: a package app that ships its own web/ UI bundle, served at /<id>/ in the main window (the usual model - apps are packages). static: the legacy single root-mounted bundle (mount:root, e.g. Plex). remote: load a live site in an isolated, hardened window."
         },
-        "route": { "type": "string", "description": "builtin: the launcher hash route (e.g. /livetv)." },
-        "entry": { "type": "string", "description": "static/local: bundle entry file (default index.html)." },
-        "mount": { "enum": ["root"], "description": "static: mount at / (single root app per box) instead of /<id>/." },
-        "url": { "type": "string", "description": "remote: the site to load (https, or http for private/LAN hosts)." },
+        "route": {
+          "type": "string",
+          "description": "builtin: the launcher hash route (e.g. /livetv)."
+        },
+        "entry": {
+          "type": "string",
+          "description": "static/local: bundle entry file (default index.html)."
+        },
+        "mount": {
+          "enum": ["root"],
+          "description": "static: mount at / (single root app per box) instead of /<id>/."
+        },
+        "url": {
+          "type": "string",
+          "description": "remote: the site to load (https, or http for private/LAN hosts)."
+        },
         "urlConfig": {
           "type": "string",
           "pattern": "^[a-zA-Z0-9_]+$",
@@ -267,11 +344,23 @@
             "type": "object",
             "required": ["url", "name"],
             "properties": {
-              "url": { "type": "string", "pattern": "^https?://" },
-              "name": { "type": "string", "pattern": "^[A-Za-z0-9!#$%&'*+.^_`|~-]{1,64}$" },
-              "value": { "type": "string" },
-              "domain": { "type": "string" },
-              "path": { "type": "string" }
+              "url": {
+                "type": "string",
+                "pattern": "^https?://"
+              },
+              "name": {
+                "type": "string",
+                "pattern": "^[A-Za-z0-9!#$%&'*+.^_`|~-]{1,64}$"
+              },
+              "value": {
+                "type": "string"
+              },
+              "domain": {
+                "type": "string"
+              },
+              "path": {
+                "type": "string"
+              }
             },
             "additionalProperties": false
           }
@@ -286,12 +375,16 @@
         },
         "origins": {
           "type": "array",
-          "items": { "type": "string" },
+          "items": {
+            "type": "string"
+          },
           "description": "remote: hostnames (plus subdomains) navigation is allowed to. Defaults to the url's host. Also the allowlist for the `fetch` capability."
         },
         "capabilities": {
           "type": "array",
-          "items": { "enum": ["nav", "player", "config", "fetch", "storage", "display", "input", "system"] },
+          "items": {
+            "enum": ["nav", "player", "config", "fetch", "storage", "display", "input", "system"]
+          },
           "description": "THE security boundary: which preload-bridge surfaces the app gets. Defaults to [\"nav\"] - an app that forgets this must not silently gain player/config/fetch. `fetch` is scoped to `origins`."
         },
         "bridge": {

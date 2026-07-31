@@ -103,6 +103,39 @@ resumes from what it already fetched.
   `pairing` entries: a form on a phone is the only sensible place to configure it,
   and it is also a better place to type a password than a TV remote.
 
+## A web app that LAUNCHES a native program
+
+The two shapes combine, and RetroArch is the case that needs it: the browsing -
+consoles, covers, search - is a 10-foot web UI of ours, while the emulator itself is
+a native program that must be started **per game**, with a core and a ROM on its
+command line. So the app is `type: webclient` with a `runtime.native` block, and its
+plugin starts the program through the host API:
+
+```js
+host.launchNative("retroarch", ["-L", corePath, romPath]);
+```
+
+What the shell does with that:
+
+- **The manifest is still the source of the command.** `launchNative` takes an app
+  id, looks the manifest up itself, and passes the extra arguments through the same
+  `native.js` parser that validates a manifest at load time (`install.js` now
+  validates `runtime.native` wherever it appears, not only on `type: native`). A
+  plugin can add arguments to a program the shell already knows; it cannot invent a
+  command line.
+- **The arguments never come from the renderer.** The UI sends a console and an
+  index into that console's playlist; the plugin resolves the ROM path and the core
+  from RetroArch's own playlist files. Nothing the page says reaches argv.
+- **The screen goes back to the app, not HOME.** For a `type: native` app, the
+  process exiting means the launcher returns. For this shape the app has a window of
+  its own, and that window is where the user came from - a game that ends lands back
+  in the list it was started from (`nativeHostApp` in main.js). Home still means
+  home: it ends the program and shows the launcher, because the bridges route it
+  there while a native app is in front.
+- **One at a time, still.** Navigating to the app's own UI while its game runs ends
+  the game: the invariant is one visible toplevel, and its window and its program
+  can never both be in front.
+
 ## Hardware OpenGL
 
 A native app is usually a flatpak, and a flatpak brings its own Mesa. On this
