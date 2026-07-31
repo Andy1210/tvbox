@@ -5,6 +5,24 @@ updates). `scripts/make-release.sh` lifts the current version's `hu`/`en`
 blocks into the OTA feed's `notes` - keep both languages, keep it short, and
 write for the person on the couch (what changes for THEM), not for developers.
 
+## 1.20.0
+
+### hu
+
+- A retro játékok mostantól a box saját felületén vannak, borítókkal. Konzolonként végig tudod nézni őket, az OK pedig egyenesen elindítja a játékot - nem kell többé az emulátor saját menüjén átvergődni. Ha kilépsz a játékból, oda kerülsz vissza, ahol voltál: a játékok listájába.
+- Hosszú listákhoz jobb oldalon ott az ábécé: A-tól Z-ig ugorhatsz benne, és halványan látszik, melyik betűhöz nincs játékod. Kereső is van, a box saját képernyő-billentyűzetével.
+- Kontrolleren az Xbox gomb játék közben előhozza az emulátor menüjét - mentett állások, játék bezárása, beállítások -, és a játék addig meg is áll. Ez eddig egyes kontrollereken egyszerűen nem működött; a box most magától kideríti, melyik gomb az az adott kontrolleren.
+- A konzolokat (emulátorokat) és a borítókat mostantól a tévén is kezelheted, nem csak telefonról.
+- A játékok appja magától frissül a boxon, néhány perccel a bekapcsolás után - neked nem kell tenned semmit.
+
+### en
+
+- Your retro games now live in the box's own screen, with covers. Browse them console by console and press OK to start a game straight away - no emulator menu to get through first. When you leave a game you land back where you were: in the list of games.
+- For a long list there is an A-Z index down the right: jump to any letter, and the letters you have no games for are dimmed. There is a search too, with the box's own on-screen keyboard.
+- On a controller, the Xbox button brings up the emulator's menu mid-game - save states, closing the game, its settings - and the game pauses while it is up. On some controllers this simply did nothing before; the box now works out which button it is on the controller you have.
+- Consoles (emulators) and covers can be managed on the TV now, not only from your phone.
+- The games app updates itself on the box a few minutes after it starts up - nothing for you to do.
+
 ## 1.19.0
 
 ### hu
