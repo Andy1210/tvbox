@@ -180,18 +180,29 @@ touched one file, `npx prettier --write <file>` is enough; when in doubt run
   visible (`startGamepadNav` stops on `visibilitychange`), which is what keeps the pad
   the emulator's alone during a game. Anything that wants an on-screen overlay
   mid-game has to solve this first - the pad cannot be "taken back" by focus.
-- **RetroArch's in-game menu hangs on a PER-DEVICE bind, and the official Xbox pad's
-  profile is the one that lacks it.** `input_menu_toggle_btn` comes from the matched
-  autoconfig profile in the flatpak; `Microsoft X-Box 360 pad.cfg` (which is what the
-  gamepad shim's re-emitted pad matches) binds button 8 = Guide, while
-  `Xbox_Wireless_Controller.cfg` - matched by NAME for a real Xbox Wireless
-  Controller - binds nothing, so that pad has no way into the Quick Menu at all. A
-  GLOBAL bind in `retroarch.cfg` fills that gap (a profile that defines its own still
-  wins), which is what the retroarch plugin's `requiredSettings()` now writes, along
-  with `quit_on_close_content = "1"` so the menu's "Close Content" ends RetroArch and
-  the shell brings the games grid back. Verified with a uinput pad presenting that
-  exact name/vendor/product, since the config question is device-identity-driven and
-  needs no physical pad.
+- **A pad's Guide button has a different NUMBER on every pad, and RetroArch's own
+  profile for the official Xbox controller gets it wrong.** RetroArch's udev driver
+  numbers buttons by ascending evdev code from `BTN_MISC`, so the index depends on the
+  key set the KERNEL reports: `hid-microsoft` claims the full gamepad set for an Xbox
+  pad over Bluetooth, including four buttons the hardware hasn't got (`BTN_C`,
+  `BTN_Z`, `BTN_TL2`, `BTN_TR2` - its triggers are axes), which moves `BTN_MODE` from
+  8 to **12**. libretro's `Xbox One S Wireless Controller.cfg` (matched by
+  vendor+product 045E:0B13) shifts every other bind accordingly - select 10, start 11,
+  thumbs 13/14 - and leaves `input_menu_toggle_btn = "8"`, i.e. a button that does not
+  exist. That, not the pad, is why the Xbox button did nothing in-game while the
+  gamepad shim's re-emitted pad (eleven keys, Guide at 8) worked.
+  **A global `input_menu_toggle_btn` cannot fix it**: measured, a concrete global value
+  overrides EVERY profile's bind, and no single number can serve two pads whose Guide
+  sits at different indices - a profile's own bind only applies while the global is
+  `"nul"`. So the correction is per device: the retroarch plugin reads each connected
+  pad's key set from sysfs (`lib/pads.js`), and owns RetroArch's profile directory
+  (`lib/autoconfig.js` - the flatpak's is read-only, so the mirror symlinks every
+  profile at its SANDBOX path and replaces the corrected ones with real files).
+  `quit_on_close_content = "1"` comes with it, so the menu's "Close Content" ends
+  RetroArch and the shell brings the games grid back. All of it verified with a uinput
+  pad cloned from the real one's vendor/product AND key set - the identity and the key
+  set are what the behaviour keys off, so a clone answers the question without the
+  physical pad.
 - **CEC is TV-specific.** Every TV forwards a different subset of remote keys
   and quirks its own way - the mapping in `cec_uinput_bridge.py` was tuned
   empirically (e.g. on the LG set it was developed against, Back and Exit share
