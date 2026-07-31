@@ -123,6 +123,12 @@ let currentAppId = null; // which app is FOREGROUND (null = launcher); drives fo
 // so raising our own window must key off the intent, not the process. Cleared
 // synchronously by every path that takes the screen back.
 let nativeForeground = false;
+// Which app's own UI the native process was launched FROM, when that app has one
+// (RetroArch: our games grid starts the emulator per game). Its window is what the
+// screen goes back to when the process exits, instead of HOME - the user came from
+// a list of games and expects to land back in it. null for an app that IS its
+// native program, where there is no window to return to.
+let nativeHostApp = null;
 // Background apps: every app runs in its OWN BrowserWindow; leaving an app
 // hides its window (registry + hidden-set policy live in appwindows.js). A
 // window is destroyed only by the HOME quit affordance, the RAM guard, app
@@ -2150,6 +2156,7 @@ function showLauncher(hash) {
   // intent first: the process outlives the SIGTERM by a moment and raiseWindow
   // below must not stand down for a native app we are already leaving.
   nativeForeground = false;
+  nativeHostApp = null; // Home means HOME, not back into the UI the game was started from
   nativeapp.stop();
   // The launcher page stays loaded permanently now (apps run in their own
   // windows), so returning home is a show(), not a reload. A hash still forces
@@ -2262,19 +2269,19 @@ function foregroundApp(id) {
 // window, and hiding first would show the bare desktop in the gap. A freshly mapped
 // toplevel stacks above ours on labwc, so the launcher can stay up until then.
 const NATIVE_HIDE_DELAY_MS = 2500;
-function openNativeApp(m) {
+function openNativeApp(m, extraArgs) {
   const deps = apps.appDeps(m);
   if (!deps.depsOk) {
     // Belt and suspenders: the tile is already greyed out via requires, so this
     // only fires if the manifest changed under us. Never leave a black screen.
     console.warn("[native] not launching", m.id, "- missing:", deps.missing.join(","));
-    return;
+    return false;
   }
   textinput.dropFor(null); // a typing session cannot survive into an app we don't own
   playingUrl = null;
   stopMpv(); // the shared player must not hold the GPU, audio, or a mode claim
   setVideoMode(false);
-  if (!nativeapp.start(m)) return;
+  if (!nativeapp.start(m, extraArgs)) return false;
   currentAppId = m.id; // makes boxIdle() false too: no OTA restart mid-game
   nativeForeground = true;
   setTimeout(() => {
@@ -2282,6 +2289,25 @@ function openNativeApp(m) {
     for (const [id] of appwins.all()) backgroundApp(id);
     if (win && !win.isDestroyed()) win.hide();
   }, NATIVE_HIDE_DELAY_MS);
+  return true;
+}
+
+// Launch an app's native program with per-launch arguments, on behalf of that
+// app's own plugin (host.launchNative). The arguments are the point: a games grid
+// starts `retroarch -L <core> <rom>`, which cannot live in the manifest. They are
+// validated by native.js's own parser, and the manifest is looked up here rather
+// than passed in, so a plugin can only ever launch a program some manifest already
+// declares.
+function launchNativeFor(id, extraArgs) {
+  const m = apps.manifestById(id);
+  if (!m || m.status !== "ready" || !(m.runtime && m.runtime.native)) {
+    console.warn("[native] no launchable native app:", id);
+    return false;
+  }
+  // An app with its own UI is where the screen belongs once the program exits;
+  // a `type: native` app has no window, so that path still ends at HOME.
+  nativeHostApp = m.type === "native" ? null : m.id;
+  return openNativeApp(m, extraArgs);
 }
 
 // ---- isolated window for remote web apps (YouTube etc.) ----
@@ -2960,9 +2986,12 @@ function navTo(dest) {
     }
     // Leaving a native app for another app ends its process: it has no background
     // state to keep, and letting it live would leave it holding the GPU and audio
-    // under whatever we bring forward.
-    if (nativeapp.running() && nativeapp.id() !== m.id) {
+    // under whatever we bring forward. Its OWN app is no exception - navigating to
+    // the UI a game was launched from means leaving the game, and the two must
+    // never be on screen together (exactly one visible toplevel).
+    if (nativeapp.running()) {
       nativeForeground = false;
+      nativeHostApp = null;
       nativeapp.stop();
     }
   };
@@ -3288,6 +3317,14 @@ const host = {
   spawnService: (name, spec) => supervisor.spawn(name, spec),
   stopService: (name) => supervisor.stop(name),
   restartService: (name, delay) => supervisor.restart(name, delay),
+  // Start an app's own native program with per-launch arguments (RetroArch: a core
+  // and a ROM). Takes the app id, not a command line: the program still comes from
+  // the manifest the shell validated, and the arguments go through native.js's
+  // parser. Returns whether it launched, so a UI can say why nothing happened.
+  launchNative: (id, extraArgs) => launchNativeFor(id, extraArgs),
+  // Is that program running right now, and whose? A UI that launches games needs to
+  // know its own state after a reload (its window is hidden while the game runs).
+  nativeRunning: () => (nativeapp.running() ? nativeapp.id() : null),
 };
 
 // Require each manifest-declared plugin whose deps resolve. Runs synchronously
@@ -3554,7 +3591,15 @@ app.whenReady().then(async () => {
     // must not yank the screen back to HOME.
     onExit: (id) => {
       nativeForeground = false;
-      if (currentAppId === id) showLauncher();
+      if (currentAppId !== id) return;
+      // An app that launched the program from its own UI gets the screen back
+      // (navTo resumes its hidden window, or reopens it if the RAM guard took it):
+      // a game that ends should land in the list it was started from. Cleared
+      // first, so a failure to come back cannot strand the flag on.
+      const back = nativeHostApp;
+      nativeHostApp = null;
+      if (back === id) navTo(id);
+      else showLauncher();
     },
   });
   updater.startSchedulers(); // boot check + 6h re-check + nightly idle auto-apply
