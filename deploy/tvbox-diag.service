@@ -9,7 +9,12 @@
 # partition whose health is in question.
 [Unit]
 Description=tvbox: write diagnostics to the boot partition
-RequiresMountsFor=/boot/firmware
+# Both layouts, because the script takes /boot when /boot/firmware is absent (the
+# pre-bookworm layout, and the same fallback tvbox-firstboot and provision.sh use).
+# On a box where /boot is a plain directory on the root filesystem this resolves to
+# the root mount and costs nothing; naming only /boot/firmware would leave the unit
+# unordered against the partition it writes to on the other layout.
+RequiresMountsFor=/boot/firmware /boot
 After=tvbox-safemode.service network.target
 Conflicts=shutdown.target
 Before=shutdown.target

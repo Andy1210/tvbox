@@ -2,12 +2,14 @@
 # SYSTEM unit, root: it reads the boot partition (mounted root-only) and writes
 # /run/tvbox-safe-mode, which greetd's drop-in refuses to start alongside.
 #
-# It has to run before greetd and after /boot/firmware is mounted, so the mount is
-# named as a requirement rather than ordered by hand: systemd derives the mount
-# unit itself, and this keeps working if the partition ever moves.
+# It has to run before greetd and after the boot partition is mounted, so the mounts
+# are named as requirements rather than ordered by hand: systemd derives the mount
+# units itself, and this keeps working if the partition ever moves. BOTH boot layouts
+# are named because the script takes /boot when /boot/firmware is absent, and a
+# safe-mode request that this unit runs too early to see is a request lost.
 [Unit]
 Description=tvbox: safe-mode decision for this boot
-RequiresMountsFor=/boot/firmware /var/lib
+RequiresMountsFor=/boot/firmware /boot /var/lib
 Before=greetd.service display-manager.service
 Conflicts=shutdown.target
 Before=shutdown.target
