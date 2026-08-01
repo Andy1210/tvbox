@@ -764,6 +764,9 @@ function handlePost(p, data, res) {
     const action = p.slice("/tvbox/api/bt/".length);
     const fn = {
       pair: bluetooth.pair,
+      // Same pairing with the wifi radio held down for the attempt - the escape
+      // hatch for a BLE remote that will not bond while the shared antenna is busy.
+      "pair-quiet": bluetooth.pairQuiet,
       connect: bluetooth.connect,
       disconnect: bluetooth.disconnect,
       remove: bluetooth.remove,
