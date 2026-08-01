@@ -386,5 +386,6 @@ message, line, src)` signature.
   kernel that panics on real hardware. QEMU's `raspi` machines were considered and
   rejected as too flaky to gate a build on. Two traps if you touch it: nspawn mounts
   a tmpfs over `/run` AND `/tmp`, so results go to `/var/tmp` (plus a console copy as
-  a fallback), and `--self-test` is the only coverage the checks get on an ordinary
-  push - phase 2 only ever runs during a real image build.
+  a fallback), and `--self-test` is all the coverage the checks get on an ordinary
+  push - in CI, phase 2 runs only during an image build (locally it runs on any
+  image, unless `SKIP_BOOT=1`).
