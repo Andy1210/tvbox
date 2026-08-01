@@ -113,6 +113,7 @@ Top level:
 | `service`         |     | Shell-side plugin (below).                                                         |
 | `version`         |     | Your app's version, informational.                                                 |
 | `pairing`         |     | Phone actions the app offers (below).                                              |
+| `backup`          |     | Files of its own a settings backup should carry (below).                           |
 
 `requires` - dependencies; a missing binary greys the tile with "needs X",
 nothing crash-loops:
@@ -207,6 +208,47 @@ The pairing server is up only while that screen is open, and every route under i
 is code-gated by the shell (`c` in the query for reads, `code` in the body for
 writes). Requests are capped in size; a route that needs a bigger body says so
 (`{ maxBody, handler }`).
+
+## Files a backup should carry (`backup`)
+
+Settings back up automatically; an app's own FILES do not, because the shell has
+no way to know which of them matter. Playlists and save files matter, a downloaded
+core does not. So the app says:
+
+```jsonc
+"backup": {
+  // Resolve `paths` against this flatpak's per-user data dir (~/.var/app/<ref>/)
+  // instead of the app's bundle dir. Must be a ref the app already declares.
+  "flatpak": "org.libretro.RetroArch",
+  // Files or directories, relative, in priority order.
+  "paths": ["config/retroarch/playlists", "config/retroarch/saves"],
+  // Sidecars the plugin keeps in ~/.tvbox/. Each name MUST start with "<id>-".
+  "state": ["retroarch-share.json", "retroarch-systems.json"],
+},
+```
+
+Both roots are derived from the manifest **on the restoring box**, never taken
+from the backup file, and every path is pinned strictly inside its root - a file
+that names anything outside the app it belongs to (or the root itself) is skipped,
+not written.
+
+`state` has two gates, and it needs both: the name must start with `<id>-`, and it
+must not be one of the shell's own sidecars. An app id is only constrained to
+`[a-z0-9_-]`, so a prefix rule alone would let a manifest calling itself `config`
+name `config.json`. `state` files are restored `0600`, like every other secret the
+box keeps.
+
+It is **bounded**, because the file is downloaded and re-uploaded by a phone:
+8 MB in total across every app, 4 MB per file, 400 files, directories walked 6
+deep with symlinks not followed. Declaration order is priority order, and
+anything that doesn't fit is named in the shell log. Which means: save files,
+playlists, settings - not ROMs, cover art or save states. Those belong on the
+[file server](file-server.md).
+
+Restore places these in passes (see
+[updates-and-backup.md](updates-and-backup.md)): an app that came back with the
+config gets its files at once, an app fetched from the registry gets them when
+its reconciliation step lands.
 
 ## Checklist for a new app
 

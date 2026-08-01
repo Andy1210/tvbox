@@ -418,6 +418,16 @@
     "restored": "Restored - the box restarts now…",
     "error": "Couldn't start the phone session"
   },
+  "restore": {
+    "preparing": "Restoring your apps…",
+    "step": {
+      "app": "Restoring {name}…",
+      "deps": "{name}: installing components…",
+      "bundle": "{name}: downloading the app…"
+    },
+    "done": "Your apps are back",
+    "doneWithErrors": "{n} of {total} apps restored - {failed} could not be downloaded"
+  },
   "parental": {
     "title": "Parental controls",
     "set": "Set a PIN",

@@ -6,6 +6,7 @@ const fs = require("fs");
 const path = require("path");
 const os = require("os");
 const crypto = require("crypto");
+const identity = require("./identity"); // per-box identity: hostname-derived device names
 
 const FILE = path.join(os.homedir(), ".tvbox", "config.json");
 
@@ -62,7 +63,10 @@ function publicConfig() {
       requirePin: !!(c.parental && c.parental.requirePin), // gate installs/sensitive settings in the UI
     },
     spotify: {
-      deviceName: (c.spotify && c.spotify.deviceName) || "",
+      // The derived default, not "": two boxes cloned from one backup would
+      // otherwise both show the same (or no) name in the Connect picker, where
+      // they are then indistinguishable. identity.js owns the derivation.
+      deviceName: (c.spotify && c.spotify.deviceName) || identity.defaultSpotifyName(),
       hasCredentials: !!(c.spotify && c.spotify.clientId && c.spotify.clientSecret),
       // Spotify Connect is opt-in: the librespot daemon (which advertises the
       // box on the LAN) runs only once enabled, even though the binary now ships
@@ -91,7 +95,10 @@ function publicConfig() {
       port: (c.mqtt && c.mqtt.port) || null, // null = the default (1883)
       username: (c.mqtt && c.mqtt.username) || "",
       hasPassword: !!(c.mqtt && c.mqtt.password), // whether one is stored, never the value
-      deviceId: (c.mqtt && c.mqtt.deviceId) || "",
+      // The id the bridge ACTUALLY uses, derived from the hostname when unset -
+      // it is the topic segment every message travels under, so showing "" here
+      // would hide the one field that must differ between two boxes.
+      deviceId: (c.mqtt && c.mqtt.deviceId) || identity.defaultDeviceId(),
     },
     update: {
       // OTA self-update (updater.js); feed URL itself stays box-local
@@ -246,10 +253,18 @@ function rawIptv() {
 function setSpotify(spotify) {
   const c = load();
   c.spotify = { ...c.spotify, ...spotify };
+  // Same rule as setMqtt's deviceId, for the same reason: a name that only echoes
+  // this box's derived default is left unset so the derivation stays live and a
+  // clone of this box doesn't inherit it as a deliberate choice. See identity.js.
+  if (c.spotify.deviceName && c.spotify.deviceName === identity.defaultSpotifyName()) delete c.spotify.deviceName;
   save(c);
 }
+// Null while Spotify is entirely unconfigured (the daemon is opt-in). Once the
+// section exists, the device name is always answered - derived from the hostname
+// when the user never chose one, so each box announces itself as itself.
 function rawSpotify() {
-  return load().spotify || null;
+  const s = load().spotify;
+  return s ? { ...s, deviceName: s.deviceName || identity.defaultSpotifyName() } : null;
 }
 
 // Manual audio default-sink override (node.name). audio-default.sh honors it if
@@ -299,7 +314,16 @@ function setMqtt(mqtt) {
   const username = str(mqtt && mqtt.username, 200);
   // the deviceId becomes an MQTT topic segment - keep it topic/discovery-safe
   // (same character class as mqtt.js safeId, so topics match the discovery id)
-  const deviceId = str(mqtt && mqtt.deviceId, 200).replace(/[^a-zA-Z0-9_-]/g, "_");
+  let deviceId = str(mqtt && mqtt.deviceId, 200).replace(/[^a-zA-Z0-9_-]/g, "_");
+  // A value equal to this box's derived default is NOT stored, and that is
+  // load-bearing rather than tidiness. publicConfig reports the derived id so the
+  // user can see which topic the box publishes on, and the settings form saves the
+  // whole section back - so saving any MQTT field would otherwise freeze today's
+  // hostname into an explicit deviceId. A later rename would then keep publishing
+  // under the old name, and a clone of that box would read the frozen value as a
+  // name its owner chose and inherit it verbatim: two boxes, one topic tree.
+  // Leaving it unset keeps the derivation live, and the effective value is the same.
+  if (deviceId && deviceId === identity.defaultDeviceId()) deviceId = "";
   const password =
     mqtt && typeof mqtt.password === "string" && mqtt.password ? mqtt.password.slice(0, 200) : prev.password;
   c.mqtt = {

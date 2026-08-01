@@ -5,6 +5,32 @@ updates). `scripts/make-release.sh` lifts the current version's `hu`/`en`
 blocks into the OTA feed's `notes` - keep both languages, keep it short, and
 write for the person on the couch (what changes for THEM), not for developers.
 
+## 1.22.0
+
+### hu
+
+- Visszaállítás után a box magától visszahozza az alkalmazásaidat is. Eddig a beállítások megjöttek, de az appok - a hozzájuk tartozó programok, letöltések, csomagok - nem, és egy üres kezdőképernyő fogadott: most a box a mentésből tudja, mi volt rajta, és a bekapcsolás után sorra letölti őket, közben pedig a képernyő alján látod, hol tart. Ha közben elindítasz valamit, félbehagyja és később folytatja.
+- Az appok saját fájljai is utaznak a mentéssel: a retro játékok listái és mentései például már nem maradnak a régi boxon.
+- Egy második boxot mostantól az elsőről tudsz beállítani. A telefonos mentés oldalán megadhatod, hogy a fájl "másik boxhoz" készül - akkor a beállítások átkerülnek, de a box eszközazonosítói (Home Assistant, Spotify-név) újra képződnek, hogy a két box ne akadjon egymásba. Visszaállításkor nevet is adhatsz az új boxnak.
+
+### en
+
+- After a restore the box brings your apps back by itself. The settings used to come back but the apps behind them - their programs, downloads and packages - did not, and you were left on an empty home screen: the box now knows from the backup what it had, downloads it after the restart, and shows the progress at the bottom of the screen. Start something in the meantime and it stands down, then carries on later.
+- An app's own files travel with the backup too, so a retro library's game lists and save files no longer stay behind on the old box.
+- A second box can be set up from the first one. On the phone backup page you can say the file is "for another box": the settings travel, but the box's device identifiers (Home Assistant, Spotify name) are re-derived so the two never collide. You can name the new box while restoring it.
+
+### notes
+
+Not release notes for the TV - for whoever runs the boxes:
+
+- **The MQTT device id now defaults to the hostname, not the literal `tvbox`.** That
+  is the fix for two boxes sharing one topic tree, but a box that configured MQTT by
+  hand and never set a `deviceId` changes topics on this update: its old
+  auto-discovered "Now playing" sensor stays behind in Home Assistant as
+  unavailable. Delete the stale retained discovery message to clear it
+  (`mosquitto_pub -t 'homeassistant/sensor/tvbox_tvbox/nowplaying/config' -r -n`),
+  or pin the old value with `"deviceId": "tvbox"` in `~/.tvbox/config.json`.
+
 ## 1.21.3
 
 ### hu

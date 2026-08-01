@@ -73,4 +73,21 @@ function remove(id, key) {
   return writeAll(id, all);
 }
 
-module.exports = { get, set, remove, readAll, safeId, MAX_BYTES, MAX_KEYS, DIR };
+// Replace an app's whole store in one write (backup restore). Goes through the
+// same id/size guards as a live write, and applies the key cap and string-value
+// rule up front - a restored file is attacker-supplied until its password
+// verifies, and must not be able to hand an app a store it could never have
+// written itself.
+function replaceAll(id, obj) {
+  if (!safeId(id)) return { ok: false, error: "bad app id" };
+  if (!obj || typeof obj !== "object" || Array.isArray(obj)) return { ok: false, error: "bad store" };
+  const out = Object.create(null);
+  for (const k of Object.keys(obj)) {
+    if (typeof obj[k] !== "string") continue;
+    if (Object.keys(out).length >= MAX_KEYS) break;
+    out[k] = obj[k];
+  }
+  return writeAll(id, out);
+}
+
+module.exports = { get, set, remove, readAll, replaceAll, safeId, MAX_BYTES, MAX_KEYS, DIR };

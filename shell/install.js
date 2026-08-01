@@ -110,6 +110,35 @@ function migrateAppsData() {
   }
 }
 
+// Files in ~/.tvbox/ that belong to the SHELL and can never be an app's own state,
+// whatever id a manifest claims. The id prefix alone is not a boundary: an app id is
+// only constrained to [a-z0-9_-], so a manifest calling itself `config` would match
+// `config.json` - the file holding the IPTV/Spotify/MQTT credentials and the
+// parental PIN hash - and a manifest-only app is untrusted. Kept in sync with
+// backup.js's EXTRA_FILES by install.test.js.
+const RESERVED_STATE_FILES = new Set([
+  "config.json",
+  "spotify-accounts.json",
+  "spotify-refresh-token",
+  "restore-localstorage.json",
+  "restore-appfiles.json",
+  "reconcile.json",
+  "install.log",
+]);
+
+// A ~/.tvbox/ sidecar an app may claim as its own in `backup.state`: one flat file
+// name, no path separators, prefixed with `<id>-`, and not one of the shell's own.
+// The HYPHEN matters - `<id>.json` and `<id>.<anything>` were the forms that let an
+// app named `config` or `spotify` name a shell file - and the reserved set closes
+// what is left.
+function stateFileOk(id, name) {
+  if (!/^[a-z0-9_-]+$/.test(String(id || ""))) return false;
+  if (typeof name !== "string" || name.length > 80) return false;
+  if (!/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(name) || name.includes("..")) return false;
+  if (RESERVED_STATE_FILES.has(name)) return false;
+  return name.startsWith(id + "-");
+}
+
 // Reject (skip with a warning) anything that would confuse the shell or the
 // launcher instead of half-rendering it. Formal schema: docs/app-manifest.md +
 // docs/app-manifest.schema.json (CI validates the shipped manifests against it).
@@ -209,6 +238,44 @@ function validateManifest(m, src) {
         return bad("pairing[].label must be a string or a locale map");
     }
   }
+  // Files of its own the app wants carried across a re-flash or onto a second box
+  // (RetroArch's playlists and save files; the `storage` capability covers only
+  // small key/value settings). Validated here as well as in CI because a manifest
+  // dropped into ~/.tvbox/apps/ never sees CI, and these paths reach the
+  // filesystem on BOTH sides of a backup.
+  const bk = m.backup;
+  if (bk !== undefined) {
+    if (!bk || typeof bk !== "object" || Array.isArray(bk)) return bad("backup must be an object");
+    if (bk.flatpak !== undefined && !nativeapp.flatpakRefOk(bk.flatpak))
+      return bad("backup.flatpak must be a flatpak ref the app declares");
+    if (!Array.isArray(bk.paths) || !bk.paths.length || bk.paths.length > 16)
+      return bad("backup.paths must be 1-16 relative paths");
+    for (const rel of bk.paths) {
+      if (typeof rel !== "string" || !rel || rel.length > 200) return bad("bad backup.paths entry");
+      // No absolute path, no traversal, no leading dot-segment: these are joined
+      // onto the app's own root and written back verbatim on restore.
+      if (path.isAbsolute(rel) || rel.split(/[\\/]/).some((s) => s === ".." || s === "" || s === "."))
+        return bad("backup.paths must be relative in-app paths: " + JSON.stringify(rel));
+      // `state` is the prefix the backup payload uses to mark a ~/.tvbox/ sidecar
+      // (backup.js STATE_PREFIX). A declared directory of that name would produce
+      // entries the restore reads as sidecars and then drops, so the files would be
+      // carried and silently never written back. Refuse the name instead.
+      if (rel === "state" || rel.startsWith("state/"))
+        return bad('backup.paths may not start with "state" (reserved for backup.state)');
+    }
+    // Sidecar state a `service` plugin keeps directly in ~/.tvbox/ (host-process
+    // Node code writes there; only small key/value settings go through the
+    // `storage` capability). The name must be PREFIXED with the app id - that is
+    // what makes this a boundary and not a convention: no app can name
+    // config.json, or another app's file.
+    if (bk.state !== undefined) {
+      if (!Array.isArray(bk.state) || bk.state.length > 8) return bad("backup.state must be an array of at most 8");
+      for (const name of bk.state) {
+        if (typeof name !== "string" || !stateFileOk(m.id, name))
+          return bad("backup.state entries must be ~/.tvbox/<id>-<name> files: " + JSON.stringify(name));
+      }
+    }
+  }
   const CAPS = ["nav", "player", "config", "fetch", "storage", "display", "input", "system"];
   const caps = m.runtime && m.runtime.capabilities;
   if (caps != null) {
@@ -285,6 +352,23 @@ function appDataDir(id) {
 }
 function isInstalled(id) {
   return fs.existsSync(appDataDir(id));
+}
+
+// The directory an app's `backup.paths` are resolved against: its flatpak's
+// per-user data dir when the manifest names one (RetroArch keeps its playlists
+// and saves there), otherwise the app's own extracted-bundle dir. Returns null
+// when the manifest declares nothing or names a flatpak it doesn't depend on -
+// a backup must never be able to read or write outside the app it belongs to.
+function appBackupRoot(m) {
+  const bk = m && m.backup;
+  if (!bk || !Array.isArray(bk.paths) || !bk.paths.length) return null;
+  if (!bk.flatpak) return appDataDir(m.id);
+  const declared = flatpak.refsFor(m).map((f) => f.ref);
+  if (!declared.includes(bk.flatpak)) {
+    console.warn("[apps]", m.id + ": backup.flatpak", bk.flatpak, "is not one of its own refs - ignoring");
+    return null;
+  }
+  return flatpak.dataDir(bk.flatpak);
 }
 
 // Is an executable on PATH (or an absolute path)? Used to check a manifest's
@@ -752,6 +836,9 @@ module.exports = {
   getManifests,
   manifestById,
   appDataDir,
+  appBackupRoot,
+  stateFileOk,
+  RESERVED_STATE_FILES,
   isInstalled,
   installApp,
   installAll,
