@@ -182,7 +182,8 @@ function pair(env, mac, cb) {
 // separate action rather than made the default: it briefly takes the box off the
 // network, which is only worth it for the device class that needs it (a BLE
 // remote whose CONNECT_IND keeps losing the antenna to wifi - wifiradio.js has
-// the measurements). The radio comes back before the answer reaches the caller.
+// the measurements). Restoring the radio is STARTED before the answer goes back,
+// not awaited, so wifi can still be a second or two behind the reply.
 function pairQuiet(env, mac, cb) {
   wifiradio.withRadioOff(
     env,

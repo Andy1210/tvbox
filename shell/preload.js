@@ -85,7 +85,9 @@ const { ipcRenderer } = require("electron");
     // `streams` (optional) is the app's own track decision, in 0-based ordinals
     // within each type: { audio, sub, subFile }. An app that resolved its
     // streams elsewhere (a media server told it which ones to play) passes them
-    // here; omitting the argument keeps mpv's own selection.
+    // here. What it leaves out falls back to the box's language preference
+    // (Settings > Picture & sound), per axis - so omitting the argument entirely
+    // is the same as having no opinion about either.
     window.tvbox.play = function (url, streams) {
       try {
         ipcRenderer.invoke("player", "queue", { url: url, streams: streams || null });

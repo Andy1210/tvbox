@@ -40,7 +40,16 @@ function withRadioOff(env, seconds, body, deps) {
     (before) => {
       if (before !== "enabled") return body(() => {}); // off already, or unknown: leave it alone
       const disarm = fuse(env, seconds);
-      run("nmcli", ["radio", "wifi", "off"], { env, timeout: 10000 }, () => {
+      run("nmcli", ["radio", "wifi", "off"], { env, timeout: 10000 }, (err) => {
+        if (err) {
+          // The radio is still up, so there is nothing to restore and nothing to
+          // arm a fuse for. The operation goes ahead anyway - it may well work,
+          // and refusing to try would be a worse answer than trying without the
+          // advantage - but the log says why it may behave as it did before.
+          console.warn("[wifi] could not take the radio down:", String(err.message || err).slice(0, 120));
+          disarm();
+          return body(() => {});
+        }
         let restored = false;
         body(() => {
           if (restored) return; // idempotent: the caller may finish more than once
@@ -65,6 +74,12 @@ function armFuse(env, seconds) {
       detached: true,
       stdio: "ignore",
     });
+    // A spawn that fails asynchronously (EMFILE, EAGAIN, a missing shell) reports
+    // it through an `error` EVENT, which the try/catch above cannot see - and an
+    // unhandled one is an uncaught exception that takes the shell down. Crashing
+    // the shell is the very lockout this fuse exists to prevent, so it is caught
+    // here even though all it can do is say the fuse is not there.
+    p.on("error", (e) => console.warn("[wifi] restore fuse failed to start:", String(e.message || e).slice(0, 120)));
     p.unref();
   } catch (e) {
     return () => {};

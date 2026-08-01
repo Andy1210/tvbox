@@ -181,6 +181,9 @@ export async function handleApi(
       }
       return { devices: btDevices };
     case "/tvbox/api/bt/pair":
+    // Same outcome as a plain pair here: what differs on a box is that the wifi
+    // radio is held down for the attempt, which demo mode has nothing to model.
+    case "/tvbox/api/bt/pair-quiet":
     case "/tvbox/api/bt/connect":
     case "/tvbox/api/bt/disconnect":
     case "/tvbox/api/bt/remove": {
@@ -188,7 +191,8 @@ export async function handleApi(
       const i = btDevices.findIndex((d) => d.mac === b.mac);
       if (i >= 0) {
         if (action === "remove") btDevices.splice(i, 1);
-        else if (action === "pair") Object.assign(btDevices[i], { paired: true, connected: true });
+        else if (action === "pair" || action === "pair-quiet")
+          Object.assign(btDevices[i], { paired: true, connected: true });
         else btDevices[i].connected = action === "connect";
       }
       return ok;

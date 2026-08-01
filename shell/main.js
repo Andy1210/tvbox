@@ -15,6 +15,7 @@ const os = require("os");
 const config = require("./config");
 const pairing = require("./pairing");
 const playeropts = require("./playeropts"); // app stream terms -> mpv args/commands + the settable-property allowlist
+const { redact } = require("./redact"); // an app's console line may carry ITS credentials; the shell's log is a file
 const display = require("./display"); // wlr-randr resolution/refresh control
 const displaymode = require("./displaymode"); // adaptive mode: UI mode + per-video claims
 const textinput = require("./textinput"); // typing into a keyboard-less app (OSK / phone)
@@ -1884,21 +1885,13 @@ function launchMpv(url, startPos, pip, rect, streams) {
     mpvStartPending = true;
   }
   if (audioSink) args.push("--audio-device=pipewire/" + audioSink);
-  // An app that resolved its own streams (Plex decides audio/subtitle server-side
-  // and ships the choice with the item) OVERRIDES the box-wide language
-  // preference - and it has to be spelled out, because mpv's default `sid=auto`
-  // turns on any subtitle track carrying the container's default flag, which is
-  // how a film played with "no subtitles" in Plex came up with burnt-looking
-  // Hungarian subs anyway. No opinion from the app -> Settings > Picture & sound
-  // (mpv falls back to the stream default when the language isn't there;
-  // --slang alone doesn't ENABLE subtitles, hence sid=auto next to it).
-  if (streams) {
-    args.push(...playeropts.streamArgs(streams));
-  } else {
-    const pl = config.rawPlayer() || {};
-    if (/^[a-z]{2,3}$/.test(pl.audioLang || "")) args.push("--alang=" + pl.audioLang);
-    if (/^[a-z]{2,3}$/.test(pl.subLang || "")) args.push("--slang=" + pl.subLang, "--sid=auto");
-  }
+  // Track selection, per axis: what the app decided for itself (Plex resolves
+  // audio/subtitle server-side and ships the choice with the item) wins, and
+  // Settings > Picture & sound fills in the rest. The app's choice has to be
+  // spelled out because mpv's default `sid=auto` turns on any subtitle track
+  // carrying the container's default flag, which is how a film played with "no
+  // subtitles" in Plex came up with Hungarian subs anyway.
+  args.push(...playeropts.streamArgs(streams, config.rawPlayer()));
   // "--" ends option parsing: a URL starting with "-" (or a crafted playlist
   // entry) must always be argv's file position, never an mpv option.
   args.push("--", url);
@@ -2476,7 +2469,7 @@ function openRemoteApp(m, url) {
   wc.on("console-message", (ev) => {
     console.log(
       "[remote:" + (CONSOLE_TAG[ev.level] || "?") + "]",
-      ev.message,
+      redact(ev.message),
       ev.sourceId ? "(" + ev.sourceId + ":" + ev.lineNumber + ")" : "",
     );
   });
@@ -2546,7 +2539,7 @@ function openRemoteApp(m, url) {
       return { action: "deny" };
     });
     cwc.on("console-message", (ev) => {
-      console.log("[popup:" + (CONSOLE_TAG[ev.level] || "?") + "]", ev.message);
+      console.log("[popup:" + (CONSOLE_TAG[ev.level] || "?") + "]", redact(ev.message));
     });
     cwc.on("dom-ready", () => {
       cwc.executeJavaScript(NO_WEBAUTHN_JS).catch(() => {}); // the sign-in page lives here
@@ -2697,7 +2690,7 @@ function openLocalApp(m) {
   w.webContents.on("console-message", (ev) => {
     console.log(
       "[app:" + m.id + ":" + (CONSOLE_TAG[ev.level] || "?") + "]",
-      ev.message,
+      redact(ev.message),
       ev.sourceId ? "(" + ev.sourceId + ":" + ev.lineNumber + ")" : "",
     );
   });
@@ -2907,7 +2900,7 @@ function handleTvCommand(cmd) {
   }
 }
 
-ipcMain.on("plog", (_e, p, a) => console.log("[plog]", p, a)); // debug: raw player.* calls from an app
+ipcMain.on("plog", (_e, p, a) => console.log("[plog]", p, redact(a))); // debug: raw player.* calls from an app
 
 // Which window a webContents belongs to: null = the launcher window, an app id
 // = that app's own window, undefined = unknown/stale sender (no identity, no
@@ -3293,8 +3286,12 @@ ipcMain.handle("player", (e, action, payload) => {
   } else if (action === "select") {
     // Mid-playback version of the queue's `streams`, in the SAME ordinal terms
     // (`track` above speaks mpv track ids, which an app that never saw the track
-    // list can't produce).
+    // list can't produce). Remembered as well as applied: going to PiP and back
+    // RELAUNCHES mpv from `queued.streams`, so a selection only sent to the live
+    // player would be quietly undone by the next toggle. Merged per axis - a
+    // call that changes only the subtitle must not clear the audio choice.
     for (const command of playeropts.streamCommands(payload)) mpvCmd({ command });
+    queued.streams = playeropts.mergeStreams(queued.streams, payload);
   } else if (action === "prop") {
     // One allowlisted playback property (subtitle/audio sync, speed, volume,
     // subtitle look). A refusal is reported, not swallowed: an app that gets
@@ -3588,7 +3585,7 @@ app.whenReady().then(async () => {
   win.webContents.on("console-message", (ev) => {
     console.log(
       "[renderer:" + (CONSOLE_TAG[ev.level] || "?") + "]",
-      ev.message,
+      redact(ev.message),
       ev.sourceId ? "(" + ev.sourceId + ":" + ev.lineNumber + ")" : "",
     );
   });
