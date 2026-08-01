@@ -1,5 +1,7 @@
-// tvbox app store - a git-hosted registry: one index.json of vetted app
-// manifests (built by the tvbox-apps repo's CI). "Installing" a store app just
+// tvbox app store - a curated registry: one index.json of vetted app manifests,
+// BUILT AND PUBLISHED by the tvbox-apps repo's CI (it compiles every app from
+// source on merge and deploys the result; nothing there is a committed
+// snapshot). "Installing" a store app just
 // writes its manifest to ~/.tvbox/apps/<id>.json - the tile appears live via
 // the manifest reload on /tvbox/api/apps; bundles/deps then follow the normal
 // opt-in paths (UI install, `tvbox deps`).
@@ -9,7 +11,12 @@ const apps = require("./install");
 const flatpak = require("./flatpak");
 const { isAllowedFetchUrl, guardedFetch } = require("./netguard"); // https anywhere, or LAN http; re-guards redirects
 
-const DEFAULT_REGISTRY = "https://raw.githubusercontent.com/Andy1210/tvbox-apps/main/index.json";
+// The registry's own https URL. Package files are fetched RELATIVE to it
+// (`new URL("apps/<id>/", url)` in install()), so the whole registry moves by
+// changing this one string - which is how it moved off GitHub raw and onto the
+// repo's Pages site, where CI publishes what it built rather than what someone
+// remembered to commit.
+const DEFAULT_REGISTRY = "https://andy1210.github.io/tvbox-apps/index.json";
 const CACHE_MS = 5 * 60 * 1000;
 let cache = { at: 0, url: null, entries: null, error: null };
 
