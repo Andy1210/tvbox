@@ -418,6 +418,16 @@
     "restored": "Visszaállítva - a box most újraindul…",
     "error": "Nem sikerült elindítani a telefonos munkamenetet"
   },
+  "restore": {
+    "preparing": "Alkalmazások visszaállítása…",
+    "step": {
+      "app": "{name} visszaállítása…",
+      "deps": "{name}: összetevők telepítése…",
+      "bundle": "{name}: az alkalmazás letöltése…"
+    },
+    "done": "Az alkalmazásaid visszakerültek",
+    "doneWithErrors": "{total} alkalmazásból {n} visszaállt - {failed} nem töltődött le"
+  },
   "parental": {
     "title": "Szülői felügyelet",
     "set": "PIN beállítása",

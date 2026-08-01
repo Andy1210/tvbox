@@ -141,12 +141,22 @@ function handle(req, res) {
       res.writeHead(403, { "Content-Type": "application/json" });
       return res.end(JSON.stringify({ ok: false, error: "code" }));
     }
-    try {
-      handler(req, res, { ...ctx, body: d });
-    } catch (e) {
-      console.warn("[pairing] route:", e.message);
+    // A handler may be async (the restore one renames the box before applying).
+    // Without following the promise, a rejection after the first await would go
+    // unhandled and the phone would sit on a request that never answers. Only
+    // answer if nothing was sent yet - a handler that already replied and then
+    // threw must not have a second response written over it.
+    const fail = (e) => {
+      console.warn("[pairing] route:", e && e.message);
+      if (res.headersSent) return res.end();
       res.writeHead(400, { "Content-Type": "application/json" });
       res.end(JSON.stringify({ ok: false }));
+    };
+    try {
+      const r = handler(req, res, { ...ctx, body: d });
+      if (r && typeof r.catch === "function") r.catch(fail);
+    } catch (e) {
+      fail(e);
     }
   });
 }

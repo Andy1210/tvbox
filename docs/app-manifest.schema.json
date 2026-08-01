@@ -117,6 +117,37 @@
         }
       }
     },
+    "backup": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["paths"],
+      "description": "Files of the app's OWN that a settings backup should carry across a re-flash or onto a second box (RetroArch's playlists and save files). The `storage` capability covers small key/value settings; this is for real files. Bounded by the shell: 8 MB total across all apps, 4 MB per file, 400 files - a backup travels through a phone, so this is not for ROMs or cover art. Anything that doesn't fit is reported in the log, never silently dropped.",
+      "properties": {
+        "flatpak": {
+          "type": "string",
+          "description": "Resolve `paths` against this flatpak's per-user data dir (~/.var/app/<ref>/) instead of the app's own bundle dir. Must be a ref the app already declares in requires.flatpak or install.source."
+        },
+        "paths": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 16,
+          "items": {
+            "type": "string",
+            "maxLength": 200
+          },
+          "description": "Relative in-app paths (file or directory), in priority order. No absolute paths, no `..`, and not starting with \"state\" (reserved for backup.state's payload prefix): they are joined onto the app's own root and written back verbatim on restore."
+        },
+        "state": {
+          "type": "array",
+          "maxItems": 8,
+          "items": {
+            "type": "string",
+            "maxLength": 80
+          },
+          "description": "Sidecar state files the app's plugin keeps directly in ~/.tvbox/ (host-process Node code writes there; the `storage` capability only covers small key/value settings). Each name must start with \"<id>-\" AND must not be one of the shell's own sidecars - both gates are needed, because an app id is only constrained to [a-z0-9_-] and a manifest calling itself `config` would otherwise name config.json. Restored 0600."
+        }
+      }
+    },
     "requires": {
       "type": "object",
       "additionalProperties": false,
