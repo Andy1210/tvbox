@@ -82,15 +82,10 @@ function init(cfg, handlers) {
 // is retained, a Home Assistant installed later still finds it.
 function announce(info) {
   if (!client) return;
-  publish(
-    "announce",
-    {
-      id: deviceId,
-      base: base,
-      ...(info || {}),
-    },
-    { retain: true },
-  );
+  // info FIRST, then the fixed fields: id and base are what Home Assistant keys
+  // discovery off, and a caller that happened to pass either of them would
+  // otherwise announce a box at an address it does not listen on.
+  publish("announce", { ...(info || {}), id: deviceId, base: base }, { retain: true });
 }
 
 // Publish under the device base. Objects are JSON-encoded; retain for state

@@ -487,6 +487,28 @@ function installRclone() {
 
 // ---- app manifests + install (the install-recipe runner lives in install.js,
 // shared with the `tvbox` CLI; the shell just queries manifests + serves apps) ----
+
+// Launchable = belongs on HOME: ready status, binary deps present, configured, a
+// bundle app has its bundle, and not mid-install. HOME shows ONLY these, so a
+// still-installing or not-yet-provisioned app stays in the store (with progress)
+// instead of appearing greyed on HOME.
+//
+// One function, because two callers answer the same question and must not drift:
+// the tile list the launcher draws, and the source list the Home Assistant
+// media_player offers. A source that HOME would refuse to open must not be
+// offered there either.
+function appLaunchable(m) {
+  const { depsOk } = apps.appDeps(m);
+  const rt = m.runtime || {};
+  // A remote web-app whose URL comes from config (runtime.urlConfig) is only
+  // launchable once that URL is set (e.g. Home Assistant).
+  const configured = rt.serve === "remote" && rt.urlConfig ? !!(config.appConfig(rt.urlConfig) || {}).baseUrl : true;
+  const installable = !!(m.install && m.install.source);
+  return (
+    m.status === "ready" && depsOk && configured && !installing.has(m.id) && (!installable || apps.isInstalled(m.id))
+  );
+}
+
 function appTiles() {
   // the subset the launcher needs to draw a tile (+ dependency status so it can
   // grey out an app whose required binary isn't installed)
@@ -526,16 +548,7 @@ function appTiles() {
       installed: apps.isInstalled(m.id),
       installing: installing.has(m.id),
       configured,
-      // Launchable = belongs on HOME: ready status, binary deps present,
-      // configured, a bundle app has its bundle, and not mid-install. HOME shows
-      // ONLY these, so a still-installing / not-yet-provisioned app stays in the
-      // store (with progress) instead of appearing greyed on HOME.
-      ready:
-        m.status === "ready" &&
-        depsOk &&
-        configured &&
-        !installing.has(m.id) &&
-        (!installable || apps.isInstalled(m.id)),
+      ready: appLaunchable(m), // see appLaunchable: the one definition HOME and HA share
       progress: installProgress.get(m.id) || null,
     };
   });
@@ -3053,14 +3066,19 @@ function publishMediaState(opts) {
   }, 200);
 }
 
-// The apps a media_player can be switched TO: launchable ones only, so Home
-// Assistant's source list never offers a tile that would refuse to open.
+// The apps a media_player can be switched TO: exactly what HOME would open
+// (appLaunchable), so the source list never offers a tile the box would refuse -
+// an app mid-install, missing a dep, or a remote app with no URL set yet.
+// Bounded, because this goes into a retained payload and then into a Home
+// Assistant state attribute.
+const MAX_MEDIA_SOURCES = 64;
 function mediaSources() {
   return apps
     .getManifests()
-    .filter((m) => m.status === "ready")
+    .filter(appLaunchable)
     .map((m) => ({ id: m.id, name: typeof m.name === "string" ? m.name : m.name && (m.name.en || m.name.hu) }))
-    .filter((s) => s.name);
+    .filter((s) => s.name)
+    .slice(0, MAX_MEDIA_SOURCES);
 }
 
 // Which app is in front changes through half a dozen paths (launch, resume,
