@@ -306,7 +306,8 @@ notes: [docs/firetv-remote-ir.md](docs/firetv-remote-ir.md).
 
 **Settings → App Store** (also HOME → "Get more apps") lists apps from the
 [tvbox-apps registry](https://github.com/Andy1210/tvbox-apps): a curated git
-repo that CI compiles into one `index.json`, which every box fetches over HTTPS.
+repo whose CI builds every app from source on merge and publishes one
+`index.json` to its GitHub Pages site, which every box fetches over HTTPS.
 Selecting an app opens a full-screen detail view (description, version, "What's
 new" changelog); installing fetches the whole package (manifest + `web/` UI +
 any `plugin.js`) into `~/.tvbox/apps/<id>/`, each file sha256-verified, and the
