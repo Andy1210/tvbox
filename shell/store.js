@@ -229,7 +229,9 @@ async function install(config, id) {
     // its own bridge). Both forms live under ~/.tvbox/apps/ and loadManifests
     // walks that dir, so leaving the old <id>.json behind would make two
     // manifests claim one id and let readdir order decide which one wins.
-    fs.rmSync(storeManifestPath(id), { force: true });
+    // recursive as well as force: rmSync throws on a directory without it, and
+    // "<id>.json is somehow a directory" must not be what breaks an install.
+    fs.rmSync(storeManifestPath(id), { recursive: true, force: true });
     console.log("[store] installed package:", id);
   } else {
     fs.mkdirSync(apps.USER_APPS_DIR, { recursive: true });

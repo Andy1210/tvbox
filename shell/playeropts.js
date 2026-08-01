@@ -39,18 +39,29 @@ function propValue(name, value) {
 const ordinal = (v) => (Number.isInteger(v) && v >= 0 && v < 100 ? v + 1 : null);
 
 // Selection as mpv command-line arguments, for a file that is about to start.
-// Anything unparseable is dropped rather than guessed: mpv's own default beats a
-// wrong track.
-function streamArgs(sel) {
+// `prefs` is the box-wide language preference (Settings > Picture & sound), and
+// the two are decided PER AXIS: the app's explicit choice wins where it made
+// one, and the box preference applies where it didn't. An app that picked an
+// audio track but said nothing about subtitles should still get the subtitle
+// language its owner asked for. Anything unparseable is dropped rather than
+// guessed: mpv's own default beats a wrong track.
+function streamArgs(sel, prefs) {
   const out = [];
-  if (!sel || typeof sel !== "object") return out;
-  const a = ordinal(sel.audio);
-  if (a) out.push("--aid=" + a);
-  if (subFileOf(sel)) out.push("--sub-file=" + sel.subFile);
-  else if (sel.sub === -1 || sel.sub === false) out.push("--sid=no");
+  const s = sel && typeof sel === "object" ? sel : {};
+  const p = prefs && typeof prefs === "object" ? prefs : {};
+  const lang = (v) => (/^[a-z]{2,3}$/.test(v || "") ? v : null);
+
+  const aid = ordinal(s.audio);
+  if (aid) out.push("--aid=" + aid);
+  else if (lang(p.audioLang)) out.push("--alang=" + p.audioLang);
+
+  if (subFileOf(s)) out.push("--sub-file=" + s.subFile);
+  else if (s.sub === -1 || s.sub === false) out.push("--sid=no");
   else {
-    const s = ordinal(sel.sub);
-    if (s) out.push("--sid=" + s);
+    const sid = ordinal(s.sub);
+    if (sid) out.push("--sid=" + sid);
+    // --slang alone doesn't ENABLE subtitles, hence sid=auto next to it.
+    else if (lang(p.subLang)) out.push("--slang=" + p.subLang, "--sid=auto");
   }
   return out;
 }
@@ -62,17 +73,41 @@ function streamCommands(sel) {
   const out = [];
   if (!sel || typeof sel !== "object") return out;
   if (subFileOf(sel)) return [["sub-add", sel.subFile, "select"]];
-  for (const [key, prop] of [
-    ["audio", "aid"],
-    ["sub", "sid"],
+  // Only SUBTITLES can be turned off. There is no "no audio" in this vocabulary,
+  // and a client that could not match its chosen audio stream says so with the
+  // same -1 it uses for "no subtitle" (Plex's does) - turning that into `aid=no`
+  // would silently mute the film instead of leaving the track to the player.
+  for (const [key, prop, offable] of [
+    ["audio", "aid", false],
+    ["sub", "sid", true],
   ]) {
     const v = sel[key];
     if (v === undefined || v === null) continue;
-    if (v === -1 || v === false) out.push(["set_property", prop, "no"]);
-    else {
-      const n = ordinal(v);
-      if (n) out.push(["set_property", prop, n]);
+    if (v === -1 || v === false) {
+      if (offable) out.push(["set_property", prop, "no"]);
+      continue;
     }
+    const n = ordinal(v);
+    if (n) out.push(["set_property", prop, n]);
+  }
+  return out;
+}
+
+// Fold a mid-playback change into the selection a relaunch would use. Only the
+// axes the change actually carried are replaced, and picking a sidecar clears
+// the embedded subtitle index it replaces (and the other way round) so the two
+// can never both be in force.
+function mergeStreams(base, change) {
+  const b = base && typeof base === "object" ? base : {};
+  const c = change && typeof change === "object" ? change : {};
+  const out = { audio: b.audio ?? null, sub: b.sub ?? null, subFile: b.subFile ?? null };
+  if (c.audio !== undefined) out.audio = c.audio;
+  if (subFileOf(c)) {
+    out.subFile = c.subFile;
+    out.sub = null;
+  } else if (c.sub !== undefined) {
+    out.sub = c.sub;
+    out.subFile = null;
   }
   return out;
 }
@@ -84,4 +119,4 @@ function subFileOf(sel) {
   return typeof u === "string" && /^https?:\/\/[^\s]+$/.test(u) ? u : null;
 }
 
-module.exports = { streamArgs, streamCommands, propValue, subFileOf, PLAYER_PROPS };
+module.exports = { streamArgs, streamCommands, mergeStreams, propValue, subFileOf, PLAYER_PROPS };

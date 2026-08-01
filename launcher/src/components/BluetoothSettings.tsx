@@ -110,8 +110,11 @@ export function BluetoothSettings() {
     // The retry is worth offering exactly where it helps: a pairing that failed.
     // It stays after a failed quiet attempt too - the remote may simply not have
     // been in pairing mode that time.
+    // Scoped to THIS device: connecting or removing some other device says
+    // nothing about the one whose pairing failed, and must not take its retry
+    // row off the screen.
     const offer = !r.ok && pairing;
-    setRetryQuiet(offer ? d.mac : null);
+    setRetryQuiet((prev) => (offer ? d.mac : prev === d.mac ? null : prev));
     setTimeout(() => setFocus(offer ? "bt-quiet-" + d.mac : "bt-dev-" + d.mac), 0);
     refresh();
   };
