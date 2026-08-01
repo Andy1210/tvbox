@@ -12,17 +12,25 @@ write for the person on the couch (what changes for THEM), not for developers.
 - Visszaállítás után a box magától visszahozza az alkalmazásaidat is. Eddig a beállítások megjöttek, de az appok - a hozzájuk tartozó programok, letöltések, csomagok - nem, és egy üres kezdőképernyő fogadott: most a box a mentésből tudja, mi volt rajta, és a bekapcsolás után sorra letölti őket, közben pedig a képernyő alján látod, hol tart. Ha közben elindítasz valamit, félbehagyja és később folytatja.
 - Az appok saját fájljai is utaznak a mentéssel: a retro játékok listái és mentései például már nem maradnak a régi boxon.
 - Egy második boxot mostantól az elsőről tudsz beállítani. A telefonos mentés oldalán megadhatod, hogy a fájl "másik boxhoz" készül - akkor a beállítások átkerülnek, de a box eszközazonosítói (Home Assistant, Spotify-név) újra képződnek, hogy a két box ne akadjon egymásba. Visszaállításkor nevet is adhatsz az új boxnak.
+- A box mostantól rendes médialejátszóként jelenik meg a Home Assistantban: állapot, cím és borító, lejátszás/megállítás, hangerő, és onnan indíthatod az appokat is. A Home Assistant magától felajánlja, amint a box felkerül az MQTT-brókerre.
 
 ### en
 
 - After a restore the box brings your apps back by itself. The settings used to come back but the apps behind them - their programs, downloads and packages - did not, and you were left on an empty home screen: the box now knows from the backup what it had, downloads it after the restart, and shows the progress at the bottom of the screen. Start something in the meantime and it stands down, then carries on later.
 - An app's own files travel with the backup too, so a retro library's game lists and save files no longer stay behind on the old box.
 - A second box can be set up from the first one. On the phone backup page you can say the file is "for another box": the settings travel, but the box's device identifiers (Home Assistant, Spotify name) are re-derived so the two never collide. You can name the new box while restoring it.
+- The box now appears in Home Assistant as a proper media player: state, title and artwork, play/pause, volume, and you can launch its apps from there. Home Assistant offers it automatically once the box is on your MQTT broker.
 
 ### notes
 
 Not release notes for the TV - for whoever runs the boxes:
 
+- **The Home Assistant media player needs a one-time install.** Copy
+  `homeassistant/custom_components/tvbox/` into your Home Assistant config dir and
+  restart it. Home Assistant's MQTT integration cannot create a `media_player`
+  entity from a discovery payload (there is no such platform), so this is a small
+  local integration over the same broker connection - no polling, no credentials of
+  its own. See docs/homeassistant-integration.md.
 - **The MQTT device id now defaults to the hostname, not the literal `tvbox`.** That
   is the fix for two boxes sharing one topic tree, but a box that configured MQTT by
   hand and never set a `deviceId` changes topics on this update: its old
@@ -30,6 +38,9 @@ Not release notes for the TV - for whoever runs the boxes:
   unavailable. Delete the stale retained discovery message to clear it
   (`mosquitto_pub -t 'homeassistant/sensor/tvbox_tvbox/nowplaying/config' -r -n`),
   or pin the old value with `"deviceId": "tvbox"` in `~/.tvbox/config.json`.
+- The SD image is now smoke-tested in CI before it is uploaded (geometry, payload,
+  and a real boot of its userspace under nspawn). See docs/sd-image.md for what a
+  pass does and does not prove.
 
 ## 1.21.3
 

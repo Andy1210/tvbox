@@ -80,4 +80,17 @@ function setVolume(env, id, volume, cb) {
   execFile("wpctl", ["set-volume", String(id), v.toFixed(2)], { env, timeout: 8000 }, (e) => cb(!e));
 }
 
-module.exports = { listSinks, setVolume };
+// Mute/unmute a sink. `muted` may be a boolean or "toggle".
+function setMuted(env, id, muted, cb) {
+  const arg = muted === "toggle" ? "toggle" : muted ? "1" : "0";
+  execFile("wpctl", ["set-mute", String(id), arg], { env, timeout: 8000 }, (e) => cb(!e));
+}
+
+// The sink the box actually plays through, with its volume/mute - what "the box's
+// volume" means to anything outside (Home Assistant's media_player, MQTT). null
+// when there is no sink at all (no HDMI audio yet).
+function defaultSink(env, cb) {
+  listSinks(env, (sinks) => cb(sinks.find((s) => s.isDefault) || sinks[0] || null));
+}
+
+module.exports = { listSinks, setVolume, setMuted, defaultSink };
