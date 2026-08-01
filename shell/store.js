@@ -225,10 +225,16 @@ async function install(config, id) {
     } catch (e) {
       return { ok: false, error: "package install failed: " + (e && e.message ? e.message : String(e)) };
     }
+    // An app can GROW from a single manifest into a package (Plex did, to carry
+    // its own bridge). Both forms live under ~/.tvbox/apps/ and loadManifests
+    // walks that dir, so leaving the old <id>.json behind would make two
+    // manifests claim one id and let readdir order decide which one wins.
+    fs.rmSync(storeManifestPath(id), { force: true });
     console.log("[store] installed package:", id);
   } else {
     fs.mkdirSync(apps.USER_APPS_DIR, { recursive: true });
     fs.writeFileSync(storeManifestPath(id), JSON.stringify(m, null, 2) + "\n");
+    fs.rmSync(packageDir(id), { recursive: true, force: true }); // ...and the other way round
     console.log("[store] installed manifest:", id);
   }
   // The tile appears live (manifests reload per /apps request), but a `service`

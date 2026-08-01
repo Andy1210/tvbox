@@ -1,3 +1,11 @@
+// SUPERSEDED - kept only so a box whose Plex app predates the move keeps
+// working across this update. The live QWebChannel adapter now ships INSIDE the
+// Plex package (tvbox-apps `plex/bridge.js`, manifest `runtime.bridge:
+// "./bridge.js"`), which is where its Plex-shaped parts belong and what lets a
+// Plex fix go out as an app update instead of an OTA. This copy does NOT have
+// the stream-selection or player.set handling; delete it one release after the
+// registry's plex 1.1.0 has had time to land.
+//
 // Generic QWebChannel bridge adapter (NOT app-specific).
 //
 // QtWebEngine-based web clients (Plex HTPC, and any similar app) expect a
