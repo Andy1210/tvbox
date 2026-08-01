@@ -39,6 +39,7 @@ const updater = require("./updater"); // OTA self-update (versions/ + `current` 
 const boothealth = require("./boothealth"); // "this boot reached the launcher" - the root-side safe-mode counter reads it
 const backup = require("./backup"); // encrypted settings backup/restore (phone pairing page)
 const backupPairing = require("./pairing/backup");
+const reconcile = require("./reconcile"); // re-acquire what a restore could not carry (packages, deps, bundles)
 const { Supervisor } = require("./service_supervisor"); // generic supervised child procs (plugins use it)
 const pkg = require("./package.json"); // shell version (About/diagnostics)
 
@@ -169,7 +170,7 @@ function boxIdle() {
 // answers cannot drift apart. The flags it reads are declared with the jobs they
 // guard, below; nothing calls this before those run.
 function boxFree() {
-  return boxIdle() && installing.size === 0 && !bundleRefreshBusy && !appsAutoBusy;
+  return boxIdle() && installing.size === 0 && !bundleRefreshBusy && !appsAutoBusy && !reconcile.busy();
 }
 // Restart the shell in-place: quit cleanly (localStorage flush, plugin stop);
 // the labwc respawn loop relaunches run-shell.sh, which follows the `current` symlink.
@@ -357,6 +358,73 @@ async function bundleRefreshTick() {
     }
   } finally {
     bundleRefreshBusy = false;
+  }
+}
+
+// A restore brings the box's SETTINGS back; this brings back what sat behind
+// them. The desired state was recorded by the restore itself (reconcile.js), so
+// this only has to drive the acquisitions - out of process for the same reason
+// every other install is, and only while the box is free, since a restored box
+// is usually one someone is standing in front of.
+//
+// It runs on the boot AFTER the restore: the restart is what makes plugins re-read
+// the restored credentials, and doing this before it would race the very files the
+// restore just wrote.
+async function reconcileTick() {
+  // An app whose manifest was in the backup itself (the single-json form) is
+  // already here, so its own files can land before anything is downloaded.
+  backup.applyPendingAppFiles();
+  const desired = reconcile.pending();
+  if (!desired || !boxFree()) return;
+  console.log("[reconcile] re-acquiring", desired.apps.length, "app(s) after a", desired.reason);
+  await reconcile.run(desired, {
+    apps,
+    free: () => boxIdle() && installing.size === 0, // not boxFree(): this run holds that flag itself
+    installApp: (id) => store.install(config, id),
+    installDeps: (id) => withInstalling(id, () => spawnCli(["deps", id, "--download-only"], id, "deps")),
+    installBundle: (id) => withInstalling(id, () => spawnCli(["install", id], id, "bundle")),
+  });
+  const s = reconcile.state();
+  const retrying = reconcile.settle(desired);
+  console.log(
+    "[reconcile] done:",
+    s.done - s.failed.length,
+    "of",
+    s.total,
+    s.failed.length
+      ? "(" + s.failed.map((f) => f.id + "/" + f.kind).join(", ") + " failed" + (retrying ? ", will retry" : "") + ")"
+      : "",
+  );
+  // Every app that was going to arrive has arrived, so the files an app asked to
+  // have carried can be placed - and whatever still has no app to belong to is
+  // dropped rather than retried at every boot from here on.
+  backup.applyPendingAppFiles({ final: !retrying });
+  // Tiles come back on their own (manifests reload per /apps request), but a
+  // `service` app's plugin loads at boot only. Hot-load each one instead of
+  // restarting: the user is watching this happen on a box they just restored, and
+  // an unexplained restart at the end is exactly what a restore should not do.
+  //
+  // A `deps` step counts as much as an `app` one: loadOnePlugin is deps-gated, so an
+  // app whose package survived the restore but whose flatpak did not was SKIPPED at
+  // boot - installing the flatpak here is exactly what makes it loadable, and
+  // without this its routes and daemon would stay dead until some unrelated restart.
+  // hotLoadPlugin is idempotent (loadedPluginIds) and refuses anything still short
+  // of a dep, so calling it for every landed step is safe.
+  for (const step of s.steps) {
+    if ((step.kind === "app" || step.kind === "deps") && step.state === "done") hotLoadPlugin(step.id);
+  }
+}
+
+// Mark an app as installing for the duration of one step, so the store UI shows
+// the same progress it does for a manual install and nothing else starts work on
+// the same app underneath it.
+async function withInstalling(id, fn) {
+  installing.add(id);
+  try {
+    return await fn();
+  } finally {
+    installing.delete(id);
+    setInstallPhase(id, null);
   }
 }
 
@@ -1141,9 +1209,15 @@ function setKeymap(layout, cb) {
 // label (letters/digits/hyphen, 1-63, no leading/trailing hyphen).
 function setHostname(name, cb) {
   if (!/^[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?$/.test(name)) return cb({ ok: false, error: "bad hostname" });
-  execFile("hostnamectl", ["set-hostname", name], { timeout: 8000 }, (e) =>
-    cb(e ? { ok: false, error: String(e.message || e).slice(0, 120) } : { ok: true }),
-  );
+  execFile("hostnamectl", ["set-hostname", name], { timeout: 8000 }, (e) => {
+    if (e) return cb({ ok: false, error: String(e.message || e).slice(0, 120) });
+    // The MQTT device id is DERIVED from the hostname when unset (identity.js), so a
+    // rename changes which topics the box belongs on. Reconnect now rather than at
+    // the next start, or Settings would report one id while the bridge published
+    // under another.
+    applyMqttConfig();
+    cb({ ok: true });
+  });
 }
 function wifiList(cb) {
   execFile(
@@ -1547,6 +1621,10 @@ function serve() {
     }
     if (p === "/tvbox/api/backup/status") {
       jsonRes(res, { restoredAt });
+      return;
+    }
+    if (p === "/tvbox/api/reconcile/status") {
+      jsonRes(res, reconcile.state());
       return;
     }
     if (p === "/tvbox/api/backup/pending-localstorage") {
@@ -3595,6 +3673,15 @@ app.whenReady().then(async () => {
   // A restore replaced config.json + user apps - plugins only read credentials
   // at boot, so restart the shell shortly after (the phone page + TV UI get a
   // few seconds to show "restored").
+  // A restore may carry a name for this box (the "second box" flow gives it its
+  // own identity, derived from the name). hostnamectl lives here because it needs
+  // the polkit grant provision installs.
+  backupPairing.onHostname(
+    (name) =>
+      new Promise((resolve, reject) =>
+        setHostname(name, (r) => (r.ok ? resolve(r) : reject(new Error(r.error || "rename refused")))),
+      ),
+  );
   backupPairing.onRestored(() => {
     restoredAt = Date.now();
     setTimeout(() => restartShell("backup restored"), 4000);
@@ -3717,6 +3804,11 @@ app.whenReady().then(async () => {
   // work is a local file copy, not a download.
   setTimeout(bundleRefreshTick, 2 * 60 * 1000);
   setInterval(bundleRefreshTick, 6 * 60 * 60 * 1000);
+  // Sooner than the bundle refresh: this is the boot right after a restore, the
+  // user is watching an empty HOME, and every tile they expect is behind it. The
+  // re-check covers a box that was busy (or offline) at the first attempt.
+  setTimeout(reconcileTick, 20 * 1000);
+  setInterval(reconcileTick, 15 * 60 * 1000);
   setTimeout(btBatteryTick, 5 * 60 * 1000); // early check after boot, then half-hourly
   setInterval(btBatteryTick, 30 * 60 * 1000);
   // Start plugin daemons once the HDMI sink is the default (librespot needs it).

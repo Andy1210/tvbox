@@ -51,6 +51,16 @@ function isInstalled(ref, a) {
   return !!root(ref, a || arch());
 }
 
+// Where a flatpak keeps its per-user data (`config/`, `data/`, `cache/` inside it).
+// Not derived from `root()`: that is the read-only installed tree, this is the
+// writable one - which is why it exists whether or not the app is installed yet,
+// and why a settings restore can put an app's own files there before its flatpak
+// arrives. Always the box user's home, never a system path.
+function dataDir(ref) {
+  if (!refOk(ref)) return null;
+  return path.join(os.homedir(), ".var", "app", ref);
+}
+
 // What a missing flatpak dep is CALLED on the TV: "needs RetroArch" reads far
 // better than "needs org.libretro.RetroArch" on a 10-foot tile.
 function shortName(ref) {
@@ -184,6 +194,7 @@ function updateSync(items, log) {
 module.exports = {
   arch,
   root,
+  dataDir,
   isInstalled,
   shortName,
   refsFor,

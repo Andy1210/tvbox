@@ -257,6 +257,104 @@ test("pairing entries are bounded and need a kind plus a label", () => {
   );
 });
 
+// A manifest's `backup.paths` reach the filesystem on BOTH sides of a backup -
+// read on the source box, written on the target - so the validator is a security
+// surface, not a convenience. A manifest dropped into ~/.tvbox/apps/ never sees
+// CI's JSON Schema; this is the only check it gets.
+test("backup.paths must be relative in-app paths", () => {
+  const withBackup = (backup) => ({ id: "x", name: "X", type: "webclient", status: "ready", backup });
+  assert.ok(apps.validateManifest(withBackup({ paths: ["saves", "config/retroarch.cfg"] }), "x.json"));
+  for (const bad of [
+    { paths: [] },
+    { paths: "saves" },
+    { paths: ["/etc/passwd"] },
+    { paths: ["../../.ssh/id_rsa"] },
+    { paths: ["saves/../../.ssh"] },
+    { paths: ["./saves"] },
+    { paths: ["saves//x"] },
+    { paths: [123] },
+    { paths: new Array(17).fill("a") },
+    { paths: ["a"], flatpak: "not a ref" },
+    { paths: ["state"] }, // reserved: the payload prefix for ~/.tvbox sidecars
+    { paths: ["state/foo"] },
+    [],
+    "saves",
+  ]) {
+    assert.equal(apps.validateManifest(withBackup(bad), "x.json"), null, JSON.stringify(bad));
+  }
+});
+
+// backup.js reads the shell's own ~/.tvbox sidecars into every backup; install.js
+// decides which names an APP may claim. The two lists have to agree, or a new
+// sidecar added to one is claimable through the other.
+test("every shell sidecar the backup carries is reserved against apps", () => {
+  const backupSrc = fs.readFileSync(path.join(__dirname, "backup.js"), "utf8");
+  const extra = /const EXTRA_FILES = \[([^\]]*)\]/.exec(backupSrc);
+  assert.ok(extra, "EXTRA_FILES not found in backup.js - update this test with it");
+  const names = extra[1].match(/"([^"]+)"/g).map((s) => s.slice(1, -1));
+  assert.ok(names.length, "EXTRA_FILES parsed empty");
+  for (const name of names) {
+    assert.ok(apps.RESERVED_STATE_FILES.has(name), name + " is carried by backup.js but not reserved in install.js");
+  }
+});
+
+// backup.state names files in ~/.tvbox/ next to config.json, so the id prefix is
+// the whole boundary: without it a manifest could ask for the shell's secrets.
+test("backup.state may only name the app's own id-prefixed sidecars", () => {
+  assert.ok(apps.stateFileOk("retroarch", "retroarch-share.json"));
+  for (const bad of [
+    "config.json",
+    "spotify-accounts.json",
+    "../config.json",
+    "retroarch/../config.json",
+    "sub/retroarch-x.json",
+    "retroarchXshare.json",
+    ".retroarch-share.json",
+    "retroarch.json", // the dot forms are what let id `config` name config.json
+    "retroarch.anything",
+    "",
+  ]) {
+    assert.equal(apps.stateFileOk("retroarch", bad), false, JSON.stringify(bad));
+  }
+  // The id prefix on its own is NOT a boundary: an app id is only constrained to
+  // [a-z0-9_-], so a manifest can call itself `config` or `spotify` and would
+  // otherwise match the very files holding the box's credentials.
+  assert.equal(apps.stateFileOk("config", "config.json"), false, "an app named config must not reach config.json");
+  assert.equal(apps.stateFileOk("spotify", "spotify-accounts.json"), false, "nor a shell sidecar");
+  assert.equal(apps.stateFileOk("spotify", "spotify-refresh-token"), false);
+  assert.equal(apps.stateFileOk("restore", "restore-localstorage.json"), false);
+  assert.equal(apps.stateFileOk("reconcile", "reconcile.json"), false);
+  const withState = (state) => ({
+    id: "retroarch",
+    name: "RetroArch",
+    type: "webclient",
+    status: "ready",
+    backup: { paths: ["saves"], state },
+  });
+  assert.ok(apps.validateManifest(withState(["retroarch-share.json"]), "x.json"));
+  assert.equal(apps.validateManifest(withState(["config.json"]), "x.json"), null);
+  assert.equal(apps.validateManifest(withState("retroarch-share.json"), "x.json"), null, "must be an array");
+});
+
+// The root a declared path resolves against, and the refusal that keeps an app
+// from naming a flatpak it has nothing to do with.
+test("backup paths resolve under the app's own root only", () => {
+  const own = { id: "x", name: "X", type: "webclient", status: "ready", backup: { paths: ["saves"] } };
+  assert.equal(apps.appBackupRoot(own), apps.appDataDir("x"));
+  const ra = {
+    id: "retroarch",
+    name: "RetroArch",
+    type: "webclient",
+    status: "ready",
+    requires: { flatpak: ["org.libretro.RetroArch"] },
+    backup: { flatpak: "org.libretro.RetroArch", paths: ["config"] },
+  };
+  assert.equal(apps.appBackupRoot(ra), path.join(TMP, ".var", "app", "org.libretro.RetroArch"));
+  const foreign = { ...ra, backup: { flatpak: "com.spotify.Client", paths: ["config"] } };
+  assert.equal(apps.appBackupRoot(foreign), null, "a ref the app doesn't declare is refused");
+  assert.equal(apps.appBackupRoot({ id: "x" }), null, "nothing declared, nothing to carry");
+});
+
 // ---- an extracted bundle vs the flatpak it came from ----
 //
 // A bundle is a COPY of the flatpak's files, and the flatpak moves on its own (the

@@ -6,17 +6,26 @@
 //        and     tvbox/<deviceId>/notify (on-screen notifications).
 // The mqtt npm client auto-reconnects. Secrets come from config.rawMqtt().
 const mqtt = require("mqtt");
+const identity = require("./identity"); // what makes this box THIS box (derived device id)
 
 let client = null;
 let base = "";
 let deviceId = "";
 
-const safeId = (s) => String(s || "tvbox").replace(/[^a-zA-Z0-9_-]/g, "_");
+const safeId = identity.safeId; // one topic-segment rule, shared with the derived default
 
 function init(cfg, handlers) {
   if (!cfg || !cfg.host) return null;
   handlers = handlers || {};
-  deviceId = cfg.deviceId || "tvbox";
+  // Derived from the hostname, not the constant "tvbox": that constant made every
+  // box that never set one publish into a single topic tree, which looks fine
+  // until there are two boxes and each acts on the other's commands.
+  //
+  // safeId here as well as in setMqtt: a RESTORE writes config.json through
+  // config.replaceAll(), which does not sanitize, so a backup can reintroduce a
+  // deviceId with a `/` or `#` in it - and that does not fail, it silently moves
+  // or widens the box's whole topic tree.
+  deviceId = safeId(cfg.deviceId || identity.defaultDeviceId());
   base = "tvbox/" + deviceId;
   const statusTopic = base + "/status";
   const url = "mqtt://" + cfg.host + ":" + (cfg.port || 1883);
