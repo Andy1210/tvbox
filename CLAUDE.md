@@ -83,7 +83,13 @@ Launcher (launcher/) is React+TS+Vite+Tailwind, spatial nav via
    (default `["nav"]`, `capsFor` in main.js). The launcher (id null) gets
    nav+player+config. Remote sites NEVER run in the main window - it has
    `contextIsolation:false` for the Plex QWebChannel bridge; remote apps get
-   the hardened separate window. Don't move apps between these worlds. Brokered
+   the hardened separate window. Don't move apps between these worlds. That
+   bridge now ships IN the app package (`runtime.bridge: "./bridge.js"`, the
+   shell has none of its own), so a package puts renderer code into that
+   non-isolated window - the same review-is-the-boundary trust as its
+   `plugin.js`, and less than it. `bridgePath` in main.js pins the file inside
+   the package dir before it reaches `require()`; the manifest validator gates
+   the same shape. Brokered
    capabilities (`player`, `fetch`, `storage`) are gated the same way in BOTH
    preloads (`preload.js` main window; `preload-app.js` isolated window, attached
    only to capability apps). A new capability = a new broker gated on its cap

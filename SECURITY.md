@@ -34,4 +34,8 @@ tvbox is a LAN device with no cloud account. The interesting boundaries:
 
 Shell-side **plugins are trusted code by design** (they run in the host
 process) - "a malicious plugin can do X" is expected, not a vulnerability;
-review plugins before installing them.
+review plugins before installing them. The same goes for an app package's
+**bridge** (`runtime.bridge: "./bridge.js"`), which runs in the app's own
+non-isolated renderer: it reaches only the capabilities that app declared, so
+it is strictly less than a plugin, but it is still code the package ships and
+review is what gates it.
