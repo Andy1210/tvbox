@@ -398,6 +398,20 @@ message, line, src)` signature.
   is why the guard is a `startsWith(root + sep)` and not `!== root`), `appdata` goes
   through the same id/size/key guards as a live write, and identity fields are
   re-derived rather than copied. Restored files are `0600`.
+- **Unit tests here agree with each other, not with reality.** Every bug found in the
+  restore path sat in an integration seam: `bundleStale` was right, the store was
+  right, HOME was right, and their sum was a dead end. The modules' own tests inject
+  fakes, and the fakes agreed while the real modules did not.
+  [shell/integration.test.js](shell/integration.test.js) is the answer - whole
+  scenarios ("a re-flashed box restores and comes back whole") through the real
+  modules, a real filesystem and a real HTTP registry. Two things shape it: every
+  module resolves `os.homedir()` at IMPORT time, so one process is one box and a
+  two-box scenario runs each as a child process; and `inBox` MUST stay async,
+  because the registry serves from the test's own event loop and an
+  `execFileSync` would deadlock it. It deliberately stops short of main.js's
+  wiring (routes, timers, publish-on-event) - that needs Electron under Xvfb, and a
+  flaky job is worse than an absent one. When you add a scenario, break the fix it
+  covers and check it actually fails.
 - **The image smoke test does not run the Pi's kernel.** `scripts/image-smoke.sh`
   boots the image's **userspace** (systemd-nspawn + arm64 binfmt), which catches a
   rootfs that cannot come up, a missing payload, and a too-small filesystem - not a
