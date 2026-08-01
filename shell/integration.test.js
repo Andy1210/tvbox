@@ -240,11 +240,11 @@ test("a re-flashed box restores its config, its apps, its app data and its app f
 
   // The backup knows about all three apps, but only ONE of them travels as a
   // manifest - which is precisely why the ids have to be recorded.
-  assert.deepEqual(before.apps, ["gamebox", "handmade", "tunes"]);
-  assert.deepEqual(before.packages, ["gamebox", "tunes"]);
-  assert.deepEqual(before.userApps, ["handmade"], "a package app's code cannot travel in a settings file");
-  assert.deepEqual(before.appdataIds, ["gamebox"]);
-  assert.deepEqual(before.appFiles, ["saves/sonic.srm", "state/gamebox-share.json"]);
+  assert.deepStrictEqual(before.apps, ["gamebox", "handmade", "tunes"]);
+  assert.deepStrictEqual(before.packages, ["gamebox", "tunes"]);
+  assert.deepStrictEqual(before.userApps, ["handmade"], "a package app's code cannot travel in a settings file");
+  assert.deepStrictEqual(before.appdataIds, ["gamebox"]);
+  assert.deepStrictEqual(before.appFiles, ["saves/sonic.srm", "state/gamebox-share.json"]);
 
   // ---- the target box: empty, restores, reconciles ----
   const after = await inBox(
@@ -282,17 +282,21 @@ test("a re-flashed box restores its config, its apps, its app data and its app f
     });`,
   );
 
-  assert.deepEqual(after.desiredApps, ["gamebox", "handmade", "tunes"], "the restore recorded what to re-acquire");
+  assert.deepStrictEqual(
+    after.desiredApps,
+    ["gamebox", "handmade", "tunes"],
+    "the restore recorded what to re-acquire",
+  );
   // handmade came back with the config (it IS a manifest); the two packages had to
   // be fetched. Nothing should have failed.
-  assert.deepEqual(after.failed, []);
-  assert.deepEqual(
+  assert.deepStrictEqual(after.failed, []);
+  assert.deepStrictEqual(
     after.steps.filter((s) => s.endsWith(":done")).sort(),
     ["gamebox:app:done", "tunes:app:done"],
     "exactly the package apps were acquired",
   );
-  assert.deepEqual(after.installed, ["gamebox", "handmade", "tunes"], "the box has every app it had before");
-  assert.deepEqual(after.packageDirs, ["gamebox", "tunes"], "and the packages are real package dirs, not stubs");
+  assert.deepStrictEqual(after.installed, ["gamebox", "handmade", "tunes"], "the box has every app it had before");
+  assert.deepStrictEqual(after.packageDirs, ["gamebox", "tunes"], "and the packages are real package dirs, not stubs");
 
   // The settings themselves, verbatim - restore is deliberately not a merge.
   assert.equal(after.config.iptv.m3u.url, "http://iptv.example/list.m3u");
@@ -300,7 +304,7 @@ test("a re-flashed box restores its config, its apps, its app data and its app f
   assert.equal(after.config.ui.locale, "hu");
 
   // The three things that used to be lost without anyone noticing.
-  assert.deepEqual(after.appdata, { difficulty: "hard", lastPlayed: "sonic" }, "the app's own storage");
+  assert.deepStrictEqual(after.appdata, { difficulty: "hard", lastPlayed: "sonic" }, "the app's own storage");
   assert.equal(after.sram, "SRAM-CONTENTS", "the app's declared files, under ITS root");
   assert.equal(after.sidecar, '{"share":"nas"}', "and its ~/.tvbox sidecar");
   assert.ok(after.pendingLocalStorage, "the launcher's storage is parked for it to pick up");
@@ -388,7 +392,7 @@ test("a reconciliation that fails keeps retrying, then stops asking", async () =
     const rounds = [];
     for (let i = 0; i < reconcile.MAX_ATTEMPTS + 1; i++) {
       const desired = reconcile.pending();
-      if (!desired) { rounds.push({ round: i, gaveUp: true }); break; }
+      if (!desired) { rounds.push({ round: i, gaveUp: true, retrying: "gave-up", attempts: null }); break; }
       const st = await reconcile.run(desired, io);
       const retrying = reconcile.settle(desired);
       const left = reconcile.pending();
@@ -400,11 +404,11 @@ test("a reconciliation that fails keeps retrying, then stops asking", async () =
   // Three real failures, then it stops - so a permanently broken app does not
   // re-run at every tick forever.
   assert.equal(r.rounds[0].failed, 1, "the registry being down is a failure, and it is reported");
-  assert.deepEqual(
-    r.rounds.map((x) => x.retrying ?? "gave-up"),
+  assert.deepStrictEqual(
+    r.rounds.map((x) => x.retrying),
     [true, true, false, "gave-up"],
   );
-  assert.deepEqual(
+  assert.deepStrictEqual(
     r.rounds.map((x) => x.attempts),
     [1, 2, null, null],
     "the budget is spent one failure at a time",
@@ -449,7 +453,7 @@ test("a reconciliation interrupted by the user keeps its full retry budget", asy
     assert.equal(round.retrying, true, `round ${i}: it will come back`);
     assert.equal(round.attempts, 0, `round ${i}: an interruption must not spend the budget`);
   }
-  assert.deepEqual(r.finalFailed, [], "and when the box is free, it finishes");
+  assert.deepStrictEqual(r.finalFailed, [], "and when the box is free, it finishes");
   assert.equal(r.retrying, false);
-  assert.deepEqual(r.installed, ["tunes"]);
+  assert.deepStrictEqual(r.installed, ["tunes"]);
 });
