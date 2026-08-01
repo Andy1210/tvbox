@@ -1732,6 +1732,16 @@ function serve() {
   server.listen(PORT, "127.0.0.1", () => console.log("[main] server on :" + PORT));
 }
 
+// scheme://host of a URL, for logging: a media URL is made of credentials as
+// often as not, and nothing downstream of a log line needs the rest of it.
+function originOf(url) {
+  try {
+    return new URL(String(url)).origin;
+  } catch (e) {
+    return "(unparseable url)";
+  }
+}
+
 // ---- mpv control ----
 // Player events go to every live window: the driving app (own window now) needs
 // them for its UI, the launcher for now-playing state. Listeners that don't
@@ -1830,6 +1840,23 @@ function stopMpv(keepMode) {
     fs.unlinkSync(IPC);
   } catch (e) {}
 }
+// mpv logs its own COMMAND LINE, and the file it plays is on it - so this file
+// gets the media URL with whatever credentials it carries, and nothing here can
+// stop that: it is mpv writing, not us. What can be done is who may read it, so
+// the file is created 0600 first (mpv truncates an existing file and keeps its
+// mode). It is deliberately NOT one of the logs tvbox-diag copies to the boot
+// partition.
+function mpvLogPath() {
+  const p = path.join(os.homedir(), ".tvbox", "mpv.log");
+  try {
+    fs.closeSync(fs.openSync(p, "a", 0o600));
+    fs.chmodSync(p, 0o600);
+  } catch (e) {
+    /* a log we cannot create is not a reason to refuse to play */
+  }
+  return p;
+}
+
 function launchMpv(url, startPos, pip, rect, streams) {
   // Fullscreen relaunch keeps the claim (the next file re-claims immediately, and
   // releasing in between would blank the TV twice); going to PiP gives it back,
@@ -1858,7 +1885,7 @@ function launchMpv(url, startPos, pip, rect, streams) {
     "--hwdec=auto-safe",
     "--input-ipc-server=" + IPC,
     "--start=" + startPos,
-    "--log-file=" + path.join(os.homedir(), ".tvbox", "mpv.log"),
+    "--log-file=" + mpvLogPath(),
     "--msg-level=all=error",
   ];
   // PiP (Live TV "browse while watching"): a small always-on-top window. Wayland
@@ -3234,7 +3261,12 @@ ipcMain.handle("player", (e, action, payload) => {
     return { ok: false, error: "player not permitted (not the foreground app)" };
   }
   payload = payload || {};
-  console.log("[player] action", action, payload && payload.url ? payload.url.slice(0, 55) : "");
+  // Where it plays FROM, never the URL. A slice of one looked safe because a Plex
+  // token sits late in the query string, but an IPTV URL carries its username and
+  // password as PATH segments - right after the host, inside any slice - and this
+  // log is what `tvbox-diag --logs` copies onto the boot partition, which any
+  // laptop can read. The origin is what a diagnosis actually needs.
+  console.log("[player] action", action, payload && payload.url ? originOf(payload.url) : "");
   if (action === "queue") {
     queued.url = payload.url;
     queued.startPos = payload.startPos || 0;
