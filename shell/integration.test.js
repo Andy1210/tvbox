@@ -48,9 +48,11 @@ function newBox(label) {
 }
 
 // Run a script AS that box: a child process with its own HOME, so the modules
-// resolve their paths to it. The script's last line of stdout must be JSON; that is
-// the value the test asserts on. Anything else it logs is passed through on failure,
-// which is what makes a broken scenario diagnosable.
+// resolve their paths to it. The script reports by calling `out(value)`, which
+// prints one `__RESULT__<json>` line; the LAST such line is what the test asserts
+// on, so the modules' own console output can flow freely around it. Everything the
+// child printed is included when it fails, which is what makes a broken scenario
+// diagnosable instead of just red.
 // ASYNC on purpose, and this is not a style choice: the registry below runs in THIS
 // process, and a synchronous execFileSync would block this event loop for as long as
 // the child runs - so the child's request for the index would never be answered and
@@ -136,6 +138,16 @@ const registryServer = http.createServer((req, res) => {
 });
 registryServer.listen(0, "127.0.0.1");
 registryServer.unref();
+// listen() is asynchronous and address() is null until it completes. Every run so
+// far got away with it because node:test turns the event loop before the first test
+// body - that is luck, not a guarantee, and the symptom would be an intermittent
+// "http://127.0.0.1:null/index.json".
+const listening = new Promise((resolve, reject) => {
+  if (registryServer.listening) return resolve();
+  registryServer.once("listening", resolve);
+  registryServer.once("error", reject);
+});
+test.before(() => listening);
 
 function filesOf(a) {
   return { "manifest.json": JSON.stringify(a.manifest), ...(a.files || {}) };
