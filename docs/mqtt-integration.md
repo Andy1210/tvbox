@@ -27,15 +27,56 @@ retained last-will on the status topic.
 
 ## Topics
 
-| Topic                   | Direction            | Payload                                           |
-| ----------------------- | -------------------- | ------------------------------------------------- |
-| `tvbox/<id>/status`     | box → (retained LWT) | `online` / `offline`                              |
-| `tvbox/<id>/nowplaying` | box → (retained)     | `{ app, state, title?, artist?, image? }`         |
-| `tvbox/<id>/cmd`        | → box                | `{ action, app? }` - control                      |
-| `tvbox/<id>/notify`     | → box                | `{ title?, message?, image?, duration?, raise? }` |
+| Topic                   | Direction            | Payload                                             |
+| ----------------------- | -------------------- | --------------------------------------------------- |
+| `tvbox/<id>/status`     | box → (retained LWT) | `online` / `offline`                                |
+| `tvbox/<id>/announce`   | box → (retained)     | `{ id, base, name, hostname, version, commands[] }` |
+| `tvbox/<id>/state`      | box → (retained)     | the whole player state (below)                      |
+| `tvbox/<id>/nowplaying` | box → (retained)     | `{ app, state, title?, artist?, image? }`           |
+| `tvbox/<id>/cmd`        | → box                | `{ action, app? }` - control                        |
+| `tvbox/<id>/notify`     | → box                | `{ title?, message?, image?, duration?, raise? }`   |
 
 Inbound payloads must be JSON (a non-JSON payload is ignored as an unknown
 command).
+
+### Player state (`state`, retained)
+
+Everything about what the box is doing, in one payload, because three separate
+things each know a part of it and nothing outside should have to ask three
+questions: **mpv**, which the shell owns (position, duration, paused - but not
+what the file is called, because the app resolved that), the **foreground app's**
+now-playing report (Spotify's title/artist/artwork - the shell cannot see inside
+an app's renderer), and the **audio sink** (volume, mute). The merge rules live in
+[shell/mediastate.js](../shell/mediastate.js) and are unit-tested.
+
+```jsonc
+{
+  "state": "playing", // playing | paused | idle
+  "title": "…",
+  "artist": "…",
+  "album": "…",
+  "image": "https://…",
+  "app": "plex", // which app the MEDIA belongs to
+  "source": "plex", // which app is ON SCREEN - they differ (Live TV plays behind HOME)
+  "sourceList": [{ "id": "plex", "name": "Plex" }],
+  "position": 61,
+  "duration": 5400, // seconds; null when nothing owns a clock
+  "seekable": true, // only while the box's own mpv holds the clock
+  "volume": 0.45,
+  "muted": false, // the box's OWN output sink, 0..1
+}
+```
+
+Republished when anything changes, plus on a slow tick. A position that crept
+forward by a few seconds is not a change - otherwise a retained topic would carry
+one message per second for nothing.
+
+### Announce (`announce`, retained)
+
+"This box exists, here is where it lives, and here is what it answers." Retained,
+so a Home Assistant installed later still finds a box that came online first. Its
+`commands` array is the box's own command vocabulary, which is what lets the Home
+Assistant entity below show exactly the controls a given box actually has.
 
 ### Now-playing (`nowplaying`, retained)
 
@@ -58,10 +99,19 @@ availability-gated on the status topic. No HA YAML needed for that.
 - `play` / `resume`, `pause`, `stop` - shared player + forwarded to the active app
 - `next`, `previous` - forwarded to the active app (e.g. Spotify)
 - `tv_on`, `tv_off` / `standby` - TV power over HDMI-CEC
-- `volume_up`, `volume_down` (+ optional `steps`: 1-10 repeats), `mute` - TV
-  volume over the configured IR blaster (Settings → Peripherals → IR blaster;
-  [ir-blaster.md](ir-blaster.md)). Ignored (`ok:false` logged) when no blaster
-  is set up - CEC volume isn't a thing on most TVs, IR is the reliable path.
+- `volume_up`, `volume_down` (+ optional `steps`: 1-10 repeats), `mute` - the
+  **TV's** volume over the configured IR blaster (Settings → Peripherals → IR
+  blaster; [ir-blaster.md](ir-blaster.md)). Ignored (`ok:false` logged) when no
+  blaster is set up - CEC volume isn't a thing on most TVs, IR is the reliable
+  path.
+- `volume_set` (+ `volume`: 0..1), `volume_mute` (+ optional `mute`: bool,
+  omitted = toggle) - the **box's own output sink**. Deliberately separate from
+  the three above: those drive the TV's amplifier over IR and have no absolute
+  value to set, this is what the box itself plays through. Targets the default
+  sink, so no caller needs to know a wireplumber node id.
+- `seek` (+ `position`: seconds, absolute) - only while the box's own mpv holds
+  the clock. An app playing its own audio (librespot) has no position to move,
+  and the `state` topic says so with `seekable: false`.
 
 ### Notifications (`notify`)
 

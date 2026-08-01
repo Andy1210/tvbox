@@ -1,0 +1,25 @@
+{
+  "config": {
+    "flow_title": "{name}",
+    "step": {
+      "confirm": {
+        "title": "Add {name}",
+        "description": "Add this tvbox to Home Assistant as a media player. It is controlled over the MQTT broker you already use - no address or password is needed."
+      },
+      "user": {
+        "title": "Add a tvbox",
+        "description": "A box announces itself on the broker, so this is only needed if the announcement did not arrive. The device id is on the box under Settings, Network, MQTT.",
+        "data": {
+          "device_id": "MQTT device id"
+        }
+      }
+    },
+    "error": {
+      "invalid_device_id": "Letters, digits, underscore and hyphen only - the id is an MQTT topic segment."
+    },
+    "abort": {
+      "already_configured": "This box is already set up.",
+      "invalid_discovery_info": "That MQTT message did not come from a tvbox."
+    }
+  }
+}
