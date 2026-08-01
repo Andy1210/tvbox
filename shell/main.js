@@ -1849,10 +1849,25 @@ function stopMpv(keepMode) {
 function mpvLogPath() {
   const p = path.join(os.homedir(), ".tvbox", "mpv.log");
   try {
-    fs.closeSync(fs.openSync(p, "a", 0o600));
-    fs.chmodSync(p, 0o600);
+    // O_NOFOLLOW, so a SYMLINK at this path is refused by the kernel rather than
+    // followed - checking with lstat first would leave the gap between the check
+    // and the open. It matters because mpv writes wherever this path leads and we
+    // would have chmodded that target on the way: ~/.tvbox is reachable through
+    // the file server, so "nobody can put a link there" is not a given.
+    const fd = fs.openSync(
+      p,
+      fs.constants.O_CREAT | fs.constants.O_WRONLY | fs.constants.O_APPEND | fs.constants.O_NOFOLLOW,
+      0o600,
+    );
+    try {
+      // A fifo or a device would take mpv's writes somewhere of its own too.
+      if (!fs.fstatSync(fd).isFile()) return null;
+      fs.fchmodSync(fd, 0o600);
+    } finally {
+      fs.closeSync(fd);
+    }
   } catch (e) {
-    /* a log we cannot create is not a reason to refuse to play */
+    return null; // no log rather than a log we are not sure of; playback is unaffected
   }
   return p;
 }
@@ -1885,7 +1900,7 @@ function launchMpv(url, startPos, pip, rect, streams) {
     "--hwdec=auto-safe",
     "--input-ipc-server=" + IPC,
     "--start=" + startPos,
-    "--log-file=" + mpvLogPath(),
+    // (the log file is appended below, when there is one we trust)
     "--msg-level=all=error",
   ];
   // PiP (Live TV "browse while watching"): a small always-on-top window. Wayland
@@ -1911,6 +1926,8 @@ function launchMpv(url, startPos, pip, rect, streams) {
     args.push("--pause=yes");
     mpvStartPending = true;
   }
+  const logFile = mpvLogPath();
+  if (logFile) args.push("--log-file=" + logFile);
   if (audioSink) args.push("--audio-device=pipewire/" + audioSink);
   // Track selection, per axis: what the app decided for itself (Plex resolves
   // audio/subtitle server-side and ships the choice with the item) wins, and
