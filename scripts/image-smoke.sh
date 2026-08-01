@@ -172,6 +172,13 @@ case "$IMG_IN" in
   echo "==> decompressing $(basename "$IMG_IN")"
   IMG="$WORK/image.img"
   xz -dc "$IMG_IN" | dd of="$IMG" bs=4M conv=sparse status=none
+  # dd exits 0 on a short stream, so without this a truncated .img.xz would be
+  # checked as if it were an image - and phase 1 would report a partition table
+  # problem instead of a corrupt download.
+  [ "${PIPESTATUS[0]}" = 0 ] || {
+    echo "decompression failed - $IMG_IN is not a complete .xz" >&2
+    exit 1
+  }
   ;;
 *)
   # A copy, not the original: phase 2 injects a unit and boots it, and the file
@@ -328,7 +335,7 @@ t "the shell launcher script is valid sh" 'sh -n /home/tv/.tvbox/shell/run-shell
 # the arm64 Electron binary executes and its bundled Node runs our code. A real
 # Wayland session is out of scope here (see the header of image-smoke.sh).
 t "Electron's runtime executes" 'ELECTRON_RUN_AS_NODE=1 /home/tv/.tvbox/shell/node_modules/electron/dist/electron -p "1+1" >/dev/null 2>&1'
-t "the shell's modules load" 'cd /home/tv/.tvbox/shell && ELECTRON_RUN_AS_NODE=1 ./node_modules/electron/dist/electron -e "require(\"./install.js\");require(\"./identity.js\");require(\"./mediastate.js\")" >/dev/null 2>&1'
+t "the shell's modules load" 'cd /home/tv/.tvbox/shell && ELECTRON_RUN_AS_NODE=1 ./node_modules/electron/dist/electron -e "require(\"./install.js\");require(\"./netguard.js\");require(\"./config.js\")" >/dev/null 2>&1'
 # Report what did fail, so a real regression is diagnosable from the CI log rather
 # than only visible as a count.
 {
