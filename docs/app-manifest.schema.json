@@ -389,8 +389,8 @@
         },
         "bridge": {
           "type": "string",
-          "pattern": "^[a-z0-9_-]+$",
-          "description": "Renderer bridge adapter from shell/bridges/<name>.js (e.g. qwebchannel for Plex HTPC)."
+          "pattern": "^([a-z0-9_-]+|\\./[a-z0-9_-]+\\.js)$",
+          "description": "Renderer bridge adapter: a bare name is one of the shell's own shell/bridges/<name>.js, \"./<file>.js\" is one this package ships next to its manifest (preferred for client-specific adapters - they then update with the app, not with an OTA)."
         },
         "player": {
           "enum": ["mpv-fullscreen", "mpv-overlay"],

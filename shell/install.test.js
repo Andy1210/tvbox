@@ -216,6 +216,23 @@ test("a native app with an unusable runtime.native is refused", () => {
   }
 });
 
+test("a bridge is a built-in name or a file the package ships, never a path", () => {
+  const withBridge = (bridge) => ({
+    id: "x",
+    name: "X",
+    type: "webclient",
+    status: "ready",
+    runtime: { serve: "static", bridge },
+  });
+  assert.ok(apps.validateManifest(withBridge("qwebchannel"), "x.json"), "built-in adapter");
+  assert.ok(apps.validateManifest(withBridge("./bridge.js"), "x.json"), "package-local adapter");
+  // The value reaches require(), so nothing that can leave the package dir may
+  // pass the manifest gate - main.js pins it again at resolution time.
+  for (const bad of ["../../etc/x.js", "./sub/dir.js", "/abs/path.js", "./bridge.json", "Bridge.js", 5, {}]) {
+    assert.equal(apps.validateManifest(withBridge(bad), "x.json"), null, JSON.stringify(bad));
+  }
+});
+
 test("pairing entries are bounded and need a kind plus a label", () => {
   const withPairing = (pairing) => ({ id: "x", name: "X", type: "webclient", status: "ready", pairing });
   assert.ok(apps.validateManifest(withPairing([{ kind: "roms", label: "Upload" }]), "x.json"));

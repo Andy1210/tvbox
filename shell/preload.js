@@ -6,7 +6,6 @@
 // capabilities. The shell core knows nothing about any specific app - what
 // bridge an app needs (if any) is declared in its manifest.
 const { ipcRenderer } = require("electron");
-const path = require("path");
 
 (function () {
   "use strict";
@@ -83,9 +82,13 @@ const path = require("path");
   // ---- player control (for built-in apps that hold the "player" capability,
   // e.g. the launcher driving Live TV through the shell's mpv service) ----
   if (caps.indexOf("player") >= 0) {
-    window.tvbox.play = function (url) {
+    // `streams` (optional) is the app's own track decision, in 0-based ordinals
+    // within each type: { audio, sub, subFile }. An app that resolved its
+    // streams elsewhere (a media server told it which ones to play) passes them
+    // here; omitting the argument keeps mpv's own selection.
+    window.tvbox.play = function (url, streams) {
       try {
-        ipcRenderer.invoke("player", "queue", { url: url });
+        ipcRenderer.invoke("player", "queue", { url: url, streams: streams || null });
         ipcRenderer.invoke("player", "play");
       } catch (e) {}
     };
@@ -116,6 +119,24 @@ const path = require("path");
       try {
         ipcRenderer.invoke("player", "track", { type: type, id: id });
       } catch (e) {}
+    };
+    // Same track terms as play()'s `streams`, for switching mid-playback:
+    // { audio, sub, subFile } with sub:-1 meaning off.
+    window.tvbox.selectStreams = function (streams) {
+      try {
+        return ipcRenderer.invoke("player", "select", streams || {});
+      } catch (e) {
+        return Promise.resolve({ ok: false });
+      }
+    };
+    // One allowlisted mpv playback property (sub-delay, audio-delay, speed,
+    // volume, the sub-* look). Rejected main-side if it isn't on the list.
+    window.tvbox.setPlayerProp = function (name, value) {
+      try {
+        return ipcRenderer.invoke("player", "prop", { name: String(name), value: value });
+      } catch (e) {
+        return Promise.resolve({ ok: false });
+      }
     };
     window.tvbox.onPlayer = function (cb) {
       var h = function (_e, ev) {
@@ -225,11 +246,16 @@ const path = require("path");
   );
 
   // ---- bridge adapter (declared by the app's manifest runtime.bridge) ----
-  // e.g. a Plex-HTPC-style web client declares "qwebchannel". Validated against
-  // a safe name and loaded only from the shell's own bridges/ dir.
-  if (info.bridge && /^[a-z0-9_-]+$/.test(info.bridge)) {
+  // A bridge translates some foreign host API (e.g. Qt's QWebChannel, which
+  // Plex HTPC expects) into the shell's own IPC. It may be a built-in adapter
+  // from bridges/, or ship INSIDE the app package - which is the point: a
+  // client-specific quirk is then fixed by updating that app from the registry
+  // instead of shipping a whole OTA to boxes that don't even have it installed.
+  // main resolves and validates the path (it is the side that knows where a
+  // package lives); the preload only loads what it is handed.
+  if (info.bridgeFile) {
     try {
-      const adapter = require(path.join(__dirname, "bridges", info.bridge + ".js"));
+      const adapter = require(info.bridgeFile);
       adapter.setup({ ipcRenderer, caps });
     } catch (e) {
       console.warn("[bridge] adapter '" + info.bridge + "' failed to load:", e.message);
