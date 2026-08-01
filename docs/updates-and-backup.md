@@ -130,12 +130,118 @@ infrastructure as the IPTV/wallpaper phone pages (code-gated LAN server on
   (scrypt → AES-256-GCM; the file holds IPTV/Spotify/MQTT credentials and the
   parental PIN hash, so it is never written unencrypted).
 - **Restore**: pick the file + password → the shell replaces `config.json`,
-  rewrites the user app manifests (validated), restores Spotify tokens, parks
-  the launcher's localStorage snapshot (locale, app order, onboarding) and
-  restarts; the launcher applies the snapshot on boot and reloads.
+  rewrites the user app manifests (validated), restores each app's own storage
+  and the Spotify tokens, parks the launcher's localStorage snapshot (locale,
+  app order, onboarding) and restarts; the launcher applies the snapshot on boot
+  and reloads. The apps themselves come back afterwards - see below.
 
-Included: `config.json`, `~/.tvbox/apps/*.json`, Spotify account tokens,
-launcher localStorage. NOT included (by design): app bundles/binaries
-(reinstall via tile / `tvbox deps`), ambient wallpapers, web-app logins
-(Plex/YouTube cookies live in per-app Electron partitions). Headless twin:
-`tvbox backup <file> --password <pw>` / `tvbox restore <file> --password <pw>`.
+Included: `config.json`, `~/.tvbox/apps/*.json`, `~/.tvbox/appdata/*.json` (the
+`storage` capability's per-app data), Spotify account tokens, launcher
+localStorage, and the **list of installed app ids**. NOT included (by design):
+ambient wallpapers and web-app logins (Plex/YouTube cookies live in per-app
+Electron partitions). Headless twin: `tvbox backup <file> --password <pw>` /
+`tvbox restore <file> --password <pw>`.
+
+### Restore is a reconciliation, not a file copy
+
+What a settings file cannot carry is everything large: a registry app's own
+package (`plugin.js` + `web/…`), the flatpaks it runs, the sha256-pinned
+binaries under `~/.tvbox/bin`, the web bundle extracted out of a flatpak. So the
+backup carries the app **ids** and the box re-acquires the rest by itself
+([shell/reconcile.js](../shell/reconcile.js)).
+
+A restore writes a desired state to `~/.tvbox/reconcile.json`; the boot after the
+restart reads it and works towards it, in this order and only while the box is
+idle:
+
+1. **app** - install from the registry anything the box doesn't have
+   (`store.install`), because nothing about an app's needs is knowable before
+   its manifest is on the box;
+2. **deps** - its no-root deps: `requires.download` binaries and
+   `requires.flatpak` apps (`tvbox deps <id> --download-only`). An **apt-only**
+   dep is deliberately never planned - reconciliation stays rootless like the
+   rest of the shell, and a step that always fails helps nobody;
+3. **bundle** - re-extract a web-client bundle that isn't there
+   (`tvbox install <id>`).
+
+The launcher shows this as a progress card (`RestoreWatcher`, fed by
+`GET /tvbox/api/reconcile/status`) so an empty HOME after a restore reads as
+"downloading" rather than "broken". A `service` app's plugin is hot-loaded when
+its step lands, so nothing restarts at the end.
+
+Failures don't stop the run - each step is independent - and a failed run keeps the
+desired state for up to **3 attempts** (the boot check plus two re-checks 15 min
+apart), so a box restored while the registry was unreachable finishes once the
+network is back. After that it stops asking.
+
+An **interrupted** run is not a failed one and costs nothing: if the box stops
+being idle mid-run (someone launched something on the box they just restored) the
+remaining steps are skipped and the next tick picks them up, with the retry budget
+untouched. Counting an interruption as a failure is how three ordinary evenings
+would have thrown the desired state away for good.
+
+To drive it by hand:
+`tvbox reconcile` (the recorded desired state) or `tvbox reconcile --all` (every
+installed app - useful outside a restore, e.g. a box whose bundles were wiped).
+
+### An app's own files travel too
+
+An app can declare files of its own that a backup should carry
+(`backup` in its manifest - see [app-manifest.md](app-manifest.md)); the shell
+knows nothing about any particular app. Two roots, both derived from the manifest
+**on the restoring box**, never from the file:
+
+- `backup.paths` - relative paths under the app's flatpak data dir
+  (`~/.var/app/<ref>/`, when `backup.flatpak` names a ref the app already
+  depends on) or its own bundle dir. Files or directories; symlinks are not
+  followed.
+- `backup.state` - sidecar files the app's plugin keeps directly in `~/.tvbox/`.
+  Each name must be prefixed **`<id>-`** _and_ not be one of the shell's own
+  sidecars (`RESERVED_STATE_FILES` in install.js). Both halves are needed: an app
+  id is only constrained to `[a-z0-9_-]`, so a manifest calling itself `config`
+  would otherwise match `config.json` - the file holding the box's credentials and
+  the parental PIN hash.
+
+Bounded, because the file travels through a phone: **8 MB total, 4 MB per file,
+400 files**. Declaration order is priority order - what doesn't fit is named in
+the log, never silently dropped. So save files and settings, not ROMs, cover art
+or save states; those move over the [file server](file-server.md).
+
+App files are placed in passes: an app whose manifest came back with the config
+gets them immediately, an app fetched from the registry gets them when its
+reconciliation step lands.
+
+## Setting up a second box from this one
+
+Same phone page, one extra choice. The **save** card asks what the file is for:
+
+- **This box** - an ordinary backup. A restore puts everything back verbatim,
+  which is what a re-flashed box needs.
+- **Another box** - a clone seed (`clone: true` in the payload, and `-clone-` in
+  the file name). A restore re-derives the fields that identify a box rather than
+  describe its setup.
+
+The choice is made on the SOURCE box on purpose. The target cannot tell a
+re-flash from a clone - both have a fresh machine id, and before setup the same
+default hostname - and each wrong guess costs something: copying the identity
+gives two boxes one MQTT topic segment (so each acts on the other's commands and
+overwrites its now-playing) and one Spotify Connect name; re-deriving it on a
+re-flash silently renames a box's Home Assistant entities.
+
+What counts as identity lives in one place,
+[shell/identity.js](../shell/identity.js): `mqtt.deviceId` and
+`spotify.deviceName`. Both are **derived from the hostname** when unset, so a box
+that never configured them is never ambiguous either. A clone re-derives a field
+only when it still holds the source box's identity - a name the owner typed
+themselves is a choice and survives.
+
+The restore card also takes an optional **name for this box**, applied (via
+`hostnamectl`, the polkit grant provision installs) BEFORE the config lands, so
+the new box derives its identity from the name you just gave it. Leave it empty
+and a clone onto a box with the same hostname still gets a unique identity - the
+first four hex digits of its machine id are appended (`raspberrypi-9f3c`), which
+is ugly but not shared; renaming the box in Settings re-derives it properly.
+
+Still per-box and deliberately not carried: the hostname itself (unless asked
+for), Wi-Fi credentials (NetworkManager's, not ours), and the paired Bluetooth
+devices.

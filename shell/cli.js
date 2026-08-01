@@ -7,6 +7,7 @@
 //   tvbox update [--check]     OTA self-update (--check only reports)
 //   tvbox backup <file>        encrypted settings backup (asks TVBOX_BACKUP_PASSWORD / --password)
 //   tvbox restore <file>       restore a backup (then restart the shell)
+//   tvbox reconcile [--all]    re-acquire what a restore couldn't carry (packages/deps/bundles)
 // New web-client files are picked up live; a NEW app manifest needs a shell
 // restart to appear as a HOME tile.
 const fs = require("fs");
@@ -323,8 +324,56 @@ function main() {
     return;
   }
 
+  // ---- re-acquire what a restore could not carry (packages, flatpaks,
+  // downloaded binaries, extracted bundles). The shell runs this by itself on the
+  // boot after a restore; this is the headless twin, and the way to retry once the
+  // box is back online after a run that failed offline. `--all` reconciles every
+  // installed app instead of the recorded desired state, which is what makes it
+  // useful outside a restore too (a box whose bundle got wiped).
+  if (cmd === "reconcile") {
+    const reconcile = require("./reconcile");
+    const store = require("./store");
+    const config = require("./config");
+    const all = argv.includes("--all");
+    const desired = all
+      ? { reason: "manual", apps: apps.getManifests().map((m) => ({ id: m.id })) }
+      : reconcile.pending();
+    if (!desired || !desired.apps.length) {
+      console.log(all ? "no apps installed" : "nothing to reconcile");
+      return;
+    }
+    reconcile
+      .run(desired, {
+        apps,
+        installApp: (id) => store.install(config, id),
+        installDeps: (id) => {
+          const m = apps.manifestById(id);
+          apps.installUiDeps(m, log);
+          return apps.appDeps(m).depsOk;
+        },
+        installBundle: (id) => {
+          apps.installApp(apps.manifestById(id), { log });
+          return true;
+        },
+        onChange: (s) => s.current && console.log(`  ${s.done + 1}/${s.total} ${s.current.kind} ${s.current.id} …`),
+      })
+      .then((s) => {
+        for (const f of s.failed) console.error(`  ${f.id} (${f.kind}): ${f.error}`);
+        if (!all) reconcile.settle(desired);
+        console.log(`done - ${s.total - s.failed.length}/${s.total} steps`);
+        if (s.failed.length) process.exit(1);
+      })
+      .catch((e) => {
+        // run() catches per step; anything reaching here is the run itself failing
+        // (a manifest reload, say), and an unhandled rejection would exit 0.
+        console.error("reconcile failed: " + (e && e.message ? e.message : e));
+        process.exit(1);
+      });
+    return;
+  }
+
   console.log(
-    "usage: tvbox <list | deps <id> | install <id> [-f] | flatpak-update <id> | fileserver-deps | remove <id> | update [--check] | backup <file> | restore <file>>",
+    "usage: tvbox <list | deps <id> | install <id> [-f] | flatpak-update <id> | fileserver-deps | remove <id> | update [--check] | backup <file> | restore <file> | reconcile [--all]>",
   );
   process.exit(1);
 }

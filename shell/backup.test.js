@@ -1,0 +1,109 @@
+// The restore side of the backup, where the input is untrusted: a .tvbackup is
+// attacker-supplied until its password verifies, and even after that it may come
+// from a different box with different apps on it.
+//
+// Everything here runs against an isolated HOME, so no test reads or writes this
+// machine's real ~/.tvbox.
+const fs = require("node:fs");
+const os = require("node:os");
+const path = require("node:path");
+const test = require("node:test");
+const assert = require("node:assert");
+
+const TMP = fs.mkdtempSync(path.join(os.tmpdir(), "tvbox-backup-test-"));
+process.env.HOME = TMP;
+
+const backup = require("./backup");
+const apps = require("./install");
+
+// One app that declares files of its own, dropped in as a manifest so install.js
+// picks it up like any other user app.
+const APP_ID = "smoketest";
+function installFakeApp(backupDecl) {
+  fs.mkdirSync(apps.USER_APPS_DIR, { recursive: true });
+  fs.writeFileSync(
+    path.join(apps.USER_APPS_DIR, APP_ID + ".json"),
+    JSON.stringify({
+      id: APP_ID,
+      name: "Smoke",
+      type: "webclient",
+      status: "ready",
+      backup: backupDecl,
+    }),
+  );
+  apps.loadManifests();
+  const root = apps.appBackupRoot(apps.manifestById(APP_ID));
+  // Each test gets a fresh root: they assert on what a restore did or did not
+  // create, so a leftover directory from the previous one would decide the answer.
+  fs.rmSync(root, { recursive: true, force: true });
+  fs.mkdirSync(root, { recursive: true });
+  return root;
+}
+
+function restore(files) {
+  // apply() parks app files; applyPendingAppFiles is what places them.
+  backup.apply({ format: "tvbox-backup", version: 1, appFiles: { [APP_ID]: files } });
+  return backup.applyPendingAppFiles({ final: true });
+}
+
+const b64 = (s) => Buffer.from(s, "utf8").toString("base64");
+
+test("a declared file is restored under the app's own root", () => {
+  const root = installFakeApp({ paths: ["saves", "app.cfg"] });
+  restore({ "saves/game.srm": b64("save data"), "app.cfg": b64("k=v") });
+  assert.equal(fs.readFileSync(path.join(root, "saves/game.srm"), "utf8"), "save data");
+  assert.equal(fs.readFileSync(path.join(root, "app.cfg"), "utf8"), "k=v");
+  // Restored files carry a secret often enough (the documented example holds share
+  // credentials) that the mode is part of the contract.
+  assert.equal(fs.statSync(path.join(root, "app.cfg")).mode & 0o777, 0o600);
+});
+
+test("a path outside the declared set is refused", () => {
+  const root = installFakeApp({ paths: ["saves"] });
+  restore({ "states/1.state": b64("nope"), "../../.ssh/authorized_keys": b64("nope") });
+  assert.equal(fs.existsSync(path.join(root, "states")), false);
+  assert.equal(fs.existsSync(path.join(TMP, ".ssh")), false);
+});
+
+// `saves/..` passes the declared-prefix check and resolves to the root itself, so
+// the guard has to be a strict prefix. A regular file where a flatpak's data dir
+// belongs is a flatpak that cannot be installed again without hand-deleting it.
+test("a declared path that resolves back to the root is refused", () => {
+  const root = installFakeApp({ paths: ["saves"] });
+  restore({ "saves/..": b64("nope") });
+  assert.ok(fs.lstatSync(root).isDirectory(), "the root is still a directory");
+});
+
+// The prefix guard compares resolved strings, which says nothing about what is on
+// disk. A link inside the root would send the write wherever it points.
+test("a symlink on the path is not followed out of the root", () => {
+  const root = installFakeApp({ paths: ["saves"] });
+  const outside = path.join(TMP, "outside");
+  fs.mkdirSync(outside, { recursive: true });
+  fs.symlinkSync(outside, path.join(root, "saves"));
+  restore({ "saves/escaped.txt": b64("nope") });
+  assert.equal(fs.existsSync(path.join(outside, "escaped.txt")), false, "the write followed the symlink");
+});
+
+test("a file is never written over a directory", () => {
+  const root = installFakeApp({ paths: ["saves"] });
+  fs.mkdirSync(path.join(root, "saves"), { recursive: true });
+  restore({ saves: b64("nope") });
+  assert.ok(fs.lstatSync(path.join(root, "saves")).isDirectory());
+});
+
+// The ~/.tvbox sidecar namespace: an app may only claim its own id-prefixed files,
+// and never one of the shell's.
+test("state sidecars land in ~/.tvbox, and only the app's own", () => {
+  installFakeApp({ paths: ["saves"], state: [APP_ID + "-share.json"] });
+  const cfg = path.join(TMP, ".tvbox", "config.json");
+  fs.writeFileSync(cfg, '{"real":true}');
+  const before = fs.readFileSync(cfg, "utf8");
+  restore({
+    ["state/" + APP_ID + "-share.json"]: b64('{"ok":true}'),
+    "state/config.json": b64('{"pwned":true}'),
+    [APP_ID + "-undeclared.json"]: b64("nope"),
+  });
+  assert.equal(fs.readFileSync(path.join(TMP, ".tvbox", APP_ID + "-share.json"), "utf8"), '{"ok":true}');
+  assert.equal(fs.readFileSync(cfg, "utf8"), before, "config.json was rewritten");
+});

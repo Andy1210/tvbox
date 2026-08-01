@@ -81,6 +81,39 @@
         color: #7d8a99;
         min-height: 1.4em;
       }
+      .opts {
+        margin: 12px 0 2px;
+      }
+      .opt {
+        display: flex;
+        gap: 10px;
+        align-items: flex-start;
+        padding: 11px 12px;
+        border: 1px solid #2a3442;
+        border-radius: 10px;
+        margin-top: 8px;
+        font-size: 15px;
+      }
+      .opt input {
+        margin: 3px 0 0;
+        accent-color: #1f6feb;
+      }
+      .note {
+        color: #7d8a99;
+        font-size: 13px;
+        margin: 8px 0 0;
+      }
+      input[type="text"] {
+        width: 100%;
+        box-sizing: border-box;
+        padding: 13px;
+        border-radius: 10px;
+        border: 1px solid #2a3442;
+        background: #0b0f14;
+        color: #f4f6fa;
+        font-size: 16px;
+        margin-top: 10px;
+      }
       .ok {
         color: #3fb950;
       }
@@ -96,6 +129,12 @@
     <div class="card">
       <h2>{{saveTitle}}</h2>
       <p>{{saveHint}}</p>
+      <div class="opts">
+        <div class="note">{{forTitle}}</div>
+        <label class="opt"><input type="radio" name="for" value="self" checked />{{forSelf}}</label>
+        <label class="opt"><input type="radio" name="for" value="clone" />{{forClone}}</label>
+        <p class="note">{{forCloneHint}}</p>
+      </div>
       <input id="sp" type="password" placeholder="{{password}}" autocomplete="new-password" />
       <button class="btn" id="save">{{saveBtn}}</button>
       <div class="st" id="sst"></div>
@@ -107,6 +146,8 @@
       <label class="file" for="rf" id="rfl">{{pickFile}}</label>
       <input id="rf" type="file" accept=".tvbackup,application/json" style="display: none" />
       <input id="rp" type="password" placeholder="{{password}}" autocomplete="current-password" />
+      <input id="rh" type="text" placeholder="{{newName}}" autocomplete="off" spellcheck="false" />
+      <p class="note">{{newNameHint}}</p>
       <button class="btn alt" id="restore">{{restoreBtn}}</button>
       <div class="st" id="rst"></div>
     </div>
@@ -127,18 +168,22 @@
           return;
         }
         st(sst, "{{working}}");
+        var clone = (document.querySelector('input[name="for"]:checked') || {}).value === "clone";
         try {
           var r = await fetch("/backup-file", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ code: code, password: pw }),
+            body: JSON.stringify({ code: code, password: pw, clone: clone }),
           });
           var d = await r.json();
           if (!d.ok) throw 0;
           var blob = new Blob([JSON.stringify(d.envelope)], { type: "application/octet-stream" });
           var a = document.createElement("a");
           a.href = URL.createObjectURL(blob);
-          a.download = "tvbox-{{host}}-" + new Date().toISOString().slice(0, 10) + ".tvbackup";
+          // The name says which kind of file it is, so a folder of them can be
+          // told apart months later without decrypting one.
+          a.download =
+            "tvbox-{{host}}-" + (clone ? "clone-" : "") + new Date().toISOString().slice(0, 10) + ".tvbackup";
           document.body.appendChild(a);
           a.click();
           a.remove();
@@ -166,10 +211,18 @@
         st(rst, "{{working}}");
         try {
           var envelope = JSON.parse(await file.text());
+          // One RFC-1123 label, sanitised here as well as in the shell - the box
+          // refuses a bad one, and a silently refused rename would look like the
+          // field did nothing.
+          var host = document
+            .getElementById("rh")
+            .value.replace(/[^A-Za-z0-9-]/g, "")
+            .slice(0, 63)
+            .replace(/^-+|-+$/g, "");
           var r = await fetch("/restore", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ code: code, password: pw, envelope: envelope }),
+            body: JSON.stringify({ code: code, password: pw, envelope: envelope, hostname: host }),
           });
           var d = await r.json();
           if (d.ok) {
