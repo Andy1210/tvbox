@@ -200,3 +200,25 @@ test("listForUi flags updateAvailable when the registry version is newer than in
     server.close();
   }
 });
+
+test("an unreachable registry says so, instead of 'not in registry'", async () => {
+  // Forcing a refresh on install means the registry has to answer. When it does
+  // not, the app is not missing - the network is - and saying the wrong one of
+  // those sends the next person looking in the wrong place.
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), "tvbox-store-off-"));
+  const prevHome = process.env.HOME;
+  process.env.HOME = home;
+  try {
+    delete require.cache[require.resolve("./store")];
+    const fresh = require("./store");
+    // A port nothing listens on: the fetch fails rather than answering 404.
+    const cfg = { rawStore: () => ({ registry: "http://127.0.0.1:1/index.json" }) };
+    const r = await fresh.install(cfg, "anything");
+    assert.strictEqual(r.ok, false);
+    assert.match(r.error, /registry unreachable/);
+  } finally {
+    process.env.HOME = prevHome;
+    fs.rmSync(home, { recursive: true, force: true });
+    delete require.cache[require.resolve("./store")];
+  }
+});
