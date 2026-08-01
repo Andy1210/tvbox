@@ -272,6 +272,45 @@ builds can't drift. The `.img.xz` lands as a workflow artifact and, on a
 release event, as a release asset. Expect ~1-1.5 h of runner time per image;
 that's normal for pi-gen in CI.
 
+## The image is smoke-tested before it is published
+
+For a long time CI built an ~840 MB `.img.xz`, uploaded it, and **nothing ever
+started it** - the image was the one channel no test covered, which is how a
+rootfs with 174 MB of usable space shipped across several releases.
+
+[`scripts/image-smoke.sh`](../scripts/image-smoke.sh) runs in `image.yml`
+**before** the upload, so a broken image fails the build instead of becoming a
+downloadable artifact. Two phases:
+
+1. **Geometry + payload** - the image mounted, not running: partition table and
+   types, rootfs size, ext4 free space _before_ the first-boot expand
+   (`MIN_FREE_MB`, **600 MB** in CI - the incident that prompted it shipped with
+   174 MB), `cmdline.txt` non-empty and carrying `root=PARTUUID=` /
+   `rootfstype=ext4` / `vc4.force_hotplug=1`, a kernel and DTBs present, no
+   orphaned `FSCK*.REC`, `/etc/fstab`'s PARTUUIDs matching the real ones, the `tv`
+   account present with a locked password, and every runtime file OTA can never
+   install (diagnostics + safe mode, the shell, the launcher bundle, the arm64
+   Electron).
+2. **Boot** - the image's OWN systemd, under `systemd-nspawn` with the arm64
+   binfmt the job already registered. A one-shot unit is injected, runs the
+   assertions from inside the booted system (`multi-user.target` active, no
+   `not-found` units, ssh host keys generated, `greetd` and `tvbox-diag` enabled,
+   Electron's runtime executes and loads the shell's modules) and powers the
+   container off. The injected files go on a **copy** of the image; the published
+   `.img.xz` is untouched.
+
+**What a pass does not prove**, so nobody reads more into it: it does not run the
+Raspberry Pi's kernel, its firmware, or a graphical session. QEMU's `raspi`
+machines are too flaky to gate a build on, and a Wayland compositor plus an
+emulated GPU is not a CI job. A kernel that panics on real hardware still passes
+here; a rootfs that cannot boot its own userspace does not.
+
+Locally: `sudo scripts/image-smoke.sh build/tvbox-*.img.xz` (add `SKIP_BOOT=1`
+for phase 1 only). And because the real run only happens during an image build,
+the ordinary CI run does `sudo scripts/image-smoke.sh --self-test`: it builds a
+synthetic image, asserts the checks pass on it, then empties its `cmdline.txt` and
+asserts they fail. A check that cannot fail is not a check.
+
 ## Gotchas learned elsewhere (so you don't relearn them)
 
 - **Electron must be `npm install`ed inside the arm64 chroot** - a host-side

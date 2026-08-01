@@ -99,6 +99,23 @@ jobs:
           cd pi-gen && ./build-docker.sh
           ls -la deploy/
 
+      # The image was the ONE channel nothing tested: this workflow built an ~840 MB
+      # .img.xz, uploaded it, and nobody started it until someone flashed it - which
+      # is how a rootfs with 174 MB of usable space shipped across several releases.
+      # Phase 1 mounts the image and checks its geometry and payload; phase 2 boots
+      # the image's OWN systemd under nspawn with the arm64 binfmt this job already
+      # registered. See the header of scripts/image-smoke.sh for exactly what a pass
+      # does and does not prove (no Pi kernel, no graphical session).
+      #
+      # BEFORE the upload on purpose: a broken image should fail the build rather
+      # than become a downloadable artifact.
+      - name: smoke-test the image (geometry + a real userspace boot)
+        run: |
+          set -e
+          sudo apt-get install -y -qq systemd-container e2fsprogs file
+          IMG=$(ls pi-gen/deploy/*.img.xz | head -1)
+          sudo -E MIN_ROOT_GB=3 MIN_FREE_MB=600 scripts/image-smoke.sh "$IMG"
+
       - name: upload image artifact
         uses: actions/upload-artifact@v4
         with:
