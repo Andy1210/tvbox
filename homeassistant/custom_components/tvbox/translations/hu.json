@@ -1,0 +1,25 @@
+{
+  "config": {
+    "flow_title": "{name}",
+    "step": {
+      "confirm": {
+        "title": "{name} hozzáadása",
+        "description": "Add hozzá ezt a tvboxot a Home Assistanthoz médialejátszóként. A már használt MQTT-brókeren keresztül vezérli - cím és jelszó nem kell hozzá."
+      },
+      "user": {
+        "title": "tvbox hozzáadása",
+        "description": "A box magától jelentkezik a brókeren, úgyhogy erre csak akkor van szükség, ha ez nem érkezett meg. Az eszközazonosítót a boxon a Beállítások, Hálózat, MQTT alatt találod.",
+        "data": {
+          "device_id": "MQTT eszközazonosító"
+        }
+      }
+    },
+    "error": {
+      "invalid_device_id": "Csak betű, szám, alulvonás és kötőjel - az azonosító egy MQTT-topic szegmens."
+    },
+    "abort": {
+      "already_configured": "Ez a box már be van állítva.",
+      "invalid_discovery_info": "Ez az MQTT-üzenet nem tvboxtól jött."
+    }
+  }
+}

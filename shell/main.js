@@ -24,6 +24,7 @@ const audio = require("./audio"); // wpctl sink list + volume (device audio sett
 const bluetooth = require("./bluetooth"); // bluetoothctl pair/connect (audio + input devices)
 const ambient = require("./ambient"); // weather + local photos for the idle/ambient screen
 const mqttBridge = require("./mqtt"); // MQTT: now-playing publish + command/notify (HA integration)
+const mediastate = require("./mediastate"); // mpv + app now-playing + sink -> ONE player state (HA media_player)
 const ir = require("./ir"); // IR blaster hub: TV volume/mute over ESPHome or Home Assistant
 const appwins = require("./appwindows"); // background-apps window registry + hidden-set policy (LRU/RAM guard)
 const nativeapp = require("./native"); // native (non-Electron) apps: RetroArch et al own the screen AND the input
@@ -40,6 +41,7 @@ const boothealth = require("./boothealth"); // "this boot reached the launcher" 
 const backup = require("./backup"); // encrypted settings backup/restore (phone pairing page)
 const backupPairing = require("./pairing/backup");
 const reconcile = require("./reconcile"); // re-acquire what a restore could not carry (packages, deps, bundles)
+const identity = require("./identity"); // per-box identity (hostname, derived device names)
 const { Supervisor } = require("./service_supervisor"); // generic supervised child procs (plugins use it)
 const pkg = require("./package.json"); // shell version (About/diagnostics)
 
@@ -485,6 +487,28 @@ function installRclone() {
 
 // ---- app manifests + install (the install-recipe runner lives in install.js,
 // shared with the `tvbox` CLI; the shell just queries manifests + serves apps) ----
+
+// Launchable = belongs on HOME: ready status, binary deps present, configured, a
+// bundle app has its bundle, and not mid-install. HOME shows ONLY these, so a
+// still-installing or not-yet-provisioned app stays in the store (with progress)
+// instead of appearing greyed on HOME.
+//
+// One function, because two callers answer the same question and must not drift:
+// the tile list the launcher draws, and the source list the Home Assistant
+// media_player offers. A source that HOME would refuse to open must not be
+// offered there either.
+function appLaunchable(m) {
+  const { depsOk } = apps.appDeps(m);
+  const rt = m.runtime || {};
+  // A remote web-app whose URL comes from config (runtime.urlConfig) is only
+  // launchable once that URL is set (e.g. Home Assistant).
+  const configured = rt.serve === "remote" && rt.urlConfig ? !!(config.appConfig(rt.urlConfig) || {}).baseUrl : true;
+  const installable = !!(m.install && m.install.source);
+  return (
+    m.status === "ready" && depsOk && configured && !installing.has(m.id) && (!installable || apps.isInstalled(m.id))
+  );
+}
+
 function appTiles() {
   // the subset the launcher needs to draw a tile (+ dependency status so it can
   // grey out an app whose required binary isn't installed)
@@ -524,16 +548,7 @@ function appTiles() {
       installed: apps.isInstalled(m.id),
       installing: installing.has(m.id),
       configured,
-      // Launchable = belongs on HOME: ready status, binary deps present,
-      // configured, a bundle app has its bundle, and not mid-install. HOME shows
-      // ONLY these, so a still-installing / not-yet-provisioned app stays in the
-      // store (with progress) instead of appearing greyed on HOME.
-      ready:
-        m.status === "ready" &&
-        depsOk &&
-        configured &&
-        !installing.has(m.id) &&
-        (!installable || apps.isInstalled(m.id)),
+      ready: appLaunchable(m), // see appLaunchable: the one definition HOME and HA share
       progress: installProgress.get(m.id) || null,
     };
   });
@@ -792,6 +807,7 @@ function handlePost(p, data, res) {
     // MQTT (retained) for HA, and remember it for the auto-update idle gate.
     nowPlaying = data;
     if (mqttCtl) mqttCtl.publish("nowplaying", data, { retain: true });
+    publishMediaState({ force: true }); // the metadata changed: always news
     return jsonRes(res, { ok: true });
   }
   if (p === "/tvbox/api/update/check") {
@@ -1900,6 +1916,7 @@ function stopMpv(keepMode) {
   // after "play" set the owner. Every play re-assigns it, and without a running
   // mpv no first-frame reveal can consume a stale value.)
   if (!keepMode) dmode.release(MPV_CLAIM);
+  clearMpvMedia(); // the clock stops with the process (see clearMpvMedia)
   mpvStartPending = false; // no paused-start handshake outlives the process
   if (mpv) {
     const pid = mpv.pid;
@@ -2069,6 +2086,11 @@ function launchMpv(url, startPos, pip, rect, streams) {
     setVideoMode(false);
     mpvStartPending = false;
     dmode.release(MPV_CLAIM); // film over -> UI mode back (stopMpv covers our own kills)
+    // The END of a film is an exit, not a stopMpv - mpv runs without --keep-open.
+    // Without this the retained state topic keeps saying "playing" with a frozen
+    // position, so Home Assistant shows a film nobody is watching until the next
+    // playback, and `seek` would still be aimed at a dead socket.
+    clearMpvMedia();
   });
   // mpv grabs keyboard focus when its window maps (and can do so late), which
   // would break D-pad nav - so keep pulling the launcher back to the front +
@@ -2215,8 +2237,19 @@ function observeMpv(seq, tries) {
         }
         emit({ type: "playing" });
         emit({ type: "position", ms: Math.round(m.data * 1000) });
-      } else if (m.name === "duration" && m.data != null) emit({ type: "duration", ms: Math.round(m.data * 1000) });
-      else if (m.name === "paused-for-cache") emit({ type: "buffering", on: !!m.data });
+        mpvMedia.active = true;
+        mpvMedia.position = m.data;
+        publishMediaState();
+      } else if (m.name === "duration" && m.data != null) {
+        emit({ type: "duration", ms: Math.round(m.data * 1000) });
+        mpvMedia.duration = m.data;
+        publishMediaState();
+      } else if (m.name === "pause") {
+        // Observed for the media state only - the renderer learns about pausing
+        // from its own player calls.
+        mpvMedia.paused = !!m.data;
+        publishMediaState({ force: true });
+      } else if (m.name === "paused-for-cache") emit({ type: "buffering", on: !!m.data });
       else if (m.name === "eof-reached" && m.data) {
         console.log("[player] eof-reached");
         emit({ type: "finished" });
@@ -2954,6 +2987,143 @@ function readBridgeJson(name, fallback) {
   }
 }
 
+// ---- the box as one media player (Home Assistant) ----
+//
+// Everything outside the box that wants to know "what is this TV doing" asks one
+// question, so there is one answer: a retained `state` topic composed from mpv,
+// the foreground app's now-playing report and the audio sink (mediastate.js owns
+// the merge rules). The nowplaying topic keeps its old shape beside it - the voice
+// assistant reads that one - so nothing that already works has to change.
+//
+// Every command the box answers, in one list, because it is also what the box
+// ADVERTISES: Home Assistant turns it into the entity's supported_features, so an
+// older box never shows a button that does nothing.
+const TV_COMMANDS = [
+  "launch",
+  "home",
+  "play",
+  "pause",
+  "stop",
+  "next",
+  "previous",
+  "seek",
+  "volume_set",
+  "volume_mute",
+  "volume_up",
+  "volume_down",
+  "mute",
+  "tv_on",
+  "tv_off",
+];
+// What mpv is doing right now. Kept here rather than read on demand: the observer
+// already streams it (observeMpv), and asking mpv over its socket per publish would
+// turn a state topic into a round trip.
+const mpvMedia = { active: false, paused: false, position: null, duration: null };
+// The clock stops with the process. Both ways mpv can go away have to come through
+// here - our own stopMpv AND mpv exiting on its own, which is what the end of a
+// film is - or a retained state topic keeps reporting a position for something
+// nobody is watching.
+function clearMpvMedia() {
+  if (!mpvMedia.active) return;
+  mpvMedia.active = false;
+  mpvMedia.paused = false;
+  mpvMedia.position = null;
+  mpvMedia.duration = null;
+  publishMediaState({ force: true });
+}
+let sinkState = { volume: null, muted: false };
+let lastMediaState = null;
+let mediaPublishTimer = null;
+let mediaPublishForced = false;
+
+// Coalesced: mpv reports a position every second and an app can push now-playing in
+// bursts, so publishes are batched to the next tick and then filtered by
+// worthPublishing (a position that moved less than a few seconds is not news).
+function publishMediaState(opts) {
+  if (!mqttCtl) return;
+  // A forced call that lands inside an already-queued window must not lose its
+  // force: re-seeding a fresh broker (applyMqttConfig) is exactly a forced publish,
+  // and lastMediaState still holds the previous broker's value, so being folded into
+  // a filtered publish would leave the new broker with no retained state at all.
+  if (opts && opts.force) mediaPublishForced = true;
+  if (mediaPublishTimer) return;
+  mediaPublishTimer = setTimeout(() => {
+    mediaPublishTimer = null;
+    const forced = mediaPublishForced;
+    mediaPublishForced = false;
+    if (!mqttCtl) return;
+    const next = mediastate.compose({
+      nowPlaying,
+      mpv: mpvMedia,
+      volume: sinkState.volume,
+      muted: sinkState.muted,
+      currentApp: currentAppId,
+      sources: mediaSources(),
+    });
+    if (!forced && !mediastate.worthPublishing(lastMediaState, next)) return;
+    lastMediaState = next;
+    mqttCtl.publish("state", next, { retain: true });
+  }, 200);
+}
+
+// The apps a media_player can be switched TO: exactly what HOME would open
+// (appLaunchable), so the source list never offers a tile the box would refuse -
+// an app mid-install, missing a dep, or a remote app with no URL set yet.
+// Bounded, because this goes into a retained payload and then into a Home
+// Assistant state attribute.
+const MAX_MEDIA_SOURCES = 64;
+function mediaSources() {
+  return apps
+    .getManifests()
+    .filter(appLaunchable)
+    .map((m) => ({ id: m.id, name: typeof m.name === "string" ? m.name : m.name && (m.name.en || m.name.hu) }))
+    .filter((s) => s.name)
+    .slice(0, MAX_MEDIA_SOURCES);
+}
+
+// Which app is in front changes through half a dozen paths (launch, resume,
+// native app, HOME, the typing screen), so the state topic is re-composed on a
+// slow tick instead of at every one of them: composing is pure and in-memory, and
+// worthPublishing drops the result when nothing moved. Media events themselves
+// don't wait for this - they publish immediately.
+const MEDIA_TICK_MS = 5000;
+const SINK_TICK_MS = 20000; // wpctl is a process spawn; the volume is not urgent
+
+// The sink's volume/mute, refreshed on a timer rather than per publish: wpctl is a
+// process spawn, and nothing else on the box changes the volume between ticks
+// without going through us.
+// The box's own output volume, set from outside (MQTT / Home Assistant). Targets
+// the DEFAULT sink, because that is what "the box's volume" means; the caller
+// never has to know a wireplumber node id. `volume` is 0..1.
+function setBoxVolume(action, cmd) {
+  const env = { ...process.env, ...WL_ENV };
+  audio.defaultSink(env, (sink) => {
+    if (!sink) return console.warn("[mqtt]", action, "- no audio sink");
+    const done = (ok) => {
+      if (!ok) console.warn("[mqtt]", action, "failed on sink", sink.id);
+      refreshSinkState(); // report what it actually became, not what was asked for
+    };
+    if (action === "volume_set") audio.setVolume(env, sink.id, Number(cmd && cmd.volume), done);
+    else audio.setMuted(env, sink.id, cmd && cmd.mute !== undefined ? !!cmd.mute : "toggle", done);
+  });
+}
+
+function refreshSinkState() {
+  // Only while something is listening. listSinks is `wpctl status` plus two more
+  // spawns per sink, and a box that never touches Home Assistant has no reason to
+  // pay three processes a minute forever - least of all during a film or a game.
+  if (!mqttCtl) return;
+  audio.defaultSink({ ...process.env, ...WL_ENV }, (sink) => {
+    const next = {
+      volume: sink && typeof sink.volume === "number" ? sink.volume : null,
+      muted: !!(sink && sink.muted),
+    };
+    if (next.volume === sinkState.volume && next.muted === sinkState.muted) return;
+    sinkState = next;
+    publishMediaState();
+  });
+}
+
 // (Re)start the MQTT bridge from the saved config. mqtt.js stop() publishes a
 // best-effort retained "offline" and force-ends the module-level client, so
 // calling it before init is safe (and a no-op when not started). rawMqtt() is
@@ -2963,6 +3133,22 @@ function applyMqttConfig() {
   mqttCtl = null;
   const mcfg = config.rawMqtt();
   if (mcfg) mqttCtl = mqttBridge.init(mcfg, { onNotify: handleTvNotify, onCommand: handleTvCommand });
+  if (mqttCtl) {
+    mqttCtl.announce({
+      name: identity.hostname(),
+      hostname: identity.hostname(),
+      version: pkg.version || "",
+      // The command vocabulary the box answers. Home Assistant turns it into the
+      // entity's supported_features, so a box on an older release doesn't advertise
+      // a button that does nothing.
+      commands: TV_COMMANDS,
+    });
+    // Read the volume now rather than waiting out the 20 s tick: MQTT may have been
+    // configured minutes after boot, and a media_player whose slider starts blank
+    // reads as broken.
+    refreshSinkState();
+    publishMediaState({ force: true });
+  }
   // re-seed retained now-playing on the (possibly new) broker; the mqtt client
   // queues QoS-0 publishes made before "connect", so this is safe immediately
   if (mqttCtl && nowPlaying) mqttCtl.publish("nowplaying", nowPlaying, { retain: true });
@@ -3017,6 +3203,25 @@ function handleTvCommand(cmd) {
       // TV. steps repeats the send ("volume up by 3"); ir.js clamps it.
       ir.send(action, cmd && cmd.steps).catch((e) => console.warn("[ir]", action, "failed:", (e && e.message) || e));
       break;
+    // The box's OWN output volume, deliberately separate from the three above:
+    // those drive the TV's amplifier over IR and have no absolute value to set,
+    // this is the sink the box plays through. A media_player entity's volume
+    // slider means this one.
+    case "volume_set":
+    case "volume_mute":
+      setBoxVolume(action, cmd);
+      break;
+    case "seek": {
+      // Absolute, in seconds - only meaningful while WE hold the clock (mpv);
+      // an app playing its own audio has no position for us to move. A non-numeric
+      // position would reach mpv as JSON `null` (NaN does not survive stringify),
+      // so it is rejected here rather than sent. A real number, not a coercion:
+      // Number(null) and Number("") are both 0, i.e. a silent seek to the start.
+      const pos = cmd && typeof cmd.position === "number" ? cmd.position : NaN;
+      if (mpvMedia.active && Number.isFinite(pos) && pos >= 0) mpvCmd({ command: ["seek", pos, "absolute"] });
+      else if (!Number.isFinite(pos)) console.warn("[mqtt] seek: bad position", cmd && cmd.position);
+      break;
+    }
     default:
       console.warn("[mqtt] unknown command:", action);
   }
@@ -3817,6 +4022,11 @@ app.whenReady().then(async () => {
   // (The command handler is added by the voice-control work.)
   applyMqttConfig();
   ir.applyConfig(); // IR blaster hub; no-op if not configured
+  // Keep the media state topic honest about which app is in front and how loud the
+  // box is; both are cheap and neither is urgent (see MEDIA_TICK_MS).
+  setInterval(() => publishMediaState(), MEDIA_TICK_MS);
+  refreshSinkState();
+  setInterval(refreshSinkState, SINK_TICK_MS);
   console.log("[main] window up");
 });
 
