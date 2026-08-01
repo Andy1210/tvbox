@@ -5,6 +5,16 @@ updates). `scripts/make-release.sh` lifts the current version's `hu`/`en`
 blocks into the OTA feed's `notes` - keep both languages, keep it short, and
 write for the person on the couch (what changes for THEM), not for developers.
 
+## 1.21.2
+
+### hu
+
+- Ha a box nem éri el a boltot, most ezt mondja, nem azt, hogy az alkalmazás nem létezik. Eddig egy megszakadt hálózat és egy tényleg hiányzó app ugyanúgy nézett ki.
+
+### en
+
+- When the box cannot reach the store it says so, instead of reporting that the app does not exist. A dropped network and a genuinely missing app used to look the same.
+
 ## 1.21.1
 
 ### hu
