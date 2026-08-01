@@ -397,6 +397,26 @@ function installDownload(entry, log) {
 // the registry URL by the caller, so it inherits the registry's trust + scheme.
 const MAX_PKG_FILES = 4000; // a web bundle is dozens of files; this is a runaway-index backstop
 const PKG_FILE_TIMEOUT_MS = 60000; // per-file cap so an unresponsive registry can't hang the install
+// One package file, with every guard the install path depends on: origin-pinned
+// (a `rel` that is itself a URL must not fetch off-registry), redirects
+// re-validated by guardedFetch, and bounded so an unresponsive registry cannot
+// hang the install and wedge the tile.
+async function fetchPackageFile(url, baseOrigin, rel) {
+  const ctl = new AbortController();
+  const timer = setTimeout(() => ctl.abort(), PKG_FILE_TIMEOUT_MS);
+  try {
+    const res = await guardedFetch(url.toString(), {
+      cache: "no-store",
+      signal: ctl.signal,
+      allow: (u) => new URL(u).origin === baseOrigin,
+    });
+    if (!res.ok) throw new Error("HTTP " + res.status + " for " + rel);
+    return Buffer.from(await res.arrayBuffer());
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 async function installPackage(id, baseUrl, files, log) {
   log = log || (() => {});
   if (!/^[a-z0-9_-]+$/.test(String(id || ""))) throw new Error("bad app id");
@@ -427,21 +447,21 @@ async function installPackage(id, baseUrl, files, log) {
       // registry; sha256 below is the content-integrity backstop on top. Bounded
       // by a timeout like every other fetcher (fetchIndex/fetchJson/download) so
       // an unresponsive registry can't hang the install and wedge the tile.
-      const ctl = new AbortController();
-      const timer = setTimeout(() => ctl.abort(), PKG_FILE_TIMEOUT_MS);
-      let buf;
-      try {
-        const res = await guardedFetch(url.toString(), {
-          cache: "no-store",
-          signal: ctl.signal,
-          allow: (u) => new URL(u).origin === baseOrigin,
-        });
-        if (!res.ok) throw new Error("HTTP " + res.status + " for " + rel);
-        buf = Buffer.from(await res.arrayBuffer());
-      } finally {
-        clearTimeout(timer);
+      // A registry served from a CDN can hand back a copy from before its last
+      // publish, and `cache: "no-store"` only speaks to the LOCAL cache - the edge
+      // has its own. So a hash that does not match is not proof of a bad file yet:
+      // try once more with a URL the edge has never seen, and only then give up.
+      // The check itself stays exactly as strict; this only removes a failure mode
+      // that looks like tampering and is really a stale cache.
+      let buf = await fetchPackageFile(url, baseOrigin, rel);
+      let sum = crypto.createHash("sha256").update(buf).digest("hex");
+      if (sum !== f.sha256.toLowerCase()) {
+        log("sha256 mismatch for " + rel + " - refetching past the cache");
+        const fresh = new URL(url.toString());
+        fresh.searchParams.set("_", Date.now().toString(36));
+        buf = await fetchPackageFile(fresh, baseOrigin, rel);
+        sum = crypto.createHash("sha256").update(buf).digest("hex");
       }
-      const sum = crypto.createHash("sha256").update(buf).digest("hex");
       if (sum !== f.sha256.toLowerCase()) throw new Error("sha256 mismatch for " + rel + " (got " + sum + ")");
       const out = path.join(tmp, rel);
       if (out !== tmp && !out.startsWith(tmp + path.sep)) throw new Error("package path escape: " + rel);

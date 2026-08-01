@@ -86,11 +86,12 @@ test("install() of a package app writes the whole dir (manifest + plugin + web) 
     packages: { pkgapp: { files } },
   };
   const server = http.createServer((req, res) => {
-    if (req.url === "/index.json") {
+    const at = req.url.split("?")[0]; // a static host routes on the path, not the query
+    if (at === "/index.json") {
       res.writeHead(200, { "Content-Type": "application/json" });
       return res.end(JSON.stringify(index));
     }
-    const body = tree[req.url.replace(/^\//, "")];
+    const body = tree[at.replace(/^\//, "")];
     if (body) {
       res.writeHead(200);
       return res.end(body);
@@ -163,13 +164,14 @@ test("listForUi flags updateAvailable when the registry version is newer than in
   };
   const pkgBody = rebuild();
   const server = http.createServer((req, res) => {
-    if (req.url === "/index.json") {
+    const at = req.url.split("?")[0]; // a static host routes on the path, not the query
+    if (at === "/index.json") {
       res.writeHead(200, { "Content-Type": "application/json" });
       return res.end(
         JSON.stringify({ registryVersion: 1, apps: [manifest(state.indexVersion)], packages: { verapp: { files } } }),
       );
     }
-    if (req.url === "/apps/verapp/manifest.json") {
+    if (at === "/apps/verapp/manifest.json") {
       res.writeHead(200);
       return res.end(pkgBody);
     }
