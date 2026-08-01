@@ -5,6 +5,12 @@
 // Callers pass the session env (main's childEnv). MAC addresses are validated by
 // the route before reaching here; execFile (no shell) means args are literal.
 const { execFile, spawn } = require("child_process");
+const wifiradio = require("./wifiradio"); // pairing with the radio quiet - see pairQuiet below
+
+// How long the radio may stay down for one pairing attempt. pair() itself caps at
+// 35 s plus a ~6 s trust/connect tail, so this only has to outlast that; the
+// detached fuse uses it as the deadline it restores on regardless.
+const PAIR_RADIO_SECONDS = 90;
 
 function bt(env, args, timeout, cb) {
   execFile("bluetoothctl", args, { env, timeout: timeout || 15000 }, (_e, out, err) => cb((out || "") + (err || "")));
@@ -172,6 +178,24 @@ function pair(env, mac, cb) {
   }, 500);
   const to = setTimeout(() => finish(paired()), 35000);
 }
+// The same pairing, with the wifi radio held down for the attempt. Offered as a
+// separate action rather than made the default: it briefly takes the box off the
+// network, which is only worth it for the device class that needs it (a BLE
+// remote whose CONNECT_IND keeps losing the antenna to wifi - wifiradio.js has
+// the measurements). Restoring the radio is STARTED before the answer goes back,
+// not awaited, so wifi can still be a second or two behind the reply.
+function pairQuiet(env, mac, cb) {
+  wifiradio.withRadioOff(
+    env,
+    PAIR_RADIO_SECONDS,
+    (done) =>
+      pair(env, mac, (r) => {
+        done();
+        cb(r);
+      }),
+    null,
+  );
+}
 function connect(env, mac, cb) {
   bt(env, ["connect", mac], 25000, (o) => cb({ ok: /Connection successful|already connected/i.test(o) }));
 }
@@ -182,4 +206,4 @@ function remove(env, mac, cb) {
   bt(env, ["remove", mac], 12000, (o) => cb({ ok: !/Failed to remove/i.test(o) }));
 }
 
-module.exports = { status, list, scan, pair, connect, disconnect, remove };
+module.exports = { status, list, scan, pair, pairQuiet, connect, disconnect, remove };
