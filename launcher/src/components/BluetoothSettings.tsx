@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { Fragment, useEffect, useRef, useState } from "react";
 import { setFocus } from "@noriginmedia/norigin-spatial-navigation";
 import { useI18n } from "../lib/i18n";
 import { fetchBtStatus, fetchBtDevices, btScan, btAction, type BtDevice, type BtStatus } from "../lib/bluetooth";
@@ -63,6 +63,10 @@ export function BluetoothSettings() {
   const [scanning, setScanning] = useState(false);
   const [busy, setBusy] = useState<string | null>(null); // mac being acted on
   const [msg, setMsg] = useState("");
+  // The device whose pairing just failed, if any: it gets the radio-quiet retry
+  // offered underneath it. Only shown after a failure - it takes the box off the
+  // network for a moment, which isn't worth doing on a pairing that would work.
+  const [retryQuiet, setRetryQuiet] = useState<string | null>(null);
   // Mirrors for the polling interval (its closure would otherwise see stale state).
   const busyRef = useRef<string | null>(null);
   const scanningRef = useRef(false);
@@ -94,15 +98,21 @@ export function BluetoothSettings() {
     setTimeout(() => setFocus("bt-scan"), 0);
   };
 
-  const act = async (d: BtDevice) => {
+  const act = async (d: BtDevice, quiet = false) => {
     if (busy) return;
-    const action = d.connected ? "disconnect" : d.paired ? "connect" : "pair";
+    const action = quiet ? "pair-quiet" : d.connected ? "disconnect" : d.paired ? "connect" : "pair";
+    const pairing = action === "pair" || action === "pair-quiet";
     setBusy(d.mac);
-    setMsg(action === "pair" ? t("bt.pairing", { name: d.name }) : "");
+    setMsg(pairing ? t(quiet ? "bt.pairingQuiet" : "bt.pairing", { name: d.name }) : "");
     const r = await btAction(action, d.mac);
     setBusy(null);
     setMsg(r.ok ? "" : t("bt.failed", { name: d.name }));
-    setTimeout(() => setFocus("bt-dev-" + d.mac), 0);
+    // The retry is worth offering exactly where it helps: a pairing that failed.
+    // It stays after a failed quiet attempt too - the remote may simply not have
+    // been in pairing mode that time.
+    const offer = !r.ok && pairing;
+    setRetryQuiet(offer ? d.mac : null);
+    setTimeout(() => setFocus(offer ? "bt-quiet-" + d.mac : "bt-dev-" + d.mac), 0);
     refresh();
   };
   const remove = async (d: BtDevice) => {
@@ -147,31 +157,45 @@ export function BluetoothSettings() {
           </svg>
         </FocusButton>
         {(devices || []).map((d) => (
-          <div key={d.mac} className="flex items-center gap-[1vw]">
-            <FocusButton
-              focusKey={"bt-dev-" + d.mac}
-              onEnter={() => act(d)}
-              className="flex-1 px-[2vw] py-[1.5vh] rounded-[1.1vh] bg-white/5 flex items-center gap-[1.2vw] min-w-0"
-            >
-              <BtGlyph type={d.type} />
-              <span className="text-[2.1vh] truncate flex-1 min-w-0 text-left">{d.name}</span>
-              {d.battery != null && (
-                <span className="text-[1.7vh] text-fg-dim shrink-0 tabular-nums">{d.battery}%</span>
-              )}
-              <span className={["text-[1.7vh] shrink-0", d.connected ? "text-accent" : "text-fg-dim"].join(" ")}>
-                {d.connected ? t("bt.connected") : d.paired ? t("bt.paired") : t("bt.pair")}
-              </span>
-            </FocusButton>
-            {d.paired && (
+          <Fragment key={d.mac}>
+            <div className="flex items-center gap-[1vw]">
               <FocusButton
-                focusKey={"bt-rm-" + d.mac}
-                onEnter={() => remove(d)}
-                className="px-[1.4vw] py-[1.5vh] rounded-[1.1vh] bg-white/5 text-[1.8vh] font-semibold shrink-0"
+                focusKey={"bt-dev-" + d.mac}
+                onEnter={() => act(d)}
+                className="flex-1 px-[2vw] py-[1.5vh] rounded-[1.1vh] bg-white/5 flex items-center gap-[1.2vw] min-w-0"
               >
-                {t("bt.remove")}
+                <BtGlyph type={d.type} />
+                <span className="text-[2.1vh] truncate flex-1 min-w-0 text-left">{d.name}</span>
+                {d.battery != null && (
+                  <span className="text-[1.7vh] text-fg-dim shrink-0 tabular-nums">{d.battery}%</span>
+                )}
+                <span className={["text-[1.7vh] shrink-0", d.connected ? "text-accent" : "text-fg-dim"].join(" ")}>
+                  {d.connected ? t("bt.connected") : d.paired ? t("bt.paired") : t("bt.pair")}
+                </span>
               </FocusButton>
+              {d.paired && (
+                <FocusButton
+                  focusKey={"bt-rm-" + d.mac}
+                  onEnter={() => remove(d)}
+                  className="px-[1.4vw] py-[1.5vh] rounded-[1.1vh] bg-white/5 text-[1.8vh] font-semibold shrink-0"
+                >
+                  {t("bt.remove")}
+                </FocusButton>
+              )}
+            </div>
+            {retryQuiet === d.mac && (
+              <>
+                <FocusButton
+                  focusKey={"bt-quiet-" + d.mac}
+                  onEnter={() => act(d, true)}
+                  className="px-[2vw] py-[1.5vh] rounded-[1.1vh] bg-white/5 text-left"
+                >
+                  <span className="text-[2.1vh] font-semibold">{t("bt.pairQuiet")}</span>
+                </FocusButton>
+                <div className="text-[1.7vh] text-fg-dim -mt-[0.3vh]">{t("bt.pairQuietHint")}</div>
+              </>
             )}
-          </div>
+          </Fragment>
         ))}
         {devices && !devices.length && <div className="text-[1.9vh] text-fg-dim">{t("bt.none")}</div>}
 
