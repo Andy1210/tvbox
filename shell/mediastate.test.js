@@ -55,6 +55,15 @@ test("volume comes from the sink and is rounded, not floated", () => {
   assert.equal(s.muted, true);
 });
 
+// PipeWire allows a sink above 1.0; the topic documents 0..1 and every consumer
+// treats it that way, so the payload has to match its own contract.
+test("a sink louder than 1.0 is clamped, not published as-is", () => {
+  assert.equal(ms.compose({ volume: 1.4 }).volume, 1);
+  assert.equal(ms.compose({ volume: -0.2 }).volume, 0);
+  assert.equal(ms.compose({ volume: Infinity }).volume, null);
+  assert.equal(ms.compose({ volume: NaN }).volume, null);
+});
+
 test("junk in the snapshot does not become junk in the payload", () => {
   const s = ms.compose({ nowPlaying: "not an object", mpv: 7, volume: "loud", currentApp: 42 });
   assert.equal(s.state, "idle");

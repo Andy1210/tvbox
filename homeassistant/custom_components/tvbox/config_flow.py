@@ -19,6 +19,9 @@ from homeassistant.helpers.service_info.mqtt import MqttServiceInfo
 
 from .const import CONF_DEVICE_ID, DOMAIN
 
+# The exact character class shell/identity.js safeId produces.
+_ID_CHARS = frozenset("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-")
+
 
 def _device_id_from_topic(topic: str) -> str | None:
     """``tvbox/<id>/announce`` -> ``<id>``. Refuses anything else."""
@@ -83,8 +86,11 @@ class TvboxConfigFlow(ConfigFlow, domain=DOMAIN):
             device_id = user_input[CONF_DEVICE_ID].strip()
             # The id becomes a topic segment; the box sanitises it to this same
             # character class (shell/identity.js safeId), so anything else here
-            # would only ever subscribe to a topic no box publishes on.
-            if not device_id or not all(c.isalnum() or c in "_-" for c in device_id):
+            # would only ever subscribe to a topic no box publishes on. ASCII
+            # explicitly: str.isalnum() is true for "é" and "٣", which no box ever
+            # publishes under, so accepting them creates an entry that silently
+            # never receives an update.
+            if not device_id or not all(c in _ID_CHARS for c in device_id):
                 errors[CONF_DEVICE_ID] = "invalid_device_id"
             else:
                 await self.async_set_unique_id(device_id)

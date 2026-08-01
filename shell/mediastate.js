@@ -48,13 +48,20 @@ function compose(input) {
     // Absolute seeking only means anything while WE hold the clock; an app that
     // reports its own position has no mpv to seek.
     seekable: !!(playing && num(mpv.duration)),
-    volume: typeof i.volume === "number" && i.volume >= 0 ? Math.round(i.volume * 100) / 100 : null,
+    // Clamped, not just rounded: PipeWire allows a sink above 1.0, while the topic
+    // documents 0..1 and every consumer (the HA entity's slider) treats it as such.
+    // The box's own payload has to match its own contract.
+    volume: typeof i.volume === "number" && Number.isFinite(i.volume) ? clamp01(i.volume) : null,
     muted: !!i.muted,
   };
 }
 
 function str(v) {
   return typeof v === "string" && v ? v.slice(0, 300) : null;
+}
+
+function clamp01(v) {
+  return Math.round(Math.min(1, Math.max(0, v)) * 100) / 100;
 }
 
 // Is `next` worth putting on the wire? Everything except the clock publishes on
