@@ -389,8 +389,8 @@
         },
         "bridge": {
           "type": "string",
-          "pattern": "^[a-z0-9_-]+$",
-          "description": "Renderer bridge adapter from shell/bridges/<name>.js (e.g. qwebchannel for Plex HTPC)."
+          "pattern": "^\\./[a-z0-9_-]+\\.js$",
+          "description": "Renderer bridge adapter: \"./<file>.js\" next to this manifest, shipped by the package. A bridge adapts one client's host API (Plex HTPC expects Qt's QWebChannel), so it belongs to that app and updates from the registry with it - the shell ships none."
         },
         "player": {
           "enum": ["mpv-fullscreen", "mpv-overlay"],

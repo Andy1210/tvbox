@@ -189,6 +189,12 @@ function validateManifest(m, src) {
   }
   const ti = m.runtime && m.runtime.textInput;
   if (ti !== undefined && ti !== "auto" && ti !== "off") return bad('runtime.textInput must be "auto" or "off"');
+  // Renderer bridge adapter, always a file the package ships next to its
+  // manifest. Pinned here as well as at resolution time, so nothing that reaches
+  // require() can carry a path.
+  const br = m.runtime && m.runtime.bridge;
+  if (br !== undefined && (typeof br !== "string" || !/^\.\/[a-z0-9_-]+\.js$/.test(br)))
+    return bad("runtime.bridge must be ./<file>.js shipped by the package");
   // Phone-pairing kinds the app offers (its plugin registers the matching
   // provider). This is how an app that has no screen of its own on the box, e.g. a
   // native app, still gets a "do this from your phone" affordance: the launcher

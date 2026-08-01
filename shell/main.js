@@ -14,6 +14,8 @@ const path = require("path");
 const os = require("os");
 const config = require("./config");
 const pairing = require("./pairing");
+const playeropts = require("./playeropts"); // app stream terms -> mpv args/commands + the settable-property allowlist
+const { redact } = require("./redact"); // an app's console line may carry ITS credentials; the shell's log is a file
 const display = require("./display"); // wlr-randr resolution/refresh control
 const displaymode = require("./displaymode"); // adaptive mode: UI mode + per-video claims
 const textinput = require("./textinput"); // typing into a keyboard-less app (OSK / phone)
@@ -143,7 +145,11 @@ function foregroundWindow() {
 let mqttCtl = null; // MQTT bridge control (publish/…) once connected; null if not configured
 let nowPlaying = null; // last launcher-reported now-playing (Spotify/Live TV) - gates auto-update idleness
 let restoredAt = null; // a backup restore just ran; the launcher polls this to show "restarting"
-const queued = { url: null, startPos: 0 };
+// `streams` is the app's own track decision (a media client that resolved which
+// audio/subtitle stream to play server-side, e.g. Plex): 0-based ordinals within
+// their type, `sub: -1` = subtitles off, `subFile` = a sidecar subtitle URL.
+// null anywhere = "no opinion", which leaves mpv's own selection alone.
+const queued = { url: null, startPos: 0, streams: null };
 
 // The box counts as idle for a self-initiated restart (nightly auto-update)
 // only when nothing is on screen or audible: no mpv, launcher focused, and the
@@ -759,6 +765,9 @@ function handlePost(p, data, res) {
     const action = p.slice("/tvbox/api/bt/".length);
     const fn = {
       pair: bluetooth.pair,
+      // Same pairing with the wifi radio held down for the attempt - the escape
+      // hatch for a BLE remote that will not bond while the shared antenna is busy.
+      "pair-quiet": bluetooth.pairQuiet,
       connect: bluetooth.connect,
       disconnect: bluetooth.disconnect,
       remove: bluetooth.remove,
@@ -1821,7 +1830,7 @@ function stopMpv(keepMode) {
     fs.unlinkSync(IPC);
   } catch (e) {}
 }
-function launchMpv(url, startPos, pip, rect) {
+function launchMpv(url, startPos, pip, rect, streams) {
   // Fullscreen relaunch keeps the claim (the next file re-claims immediately, and
   // releasing in between would blank the TV twice); going to PiP gives it back,
   // because there the browse UI is what's on screen.
@@ -1876,13 +1885,13 @@ function launchMpv(url, startPos, pip, rect) {
     mpvStartPending = true;
   }
   if (audioSink) args.push("--audio-device=pipewire/" + audioSink);
-  // Preferred audio/subtitle language (Settings > Picture & sound). mpv falls
-  // back to the stream default when the language isn't present; subtitles stay
-  // OFF unless a preference is set (--slang alone doesn't enable them, so add
-  // sid=auto to actually select a matching track).
-  const pl = config.rawPlayer() || {};
-  if (/^[a-z]{2,3}$/.test(pl.audioLang || "")) args.push("--alang=" + pl.audioLang);
-  if (/^[a-z]{2,3}$/.test(pl.subLang || "")) args.push("--slang=" + pl.subLang, "--sid=auto");
+  // Track selection, per axis: what the app decided for itself (Plex resolves
+  // audio/subtitle server-side and ships the choice with the item) wins, and
+  // Settings > Picture & sound fills in the rest. The app's choice has to be
+  // spelled out because mpv's default `sid=auto` turns on any subtitle track
+  // carrying the container's default flag, which is how a film played with "no
+  // subtitles" in Plex came up with Hungarian subs anyway.
+  args.push(...playeropts.streamArgs(streams, config.rawPlayer()));
   // "--" ends option parsing: a URL starting with "-" (or a crafted playlist
   // entry) must always be argv's file position, never an mpv option.
   args.push("--", url);
@@ -2038,7 +2047,12 @@ function observeMpv(seq, tries) {
   s.on("connect", () => {
     connected = true;
     console.log("[player] observer connected");
-    ["time-pos", "duration", "pause", "eof-reached", "core-idle"].forEach((p, i) =>
+    // `paused-for-cache`, NOT `core-idle`: core-idle is also true while the USER
+    // has it paused, so reporting it as buffering told a client the player was
+    // stuck loading for as long as the film sat paused. Plex then spun its loader
+    // over the frozen frame and killed the session on its own 120 s
+    // BufferingTimeout ("Playback error"), measured on the box.
+    ["time-pos", "duration", "pause", "eof-reached", "paused-for-cache"].forEach((p, i) =>
       s.write(JSON.stringify({ command: ["observe_property", i + 1, p] }) + "\n"),
     );
   });
@@ -2080,7 +2094,7 @@ function observeMpv(seq, tries) {
         emit({ type: "playing" });
         emit({ type: "position", ms: Math.round(m.data * 1000) });
       } else if (m.name === "duration" && m.data != null) emit({ type: "duration", ms: Math.round(m.data * 1000) });
-      else if (m.name === "core-idle") emit({ type: "buffering", on: !!m.data });
+      else if (m.name === "paused-for-cache") emit({ type: "buffering", on: !!m.data });
       else if (m.name === "eof-reached" && m.data) {
         console.log("[player] eof-reached");
         emit({ type: "finished" });
@@ -2455,7 +2469,7 @@ function openRemoteApp(m, url) {
   wc.on("console-message", (ev) => {
     console.log(
       "[remote:" + (CONSOLE_TAG[ev.level] || "?") + "]",
-      ev.message,
+      redact(ev.message),
       ev.sourceId ? "(" + ev.sourceId + ":" + ev.lineNumber + ")" : "",
     );
   });
@@ -2525,7 +2539,7 @@ function openRemoteApp(m, url) {
       return { action: "deny" };
     });
     cwc.on("console-message", (ev) => {
-      console.log("[popup:" + (CONSOLE_TAG[ev.level] || "?") + "]", ev.message);
+      console.log("[popup:" + (CONSOLE_TAG[ev.level] || "?") + "]", redact(ev.message));
     });
     cwc.on("dom-ready", () => {
       cwc.executeJavaScript(NO_WEBAUTHN_JS).catch(() => {}); // the sign-in page lives here
@@ -2676,7 +2690,7 @@ function openLocalApp(m) {
   w.webContents.on("console-message", (ev) => {
     console.log(
       "[app:" + m.id + ":" + (CONSOLE_TAG[ev.level] || "?") + "]",
-      ev.message,
+      redact(ev.message),
       ev.sourceId ? "(" + ev.sourceId + ":" + ev.lineNumber + ")" : "",
     );
   });
@@ -2886,7 +2900,7 @@ function handleTvCommand(cmd) {
   }
 }
 
-ipcMain.on("plog", (_e, p, a) => console.log("[plog]", p, a)); // debug: raw player.* calls from an app
+ipcMain.on("plog", (_e, p, a) => console.log("[plog]", p, redact(a))); // debug: raw player.* calls from an app
 
 // Which window a webContents belongs to: null = the launcher window, an app id
 // = that app's own window, undefined = unknown/stale sender (no identity, no
@@ -2936,6 +2950,21 @@ function popupAppId(sender) {
   return undefined;
 }
 
+// Where the app's declared bridge adapter really lives, or null. A bridge always
+// ships INSIDE its app package ("./file.js" next to the manifest): the thing it
+// adapts is one client's host API, so it belongs to that client and updates from
+// the registry with it. The shell has no bridge of its own. Resolved here rather
+// than in the preload because this is the side that knows where a package is
+// installed, and the value reaches require(): it is pinned to the package dir,
+// no subdirectories and no traversal, and a manifest-only app (no dir of its
+// own) simply cannot have one.
+function bridgePath(m) {
+  const name = (m && m.runtime && m.runtime.bridge) || null;
+  if (!name || !m._dir || !/^\.\/[a-z0-9_-]+\.js$/.test(name)) return null;
+  const file = path.join(m._dir, name.slice(2));
+  return path.dirname(file) === path.resolve(m._dir) && fs.existsSync(file) ? file : null;
+}
+
 // Synchronous: the preload asks which app this is, which capabilities it was
 // granted, and which bridge adapter its manifest declared - so it loads only
 // that surface (the security/extensibility boundary). Answered PER SENDER
@@ -2952,6 +2981,7 @@ ipcMain.on("tvbox:app", (e) => {
     id,
     capabilities: capsFor(id),
     bridge: rt.bridge || null,
+    bridgeFile: bridgePath(m),
     // The language the page should believe it is running in - the preload overrides
     // navigator.language(s) with it before the page's own scripts read them.
     language: lang.resolve(config.uiLocale(), app.getSystemLocale(), rt.language).tag,
@@ -3208,6 +3238,7 @@ ipcMain.handle("player", (e, action, payload) => {
   if (action === "queue") {
     queued.url = payload.url;
     queued.startPos = payload.startPos || 0;
+    queued.streams = payload.streams || null;
   } else if (action === "play") {
     // remember whose window the video belongs to: the first-frame reveal
     // (setVideoMode(true) in observeMpv) must hit THAT window, not the launcher
@@ -3224,7 +3255,7 @@ ipcMain.handle("player", (e, action, payload) => {
     } else if (queued.url) {
       playingUrl = queued.url;
       setVideoMode(false);
-      ensureAudio(() => launchMpv(queued.url, queued.startPos));
+      ensureAudio(() => launchMpv(queued.url, queued.startPos, false, null, queued.streams));
     } // fullscreen (also un-PiPs)
   } else if (action === "pause") mpvCmd({ command: ["set_property", "pause", true] });
   else if (action === "resume") mpvCmd({ command: ["set_property", "pause", false] });
@@ -3252,13 +3283,29 @@ ipcMain.handle("player", (e, action, payload) => {
     const prop = payload.type === "sub" ? "sid" : "aid";
     const v = payload.id === "no" || payload.id === "auto" ? payload.id : Number(payload.id);
     if (typeof v === "string" || Number.isFinite(v)) mpvCmd({ command: ["set_property", prop, v] });
+  } else if (action === "select") {
+    // Mid-playback version of the queue's `streams`, in the SAME ordinal terms
+    // (`track` above speaks mpv track ids, which an app that never saw the track
+    // list can't produce). Remembered as well as applied: going to PiP and back
+    // RELAUNCHES mpv from `queued.streams`, so a selection only sent to the live
+    // player would be quietly undone by the next toggle. Merged per axis - a
+    // call that changes only the subtitle must not clear the audio choice.
+    for (const command of playeropts.streamCommands(payload)) mpvCmd({ command });
+    queued.streams = playeropts.mergeStreams(queued.streams, payload);
+  } else if (action === "prop") {
+    // One allowlisted playback property (subtitle/audio sync, speed, volume,
+    // subtitle look). A refusal is reported, not swallowed: an app that gets
+    // "ok" for a setting that never landed has no way to notice.
+    const v = playeropts.propValue(payload.name, payload.value);
+    if (v === null) return { ok: false, error: "property not allowed or value out of range" };
+    mpvCmd({ command: ["set_property", payload.name, v] });
   } else if (action === "pip") {
     // Toggle the current channel between a PiP (at the launcher-measured rect) and
     // fullscreen. PiP needs the window transparent (so mpv behind shows through the
     // hole); fullscreen starts opaque and observeMpv reveals on the first frame.
     if (playingUrl) {
       setVideoMode(!!payload.on);
-      ensureAudio(() => launchMpv(playingUrl, 0, !!payload.on, payload.rect));
+      ensureAudio(() => launchMpv(playingUrl, 0, !!payload.on, payload.rect, queued.streams));
     }
   }
   return { ok: true };
@@ -3538,7 +3585,7 @@ app.whenReady().then(async () => {
   win.webContents.on("console-message", (ev) => {
     console.log(
       "[renderer:" + (CONSOLE_TAG[ev.level] || "?") + "]",
-      ev.message,
+      redact(ev.message),
       ev.sourceId ? "(" + ev.sourceId + ":" + ev.lineNumber + ")" : "",
     );
   });

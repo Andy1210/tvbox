@@ -13,7 +13,11 @@ export interface BtStatus {
   powered: boolean;
   discovering: boolean;
 }
-export type BtAction = "pair" | "connect" | "disconnect" | "remove";
+// "pair-quiet" is a pair with the box's wifi radio held down for the attempt:
+// wifi and Bluetooth share one antenna here, and a BLE remote that will not bond
+// otherwise usually bonds with the radio quiet. The box is briefly off the
+// network, so it is an explicit choice rather than what pairing always does.
+export type BtAction = "pair" | "pair-quiet" | "connect" | "disconnect" | "remove";
 
 async function getJson<T>(url: string, fallback: T): Promise<T> {
   try {
