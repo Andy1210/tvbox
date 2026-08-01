@@ -15,6 +15,16 @@ write for the person on the couch (what changes for THEM), not for developers.
 
 - When the box cannot reach the store it says so, instead of reporting that the app does not exist. A dropped network and a genuinely missing app used to look the same.
 
+## 1.21.2
+
+### hu
+
+- A box naplója nem őrzi meg a lejátszott cím webcímét. Egy IPTV-cím a felhasználónevet és a jelszót magában a címben hordozza, és a naplóból hibakeresésnél a memóriakártyára is átkerülhet; mostantól csak az szerepel benne, honnan indult a lejátszás.
+
+### en
+
+- The box's log no longer keeps the web address of what it played. An IPTV address carries the username and password inside the address itself, and the log can be copied to the memory card for troubleshooting; it now records only where playback came from.
+
 ## 1.21.1
 
 ### hu
