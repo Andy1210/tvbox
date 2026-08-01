@@ -14,6 +14,7 @@ import { fetchReconcileStatus, type ReconcileStatus } from "../lib/reconcile";
 // cannot steal spatial-nav focus (cf. InstallWatcher).
 const POLL_MS = 3000;
 const DWELL_MS = 8000; // how long the finished summary stays up
+const EARLY_RETRIES = 5; // before the first answer, a hiccup gets this many more goes
 
 export function RestoreWatcher() {
   const { t, loc } = useI18n();
@@ -23,14 +24,28 @@ export function RestoreWatcher() {
   useEffect(() => {
     let alive = true;
     let timer: ReturnType<typeof setTimeout> | null = null;
+    // A failed fetch is a hiccup, not an answer. Dropping the banner on one - which
+    // is what setting the status to null would do - leaves the user back in front of
+    // an empty HOME with nothing explaining it, exactly the state this exists to
+    // prevent. So the last known status is kept and the poll retries: while a run is
+    // in flight, indefinitely; before the first answer, a few times, because a shell
+    // that never responds must not leave a poll running forever.
+    let lastKnown: ReconcileStatus | null = null;
+    let earlyFailures = 0;
     const poll = async () => {
       const s = await fetchReconcileStatus();
       if (!alive) return;
+      if (!s) {
+        const keepTrying = lastKnown ? lastKnown.active || lastKnown.pending : ++earlyFailures <= EARLY_RETRIES;
+        if (keepTrying) timer = setTimeout(poll, POLL_MS);
+        return; // leave `status` as it was
+      }
+      lastKnown = s;
       setStatus(s);
       // Keep polling while the box still owes work. `pending` covers the gap
       // between a recorded restore and the first step actually running.
-      if (s && (s.active || s.pending)) timer = setTimeout(poll, POLL_MS);
-      else if (s && s.finishedAt) timer = setTimeout(() => alive && setDismissed(true), DWELL_MS);
+      if (s.active || s.pending) timer = setTimeout(poll, POLL_MS);
+      else if (s.finishedAt) timer = setTimeout(() => alive && setDismissed(true), DWELL_MS);
     };
     poll();
     return () => {

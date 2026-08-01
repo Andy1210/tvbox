@@ -229,6 +229,34 @@ function walkFiles(abs, rel, depth) {
   return names.flatMap((n) => walkFiles(path.join(abs, n), rel + "/" + n, depth + 1));
 }
 
+// Is any existing component of `out` below `root` a symlink? The prefix guard in
+// restoreAppFiles compares resolved STRINGS, which says nothing about what is on
+// disk: a link at `<root>/saves` pointing at ~/.ssh would pass it and the write
+// would follow the link out. lstat so the link itself is what gets inspected, and
+// walk downwards from the root so a link at any depth is caught.
+function symlinkOnPath(root, out) {
+  const rel = path.relative(root, out);
+  if (!rel || rel.startsWith("..")) return true; // not under the root: refuse rather than reason about it
+  let at = root;
+  for (const part of rel.split(path.sep)) {
+    at = path.join(at, part);
+    try {
+      if (fs.lstatSync(at).isSymbolicLink()) return true;
+    } catch (e) {
+      return false; // does not exist yet - nothing to follow, and mkdir will create it
+    }
+  }
+  return false;
+}
+
+function isDir(p) {
+  try {
+    return fs.lstatSync(p).isDirectory();
+  } catch (e) {
+    return false;
+  }
+}
+
 // Write back what collectAppFiles gathered, under the same per-app root. Every
 // path is re-derived from the manifest ON THIS BOX and pinned inside that root, so
 // a tampered backup cannot name a file outside the app it claims to be.
@@ -252,10 +280,15 @@ function restoreAppFiles(appFiles) {
       // ~/.tvbox/ sidecars (id-prefixed name, no separators), anything else must
       // sit under a path the manifest declares and resolve inside the app's root.
       let out;
+      // `base` is the directory the entry is confined to, and it differs per branch -
+      // the symlink walk below has to be told which one, or a state sidecar (which
+      // lives in ~/.tvbox, not under the app root) reads as an escape attempt.
+      let base;
       if (rel.startsWith(STATE_PREFIX)) {
         const name = rel.slice(STATE_PREFIX.length);
         if (!apps.stateFileOk(id, name) || !(m.backup.state || []).includes(name)) continue;
         out = path.join(TVBOX, name);
+        base = TVBOX;
       } else {
         if (!allowed.some((p) => rel === p || rel.startsWith(p + "/"))) continue;
         out = path.resolve(root, rel);
@@ -265,15 +298,24 @@ function restoreAppFiles(appFiles) {
         // app's directory belongs - and `~/.var/app/<ref>` as a regular file is a
         // flatpak that can never be installed again without hand-deleting it.
         if (!out.startsWith(root + path.sep)) continue;
+        base = root;
       }
       try {
         const buf = Buffer.from(b64, "base64");
         if (buf.length > MAX_APP_FILE_BYTES) continue;
+        // The resolved-prefix guard above is a guard on the PATH STRING; a symlink
+        // anywhere along it would still land the write outside the root. lstat, not
+        // stat, for exactly that reason - and every existing component is checked,
+        // not only the target.
+        if (symlinkOnPath(base, out)) {
+          console.warn("[backup] skipped", id + "/" + rel, "- a symlink is on that path");
+          continue;
+        }
         // A payload may name a declared path that is a DIRECTORY on this box
         // (`paths: ["saves"]`, entry `"saves"`): collect only ever emits files under
         // it, so that entry is crafted, and writing a file over an app's save
         // directory is not something a restore should do.
-        if (fs.existsSync(out) && fs.statSync(out).isDirectory()) {
+        if (isDir(out)) {
           console.warn("[backup] skipped", id + "/" + rel, "- a directory lives there");
           continue;
         }
