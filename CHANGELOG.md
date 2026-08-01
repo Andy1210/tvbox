@@ -5,6 +5,16 @@ updates). `scripts/make-release.sh` lifts the current version's `hu`/`en`
 blocks into the OTA feed's `notes` - keep both languages, keep it short, and
 write for the person on the couch (what changes for THEM), not for developers.
 
+## 1.21.1
+
+### hu
+
+- Javítva: ha egy alkalmazás frissítése épp akkor jelent meg, a telepítés hibás letöltésre panaszkodott és nem ment végig. A box a frissítés pillanatában rákérdez a bolt aktuális tartalmára, és ha egy fájlt a gyorsítótár még régi formájában adna vissza, még egyszer elkéri.
+
+### en
+
+- Fixed: installing an app update that had only just been published could fail as if the download were corrupt. The box now asks the store what it holds at the moment of the install, and a file the cache would still answer with an old copy of is fetched once more.
+
 ## 1.21.0
 
 ### hu
