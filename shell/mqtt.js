@@ -20,7 +20,12 @@ function init(cfg, handlers) {
   // Derived from the hostname, not the constant "tvbox": that constant made every
   // box that never set one publish into a single topic tree, which looks fine
   // until there are two boxes and each acts on the other's commands.
-  deviceId = cfg.deviceId || identity.defaultDeviceId();
+  //
+  // safeId here as well as in setMqtt: a RESTORE writes config.json through
+  // config.replaceAll(), which does not sanitize, so a backup can reintroduce a
+  // deviceId with a `/` or `#` in it - and that does not fail, it silently moves
+  // or widens the box's whole topic tree.
+  deviceId = safeId(cfg.deviceId || identity.defaultDeviceId());
   base = "tvbox/" + deviceId;
   const statusTopic = base + "/status";
   const url = "mqtt://" + cfg.host + ":" + (cfg.port || 1883);
