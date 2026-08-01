@@ -49,3 +49,14 @@ test("lines with nothing to hide come back untouched", () => {
 test("non-strings pass through rather than throwing", () => {
   for (const v of [null, undefined, 5, {}]) assert.strictEqual(redact(v), v);
 });
+
+test("credentials in a URL PATH are why a log line gets an origin, not a slice", () => {
+  // redact() handles name=value, which is where a Plex token lives. An IPTV URL
+  // puts the username and password in the path instead, and no denylist of
+  // parameter names can catch that - which is why the player log prints the
+  // origin and never the URL (see originOf in main.js).
+  const iptv = "http://live.example.net:8080/live/myuser/mypassword/12345.ts";
+  assert.strictEqual(redact(iptv), iptv, "nothing here looks like a parameter, and nothing is redacted");
+  assert.ok(iptv.slice(0, 55).includes("mypassword"), "a slice of it leaks the password");
+  assert.strictEqual(new URL(iptv).origin, "http://live.example.net:8080", "the origin carries none of it");
+});
