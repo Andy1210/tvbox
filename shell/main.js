@@ -2957,25 +2957,19 @@ function popupAppId(sender) {
   return undefined;
 }
 
-// Where the app's declared bridge adapter really lives, or null. Two forms:
-// a bare name is one of the shell's own bridges/, and "./file.js" is a file the
-// app PACKAGE ships - so a client-specific adapter travels with the app it
-// belongs to and updates from the registry. Resolved here rather than in the
-// preload because this is the side that knows where a package is installed, and
-// the path must be pinned inside that package dir: no subdirectories, no
-// traversal, and no bridge at all for a manifest-only app that has no dir.
+// Where the app's declared bridge adapter really lives, or null. A bridge always
+// ships INSIDE its app package ("./file.js" next to the manifest): the thing it
+// adapts is one client's host API, so it belongs to that client and updates from
+// the registry with it. The shell has no bridge of its own. Resolved here rather
+// than in the preload because this is the side that knows where a package is
+// installed, and the value reaches require(): it is pinned to the package dir,
+// no subdirectories and no traversal, and a manifest-only app (no dir of its
+// own) simply cannot have one.
 function bridgePath(m) {
   const name = (m && m.runtime && m.runtime.bridge) || null;
-  if (!name) return null;
-  const file = /^[a-z0-9_-]+$/.test(name)
-    ? path.join(__dirname, "bridges", name + ".js")
-    : /^\.\/[a-z0-9_-]+\.js$/.test(name) && m._dir
-      ? path.join(m._dir, name.slice(2))
-      : null;
-  if (!file || !fs.existsSync(file)) return null;
-  // A package-local bridge must sit IN the package: a manifest naming one that
-  // resolves anywhere else gets no bridge rather than a surprise require().
-  return file.startsWith(__dirname + path.sep) || path.dirname(file) === path.resolve(m._dir || "") ? file : null;
+  if (!name || !m._dir || !/^\.\/[a-z0-9_-]+\.js$/.test(name)) return null;
+  const file = path.join(m._dir, name.slice(2));
+  return path.dirname(file) === path.resolve(m._dir) && fs.existsSync(file) ? file : null;
 }
 
 // Synchronous: the preload asks which app this is, which capabilities it was

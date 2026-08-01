@@ -1,10 +1,10 @@
 // tvbox shell preload - thin, app-agnostic loader.
 //
 // Always exposes shell NAVIGATION (window.tvbox + the remote Home button). Then
-// it asks the shell which app this is and which BRIDGE ADAPTER its manifest
-// declared, and loads that generic adapter from bridges/ with the granted
+// it asks the shell which app this is and whether its manifest declared a BRIDGE
+// ADAPTER, and loads that (from the app's own package) with the granted
 // capabilities. The shell core knows nothing about any specific app - what
-// bridge an app needs (if any) is declared in its manifest.
+// bridge an app needs (if any) ships with the app.
 const { ipcRenderer } = require("electron");
 
 (function () {
@@ -247,12 +247,12 @@ const { ipcRenderer } = require("electron");
 
   // ---- bridge adapter (declared by the app's manifest runtime.bridge) ----
   // A bridge translates some foreign host API (e.g. Qt's QWebChannel, which
-  // Plex HTPC expects) into the shell's own IPC. It may be a built-in adapter
-  // from bridges/, or ship INSIDE the app package - which is the point: a
-  // client-specific quirk is then fixed by updating that app from the registry
-  // instead of shipping a whole OTA to boxes that don't even have it installed.
-  // main resolves and validates the path (it is the side that knows where a
-  // package lives); the preload only loads what it is handed.
+  // Plex HTPC expects) into the shell's own IPC, and ships INSIDE the app
+  // package - which is the point: a client-specific quirk is then fixed by
+  // updating that app from the registry instead of shipping a whole OTA to
+  // boxes that don't even have it installed. main resolves and validates the
+  // path (it is the side that knows where a package lives); the preload only
+  // loads what it is handed.
   if (info.bridgeFile) {
     try {
       const adapter = require(info.bridgeFile);

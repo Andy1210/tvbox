@@ -45,7 +45,7 @@ jobs:
         run: |
           set -e
           shopt -s nullglob
-          for f in shell/*.js shell/bridges/*.js shell/pairing/*.js; do
+          for f in shell/*.js shell/pairing/*.js; do
             node --check "$f"
           done
       - name: shell unit tests (node --test, no Electron)

@@ -480,7 +480,6 @@ full build + install in one command.
 ```text
 tvbox/
   shell/         Electron host (HTTP server, app-package registry + installer, mpv, plugin loader) + preload bridges
-    bridges/     renderer bridge adapters (e.g. QWebChannel for Plex)
   app-sdk/       @tvbox/app-sdk, the shared 10-foot UI SDK the launcher + every app package consume
   launcher/      React 10-foot HOME screen (built into the shell)
   cec/           HDMI-CEC to uinput remote bridge (tvbox-cec systemd service)
