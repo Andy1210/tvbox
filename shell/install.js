@@ -458,7 +458,7 @@ async function installPackage(id, baseUrl, files, log) {
       if (sum !== f.sha256.toLowerCase()) {
         log("sha256 mismatch for " + rel + " - refetching past the cache");
         const fresh = new URL(url.toString());
-        fresh.searchParams.set("_", Date.now().toString(36));
+        fresh.searchParams.set("_", Date.now().toString(36) + "-" + Math.random().toString(36).slice(2, 8));
         buf = await fetchPackageFile(fresh, baseOrigin, rel);
         sum = crypto.createHash("sha256").update(buf).digest("hex");
       }

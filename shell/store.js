@@ -49,12 +49,18 @@ function trustErrors(m) {
 // below only speaks to this process's own cache; a registry on a CDN (GitHub
 // Pages caches for ten minutes) will otherwise happily answer a "refresh" with
 // the copy it already has, which is not what a caller asking to refresh wants.
+// Unique per call: two refreshes inside one millisecond would otherwise share a
+// URL, and the second would be served the copy the first just put in the edge.
+function cacheBuster() {
+  return Date.now().toString(36) + "-" + Math.random().toString(36).slice(2, 8);
+}
+
 async function fetchIndex(url, bust) {
   const ctl = new AbortController();
   const t = setTimeout(() => ctl.abort(), 10000);
   try {
     const u = new URL(url);
-    if (bust) u.searchParams.set("_", Date.now().toString(36));
+    if (bust) u.searchParams.set("_", cacheBuster());
     const res = await guardedFetch(u.toString(), { signal: ctl.signal, cache: "no-store" });
     if (!res.ok) throw new Error("HTTP " + res.status);
     const idx = await res.json();
@@ -227,8 +233,13 @@ async function install(config, id) {
   // Measured on a box: a registry published between the store listing and the
   // install did exactly that. An install is deliberate and rare; one fetch to
   // make the two agree is the cheapest correctness there is.
-  const { entries, url } = await getEntries(config, true);
-  const m = (entries || []).find((x) => x.id === id);
+  const { entries, url, error } = await getEntries(config, true);
+  // Say WHY when the refresh itself failed. Forcing a refresh means an install
+  // needs the registry to answer - it needed the network for the files anyway -
+  // and reporting an unreachable registry as "not in registry" sends whoever
+  // debugs a failed auto-update looking for a missing app.
+  if (!entries) return { ok: false, error: "registry unreachable: " + (error || "unknown") };
+  const m = entries.find((x) => x.id === id);
   if (!m) return { ok: false, error: "not in registry" };
   const errs = trustErrors(m);
   if (errs.length) return { ok: false, error: errs.join("; ") };
