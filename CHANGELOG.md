@@ -5,6 +5,20 @@ updates). `scripts/make-release.sh` lifts the current version's `hu`/`en`
 blocks into the OTA feed's `notes` - keep both languages, keep it short, and
 write for the person on the couch (what changes for THEM), not for developers.
 
+## 1.21.0
+
+### hu
+
+- A Plexben a szüneteltetés nem szakítja meg többé a filmet. Eddig nagyjából két perc állás után "Playback error" üzenettel kilépett, mert a box tévesen azt jelentette a Plexnek, hogy még tölt.
+- A Plex a saját döntéseit kapja vissza: az általa választott hangsáv szól, és ha nála ki van kapcsolva a felirat, akkor kikapcsolva is marad. Eddig a box a fájlban alapértelmezettnek jelölt feliratot kapcsolta be helyette, és a hangsávot is maga választotta. A lejátszás közbeni átállítás (felirat, hangsáv, késleltetés, sebesség) szintén működik már.
+- Ha egy távirányító párosítása nem sikerül, a Beállítások > Bluetooth alatt megjelenik egy "Párosítás wifi nélkül" gomb. A wifi és a Bluetooth ugyanazon az antennán osztozik, és épp a párosítás az, ami emiatt elhasal; a box egy percre lelép a hálózatról, aztán magától visszatér. A wifit csak akkor kapcsolja vissza, ha előtte be volt kapcsolva.
+
+### en
+
+- Pausing a film in Plex no longer ends it. It used to stop with a "Playback error" about two minutes into a pause, because the box was telling Plex it was still loading.
+- Plex's own choices are honoured: the audio track it picked is the one you hear, and subtitles stay off when they are off in Plex. The box used to switch on whatever subtitle the file marked as default and pick the audio track itself. Changing any of it mid-film (subtitles, audio track, delay, speed) works now too.
+- When pairing a remote fails, Settings > Bluetooth offers "Pair without Wi-Fi". Wi-Fi and Bluetooth share one antenna on this box and pairing is what loses; the box leaves the network for up to a minute, then rejoins on its own. It only turns Wi-Fi back on if it was on to begin with.
+
 ## 1.20.0
 
 ### hu
