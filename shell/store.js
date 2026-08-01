@@ -45,11 +45,17 @@ function trustErrors(m) {
   return errs;
 }
 
-async function fetchIndex(url) {
+// `bust` gives the URL a query the CDN edge has never seen. `cache: "no-store"`
+// below only speaks to this process's own cache; a registry on a CDN (GitHub
+// Pages caches for ten minutes) will otherwise happily answer a "refresh" with
+// the copy it already has, which is not what a caller asking to refresh wants.
+async function fetchIndex(url, bust) {
   const ctl = new AbortController();
   const t = setTimeout(() => ctl.abort(), 10000);
   try {
-    const res = await guardedFetch(url, { signal: ctl.signal, cache: "no-store" });
+    const u = new URL(url);
+    if (bust) u.searchParams.set("_", Date.now().toString(36));
+    const res = await guardedFetch(u.toString(), { signal: ctl.signal, cache: "no-store" });
     if (!res.ok) throw new Error("HTTP " + res.status);
     const idx = await res.json();
     if (!idx || idx.registryVersion !== 1 || !Array.isArray(idx.apps)) throw new Error("bad index shape");
@@ -84,7 +90,7 @@ async function getEntries(config, refresh) {
   const url = registryUrl(config);
   if (!refresh && cache.url === url && Date.now() - cache.at < CACHE_MS && cache.entries) return cache;
   try {
-    cache = { at: Date.now(), url, entries: await fetchIndex(url), error: null };
+    cache = { at: Date.now(), url, entries: await fetchIndex(url, !!refresh), error: null };
   } catch (e) {
     console.warn("[store] registry fetch failed:", e.message);
     cache = { at: Date.now(), url, entries: null, error: String(e.message || e).slice(0, 120) };
@@ -214,7 +220,14 @@ function listForUi(config) {
 }
 
 async function install(config, id) {
-  const { entries, url } = await getEntries(config, false);
+  // REFRESH, not the cached copy. The file list and its sha256s come from the
+  // index while the files come from the registry live, so an index even a few
+  // minutes old can describe a package that has since been republished - and the
+  // install then fails on a hash mismatch that looks like a corrupt download.
+  // Measured on a box: a registry published between the store listing and the
+  // install did exactly that. An install is deliberate and rare; one fetch to
+  // make the two agree is the cheapest correctness there is.
+  const { entries, url } = await getEntries(config, true);
   const m = (entries || []).find((x) => x.id === id);
   if (!m) return { ok: false, error: "not in registry" };
   const errs = trustErrors(m);

@@ -97,7 +97,7 @@ function servePackage(tree) {
     files.push({ path: rel, sha256: crypto.createHash("sha256").update(buf).digest("hex") });
   }
   const server = http.createServer((req, res) => {
-    const b = bodies[req.url];
+    const b = bodies[req.url.split("?")[0]]; // a static host ignores the cache-busting query
     if (b) {
       res.writeHead(200);
       res.end(b);
@@ -350,4 +350,48 @@ test("an app whose bundle is missing entirely is flagged for the refresh tick", 
   assert.strictEqual(apps.bundleMissing({ id: "youtube", type: "webclient" }), false, "pure manifest");
   assert.strictEqual(apps.bundleMissing({ id: "retroarch", type: "native", install: {} }), false, "native app");
   assert.strictEqual(apps.bundleMissing(null), false, "no manifest at all");
+});
+
+test("a stale cached copy is refetched past the cache, not called corrupt", async () => {
+  // A registry on a CDN can answer with a copy from before its last publish while
+  // the index already describes the new one. The hash check must stay strict, but
+  // "the edge is behind" and "this file is bad" are different things, and only one
+  // of them is worth failing an install over.
+  const good = Buffer.from('{"id":"pkgtest","name":"Pkg","type":"webclient"}');
+  const stale = Buffer.from('{"id":"pkgtest","name":"OLD","type":"webclient"}');
+  let servedStale = 0;
+  const server = http.createServer((req, res) => {
+    const [at, query] = req.url.split("?");
+    if (at !== "/apps/pkgtest/manifest.json") {
+      res.writeHead(404);
+      return res.end("no");
+    }
+    // The plain URL is what an edge has cached; a URL it has never seen is a miss
+    // and reaches the origin.
+    res.writeHead(200);
+    if (!query) {
+      servedStale++;
+      return res.end(stale);
+    }
+    res.end(good);
+  });
+  await new Promise((r) => server.listen(0, "127.0.0.1", r));
+  const base = "http://127.0.0.1:" + server.address().port + "/apps/pkgtest/";
+  const files = [{ path: "manifest.json", sha256: crypto.createHash("sha256").update(good).digest("hex") }];
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), "tvbox-stale-"));
+  const prevHome = process.env.HOME;
+  process.env.HOME = home;
+  try {
+    delete require.cache[require.resolve("./install")];
+    const fresh = require("./install");
+    await fresh.installPackage("pkgtest", base, files, () => {});
+    const got = fs.readFileSync(path.join(home, ".tvbox", "apps", "pkgtest", "manifest.json"), "utf8");
+    assert.match(got, /"name":"Pkg"/, "the good copy is what landed");
+    assert.strictEqual(servedStale, 1, "the stale copy was tried once, then bypassed");
+  } finally {
+    process.env.HOME = prevHome;
+    server.close();
+    fs.rmSync(home, { recursive: true, force: true });
+    delete require.cache[require.resolve("./install")];
+  }
 });
