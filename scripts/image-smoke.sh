@@ -36,6 +36,10 @@ MIN_ROOT_GB="${MIN_ROOT_GB:-3}"    # the rootfs partition itself
 MIN_FREE_MB="${MIN_FREE_MB:-600}"  # usable space on a freshly flashed box, BEFORE its
                                    # first-boot expand: the 174 MB regression lived here
 BOOT_TIMEOUT="${BOOT_TIMEOUT:-420}" # arm64 userspace under emulation is slow
+# ...and a hard deadline on top of it: the injected unit powers the container off,
+# but a container process that will not terminate would otherwise outlive the
+# timeout's polite signal and hang the job rather than fail it.
+BOOT_KILL_AFTER="${BOOT_KILL_AFTER:-30}"
 
 IMG_IN="${1:-}"
 [ -n "$IMG_IN" ] || {
@@ -375,7 +379,7 @@ echo "==> systemd-nspawn --boot (timeout ${BOOT_TIMEOUT}s)"
 # --resolv-conf=off leaves the image's own file alone.
 CONSOLE="$WORK/boot-console.log"
 set +e
-timeout "$BOOT_TIMEOUT" systemd-nspawn \
+timeout --kill-after="$BOOT_KILL_AFTER" "$BOOT_TIMEOUT" systemd-nspawn \
   --directory "$ROOTMNT" \
   --boot \
   --register=no \
