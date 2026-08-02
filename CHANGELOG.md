@@ -5,6 +5,38 @@ updates). `scripts/make-release.sh` lifts the current version's `hu`/`en`
 blocks into the OTA feed's `notes` - keep both languages, keep it short, and
 write for the person on the couch (what changes for THEM), not for developers.
 
+## 1.23.0
+
+### hu
+
+- Ha egy második boxot az elsőről állítasz be, az új box mostantól a sajátjaként lép be a médiaappokba. Eddig az első box bejelentkezését és azonosítóját is átvitte a mentés, amitől a kettő egyetlen lejátszónak látszott: a Plex csak az egyiket mutatta, a telefonról indított lejátszás hol az egyikre, hol a másikra ment, és a szobát nem lehetett megválasztani. A beállításaid (nyelv, alkalmazások sorrendje) továbbra is átjönnek - az új boxon csak egyszer be kell lépned az appokba.
+- Egy visszaállítás után nem éled újra egy korábbi visszaállítás félbemaradt beállításcsomagja.
+
+### en
+
+- Setting up a second box from the first one now lets the new box sign in to your media apps as itself. The backup used to carry the first box's login and identity across, which made the two look like a single player: Plex only ever showed one of them, casting from a phone landed on whichever it felt like, and you could not pick the room. Your settings (language, app order) still travel - you just sign in once on the new box.
+- A restore no longer leaves an earlier restore's half-applied settings behind to be picked up later.
+
+### notes
+
+Not release notes for the TV - for whoever runs the boxes:
+
+- **This prevents new collisions; it does not repair existing ones.** Two boxes
+  that already share a media-app identity keep sharing it until one of them is
+  cleared by hand: stop the shell (`pkill -9 -f 'electron[/]dist'`) and remove
+  `~/.tvbox/shell-userdata/Local Storage` in the SAME command - the respawn loop
+  is fast enough that a slower sequence deletes the store out from under a
+  process that already holds it in memory and writes it back on exit. That box
+  then has to sign in to its apps again.
+- The filter is gated on the **"for another box"** choice on the phone backup
+  page, the same flag that re-derives the MQTT and Spotify names. A clone
+  restored without ticking it is not caught: a re-flash and a clone both arrive
+  with a fresh machine id, so the box cannot tell them apart, and treating a
+  re-flash as foreign would be the worse mistake.
+- Also in this release: `shell/integration.test.js`, whole-scenario tests through
+  the real modules instead of mutually-agreeing fakes (#34). The backup fix above
+  has a two-box scenario there.
+
 ## 1.22.0
 
 ### hu
