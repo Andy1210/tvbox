@@ -169,3 +169,19 @@ test("apply() parks only the launcher's keys from a foreign payload", () => {
   const data = JSON.parse(JSON.parse(fs.readFileSync(parked, "utf8")).data);
   assert.deepStrictEqual(Object.keys(data).sort(), ["tvbox.appPrefs", "tvbox.setup.done"]);
 });
+
+test("a foreign snapshot with nothing to keep clears an earlier parked one", () => {
+  // Copilot's catch on the PR: skipping the write is not the same as parking
+  // nothing. Whatever a previous restore left behind would be replayed on the
+  // next boot, which is the stale identity this whole guard exists to stop.
+  const parked = path.join(TMP, ".tvbox", "restore-localstorage.json");
+  fs.writeFileSync(parked, JSON.stringify({ data: JSON.stringify({ ClientID: "stale" }), at: 1 }));
+  backup.apply({
+    format: "tvbox-backup",
+    version: 1,
+    machineId: "0000deadbeef",
+    localStorage: JSON.stringify({ ClientID: "fsbet2zresma446qnnvt4kst" }),
+  });
+  assert.strictEqual(fs.existsSync(parked), false, "the older snapshot is gone, not left to be replayed");
+  assert.strictEqual(backup.pendingLocalStorage().data, null);
+});

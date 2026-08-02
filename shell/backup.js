@@ -519,7 +519,12 @@ function apply(payload) {
   }
   if (typeof payload.localStorage === "string" && payload.localStorage) {
     const ls = ownStorageOnly(payload.localStorage, sameBox(payload));
+    // Filtering down to nothing has to CLEAR the parked file, not leave it. This
+    // restore decided the box should not have that snapshot; leaving an earlier
+    // restore's file behind would let the launcher replay it on the next boot
+    // anyway - the same stale-identity outcome, one restore later.
     if (ls) fs.writeFileSync(RESTORE_LS, JSON.stringify({ data: ls, at: Date.now() }), { mode: 0o600 });
+    else clearPendingLocalStorage();
   }
   // Parked rather than written now: an app's files belong under a root derived
   // from ITS manifest, and a registry package's manifest only arrives with the
