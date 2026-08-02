@@ -409,17 +409,24 @@ function decrypt(envelope, password) {
 // the next boot reconciles towards. The caller restarts the shell afterwards
 // (plugins re-read creds at boot only) - which is also what starts the
 // reconciliation, so it never fights the restore for the same files.
-// Did this payload come from the box it is being restored onto?
+// Is this restore putting the payload back on the box it came from?
 //
-// `machineId` has been collected since the first version and never read; it is a
-// better answer than the clone radio, because that radio is a HUMAN choosing on
-// the source box, and the failure this guards against is precisely someone not
-// choosing it. A payload from before machine-ids were recorded reads as
-// same-box, which keeps an old backup restoring exactly as it used to.
+// Gated on the CLONE flag, like identity.rebrand - and for the same reason
+// collect() asks the person on the source box: a re-flash and a clone BOTH
+// arrive with a fresh machine id and a default hostname, so the target cannot
+// tell them apart by itself. Guessing "different" would be the worse mistake
+// here, because restoring a re-flashed box verbatim is the main thing a backup
+// is for.
+//
+// The machine id is still worth reading (it has been collected since the first
+// version and never used): it can only ever force the answer to SAME. A payload
+// from this very install is provably not another box's, whatever the seed was
+// marked as. It can never make the answer "different", which is what would break
+// the re-flash case.
 function sameBox(payload) {
   const from = typeof payload.machineId === "string" ? payload.machineId : "";
-  if (!from) return !payload.clone;
-  return from === identity.machineId();
+  if (from && from === identity.machineId()) return true;
+  return !payload.clone;
 }
 
 // The launcher's own keys, and nothing else, when the snapshot came from another

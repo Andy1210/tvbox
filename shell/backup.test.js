@@ -144,16 +144,24 @@ test("a snapshot that is not an object is not replayed", () => {
   }
 });
 
-test("sameBox trusts the machine id over the clone radio", () => {
-  const mine = identity.machineId();
-  // The radio is a human choosing on the SOURCE box, and the failure this guards
-  // against is exactly someone not choosing it - so the id wins both ways.
-  assert.strictEqual(backup.sameBox({ machineId: mine, clone: true }), true);
-  assert.strictEqual(backup.sameBox({ machineId: "0000deadbeef", clone: false }), false);
+test("a re-flash restores verbatim even though the machine id changed", () => {
+  // The main thing a backup is for. A re-flashed box has a FRESH machine id, so
+  // an id-only test would call its own backup foreign and strip the app keys.
+  assert.strictEqual(backup.sameBox({ machineId: "0000deadbeef", clone: false }), true);
 });
 
-test("a backup from before machine ids falls back to the clone flag", () => {
-  assert.strictEqual(backup.sameBox({ clone: false }), true, "an old same-box backup still restores whole");
+test("a clone seed is foreign even when the ids cannot tell", () => {
+  assert.strictEqual(backup.sameBox({ machineId: "0000deadbeef", clone: true }), false);
+});
+
+test("the machine id can only ever force the answer to same", () => {
+  // Restoring a seed onto the box it was made on: whatever the radio said, this
+  // is provably not another box's identity.
+  assert.strictEqual(backup.sameBox({ machineId: identity.machineId(), clone: true }), true);
+});
+
+test("a backup from before machine ids falls back to the flag alone", () => {
+  assert.strictEqual(backup.sameBox({ clone: false }), true);
   assert.strictEqual(backup.sameBox({ clone: true }), false);
 });
 
@@ -164,6 +172,7 @@ test("apply() parks only the launcher's keys from a foreign payload", () => {
     format: "tvbox-backup",
     version: 1,
     machineId: "0000deadbeef",
+    clone: true,
     localStorage: SNAPSHOT,
   });
   const data = JSON.parse(JSON.parse(fs.readFileSync(parked, "utf8")).data);
@@ -180,6 +189,7 @@ test("a foreign snapshot with nothing to keep clears an earlier parked one", () 
     format: "tvbox-backup",
     version: 1,
     machineId: "0000deadbeef",
+    clone: true,
     localStorage: JSON.stringify({ ClientID: "fsbet2zresma446qnnvt4kst" }),
   });
   assert.strictEqual(fs.existsSync(parked), false, "the older snapshot is gone, not left to be replayed");
