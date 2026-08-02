@@ -409,6 +409,74 @@ function decrypt(envelope, password) {
 // the next boot reconciles towards. The caller restarts the shell afterwards
 // (plugins re-read creds at boot only) - which is also what starts the
 // reconciliation, so it never fights the restore for the same files.
+// Is this restore putting the payload back on the box it came from?
+//
+// Gated on the CLONE flag, like identity.rebrand - and for the same reason
+// collect() asks the person on the source box: a re-flash and a clone BOTH
+// arrive with a fresh machine id and a default hostname, so the target cannot
+// tell them apart by itself. Guessing "different" would be the worse mistake
+// here, because restoring a re-flashed box verbatim is the main thing a backup
+// is for.
+//
+// The machine id is still worth reading (collected for a long time, never used,
+// and absent from old enough backups): it can only ever force the answer to SAME. A payload
+// from this very install is provably not another box's, whatever the seed was
+// marked as. It can never make the answer "different", which is what would break
+// the re-flash case.
+function sameBox(payload) {
+  const from = typeof payload.machineId === "string" ? payload.machineId : "";
+  if (from && from === identity.machineId()) return true;
+  return !payload.clone;
+}
+
+// The launcher's own keys, and nothing else, when the snapshot came from another
+// box.
+//
+// localStorage is not the launcher's private store: every LOCAL app shares this
+// origin (`http://localhost:<port>`), and one of them is mounted at its root, so
+// an app's identity and its login sit in the same snapshot. Carrying that to a
+// second box is how two tvboxes ended up as ONE Plex device - same client
+// identifier, so plex.tv held a single record, whichever registered last owned
+// the name, and neither room could be addressed on purpose. It also put an
+// account's media login on a box its owner never linked.
+//
+// The replay is a MERGE (the launcher only ever setItem()s, it never clears), so
+// a key left out here is not lost - the app finds nothing under it and mints or
+// asks for its own, which is exactly what a second box should do. This mirrors
+// what identity.js does for config: what identifies a box is re-derived on the
+// box, never copied onto it.
+const OWN_PREFIX = "tvbox.";
+function ownStorageOnly(raw, same) {
+  // Parsed on BOTH paths, not just the filtered one. The launcher's replay does
+  // `JSON.parse` inside a try that returns on failure - before it clears the
+  // parked file - so a snapshot that cannot parse would sit there being retried
+  // and re-failing on every boot, forever. Better to park nothing.
+  let snapshot;
+  try {
+    snapshot = JSON.parse(raw);
+  } catch (e) {
+    console.warn("[backup] localStorage snapshot is not JSON - not replayed");
+    return "";
+  }
+  if (!snapshot || typeof snapshot !== "object" || Array.isArray(snapshot)) return "";
+  if (same) return raw; // verbatim, byte for byte, once it is known to be usable
+  const kept = {};
+  const dropped = [];
+  for (const [k, v] of Object.entries(snapshot)) {
+    if (k.startsWith(OWN_PREFIX)) kept[k] = v;
+    else dropped.push(k);
+  }
+  if (dropped.length)
+    console.log(
+      "[backup] another box's backup: kept " +
+        Object.keys(kept).length +
+        " launcher key(s), left " +
+        dropped.length +
+        " app key(s) for this box to make its own",
+    );
+  return Object.keys(kept).length ? JSON.stringify(kept) : "";
+}
+
 function apply(payload) {
   if (!payload || payload.format !== FORMAT || payload.version > VERSION) throw new Error("bad backup payload");
   if (payload.config && typeof payload.config === "object") {
@@ -460,9 +528,17 @@ function apply(payload) {
     }
     if (n) console.log("[backup] restored app storage for", n, "app(s)");
   }
-  if (typeof payload.localStorage === "string" && payload.localStorage) {
-    fs.writeFileSync(RESTORE_LS, JSON.stringify({ data: payload.localStorage, at: Date.now() }), { mode: 0o600 });
-  }
+  // The parked file is a HANDOFF, not state: it lives between a restore and the
+  // launcher's next load. So a restore defines it the way it defines config -
+  // wholesale. Leaving an earlier restore's file behind would let the launcher
+  // replay a snapshot this restore decided the box should not have, which is the
+  // same stale identity one restore later. Both routes reach it: a foreign
+  // snapshot that filters down to nothing, and a payload carrying none at all
+  // (`tvbox backup` on the CLI has no renderer to collect from).
+  const rawLs = typeof payload.localStorage === "string" ? payload.localStorage : "";
+  const ls = rawLs ? ownStorageOnly(rawLs, sameBox(payload)) : "";
+  if (ls) fs.writeFileSync(RESTORE_LS, JSON.stringify({ data: ls, at: Date.now() }), { mode: 0o600 });
+  else clearPendingLocalStorage();
   // Parked rather than written now: an app's files belong under a root derived
   // from ITS manifest, and a registry package's manifest only arrives with the
   // reconciliation below. applyPendingAppFiles places them in passes.
@@ -493,6 +569,8 @@ module.exports = {
   encrypt,
   decrypt,
   apply,
+  ownStorageOnly, // exported for its unit test: the filter is the whole guard
+  sameBox,
   applyPendingAppFiles,
   pendingLocalStorage,
   clearPendingLocalStorage,

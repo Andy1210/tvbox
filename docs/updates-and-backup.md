@@ -142,6 +142,18 @@ ambient wallpapers and web-app logins (Plex/YouTube cookies live in per-app
 Electron partitions). Headless twin: `tvbox backup <file> --password <pw>` /
 `tvbox restore <file> --password <pw>`.
 
+> **A clone gets the launcher's settings, not the apps' identities.** The
+> localStorage snapshot is one store shared by the launcher and every local
+> app (they are all one origin, and one of them is mounted at its root), so a
+> CLONE restore replays only the `tvbox.`-prefixed keys. It is gated on the
+> clone choice you make on the source box, because a re-flash and a clone both
+> arrive with a fresh machine id and the target cannot tell them apart - and a
+> re-flash has to come back verbatim. (The machine id is still read, but it can
+> only ever say "this is the same install", never "this is a different box".) An app on the
+> second box then finds nothing under its own key and mints or asks for its
+> own. Without this, two boxes restored from one backup registered as a
+> SINGLE Plex player, and the second box carried the first one's media login.
+
 ### Restore is a reconciliation, not a file copy
 
 What a settings file cannot carry is everything large: a registry app's own

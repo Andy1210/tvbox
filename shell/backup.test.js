@@ -107,3 +107,121 @@ test("state sidecars land in ~/.tvbox, and only the app's own", () => {
   assert.equal(fs.readFileSync(path.join(TMP, ".tvbox", APP_ID + "-share.json"), "utf8"), '{"ok":true}');
   assert.equal(fs.readFileSync(cfg, "utf8"), before, "config.json was rewritten");
 });
+
+// ---- a snapshot from ANOTHER box must not carry that box's app identity ----
+// localStorage is shared by the launcher and every local app on one origin, so a
+// clone seed used to hand the second box the first one's Plex client identifier
+// (and its login): two boxes, one device on plex.tv, neither room addressable.
+
+const identity = require("./identity");
+
+const SNAPSHOT = JSON.stringify({
+  "tvbox.setup.done": "1",
+  "tvbox.appPrefs": '{"order":["plex"]}',
+  ClientID: "fsbet2zresma446qnnvt4kst",
+  PlexAuthToken: "a-real-token",
+});
+
+test("a same-box restore replays the snapshot verbatim", () => {
+  assert.strictEqual(backup.ownStorageOnly(SNAPSHOT, true), SNAPSHOT);
+});
+
+test("another box's restore keeps the launcher's keys and drops the apps'", () => {
+  const kept = JSON.parse(backup.ownStorageOnly(SNAPSHOT, false));
+  assert.deepStrictEqual(kept, { "tvbox.setup.done": "1", "tvbox.appPrefs": '{"order":["plex"]}' });
+  // The two that matter: an app identity and an account credential.
+  assert.ok(!("ClientID" in kept), "the app's client identifier stays behind");
+  assert.ok(!("PlexAuthToken" in kept), "so does the login it came with");
+});
+
+test("nothing is parked when a foreign snapshot has no launcher keys", () => {
+  assert.strictEqual(backup.ownStorageOnly(JSON.stringify({ ClientID: "x" }), false), "");
+});
+
+test("a snapshot that is not an object is not replayed", () => {
+  for (const junk of ["{not json", JSON.stringify(["a"]), JSON.stringify("s"), "null"]) {
+    assert.strictEqual(backup.ownStorageOnly(junk, false), "", junk);
+  }
+});
+
+test("a re-flash restores verbatim even though the machine id changed", () => {
+  // The main thing a backup is for. A re-flashed box has a FRESH machine id, so
+  // an id-only test would call its own backup foreign and strip the app keys.
+  assert.strictEqual(backup.sameBox({ machineId: "0000deadbeef", clone: false }), true);
+});
+
+test("a clone seed is foreign even when the ids cannot tell", () => {
+  assert.strictEqual(backup.sameBox({ machineId: "0000deadbeef", clone: true }), false);
+});
+
+test("the machine id can only ever force the answer to same", () => {
+  // Restoring a seed onto the box it was made on: whatever the radio said, this
+  // is provably not another box's identity.
+  assert.strictEqual(backup.sameBox({ machineId: identity.machineId(), clone: true }), true);
+});
+
+test("a backup from before machine ids falls back to the flag alone", () => {
+  assert.strictEqual(backup.sameBox({ clone: false }), true);
+  assert.strictEqual(backup.sameBox({ clone: true }), false);
+});
+
+test("apply() parks only the launcher's keys from a foreign payload", () => {
+  const parked = path.join(TMP, ".tvbox", "restore-localstorage.json");
+  fs.rmSync(parked, { force: true });
+  backup.apply({
+    format: "tvbox-backup",
+    version: 1,
+    machineId: "0000deadbeef",
+    clone: true,
+    localStorage: SNAPSHOT,
+  });
+  const data = JSON.parse(JSON.parse(fs.readFileSync(parked, "utf8")).data);
+  assert.deepStrictEqual(Object.keys(data).sort(), ["tvbox.appPrefs", "tvbox.setup.done"]);
+});
+
+test("a foreign snapshot with nothing to keep clears an earlier parked one", () => {
+  // Copilot's catch on the PR: skipping the write is not the same as parking
+  // nothing. Whatever a previous restore left behind would be replayed on the
+  // next boot, which is the stale identity this whole guard exists to stop.
+  const parked = path.join(TMP, ".tvbox", "restore-localstorage.json");
+  fs.writeFileSync(parked, JSON.stringify({ data: JSON.stringify({ ClientID: "stale" }), at: 1 }));
+  backup.apply({
+    format: "tvbox-backup",
+    version: 1,
+    machineId: "0000deadbeef",
+    clone: true,
+    localStorage: JSON.stringify({ ClientID: "fsbet2zresma446qnnvt4kst" }),
+  });
+  assert.strictEqual(fs.existsSync(parked), false, "the older snapshot is gone, not left to be replayed");
+  assert.strictEqual(backup.pendingLocalStorage().data, null);
+});
+
+test("a payload carrying no snapshot clears the parked one too", () => {
+  // The CLI has no renderer to collect from, so `tvbox backup` produces
+  // localStorage:null. That is still an intent - "this restore hands the
+  // launcher nothing" - and an older parked file would otherwise outlive it.
+  const parked = path.join(TMP, ".tvbox", "restore-localstorage.json");
+  fs.writeFileSync(parked, JSON.stringify({ data: JSON.stringify({ "tvbox.locale": "hu" }), at: 1 }));
+  backup.apply({ format: "tvbox-backup", version: 1, machineId: identity.machineId() });
+  assert.strictEqual(fs.existsSync(parked), false);
+});
+
+test("a same-box restore still parks its snapshot", () => {
+  // The clearing must not swallow the ordinary case: a re-flash restore is
+  // supposed to hand the launcher everything back.
+  backup.apply({
+    format: "tvbox-backup",
+    version: 1,
+    machineId: identity.machineId(),
+    localStorage: SNAPSHOT,
+  });
+  assert.strictEqual(backup.pendingLocalStorage().data, SNAPSHOT);
+});
+
+test("an unusable snapshot is not parked even on a same-box restore", () => {
+  // The launcher parses the parked file inside a try that returns before it
+  // clears it, so an unparseable one would be retried and re-fail on every boot.
+  for (const junk of ["{not json", JSON.stringify(["a"]), "null"]) {
+    assert.strictEqual(backup.ownStorageOnly(junk, true), "", junk);
+  }
+});
