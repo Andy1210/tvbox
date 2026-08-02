@@ -387,6 +387,49 @@ test("a clone seed gives the second box its own MQTT and Spotify identity", asyn
   assert.notEqual(b.effectiveSpotify, a.effectiveSpotify, "nor a Connect name");
 });
 
+test("a clone seed does not carry the first box's app identity in localStorage", async () => {
+  // The unit tests prove the filter; this proves the SEAM - collect on one box,
+  // decrypt and apply on another, and read back what the launcher would actually
+  // be handed. That is where this bug lived: every part was right on its own and
+  // two real boxes still ended up as one Plex device.
+  const source = newBox("ls-source");
+  const target = newBox("ls-target");
+  const seed = path.join(TMP, "ls-clone.tvbackup");
+
+  // The snapshot the launcher hands over is the whole ORIGIN's storage, so it
+  // mixes its own keys with those of every local app - here a client identifier
+  // and the login that came with it.
+  const SNAPSHOT = JSON.stringify({
+    "tvbox.locale": "hu",
+    "tvbox.appPrefs": '{"order":["plex"]}',
+    ClientID: "fsbet2zresma446qnnvt4kst",
+    PlexAuthToken: "a-real-token",
+  });
+
+  await inBox(
+    source,
+    `const backup = mod("backup");
+    const identity = mod("identity");
+    identity.machineId = () => "1111111111111111";
+    const payload = backup.collect({ localStorage: ${JSON.stringify(SNAPSHOT)} }, { clone: true });
+    fs.writeFileSync(${JSON.stringify(seed)}, JSON.stringify(backup.encrypt(payload, "pw-1234")));
+    out({ machineId: payload.machineId, carried: !!payload.localStorage });`,
+  );
+
+  const b = await inBox(
+    target,
+    `const backup = mod("backup");
+    const identity = mod("identity");
+    identity.machineId = () => "2222222222222222";
+    const payload = backup.decrypt(JSON.parse(fs.readFileSync(${JSON.stringify(seed)}, "utf8")), "pw-1234");
+    backup.apply(payload);
+    const parked = backup.pendingLocalStorage().data;
+    out({ keys: parked ? Object.keys(JSON.parse(parked)).sort() : null });`,
+  );
+
+  assert.deepStrictEqual(b.keys, ["tvbox.appPrefs", "tvbox.locale"], "only the launcher's own keys are parked");
+});
+
 // ============================================================================
 // The retry budget, against a registry that is actually down.
 // ============================================================================
