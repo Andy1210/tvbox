@@ -107,3 +107,65 @@ test("state sidecars land in ~/.tvbox, and only the app's own", () => {
   assert.equal(fs.readFileSync(path.join(TMP, ".tvbox", APP_ID + "-share.json"), "utf8"), '{"ok":true}');
   assert.equal(fs.readFileSync(cfg, "utf8"), before, "config.json was rewritten");
 });
+
+// ---- a snapshot from ANOTHER box must not carry that box's app identity ----
+// localStorage is shared by the launcher and every local app on one origin, so a
+// clone seed used to hand the second box the first one's Plex client identifier
+// (and its login): two boxes, one device on plex.tv, neither room addressable.
+
+const identity = require("./identity");
+
+const SNAPSHOT = JSON.stringify({
+  "tvbox.setup.done": "1",
+  "tvbox.appPrefs": '{"order":["plex"]}',
+  ClientID: "fsbet2zresma446qnnvt4kst",
+  PlexAuthToken: "a-real-token",
+});
+
+test("a same-box restore replays the snapshot verbatim", () => {
+  assert.strictEqual(backup.ownStorageOnly(SNAPSHOT, true), SNAPSHOT);
+});
+
+test("another box's restore keeps the launcher's keys and drops the apps'", () => {
+  const kept = JSON.parse(backup.ownStorageOnly(SNAPSHOT, false));
+  assert.deepStrictEqual(kept, { "tvbox.setup.done": "1", "tvbox.appPrefs": '{"order":["plex"]}' });
+  // The two that matter: an app identity and an account credential.
+  assert.ok(!("ClientID" in kept), "the app's client identifier stays behind");
+  assert.ok(!("PlexAuthToken" in kept), "so does the login it came with");
+});
+
+test("nothing is parked when a foreign snapshot has no launcher keys", () => {
+  assert.strictEqual(backup.ownStorageOnly(JSON.stringify({ ClientID: "x" }), false), "");
+});
+
+test("a snapshot that is not an object is not replayed", () => {
+  for (const junk of ["{not json", JSON.stringify(["a"]), JSON.stringify("s"), "null"]) {
+    assert.strictEqual(backup.ownStorageOnly(junk, false), "", junk);
+  }
+});
+
+test("sameBox trusts the machine id over the clone radio", () => {
+  const mine = identity.machineId();
+  // The radio is a human choosing on the SOURCE box, and the failure this guards
+  // against is exactly someone not choosing it - so the id wins both ways.
+  assert.strictEqual(backup.sameBox({ machineId: mine, clone: true }), true);
+  assert.strictEqual(backup.sameBox({ machineId: "0000deadbeef", clone: false }), false);
+});
+
+test("a backup from before machine ids falls back to the clone flag", () => {
+  assert.strictEqual(backup.sameBox({ clone: false }), true, "an old same-box backup still restores whole");
+  assert.strictEqual(backup.sameBox({ clone: true }), false);
+});
+
+test("apply() parks only the launcher's keys from a foreign payload", () => {
+  const parked = path.join(TMP, ".tvbox", "restore-localstorage.json");
+  fs.rmSync(parked, { force: true });
+  backup.apply({
+    format: "tvbox-backup",
+    version: 1,
+    machineId: "0000deadbeef",
+    localStorage: SNAPSHOT,
+  });
+  const data = JSON.parse(JSON.parse(fs.readFileSync(parked, "utf8")).data);
+  assert.deepStrictEqual(Object.keys(data).sort(), ["tvbox.appPrefs", "tvbox.setup.done"]);
+});

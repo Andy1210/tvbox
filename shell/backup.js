@@ -409,6 +409,63 @@ function decrypt(envelope, password) {
 // the next boot reconciles towards. The caller restarts the shell afterwards
 // (plugins re-read creds at boot only) - which is also what starts the
 // reconciliation, so it never fights the restore for the same files.
+// Did this payload come from the box it is being restored onto?
+//
+// `machineId` has been collected since the first version and never read; it is a
+// better answer than the clone radio, because that radio is a HUMAN choosing on
+// the source box, and the failure this guards against is precisely someone not
+// choosing it. A payload from before machine-ids were recorded reads as
+// same-box, which keeps an old backup restoring exactly as it used to.
+function sameBox(payload) {
+  const from = typeof payload.machineId === "string" ? payload.machineId : "";
+  if (!from) return !payload.clone;
+  return from === identity.machineId();
+}
+
+// The launcher's own keys, and nothing else, when the snapshot came from another
+// box.
+//
+// localStorage is not the launcher's private store: every LOCAL app shares this
+// origin (`http://localhost:<port>`), and one of them is mounted at its root, so
+// an app's identity and its login sit in the same snapshot. Carrying that to a
+// second box is how two tvboxes ended up as ONE Plex device - same client
+// identifier, so plex.tv held a single record, whichever registered last owned
+// the name, and neither room could be addressed on purpose. It also put an
+// account's media login on a box its owner never linked.
+//
+// The replay is a MERGE (the launcher only ever setItem()s, it never clears), so
+// a key left out here is not lost - the app finds nothing under it and mints or
+// asks for its own, which is exactly what a second box should do. This mirrors
+// what identity.js does for config: what identifies a box is re-derived on the
+// box, never copied onto it.
+const OWN_PREFIX = "tvbox.";
+function ownStorageOnly(raw, same) {
+  if (same) return raw;
+  let snapshot;
+  try {
+    snapshot = JSON.parse(raw);
+  } catch (e) {
+    console.warn("[backup] localStorage snapshot is not JSON - not replayed");
+    return "";
+  }
+  if (!snapshot || typeof snapshot !== "object" || Array.isArray(snapshot)) return "";
+  const kept = {};
+  const dropped = [];
+  for (const [k, v] of Object.entries(snapshot)) {
+    if (k.startsWith(OWN_PREFIX)) kept[k] = v;
+    else dropped.push(k);
+  }
+  if (dropped.length)
+    console.log(
+      "[backup] another box's backup: kept " +
+        Object.keys(kept).length +
+        " launcher key(s), left " +
+        dropped.length +
+        " app key(s) for this box to make its own",
+    );
+  return Object.keys(kept).length ? JSON.stringify(kept) : "";
+}
+
 function apply(payload) {
   if (!payload || payload.format !== FORMAT || payload.version > VERSION) throw new Error("bad backup payload");
   if (payload.config && typeof payload.config === "object") {
@@ -461,7 +518,8 @@ function apply(payload) {
     if (n) console.log("[backup] restored app storage for", n, "app(s)");
   }
   if (typeof payload.localStorage === "string" && payload.localStorage) {
-    fs.writeFileSync(RESTORE_LS, JSON.stringify({ data: payload.localStorage, at: Date.now() }), { mode: 0o600 });
+    const ls = ownStorageOnly(payload.localStorage, sameBox(payload));
+    if (ls) fs.writeFileSync(RESTORE_LS, JSON.stringify({ data: ls, at: Date.now() }), { mode: 0o600 });
   }
   // Parked rather than written now: an app's files belong under a root derived
   // from ITS manifest, and a registry package's manifest only arrives with the
@@ -493,6 +551,8 @@ module.exports = {
   encrypt,
   decrypt,
   apply,
+  ownStorageOnly, // exported for its unit test: the filter is the whole guard
+  sameBox,
   applyPendingAppFiles,
   pendingLocalStorage,
   clearPendingLocalStorage,
