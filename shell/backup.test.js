@@ -185,3 +185,25 @@ test("a foreign snapshot with nothing to keep clears an earlier parked one", () 
   assert.strictEqual(fs.existsSync(parked), false, "the older snapshot is gone, not left to be replayed");
   assert.strictEqual(backup.pendingLocalStorage().data, null);
 });
+
+test("a payload carrying no snapshot clears the parked one too", () => {
+  // The CLI has no renderer to collect from, so `tvbox backup` produces
+  // localStorage:null. That is still an intent - "this restore hands the
+  // launcher nothing" - and an older parked file would otherwise outlive it.
+  const parked = path.join(TMP, ".tvbox", "restore-localstorage.json");
+  fs.writeFileSync(parked, JSON.stringify({ data: JSON.stringify({ "tvbox.locale": "hu" }), at: 1 }));
+  backup.apply({ format: "tvbox-backup", version: 1, machineId: identity.machineId() });
+  assert.strictEqual(fs.existsSync(parked), false);
+});
+
+test("a same-box restore still parks its snapshot", () => {
+  // The clearing must not swallow the ordinary case: a re-flash restore is
+  // supposed to hand the launcher everything back.
+  backup.apply({
+    format: "tvbox-backup",
+    version: 1,
+    machineId: identity.machineId(),
+    localStorage: SNAPSHOT,
+  });
+  assert.strictEqual(backup.pendingLocalStorage().data, SNAPSHOT);
+});

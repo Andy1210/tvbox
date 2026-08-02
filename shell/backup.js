@@ -517,15 +517,17 @@ function apply(payload) {
     }
     if (n) console.log("[backup] restored app storage for", n, "app(s)");
   }
-  if (typeof payload.localStorage === "string" && payload.localStorage) {
-    const ls = ownStorageOnly(payload.localStorage, sameBox(payload));
-    // Filtering down to nothing has to CLEAR the parked file, not leave it. This
-    // restore decided the box should not have that snapshot; leaving an earlier
-    // restore's file behind would let the launcher replay it on the next boot
-    // anyway - the same stale-identity outcome, one restore later.
-    if (ls) fs.writeFileSync(RESTORE_LS, JSON.stringify({ data: ls, at: Date.now() }), { mode: 0o600 });
-    else clearPendingLocalStorage();
-  }
+  // The parked file is a HANDOFF, not state: it lives between a restore and the
+  // launcher's next load. So a restore defines it the way it defines config -
+  // wholesale. Leaving an earlier restore's file behind would let the launcher
+  // replay a snapshot this restore decided the box should not have, which is the
+  // same stale identity one restore later. Both routes reach it: a foreign
+  // snapshot that filters down to nothing, and a payload carrying none at all
+  // (`tvbox backup` on the CLI has no renderer to collect from).
+  const rawLs = typeof payload.localStorage === "string" ? payload.localStorage : "";
+  const ls = rawLs ? ownStorageOnly(rawLs, sameBox(payload)) : "";
+  if (ls) fs.writeFileSync(RESTORE_LS, JSON.stringify({ data: ls, at: Date.now() }), { mode: 0o600 });
+  else clearPendingLocalStorage();
   // Parked rather than written now: an app's files belong under a root derived
   // from ITS manifest, and a registry package's manifest only arrives with the
   // reconciliation below. applyPendingAppFiles places them in passes.
