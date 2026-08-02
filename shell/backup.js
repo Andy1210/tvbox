@@ -418,8 +418,8 @@ function decrypt(envelope, password) {
 // here, because restoring a re-flashed box verbatim is the main thing a backup
 // is for.
 //
-// The machine id is still worth reading (it has been collected since the first
-// version and never used): it can only ever force the answer to SAME. A payload
+// The machine id is still worth reading (collected for a long time, never used,
+// and absent from old enough backups): it can only ever force the answer to SAME. A payload
 // from this very install is provably not another box's, whatever the seed was
 // marked as. It can never make the answer "different", which is what would break
 // the re-flash case.
@@ -447,7 +447,10 @@ function sameBox(payload) {
 // box, never copied onto it.
 const OWN_PREFIX = "tvbox.";
 function ownStorageOnly(raw, same) {
-  if (same) return raw;
+  // Parsed on BOTH paths, not just the filtered one. The launcher's replay does
+  // `JSON.parse` inside a try that returns on failure - before it clears the
+  // parked file - so a snapshot that cannot parse would sit there being retried
+  // and re-failing on every boot, forever. Better to park nothing.
   let snapshot;
   try {
     snapshot = JSON.parse(raw);
@@ -456,6 +459,7 @@ function ownStorageOnly(raw, same) {
     return "";
   }
   if (!snapshot || typeof snapshot !== "object" || Array.isArray(snapshot)) return "";
+  if (same) return raw; // verbatim, byte for byte, once it is known to be usable
   const kept = {};
   const dropped = [];
   for (const [k, v] of Object.entries(snapshot)) {

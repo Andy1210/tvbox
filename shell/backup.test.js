@@ -217,3 +217,11 @@ test("a same-box restore still parks its snapshot", () => {
   });
   assert.strictEqual(backup.pendingLocalStorage().data, SNAPSHOT);
 });
+
+test("an unusable snapshot is not parked even on a same-box restore", () => {
+  // The launcher parses the parked file inside a try that returns before it
+  // clears it, so an unparseable one would be retried and re-fail on every boot.
+  for (const junk of ["{not json", JSON.stringify(["a"]), "null"]) {
+    assert.strictEqual(backup.ownStorageOnly(junk, true), "", junk);
+  }
+});
