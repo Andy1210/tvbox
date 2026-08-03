@@ -100,11 +100,16 @@ def main():
     while True:
         _scan()  # pick up (re)connected wireless mice
         time.sleep(1.0)
+        # Decide under the lock, park outside it: _park() shells out to wlrctl with
+        # a five-second timeout, and _watch() needs the lock to record the very
+        # motion that should cancel the next park.
         with _lock:
             now = time.monotonic()
-            if now - _last >= IDLE_SEC and now - _parked >= PARK_REPEAT_SEC:
+            should_park = now - _last >= IDLE_SEC and now - _parked >= PARK_REPEAT_SEC
+            if should_park:
                 _parked = now
-                _park()
+        if should_park:
+            _park()
 
 
 if __name__ == "__main__":

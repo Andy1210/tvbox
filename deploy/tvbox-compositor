@@ -20,12 +20,23 @@ set -u
 PATCHED=/usr/local/bin/labwc
 STOCK=/usr/bin/labwc
 STAMP=/usr/local/share/tvbox/labwc-planes.stamp
-FELLBACK=/run/tvbox-compositor-fallback
+# Per-user, because this runs as the box user and /run is root's. A tmpfs either
+# way, so the decision still cannot outlive the boot it was made for.
+FELLBACK="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/tvbox-compositor-fallback"
+
+# Whichever compositor is actually there. A box with no distro labwc must still
+# get a session out of the patched one, and vice versa - the fallback exists to
+# save the TV, not to insist on a particular binary.
+run_stock() {
+	[ -x "$STOCK" ] && exec "$STOCK" "$@"
+	[ -x "$PATCHED" ] && exec "$PATCHED" "$@"
+	exec labwc "$@"
+}
 
 # A labwc under /usr/local without the stamp is someone else's build, and nothing
 # here knows what it wants - leave it to the distro one.
-if [ ! -x "$PATCHED" ] || [ ! -f "$STAMP" ] || [ -e "$FELLBACK" ] || [ ! -x "$STOCK" ]; then
-	exec "${STOCK:-labwc}" "$@"
+if [ ! -x "$PATCHED" ] || [ ! -f "$STAMP" ] || [ -e "$FELLBACK" ]; then
+	run_stock "$@"
 fi
 
 # Plane offload only happens through libliftoff, and wlroots keeps libliftoff
@@ -44,7 +55,7 @@ ended=$(cut -d" " -f1 /proc/uptime | cut -d. -f1)
 if [ "$rc" -ne 0 ] && [ $((ended - started)) -lt 20 ]; then
 	echo "tvbox: patched labwc exited $rc after $((ended - started))s - falling back for this boot" >&2
 	: > "$FELLBACK" 2>/dev/null || true
-	exec "$STOCK" "$@"
+	run_stock "$@"
 fi
 
 exit "$rc"

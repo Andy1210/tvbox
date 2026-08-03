@@ -612,8 +612,11 @@ fi
 # patched compositor that will not come up costs one restart instead of the TV.
 if [ -f "$HERE/tvbox-compositor" ] && install -m 755 -o root -g root \
     "$HERE/tvbox-compositor" /usr/local/bin/tvbox-compositor; then
-  if [ -f /etc/greetd/config.toml ] && grep -q '^command = "labwc"' /etc/greetd/config.toml; then
-    sed -i 's|^command = "labwc"|command = "tvbox-compositor"|' /etc/greetd/config.toml
+  # Any shape that names labwc, since the path has been written both ways; a
+  # config pointing at something else entirely is somebody's choice, not ours.
+  if [ -f /etc/greetd/config.toml ]; then
+    sed -i -E 's|^command = "(/usr(/local)?/bin/)?labwc"|command = "tvbox-compositor"|' \
+      /etc/greetd/config.toml
   fi
   ok "session wrapper (falls back to the distro labwc for the boot if the patched one fails)"
 else

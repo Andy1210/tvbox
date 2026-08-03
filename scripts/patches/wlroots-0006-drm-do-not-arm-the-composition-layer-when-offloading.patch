@@ -1,4 +1,4 @@
-From 6eda2cc04038d857d7293a6e8f8ed1ce29d7dbe8 Mon Sep 17 00:00:00 2001
+From 31c6f07749116c0bb2eafbdec2ac6ede57f64753 Mon Sep 17 00:00:00 2001
 From: Andy1210 <andy1210@gmail.com>
 Date: Mon, 3 Aug 2026 18:00:00 +0200
 Subject: [PATCH 6/6] backend/drm: do not arm the composition layer while
@@ -20,14 +20,14 @@ gets a plane and so cannot take one from anything. Because nothing else then
 covers an allocation that leaves the primary layer out, check that the frame
 reached a plane at all - either layer will do, they carry the same buffer.
 ---
- backend/drm/libliftoff.c | 82 ++++++++++++++++++++++++++++++++++++----
- 1 file changed, 74 insertions(+), 8 deletions(-)
+ backend/drm/libliftoff.c | 89 ++++++++++++++++++++++++++++++++++++----
+ 1 file changed, 81 insertions(+), 8 deletions(-)
 
 diff --git a/backend/drm/libliftoff.c b/backend/drm/libliftoff.c
-index db23abe..9fa66d7 100644
+index 88765df..54de81f 100644
 --- a/backend/drm/libliftoff.c
 +++ b/backend/drm/libliftoff.c
-@@ -357,25 +357,69 @@ static bool add_connector(drmModeAtomicReq *req,
+@@ -357,25 +357,76 @@ static bool add_connector(drmModeAtomicReq *req,
  			ok = ok && add_prop(req, crtc->id, crtc->props.vrr_enabled, state->vrr_enabled);
  		}
  
@@ -80,8 +80,15 @@ index db23abe..9fa66d7 100644
 +				&state->primary_viewport.dst_box,
 +				&state->primary_viewport.src_box);
 +		} else {
++			// Frame-scoped properties outlive the frame that set them, so a
++			// disarmed fallback would keep a damage blob that has since been
++			// destroyed and a fence fd belonging to a commit that is long done.
 +			ok = ok && liftoff_layer_set_property(
 +				crtc->liftoff_composition_layer, "FB_ID", 0) == 0;
++			liftoff_layer_set_property(crtc->liftoff_composition_layer,
++				"FB_DAMAGE_CLIPS", 0);
++			liftoff_layer_set_property(crtc->liftoff_composition_layer,
++				"IN_FENCE_FD", -1);
 +		}
  
  		liftoff_layer_set_property(crtc->primary->liftoff_layer,
@@ -105,7 +112,7 @@ index db23abe..9fa66d7 100644
  		}
  
  		if (state->base->committed & WLR_OUTPUT_STATE_LAYERS) {
-@@ -505,6 +549,28 @@ static bool commit(struct wlr_drm_backend *drm,
+@@ -512,6 +563,28 @@ static bool commit(struct wlr_drm_backend *drm,
  			wlr_drm_conn_log(conn, WLR_DEBUG, "Failed to scan-out cursor plane");
  			goto out;
  		}
