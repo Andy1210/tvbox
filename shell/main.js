@@ -2152,27 +2152,25 @@ function adaptMpvMode(seq, done) {
     console.warn("[player] display mode adapt failed:", (e && e.message) || e);
     done();
   };
-  readVideoProps()
-    .then((c) => {
-      if (c.fps > 0 && c.width > 0) return claim(c);
-      // The video output can still be settling right after the first frame - one
-      // more go, keeping whatever we already learned.
-      setTimeout(
-        () =>
-          readVideoProps()
-            .then((c2) =>
-              claim({
-                fps: c2.fps || c.fps,
-                width: c2.width || c.width,
-                height: c2.height || c.height,
-                hwdec: c2.hwdec || c.hwdec,
-              }),
-            )
-            .catch(failed),
-        400,
-      );
-    })
-    .catch(failed);
+  // Properties that settle late get a few more goes, keeping whatever each read
+  // already learned: dwidth/fps come back "property unavailable" for the first
+  // second or so after a paused start, and hwdec-current stays unavailable until
+  // the decoder has actually run - which is what decides the renderer. Re-read
+  // only while something we act on is still missing, so an ordinary file is not
+  // held up: below 4K the hwdec answer changes nothing, so it is not waited for.
+  const settle = (prev, tries) =>
+    readVideoProps().then((c) => {
+      const merged = {
+        fps: c.fps || prev.fps,
+        width: c.width || prev.width,
+        height: c.height || prev.height,
+        hwdec: c.hwdec || prev.hwdec,
+      };
+      const missing = !(merged.fps > 0 && merged.width > 0) || videoout.hwdecPending(merged, mpvPip);
+      if (!missing || tries <= 0) return merged;
+      return new Promise((r) => setTimeout(() => r(settle(merged, tries - 1)), 250));
+    });
+  settle({ fps: 0, width: 0, height: 0, hwdec: "" }, 6).then(claim).catch(failed);
 }
 
 // Paused-start handshake: switch the mode, then play. The 6s failsafe is

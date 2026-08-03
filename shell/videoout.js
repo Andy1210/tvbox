@@ -21,11 +21,24 @@ const ZERO_COPY_VO = "dmabuf-wayland";
 // 1080p film is composited at 1080p) and its tone mapping is worth having.
 const ZERO_COPY_MIN_HEIGHT = 1440;
 
-function zeroCopyVideo(content, pip) {
-  if (pip || !content) return false;
-  const hwdec = content.hwdec;
-  if (!hwdec || hwdec === "no") return false;
-  return Number(content.height) >= ZERO_COPY_MIN_HEIGHT;
+// Video this output could serve if the decoder cooperates - resolution and window
+// alone, before anything is known about the decoder.
+function zeroCopyCandidate(content, pip) {
+  return !pip && !!content && Number(content.height) >= ZERO_COPY_MIN_HEIGHT;
 }
 
-module.exports = { ZERO_COPY_VO, ZERO_COPY_MIN_HEIGHT, zeroCopyVideo };
+// mpv answers hwdec-current with "property unavailable" until the decoder has
+// really started (~0.7s after a paused start), and "no" once it has settled on
+// software decoding. Only the unavailable answer is worth waiting for, and only
+// for video whose renderer it decides.
+function hwdecPending(content, pip) {
+  return zeroCopyCandidate(content, pip) && !content.hwdec;
+}
+
+function zeroCopyVideo(content, pip) {
+  if (!zeroCopyCandidate(content, pip)) return false;
+  const hwdec = content.hwdec;
+  return !!hwdec && hwdec !== "no";
+}
+
+module.exports = { ZERO_COPY_VO, ZERO_COPY_MIN_HEIGHT, zeroCopyCandidate, hwdecPending, zeroCopyVideo };
