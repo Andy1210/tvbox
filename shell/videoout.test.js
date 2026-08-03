@@ -30,6 +30,17 @@ test("PiP never takes it - that window runs under XWayland", () => {
   assert.equal(videoout.zeroCopyVideo(uhd, true), false);
 });
 
+test("an undecided hwdec is waited for, but only where it decides anything", () => {
+  // "property unavailable" right after a paused start - ask again.
+  assert.equal(videoout.hwdecPending({ ...uhd, hwdec: "" }, false), true);
+  // Settled answers, either way: nothing to wait for.
+  assert.equal(videoout.hwdecPending(uhd, false), false);
+  assert.equal(videoout.hwdecPending({ ...uhd, hwdec: "no" }, false), false);
+  // Below 4K and in PiP the answer changes nothing, so the film is not held up.
+  assert.equal(videoout.hwdecPending({ ...uhd, height: 1080, hwdec: "" }, false), false);
+  assert.equal(videoout.hwdecPending({ ...uhd, hwdec: "" }, true), false);
+});
+
 test("missing video properties do not pick it", () => {
   assert.equal(videoout.zeroCopyVideo(null, false), false);
   assert.equal(videoout.zeroCopyVideo({ hwdec: "drm" }, false), false);
