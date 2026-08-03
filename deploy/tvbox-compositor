@@ -1,0 +1,50 @@
+#!/bin/sh
+# The box's Wayland session, started by greetd (installed to /usr/local/bin).
+#
+# It exists to make swapping the compositor survivable. scripts/install-labwc-
+# planes.sh builds a patched labwc into /usr/local so a fullscreen video can go
+# on a display plane; that build is not a distro package, and a compositor that
+# will not start is a TV that shows nothing. So: prefer the patched build, and if
+# it dies on its way up, spend the rest of this boot on the distro one.
+#
+# The fallback marker lives in /run, which is a tmpfs. A box that fell back is
+# therefore back on the patched build at the next boot - a transient failure
+# (a TV that answered nothing on HDMI, say) must not disable the feature
+# permanently, and a persistent one still leaves a usable TV within seconds.
+#
+# This complements safe mode rather than replacing it: safe mode catches three
+# boots that never reached the launcher, which is a whole boot cycle away. Both
+# want to exist.
+set -u
+
+PATCHED=/usr/local/bin/labwc
+STOCK=/usr/bin/labwc
+STAMP=/usr/local/share/tvbox/labwc-planes.stamp
+FELLBACK=/run/tvbox-compositor-fallback
+
+# A labwc under /usr/local without the stamp is someone else's build, and nothing
+# here knows what it wants - leave it to the distro one.
+if [ ! -x "$PATCHED" ] || [ ! -f "$STAMP" ] || [ -e "$FELLBACK" ] || [ ! -x "$STOCK" ]; then
+	exec "${STOCK:-labwc}" "$@"
+fi
+
+# Plane offload only happens through libliftoff, and wlroots keeps libliftoff
+# behind this variable: without it every output layer is refused, silently.
+WLR_DRM_FORCE_LIBLIFTOFF=1
+export WLR_DRM_FORCE_LIBLIFTOFF
+
+started=$(cut -d" " -f1 /proc/uptime | cut -d. -f1)
+"$PATCHED" "$@"
+rc=$?
+ended=$(cut -d" " -f1 /proc/uptime | cut -d. -f1)
+
+# A clean exit is the session ending, whenever it happens, and a failure after
+# the session has been up for a while is not a startup problem - neither is a
+# reason to change compositor. Only a quick, failed start is.
+if [ "$rc" -ne 0 ] && [ $((ended - started)) -lt 20 ]; then
+	echo "tvbox: patched labwc exited $rc after $((ended - started))s - falling back for this boot" >&2
+	: > "$FELLBACK" 2>/dev/null || true
+	exec "$STOCK" "$@"
+fi
+
+exit "$rc"

@@ -1,0 +1,62 @@
+From b32fbb14fad885b520727b4cb680500eb2427236 Mon Sep 17 00:00:00 2001
+From: Andy1210 <andy1210@gmail.com>
+Date: Mon, 3 Aug 2026 12:00:00 +0200
+Subject: [PATCH 4/5] backend/drm: cap the overlay planes given to libliftoff
+
+libliftoff searches plane assignments against a deadline, and the search grows
+with the number of planes. On hardware that exposes many - vc4 has 56 - it runs
+out of time before finding even an obvious assignment: "candidate planes: 0",
+every commit rejected, and only sometimes, because whether the deadline hits
+depends on the order the search takes.
+
+Keep every primary and cursor plane, and a few overlays, which is far more than
+the layers a compositor offloads.
+---
+ backend/drm/libliftoff.c | 20 ++++++++++++++++++++
+ 1 file changed, 20 insertions(+)
+
+diff --git a/backend/drm/libliftoff.c b/backend/drm/libliftoff.c
+index 28c34bd..b73da1e 100644
+--- a/backend/drm/libliftoff.c
++++ b/backend/drm/libliftoff.c
+@@ -1,5 +1,8 @@
+ #include <fcntl.h>
+ #include <libliftoff.h>
++
++// Overlay planes offered to libliftoff; see the loop below for why.
++#define WLR_DRM_LIFTOFF_MAX_OVERLAYS 4
+ #include <stdio.h>
+ #include <stdlib.h>
+ #include <sys/stat.h>
+@@ -49,11 +52,28 @@ static bool init(struct wlr_drm_backend *drm) {
+ 		return false;
+ 	}
+ 
++	/*
++	 * libliftoff searches plane assignments against a deadline, and the search
++	 * grows with the number of planes it is given. Hardware that exposes a lot
++	 * of them (the Pi's vc4 has 56) makes it run out of time before it finds
++	 * even an obvious assignment: "candidate planes: 0", every commit rejected,
++	 * a black screen - and only sometimes, because whether the deadline hits
++	 * depends on the order the search happens to take. Keep every primary and
++	 * cursor plane (the composition layer can only go on a primary) and a few
++	 * overlays, which is far more than the layers a compositor offloads.
++	 */
++	size_t overlays_left = WLR_DRM_LIFTOFF_MAX_OVERLAYS;
+ 	for (size_t i = 0; i < drm->num_planes; i++) {
+ 		struct wlr_drm_plane *plane = &drm->planes[i];
+ 		if (plane->initial_crtc_id != 0) {
+ 			continue;
+ 		}
++		if (plane->type == DRM_PLANE_TYPE_OVERLAY) {
++			if (overlays_left == 0) {
++				continue;
++			}
++			overlays_left--;
++		}
+ 		plane->liftoff = liftoff_plane_create(drm->liftoff, plane->id);
+ 		if (plane->liftoff == NULL) {
+ 			wlr_log(WLR_ERROR, "Failed to create liftoff plane");
+-- 
+2.47.3
+

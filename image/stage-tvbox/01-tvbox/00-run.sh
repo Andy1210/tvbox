@@ -531,7 +531,7 @@ cat > "${ROOTFS_DIR}/etc/greetd/config.toml" <<EOF
 vt = 7
 
 [default_session]
-command = "labwc"
+command = "tvbox-compositor"
 user = "${FIRST_USER_NAME}"
 EOF
 
@@ -564,6 +564,18 @@ chown -R ${FIRST_USER_NAME}:${FIRST_USER_NAME} ${USER_HOME}/.tvbox
 # channel that can add a system library. Non-fatal: a box without it just keeps
 # using the shim.
 sh ${USER_HOME}/.tvbox/install-libcec8.sh || echo "WARN: libcec 8 build failed - the CEC bridge will use the vendor shim"
+
+# The session wrapper greetd starts, and the compositor it prefers. labwc + wlroots
+# with five patches let the display hardware compose a fullscreen video with the
+# app's UI over it, instead of the GPU redrawing both at 4K every frame. Same
+# reasoning as libcec above: a flashed box never runs provision, and only this
+# channel can install a system library.
+#
+# This is the slowest step in the build - two meson projects compiled under qemu -
+# and it is non-fatal on purpose. A box without it keeps the distro labwc, which
+# the wrapper falls back to on its own.
+install -m 755 ${USER_HOME}/.tvbox/tvbox-compositor /usr/local/bin/tvbox-compositor
+sh ${USER_HOME}/.tvbox/install-labwc-planes.sh || echo "WARN: plane-offload build failed - the box will composite with the distro labwc"
 
 # NB: librespot (Spotify Connect) is NOT preinstalled - it's a per-app
 # requires.download binary the Spotify app installs from the UI, no root
