@@ -27,21 +27,35 @@ except Exception:
     raise SystemExit(0)  # no python-evdev -> nothing to do
 
 IDLE_SEC = 4.0  # hide after this many seconds without pointer motion
+# Park again this often while still idle. Parking ONCE is not enough: the pointer
+# comes back on its own - the compositor repositions it when the output mode
+# changes, which on this box happens every time a video claims or releases a mode -
+# and that motion is not something an evdev watcher can see, so nothing would ever
+# ask for another park. Cheap enough to just keep doing it.
+PARK_REPEAT_SEC = 10.0
 
 _last = 0.0  # monotonic time of last pointer motion (0 = park ASAP on start)
-_hidden = False
+_parked = 0.0  # monotonic time of the last park (0 = never)
 _lock = threading.Lock()
 _watched = set()  # device paths with a live reader thread
 
 
+# Enough to cross any panel we will meet (a 4K output is 3840x2160) from wherever
+# the pointer happens to be, and small enough to survive the wire: Wayland carries
+# coordinates as 24.8 fixed point, so anything past ~32767 overflows and comes back
+# NEGATIVE - which is how a "park" ended up dragging the cursor to the top of the
+# screen instead of the corner.
+PARK_DELTA = "8000"
+
+
 def _park():
-    # Move the pointer far into the bottom-right corner (the compositor clamps
-    # it to the screen edge) so it leaves the visible UI. Uses the wlroots
-    # virtual-pointer protocol, so it does NOT count as physical motion and
-    # cannot re-trigger our own watchers.
+    # Move the pointer into the bottom-right corner (the compositor clamps it to
+    # the output edge) so it leaves the picture. Uses the wlroots virtual-pointer
+    # protocol, so it does NOT count as physical motion and cannot re-trigger our
+    # own watchers.
     try:
         subprocess.run(
-            ["wlrctl", "pointer", "move", "100000", "100000"],
+            ["wlrctl", "pointer", "move", PARK_DELTA, PARK_DELTA],
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
             timeout=5,
@@ -56,13 +70,12 @@ def _is_pointer(dev):
 
 
 def _watch(dev):
-    global _last, _hidden
+    global _last
     try:
         for ev in dev.read_loop():
             if ev.type in (ecodes.EV_REL, ecodes.EV_ABS):
                 with _lock:
                     _last = time.monotonic()
-                    _hidden = False
     except Exception:
         pass  # device went away (wireless sleep/unplug); _scan re-adds it
     finally:
@@ -83,14 +96,14 @@ def _scan():
 
 
 def main():
-    global _hidden
+    global _parked
     while True:
         _scan()  # pick up (re)connected wireless mice
         time.sleep(1.0)
         with _lock:
-            idle = time.monotonic() - _last
-            if idle >= IDLE_SEC and not _hidden:
-                _hidden = True
+            now = time.monotonic()
+            if now - _last >= IDLE_SEC and now - _parked >= PARK_REPEAT_SEC:
+                _parked = now
                 _park()
 
 
