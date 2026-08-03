@@ -5,6 +5,40 @@ updates). `scripts/make-release.sh` lifts the current version's `hu`/`en`
 blocks into the OTA feed's `notes` - keep both languages, keep it short, and
 write for the person on the couch (what changes for THEM), not for developers.
 
+## 1.24.0
+
+### hu
+
+- A 4K filmek végre folyamatosak. Eddig a box a képkockák háromnegyedét eldobta 4K-ban - diavetítésnek látszott -, mert a videót és a fölötte lévő kezelőfelületet egyszerre kellett kirajzolnia, és a kettő nem fért bele. Mostantól a 4K képet közvetlenül adja tovább a képernyőnek, így akkor is sima marad, ha közben a menü vagy a lejátszósáv látszik.
+- Ennek egy ára van: a 4K HDR filmeknél a színeket ezután nem a box igazítja a tévéhez, hanem úgy mennek ki, ahogy a filmben vannak - sötét jeleneteken világosabbnak, kontrasztosabbnak kevésbé látszhatnak. A Full HD filmeket ez nem érinti.
+
+### en
+
+- 4K films finally play smoothly. The box used to drop three frames in four at 4K - it looked like a slideshow - because it had to draw both the video and the UI sitting over it, and the two did not fit. It now hands the 4K picture straight to the screen, so it stays smooth even while a menu or the playback bar is up.
+- One thing changes with it: on 4K HDR films the box no longer adapts the colours to your TV, so they go out as the film has them - dark scenes can look lighter and less contrasty. Full HD films are unaffected.
+
+### notes
+
+Not release notes for the TV - for whoever runs the boxes:
+
+- Measured on `tvbox-livingroom` (2160p HEVC, 29 Mbps, DV/PQ, direct play):
+  **17 dropped frames a second before, 0 in ten minutes after**, mpv at 7% of a
+  core instead of 12-20%. The decoder was never the problem - it dropped nothing
+  in either case.
+- The renderer is chosen per stream in `shell/videoout.js`: the zero-copy output
+  (`dmabuf-wayland`) only for fullscreen, hardware-decoded, 4K-class video.
+  Everything else keeps `--vo=gpu` and its tone mapping, because that output
+  shows **nothing** for a software-decoded stream and does not exist under
+  XWayland, where PiP runs.
+- **4K AV1 is still not smooth** and this cannot help it: the Pi 5 has no AV1
+  decoder, so those frames come from the CPU and the GPU renderer is the only
+  one that can take them.
+- If the HDR colour change is not wanted, the trade is one gate away - excluding
+  `gamma: "pq"` from `zeroCopyVideo` returns those films to tone mapping, and to
+  the frame drops. The lasting fix is HDR passthrough (let the panel tone-map,
+  as a Fire TV does), which needs a compositor with colour management; labwc
+  0.9.8 / wlroots 0.19.1 advertises none.
+
 ## 1.23.0
 
 ### hu
