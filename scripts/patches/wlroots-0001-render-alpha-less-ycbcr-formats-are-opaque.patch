@@ -1,7 +1,7 @@
-From 914cc5cb9cbe46160dd06072c6463ae9ba88f041 Mon Sep 17 00:00:00 2001
+From 107d1da611e6a3ee330b8d65707e0fcf208f5479 Mon Sep 17 00:00:00 2001
 From: Andy1210 <andy1210@gmail.com>
 Date: Mon, 3 Aug 2026 18:00:00 +0200
-Subject: [PATCH 1/6] render: alpha-less YCbCr formats are opaque
+Subject: [PATCH 1/5] render: alpha-less YCbCr formats are opaque
 
 pixel_format_has_alpha() answers from an allowlist of opaque formats and returns
 true for anything not on it. pixel_format_is_ycbcr() knows 58 YCbCr formats; four
@@ -17,74 +17,54 @@ None of the formats added here has an alpha channel. The ones deliberately left
 off are the six that do: AYUV, Y410, Y412, Y416, Y0L0 and Y0L2, whose X-prefixed
 siblings are the alpha-less variants and are included.
 ---
- render/pixel_format.c | 50 +++++++++++++++++++++++++++++++++++++++++++
- 1 file changed, 50 insertions(+)
+ render/pixel_format.c | 26 ++++++++++++++++++++++----
+ 1 file changed, 22 insertions(+), 4 deletions(-)
 
 diff --git a/render/pixel_format.c b/render/pixel_format.c
-index c60dd9d..7b98e95 100644
+index c60dd9d..a740ef4 100644
 --- a/render/pixel_format.c
 +++ b/render/pixel_format.c
-@@ -211,10 +211,60 @@ static const uint32_t opaque_pixel_formats[] = {
+@@ -211,10 +211,6 @@ static const uint32_t opaque_pixel_formats[] = {
  	DRM_FORMAT_XBGR2101010,
  	DRM_FORMAT_XBGR16161616F,
  	DRM_FORMAT_XBGR16161616,
-+	// YCbCr. Every format pixel_format_is_ycbcr() knows, except the six that
-+	// carry alpha: AYUV, Y410, Y412, Y416, Y0L0 and Y0L2.
-+	DRM_FORMAT_YUYV,
- 	DRM_FORMAT_YVYU,
-+	DRM_FORMAT_UYVY,
- 	DRM_FORMAT_VYUY,
- 	DRM_FORMAT_NV12,
-+	DRM_FORMAT_NV15,
-+	DRM_FORMAT_NV16,
-+	DRM_FORMAT_NV20,
-+	DRM_FORMAT_NV21,
-+	DRM_FORMAT_NV24,
-+	DRM_FORMAT_NV30,
-+	DRM_FORMAT_NV42,
-+	DRM_FORMAT_NV61,
- 	DRM_FORMAT_P010,
-+	DRM_FORMAT_P012,
-+	DRM_FORMAT_P016,
-+	DRM_FORMAT_P030,
-+	DRM_FORMAT_P210,
-+	DRM_FORMAT_Q401,
-+	DRM_FORMAT_Q410,
-+	DRM_FORMAT_S010,
-+	DRM_FORMAT_S012,
-+	DRM_FORMAT_S016,
-+	DRM_FORMAT_S210,
-+	DRM_FORMAT_S212,
-+	DRM_FORMAT_S216,
-+	DRM_FORMAT_S410,
-+	DRM_FORMAT_S412,
-+	DRM_FORMAT_S416,
-+	DRM_FORMAT_VUY888,
-+	DRM_FORMAT_VUY101010,
-+	DRM_FORMAT_X0L0,
-+	DRM_FORMAT_X0L2,
-+	DRM_FORMAT_XVYU2101010,
-+	DRM_FORMAT_XVYU12_16161616,
-+	DRM_FORMAT_XVYU16161616,
-+	DRM_FORMAT_XYUV8888,
-+	DRM_FORMAT_Y210,
-+	DRM_FORMAT_Y212,
-+	DRM_FORMAT_Y216,
-+	DRM_FORMAT_YUV410,
-+	DRM_FORMAT_YUV411,
-+	DRM_FORMAT_YUV420,
-+	DRM_FORMAT_YUV420_8BIT,
-+	DRM_FORMAT_YUV420_10BIT,
-+	DRM_FORMAT_YUV422,
-+	DRM_FORMAT_YUV444,
-+	DRM_FORMAT_YVU410,
-+	DRM_FORMAT_YVU411,
-+	DRM_FORMAT_YVU420,
-+	DRM_FORMAT_YVU422,
-+	DRM_FORMAT_YVU444,
+-	DRM_FORMAT_YVYU,
+-	DRM_FORMAT_VYUY,
+-	DRM_FORMAT_NV12,
+-	DRM_FORMAT_P010,
  };
  
  static const size_t pixel_format_info_size =
+@@ -299,7 +295,29 @@ bool pixel_format_info_check_stride(const struct wlr_pixel_format_info *fmt,
+ 	return true;
+ }
+ 
++// The YCbCr formats that carry alpha. Stated as the exceptions rather than as a
++// list of the rest, so that a format added to pixel_format_is_ycbcr() cannot go
++// on being treated as translucent because a second list was not updated.
++static bool ycbcr_format_has_alpha(uint32_t fmt) {
++	switch (fmt) {
++	case DRM_FORMAT_AYUV:
++	case DRM_FORMAT_Y0L0:
++	case DRM_FORMAT_Y0L2:
++	case DRM_FORMAT_Y410:
++	case DRM_FORMAT_Y412:
++	case DRM_FORMAT_Y416:
++		return true;
++	default:
++		return false;
++	}
++}
++
++bool pixel_format_is_ycbcr(uint32_t format);
++
+ bool pixel_format_has_alpha(uint32_t fmt) {
++	if (pixel_format_is_ycbcr(fmt)) {
++		return ycbcr_format_has_alpha(fmt);
++	}
+ 	for (size_t i = 0; i < opaque_pixel_formats_size; i++) {
+ 		if (fmt == opaque_pixel_formats[i]) {
+ 			return false;
 -- 
 2.47.3
 

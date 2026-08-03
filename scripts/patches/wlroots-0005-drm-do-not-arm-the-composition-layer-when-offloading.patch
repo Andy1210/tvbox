@@ -1,7 +1,7 @@
-From 348c1517a8a91e2ff07a3d673e72e63f8b0d096e Mon Sep 17 00:00:00 2001
+From 4a26e3f4864d004e32b6ebb782ed3f14f35311a8 Mon Sep 17 00:00:00 2001
 From: Andy1210 <andy1210@gmail.com>
 Date: Mon, 3 Aug 2026 18:00:00 +0200
-Subject: [PATCH 6/6] backend/drm: do not arm the composition layer while
+Subject: [PATCH 5/5] backend/drm: do not arm the composition layer while
  offloading
 
 The composition layer catches whatever cannot be offloaded, and it is armed with
@@ -20,14 +20,14 @@ gets a plane and so cannot take one from anything. Because nothing else then
 covers an allocation that leaves the primary layer out, check that the frame
 reached a plane at all - either layer will do, they carry the same buffer.
 ---
- backend/drm/libliftoff.c | 77 +++++++++++++++++++++++++++++++++++-----
- 1 file changed, 69 insertions(+), 8 deletions(-)
+ backend/drm/libliftoff.c | 78 +++++++++++++++++++++++++++++++++++-----
+ 1 file changed, 70 insertions(+), 8 deletions(-)
 
 diff --git a/backend/drm/libliftoff.c b/backend/drm/libliftoff.c
-index a554b81..02fd6b5 100644
+index db23abe..588d51a 100644
 --- a/backend/drm/libliftoff.c
 +++ b/backend/drm/libliftoff.c
-@@ -363,25 +363,68 @@ static bool add_connector(drmModeAtomicReq *req,
+@@ -357,25 +357,69 @@ static bool add_connector(drmModeAtomicReq *req,
  			ok = ok && add_prop(req, crtc->id, crtc->props.vrr_enabled, state->vrr_enabled);
  		}
  
@@ -50,10 +50,11 @@ index a554b81..02fd6b5 100644
 +		 * unarmed layer carries no framebuffer and libliftoff never gives it a
 +		 * plane, so there would be nothing for the fallback to lose the plane to.
 +		 *
-+		 * If the allocation then cannot place the armed layer, libliftoff marks it
-+		 * as needing composition and the commit still succeeds - so the frame goes
-+		 * out without that layer, and the compositor learns from the layer's
-+		 * accepted flag that it has to composite the next one.
++		 * The cost when the armed layer cannot be placed is a dropped frame, not a
++		 * degraded one: with the fallback invisible, libliftoff will not accept an
++		 * allocation that leaves any visible layer out, so the commit fails. The
++		 * compositor reads the layer's accepted flag, composites the next frame,
++		 * and the disabled layer that comes with it frees the search again.
 +		 */
 +		bool offloading = false;
 +		if (state->base->committed & WLR_OUTPUT_STATE_LAYERS) {
@@ -104,28 +105,28 @@ index a554b81..02fd6b5 100644
  		}
  
  		if (state->base->committed & WLR_OUTPUT_STATE_LAYERS) {
-@@ -509,6 +552,24 @@ static bool commit(struct wlr_drm_backend *drm,
+@@ -505,6 +549,24 @@ static bool commit(struct wlr_drm_backend *drm,
  			wlr_drm_conn_log(conn, WLR_DEBUG, "Failed to scan-out cursor plane");
  			goto out;
  		}
 +
 +		/*
-+		 * Whether the frame the compositor prepared reached a plane at all. The
-+		 * primary layer and the composition fallback carry the SAME buffer, so
-+		 * either one being placed means the frame is on screen - which is why the
-+		 * question is about the planes and not about needs_composition, that being
-+		 * true of whichever of the two libliftoff did not pick.
++		 * Did the frame the compositor prepared reach a plane at all? With the
++		 * fallback out of the contest, nothing else covers an allocation that
++		 * leaves the primary layer out.
 +		 *
-+		 * With the fallback disarmed while a layer is offloaded, nothing else
-+		 * covers an allocation that leaves the primary layer out: the commit would
-+		 * scan out everything EXCEPT that frame, on a driver that tolerates an
-+		 * active CRTC without a primary plane, and nothing downstream would know.
++		 * The question is about the PLANES and not about needs_composition: the
++		 * primary layer and the fallback carry the same buffer, so that is true of
++		 * whichever of the two libliftoff did not pick, and asking it instead
++		 * rejects perfectly good frames.
 +		 */
++#if HAVE_LIBLIFTOFF_0_5
 +		if (liftoff_layer_get_plane(crtc->primary->liftoff_layer) == NULL &&
 +				liftoff_layer_get_plane(crtc->liftoff_composition_layer) == NULL) {
 +			wlr_drm_conn_log(conn, WLR_DEBUG, "Failed to scan-out primary plane");
 +			goto out;
 +		}
++#endif
  	}
  
  	ok = drmModeAtomicCommit(drm->fd, req, flags, page_flip) == 0;

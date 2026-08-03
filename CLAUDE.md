@@ -296,7 +296,7 @@ touched one file, `npx prettier --write <file>` is enough; when in doubt run
   wlroots.** Removing ours left the video smooth only while nothing sat over it -
   a fullscreen translucent UI still sent the whole output through the renderer,
   67% of the V3D. `scripts/install-labwc-planes.sh` builds labwc 0.20.0 +
-  wlroots 0.20.2 with the seven patches in `scripts/patches/`, and the display
+  wlroots 0.20.2 with the six patches in `scripts/patches/`, and the display
   hardware composes instead: film on the vc4 primary plane, UI on an overlay,
   compositor at **0% GPU**, 0 dropped frames with the Plex UI open. Things that
   bite: the whole path only works with **`WLR_DRM_FORCE_LIBLIFTOFF=1`** (wlroots
@@ -304,7 +304,7 @@ touched one file, `npx prettier --write <file>` is enough; when in doubt run
   which `deploy/tvbox-compositor` sets); greetd starts **`tvbox-compositor`**
   rather than labwc, so a patched build that cannot come up costs one restart
   instead of the TV; and the build needs root+apt, so **OTA-only boxes never get
-  it** and composite as before. Two of the seven are plain wlroots bugs: the
+  it** and composite as before. Two of the six are plain wlroots bugs: the
   libliftoff interface never set the colour-management connector properties and
   the guard that noticed rejected every commit carrying an image description
   (labwc attaches one to all of them), and `pixel_format_has_alpha()` calls a
