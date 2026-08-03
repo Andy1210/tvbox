@@ -6,21 +6,26 @@
 # into one buffer, and at 3840x2160 that is a full-screen GPU pass per frame on
 # top of the one the player already does. A Pi 5 fits one of the two. The display
 # hardware can compose the same scene for free - vc4 offers 48 overlay planes
-# with alpha blending - but nothing in the wlroots stack asks it to. Five patches
+# with alpha blending - but nothing in the wlroots stack asks it to. Seven patches
 # do, and they are not in any release yet:
 #
-#   wlroots-0001  the libliftoff interface never set the two colour-management
+#   wlroots-0001  wlroots decides opacity from an allowlist of formats that names
+#                 four of the 58 YCbCr formats it knows. P030 - what this hardware
+#                 decodes 10-bit video into - was not one of them, so a video
+#                 buffer read as possibly-translucent and could never scan out.
+#   wlroots-0002  the libliftoff interface never set the colour-management
 #                 connector properties, and the guard that noticed rejected EVERY
 #                 commit carrying an image description. This is the one that made
 #                 the rest unreachable.
-#   wlroots-0002  direct scan-out was refused whenever the state carried a mode,
+#   wlroots-0003  direct scan-out was refused whenever the state carried a mode,
 #                 an enable or a render format - which a compositor that rebuilds
 #                 its pending state every frame always does.
-#   wlroots-0003  wlr_scene never drives output layers, so a surface above a
+#   wlroots-0004  wlr_scene never drives output layers, so a surface above a
 #                 fullscreen video forces the whole output through the renderer.
-#   wlroots-0004  libliftoff searches plane assignments against a deadline; vc4
-#                 exposes 56 planes and the search never finishes.
-#   wlroots-0005  the composition fallback is armed even when it is not needed,
+#   wlroots-0005  libliftoff searches plane assignments against a 1 ms deadline
+#                 and reports none when it expires; the search is cached, so it
+#                 can afford the time it needs.
+#   wlroots-0006  the composition fallback is armed even when it is not needed,
 #                 and on hardware with one plane at zpos 0 it takes the plane the
 #                 video needs.
 #   labwc-0001    output states labwc builds itself describe no layers, which

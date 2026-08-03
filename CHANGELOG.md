@@ -47,7 +47,7 @@ Not release notes for the TV - for whoever runs the boxes:
 problem. Removing ours left the video smooth only while nothing sat over it; a
 fullscreen translucent UI still sent the whole output through the renderer, at
 67% of the V3D. `scripts/install-labwc-planes.sh` builds labwc 0.20.0 + wlroots
-0.20.2 with five patches (`scripts/patches/`) that let the display hardware
+0.20.2 with seven patches (`scripts/patches/`) that let the display hardware
 compose instead: the film lands on the vc4 primary plane, the UI on an overlay,
 and the compositor's GPU time drops to **0%**. Measured with the Plex UI open
 over a 2160p23.976 film: 0 dropped and 0 delayed frames.
@@ -63,11 +63,15 @@ Four things to know about it:
   that shows nothing. The marker lives in `/run`, so the next boot tries again.
 - **`WLR_DRM_FORCE_LIBLIFTOFF=1` is required and set by the wrapper.** wlroots
   only touches planes through libliftoff, and keeps it behind that variable.
-- **One of the five is a plain wlroots bug worth upstreaming**, not a tvbox
-  quirk: the liftoff interface never set the two colour-management connector
+- **Two of the seven are plain wlroots bugs worth upstreaming**, not tvbox
+  quirks. The liftoff interface never set the colour-management connector
   properties, and the guard that noticed rejected every commit carrying an image
-  description - which labwc attaches to all of them. Enabling libliftoff on any
-  wlroots compositor therefore breaks presentation outright.
+  description - which labwc attaches to all of them, so enabling libliftoff on any
+  wlroots compositor breaks presentation outright. And wlroots decides whether a
+  buffer is opaque from an allowlist that names four of the 58 YCbCr formats it
+  knows: P030 was missing while P010 and NV12 were on it, so 10-bit video was
+  treated as possibly-translucent - which cost occlusion culling and direct
+  scan-out for every such buffer, on every compositor.
 
 ## 1.23.0
 
