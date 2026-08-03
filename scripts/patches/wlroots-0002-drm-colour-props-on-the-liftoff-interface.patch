@@ -1,7 +1,7 @@
-From beb13165e5d48cc2a49f7eefff21dc2d7774ac66 Mon Sep 17 00:00:00 2001
+From 39646f2d0e87f41ebb9036f5fde3ede5f3fec62b Mon Sep 17 00:00:00 2001
 From: Andy1210 <andy1210@gmail.com>
 Date: Mon, 3 Aug 2026 18:00:00 +0200
-Subject: [PATCH 2/6] backend/drm: set the colour props on the liftoff
+Subject: [PATCH 2/5] backend/drm: set the colour props on the liftoff
  interface
 
 The liftoff interface never set Colorspace, HDR_OUTPUT_METADATA or max bpc, and
@@ -27,9 +27,9 @@ request to put any of this in.
 ---
  backend/drm/atomic.c        |  4 ++--
  backend/drm/drm.c           |  4 ++--
- backend/drm/libliftoff.c    | 26 ++++++++++++++++++++++++++
+ backend/drm/libliftoff.c    | 27 ++++++++++++++++++++++++++-
  include/backend/drm/iface.h |  8 ++++++++
- 4 files changed, 38 insertions(+), 4 deletions(-)
+ 4 files changed, 38 insertions(+), 5 deletions(-)
 
 diff --git a/backend/drm/atomic.c b/backend/drm/atomic.c
 index faa535d..a33c9b0 100644
@@ -69,13 +69,14 @@ index bd29872..6142ced 100644
  	}
  
 diff --git a/backend/drm/libliftoff.c b/backend/drm/libliftoff.c
-index 333beac..a953724 100644
+index 333beac..bdbe7eb 100644
 --- a/backend/drm/libliftoff.c
 +++ b/backend/drm/libliftoff.c
-@@ -320,6 +320,32 @@ static bool add_connector(drmModeAtomicReq *req,
+@@ -320,7 +320,32 @@ static bool add_connector(drmModeAtomicReq *req,
  		ok = ok && add_prop(req, conn->id, conn->props.content_type,
  			DRM_MODE_CONTENT_TYPE_GRAPHICS);
  	}
+-	// TODO: set "max bpc"
 +	/*
 +	 * Colour depth and colour management, the three connector properties the
 +	 * atomic interface sets. The two colour-management values are already
@@ -102,9 +103,9 @@ index 333beac..a953724 100644
 +		ok = ok && add_prop(req, conn->id, conn->props.hdr_output_metadata,
 +			state->hdr_output_metadata);
 +	}
- 	// TODO: set "max bpc"
  	ok = ok &&
  		add_prop(req, crtc->id, crtc->props.mode_id, state->mode_id) &&
+ 		add_prop(req, crtc->id, crtc->props.active, active);
 diff --git a/include/backend/drm/iface.h b/include/backend/drm/iface.h
 index bc96105..848bc79 100644
 --- a/include/backend/drm/iface.h

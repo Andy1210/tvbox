@@ -1,7 +1,7 @@
-From f92c947584dbeb005fb54f4f8995be070d259390 Mon Sep 17 00:00:00 2001
+From e34d9b243134b9a335853796ef189b0130ccf098 Mon Sep 17 00:00:00 2001
 From: Andy1210 <andy1210@gmail.com>
 Date: Mon, 3 Aug 2026 18:00:00 +0200
-Subject: [PATCH 4/6] scene: offload the top surface to an output layer
+Subject: [PATCH 3/5] scene: offload the top surface to an output layer
 
 The renderer is all-or-nothing: one surface above a fullscreen video sends the
 whole output through it. At 4K that is a full-screen composite per frame for
@@ -25,12 +25,12 @@ Measured on a Raspberry Pi 5 (vc4) with a 4K film under a fullscreen translucent
 UI: the compositor GPU time goes from 67% to 0% and the player stops dropping
 frames.
 ---
- include/wlr/types/wlr_scene.h |  14 ++
- types/scene/wlr_scene.c       | 236 +++++++++++++++++++++++++++++++++-
- 2 files changed, 247 insertions(+), 3 deletions(-)
+ include/wlr/types/wlr_scene.h |  15 ++
+ types/scene/wlr_scene.c       | 287 +++++++++++++++++++++++++++++++++-
+ 2 files changed, 299 insertions(+), 3 deletions(-)
 
 diff --git a/include/wlr/types/wlr_scene.h b/include/wlr/types/wlr_scene.h
-index 6c627b1..82e9299 100644
+index 6c627b1..96e3f10 100644
 --- a/include/wlr/types/wlr_scene.h
 +++ b/include/wlr/types/wlr_scene.h
 @@ -24,6 +24,7 @@
@@ -41,7 +41,7 @@ index 6c627b1..82e9299 100644
  #include <wlr/types/wlr_linux_dmabuf_v1.h>
  #include <wlr/util/addon.h>
  #include <wlr/util/box.h>
-@@ -264,6 +265,19 @@ struct wlr_scene_output {
+@@ -264,6 +265,20 @@ struct wlr_scene_output {
  
  		struct wl_list damage_highlight_regions;
  
@@ -55,6 +55,7 @@ index 6c627b1..82e9299 100644
 +		bool offload_unavailable;
 +		bool offload_active;
 +		bool offload_offered;
++		bool offload_disabled;
 +		int offload_refusals;
 +		int offload_backoff;
 +
@@ -62,20 +63,21 @@ index 6c627b1..82e9299 100644
  
  		struct wlr_drm_syncobj_timeline *in_timeline;
 diff --git a/types/scene/wlr_scene.c b/types/scene/wlr_scene.c
-index 6fcc61d..1369841 100644
+index 7bc8b76..b790573 100644
 --- a/types/scene/wlr_scene.c
 +++ b/types/scene/wlr_scene.c
-@@ -1865,6 +1865,9 @@ void wlr_scene_output_destroy(struct wlr_scene_output *scene_output) {
+@@ -1865,6 +1865,10 @@ void wlr_scene_output_destroy(struct wlr_scene_output *scene_output) {
  	wlr_color_transform_unref(scene_output->prev_gamma_lut_color_transform);
  	wlr_color_transform_unref(scene_output->prev_supplied_color_transform);
  	wlr_color_transform_unref(scene_output->combined_color_transform);
 +	if (scene_output->offload_layer != NULL) {
 +		wlr_output_layer_destroy(scene_output->offload_layer);
++		scene_output->offload_layer = NULL;
 +	}
  	wl_array_release(&scene_output->render_list);
  	free(scene_output);
  }
-@@ -2352,6 +2355,224 @@ cleanup_transforms:
+@@ -2310,6 +2314,274 @@ cleanup_transforms:
  	return result;
  }
  
@@ -96,9 +98,38 @@ index 6fcc61d..1369841 100644
 +// keeps its framebuffer on its plane - over a frame that now contains that same
 +// surface - and the backend drops its last reference to that buffer while the
 +// display is still reading from it.
++static void scene_output_drop_offload_layer(struct wlr_scene_output *scene_output) {
++	wlr_output_layer_destroy(scene_output->offload_layer);
++	scene_output->offload_layer = NULL;
++	scene_output->offload_layer_state = (struct wlr_output_layer_state){0};
++	scene_output->offload_active = false;
++	scene_output->offload_offered = false;
++	scene_output->offload_disabled = false;
++}
++
 +static void scene_output_disable_offload_layer(struct wlr_scene_output *scene_output,
 +		struct wlr_output_state *state) {
-+	if (scene_output->offload_layer == NULL) {
++	if (scene_output->offload_layer == NULL ||
++			(state->committed & WLR_OUTPUT_STATE_LAYERS)) {
++		return;
++	}
++
++	// A state has to describe EVERY layer on the output and this describes only
++	// ours, so on an output that has gained a layer from elsewhere there is
++	// nothing valid to say - and saying it anyway fails every commit from here
++	// on. Stop owning a layer instead; the backend frees the plane when nothing
++	// claims it.
++	if (wl_list_length(&scene_output->output->layers) > 1) {
++		scene_output_drop_offload_layer(scene_output);
++		return;
++	}
++
++	// One frame describing it disabled is what takes the buffer off the plane.
++	// After that the layer has no purpose until the next offload, and keeping it
++	// would keep imposing the rule above on every commit.
++	if (scene_output->offload_disabled &&
++			(scene_output->offload_unavailable || scene_output->offload_backoff > 0)) {
++		scene_output_drop_offload_layer(scene_output);
 +		return;
 +	}
 +
@@ -106,6 +137,7 @@ index 6fcc61d..1369841 100644
 +		.layer = scene_output->offload_layer,
 +	};
 +	wlr_output_state_set_layers(state, &scene_output->offload_layer_state, 1);
++	scene_output->offload_disabled = true;
 +}
 +
 +// Hand the topmost surface to the backend as an output layer, so the fullscreen
@@ -136,8 +168,9 @@ index 6fcc61d..1369841 100644
 +		scene_output->offload_backoff = SCENE_OFFLOAD_BACKOFF;
 +		// The commit that carried the offer counted its damage as handled, so
 +		// nothing would ask for another frame and the refused surface would stay
-+		// off screen until something unrelated damaged the output.
-+		wlr_damage_ring_add_whole(&scene_output->damage_ring);
++		// off screen until something unrelated damaged the output. This is the
++		// call that also schedules one.
++		scene_output_damage_whole(scene_output);
 +		if (++scene_output->offload_refusals > SCENE_OFFLOAD_MAX_REFUSALS) {
 +			wlr_log(WLR_DEBUG, "Output layers refused %d times, giving up on this output",
 +				scene_output->offload_refusals);
@@ -163,11 +196,8 @@ index 6fcc61d..1369841 100644
 +		return SCANOUT_CANDIDATE;
 +	}
 +
-+	// One surface above the one that covers the output. Anything further down is
-+	// hidden behind that surface, which is checked below rather than assumed: the
-+	// layer above is composed by the display engine, not painted over anything
-+	// prepared here, so a bottom surface that is not opaque everywhere would let
-+	// what it does not cover show the CRTC background instead.
++	// One surface above one that covers the output, and the coverage has to be
++	// opaque - checked below, not assumed.
 +	struct render_list_entry *top = &list_data[0];
 +	struct render_list_entry *bottom = &list_data[1];
 +
@@ -203,19 +233,20 @@ index 6fcc61d..1369841 100644
 +
 +	// Covering the output is not the same as hiding what is under it, and what is
 +	// under it will not be drawn: the layer above is composed by the display
-+	// engine, not painted over anything prepared here. An ARGB toolkit window that
-+	// declared no opaque region covers the output and hides nothing.
++	// engine, not painted over anything prepared here. An ARGB toolkit window
++	// that declared no opaque region covers the output and hides nothing.
 +	if (bottom_buffer->opacity != 1) {
 +		return SCANOUT_INELIGIBLE;
 +	}
 +	if (!bottom_buffer->buffer_is_opaque) {
-+		pixman_box32_t *extents =
-+			pixman_region32_extents(&bottom_buffer->opaque_region);
 +		int width, height;
 +		scene_node_get_size(bottom->node, &width, &height);
-+		if (!pixman_region32_n_rects(&bottom_buffer->opaque_region) ||
-+				extents->x1 > 0 || extents->y1 > 0 ||
-+				extents->x2 < width || extents->y2 < height) {
++		pixman_box32_t box = { .x2 = width, .y2 = height };
++		// Coverage, not a bounding box: a window with rounded corners declares an
++		// opaque region whose extents are the whole surface and whose corners are
++		// not in it.
++		if (pixman_region32_contains_rectangle(&bottom_buffer->opaque_region,
++				&box) != PIXMAN_REGION_IN) {
 +			return SCANOUT_INELIGIBLE;
 +		}
 +	}
@@ -235,14 +266,27 @@ index 6fcc61d..1369841 100644
 +	scene_node_get_size(top->node, &top_box.width, &top_box.height);
 +	transform_output_box(&top_box, data);
 +
++	// Unscaled only. A layer state has no filter mode, so a scaled one would be
++	// resampled however the plane happens to, and it asks a question about plane
++	// scaling capability that this does not need to answer.
++	struct wlr_fbox src_box = top_buffer->src_box;
++	if (wlr_fbox_empty(&src_box)) {
++		src_box = (struct wlr_fbox){
++			.width = top_buffer->buffer->width,
++			.height = top_buffer->buffer->height,
++		};
++	}
++	if (src_box.width != top_box.width || src_box.height != top_box.height) {
++		return SCANOUT_INELIGIBLE;
++	}
++
++	scene_output->offload_disabled = false;
 +	scene_output->offload_layer_state = (struct wlr_output_layer_state){
 +		.layer = scene_output->offload_layer,
 +		.buffer = top_buffer->buffer,
 +		.dst_box = top_box,
++		.src_box = top_buffer->src_box,
 +	};
-+	if (!wlr_fbox_empty(&top_buffer->src_box)) {
-+		scene_output->offload_layer_state.src_box = top_buffer->src_box;
-+	}
 +
 +	// Everything below happens on a copy, so that a scan-out the backend refuses
 +	// leaves the caller's state untouched and the scene composites as it always
@@ -278,11 +322,14 @@ index 6fcc61d..1369841 100644
 +	// to hear so: this is what carries presentation timing and, for a client using
 +	// explicit synchronisation, the release point for the buffer that was on the
 +	// plane.
++	// No release timeline: the one on the state is the primary plane's, signalled
++	// as soon as a new primary buffer is queued, and a layer's buffer is not free
++	// then - it stays on its plane until something replaces it. Telling an
++	// explicit-sync client otherwise invites it to draw into a buffer the display
++	// is still reading. The backend's own reference counting releases it.
 +	struct wlr_scene_output_sample_event sample_event = {
 +		.output = scene_output,
 +		.direct_scanout = true,
-+		.release_timeline = data->output->out_timeline,
-+		.release_point = data->output->out_point,
 +	};
 +	wl_signal_emit_mutable(&top_buffer->events.output_sample, &sample_event);
 +
@@ -292,6 +339,11 @@ index 6fcc61d..1369841 100644
 +	scene_output->offload_refusals = 0;
 +	if (!scene_output->offload_active) {
 +		scene_output->offload_active = true;
++		// The answer arrives with the next frame, and a scene that has just
++		// stopped compositing has no other reason to build one. Ask for it here,
++		// once per episode - while the offload holds, the content that made it
++		// worth doing is scheduling frames by itself.
++		wlr_output_schedule_frame(scene_output->output);
 +		wlr_log(WLR_DEBUG, "Offloading the top surface to an output layer");
 +	}
 +	return SCANOUT_SUCCESS;
@@ -300,7 +352,7 @@ index 6fcc61d..1369841 100644
  bool wlr_scene_output_build_state(struct wlr_scene_output *scene_output,
  		struct wlr_output_state *state, const struct wlr_scene_output_state_options *options) {
  	struct wlr_scene_output_state_options default_options = {0};
-@@ -2481,13 +2702,22 @@ bool wlr_scene_output_build_state(struct wlr_scene_output *scene_output,
+@@ -2439,13 +2711,22 @@ bool wlr_scene_output_build_state(struct wlr_scene_output *scene_output,
  	wlr_output_state_set_damage(state, &scene_output->pending_commit_damage);
  
  	// We only want to try direct scanout if:

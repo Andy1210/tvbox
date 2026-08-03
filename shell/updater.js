@@ -75,10 +75,9 @@ const INFRA_FILES = [
   "install-labwc-planes.sh",
   "wlroots-0001-render-alpha-less-ycbcr-formats-are-opaque.patch",
   "wlroots-0002-drm-colour-props-on-the-liftoff-interface.patch",
-  "wlroots-0003-scene-only-a-real-mode-change-blocks-direct-scanout.patch",
-  "wlroots-0004-scene-offload-the-top-surface-to-an-output-layer.patch",
-  "wlroots-0005-drm-give-libliftoff-a-deadline-it-can-finish-in.patch",
-  "wlroots-0006-drm-do-not-arm-the-composition-layer-when-offloading.patch",
+  "wlroots-0003-scene-offload-the-top-surface-to-an-output-layer.patch",
+  "wlroots-0004-drm-give-libliftoff-a-deadline-it-can-finish-in.patch",
+  "wlroots-0005-drm-do-not-arm-the-composition-layer-when-offloading.patch",
   "labwc-0001-output-describe-layers-in-every-state-we-build.patch",
   "tvbox-compositor", // greetd starts this, not labwc directly
   // Diagnostics + safe mode. Root-side, so a release only refreshes the copies in
