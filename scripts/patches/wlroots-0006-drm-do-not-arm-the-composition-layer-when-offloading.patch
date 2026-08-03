@@ -1,7 +1,7 @@
-From 4a26e3f4864d004e32b6ebb782ed3f14f35311a8 Mon Sep 17 00:00:00 2001
+From 6eda2cc04038d857d7293a6e8f8ed1ce29d7dbe8 Mon Sep 17 00:00:00 2001
 From: Andy1210 <andy1210@gmail.com>
 Date: Mon, 3 Aug 2026 18:00:00 +0200
-Subject: [PATCH 5/5] backend/drm: do not arm the composition layer while
+Subject: [PATCH 6/6] backend/drm: do not arm the composition layer while
  offloading
 
 The composition layer catches whatever cannot be offloaded, and it is armed with
@@ -20,11 +20,11 @@ gets a plane and so cannot take one from anything. Because nothing else then
 covers an allocation that leaves the primary layer out, check that the frame
 reached a plane at all - either layer will do, they carry the same buffer.
 ---
- backend/drm/libliftoff.c | 78 +++++++++++++++++++++++++++++++++++-----
- 1 file changed, 70 insertions(+), 8 deletions(-)
+ backend/drm/libliftoff.c | 82 ++++++++++++++++++++++++++++++++++++----
+ 1 file changed, 74 insertions(+), 8 deletions(-)
 
 diff --git a/backend/drm/libliftoff.c b/backend/drm/libliftoff.c
-index db23abe..588d51a 100644
+index db23abe..9fa66d7 100644
 --- a/backend/drm/libliftoff.c
 +++ b/backend/drm/libliftoff.c
 @@ -357,25 +357,69 @@ static bool add_connector(drmModeAtomicReq *req,
@@ -105,7 +105,7 @@ index db23abe..588d51a 100644
  		}
  
  		if (state->base->committed & WLR_OUTPUT_STATE_LAYERS) {
-@@ -505,6 +549,24 @@ static bool commit(struct wlr_drm_backend *drm,
+@@ -505,6 +549,28 @@ static bool commit(struct wlr_drm_backend *drm,
  			wlr_drm_conn_log(conn, WLR_DEBUG, "Failed to scan-out cursor plane");
  			goto out;
  		}
@@ -121,7 +121,11 @@ index db23abe..588d51a 100644
 +		 * rejects perfectly good frames.
 +		 */
 +#if HAVE_LIBLIFTOFF_0_5
-+		if (liftoff_layer_get_plane(crtc->primary->liftoff_layer) == NULL &&
++		// Only for a connector that is meant to show something: disabling one
++		// deliberately leaves its primary layer without a framebuffer, and
++		// therefore without a plane.
++		if (state->connectors[i].active &&
++				liftoff_layer_get_plane(crtc->primary->liftoff_layer) == NULL &&
 +				liftoff_layer_get_plane(crtc->liftoff_composition_layer) == NULL) {
 +			wlr_drm_conn_log(conn, WLR_DEBUG, "Failed to scan-out primary plane");
 +			goto out;

@@ -1,7 +1,7 @@
-From e34d9b243134b9a335853796ef189b0130ccf098 Mon Sep 17 00:00:00 2001
+From 01bca6cd1b3173e32f39c38556a82968a1b8ced9 Mon Sep 17 00:00:00 2001
 From: Andy1210 <andy1210@gmail.com>
 Date: Mon, 3 Aug 2026 18:00:00 +0200
-Subject: [PATCH 3/5] scene: offload the top surface to an output layer
+Subject: [PATCH 4/6] scene: offload the top surface to an output layer
 
 The renderer is all-or-nothing: one surface above a fullscreen video sends the
 whole output through it. At 4K that is a full-screen composite per frame for
@@ -26,8 +26,8 @@ UI: the compositor GPU time goes from 67% to 0% and the player stops dropping
 frames.
 ---
  include/wlr/types/wlr_scene.h |  15 ++
- types/scene/wlr_scene.c       | 287 +++++++++++++++++++++++++++++++++-
- 2 files changed, 299 insertions(+), 3 deletions(-)
+ types/scene/wlr_scene.c       | 301 +++++++++++++++++++++++++++++++++-
+ 2 files changed, 313 insertions(+), 3 deletions(-)
 
 diff --git a/include/wlr/types/wlr_scene.h b/include/wlr/types/wlr_scene.h
 index 6c627b1..96e3f10 100644
@@ -63,7 +63,7 @@ index 6c627b1..96e3f10 100644
  
  		struct wlr_drm_syncobj_timeline *in_timeline;
 diff --git a/types/scene/wlr_scene.c b/types/scene/wlr_scene.c
-index 7bc8b76..b790573 100644
+index 7bc8b76..e5c43e6 100644
 --- a/types/scene/wlr_scene.c
 +++ b/types/scene/wlr_scene.c
 @@ -1865,6 +1865,10 @@ void wlr_scene_output_destroy(struct wlr_scene_output *scene_output) {
@@ -77,7 +77,7 @@ index 7bc8b76..b790573 100644
  	wl_array_release(&scene_output->render_list);
  	free(scene_output);
  }
-@@ -2310,6 +2314,274 @@ cleanup_transforms:
+@@ -2310,6 +2314,286 @@ cleanup_transforms:
  	return result;
  }
  
@@ -149,37 +149,50 @@ index 7bc8b76..b790573 100644
 +// display hardware has overlay planes for - vc4 offers 48 of them, with alpha
 +// blending, in the formats a UI toolkit produces. This asks the backend for one
 +// and lets it say no.
++// Read the answer the last commit gave. This has to happen on EVERY frame, not
++// only on those that consider offloading again: the scene stops considering it
++// as soon as the surface above the video goes away, and that is exactly the
++// frame on which the layer has to be taken down.
++static void scene_output_read_offload_verdict(struct wlr_scene_output *scene_output) {
++	if (!scene_output->offload_offered) {
++		return;
++	}
++	scene_output->offload_offered = false;
++	if (scene_output->offload_layer_state.accepted) {
++		scene_output->offload_refusals = 0;
++		return;
++	}
++
++	if (scene_output->offload_active) {
++		scene_output->offload_active = false;
++		wlr_log(WLR_DEBUG, "Output layer refused, compositing instead");
++	}
++	scene_output->offload_backoff = SCENE_OFFLOAD_BACKOFF;
++	// The commit that carried the offer counted its damage as handled, so nothing
++	// would ask for another frame and the refused surface would stay off screen
++	// until something unrelated damaged the output. This is the call that also
++	// schedules one.
++	scene_output_damage_whole(scene_output);
++	if (++scene_output->offload_refusals > SCENE_OFFLOAD_MAX_REFUSALS) {
++		wlr_log(WLR_DEBUG, "Output layers refused %d times, giving up on this output",
++			scene_output->offload_refusals);
++		scene_output->offload_unavailable = true;
++	}
++}
++
 +static enum scene_direct_scanout_result scene_try_layer_offload(
 +		struct wlr_scene_output *scene_output, struct wlr_output_state *state,
 +		const struct render_data *data, struct render_list_entry *list_data,
 +		int list_len) {
-+	// Whether the backend took the layer can only be read after a real commit:
-+	// the DRM backend updates the flag on the commit path only. So the verdict
-+	// that governs this frame is the one the backend gave for the last one, which
-+	// is the order wlr_output_layer documents anyway.
-+	bool refused = scene_output->offload_offered &&
-+		!scene_output->offload_layer_state.accepted;
-+	scene_output->offload_offered = false;
-+	if (refused) {
-+		if (scene_output->offload_active) {
-+			scene_output->offload_active = false;
-+			wlr_log(WLR_DEBUG, "Output layer refused, compositing instead");
-+		}
-+		scene_output->offload_backoff = SCENE_OFFLOAD_BACKOFF;
-+		// The commit that carried the offer counted its damage as handled, so
-+		// nothing would ask for another frame and the refused surface would stay
-+		// off screen until something unrelated damaged the output. This is the
-+		// call that also schedules one.
-+		scene_output_damage_whole(scene_output);
-+		if (++scene_output->offload_refusals > SCENE_OFFLOAD_MAX_REFUSALS) {
-+			wlr_log(WLR_DEBUG, "Output layers refused %d times, giving up on this output",
-+				scene_output->offload_refusals);
-+			scene_output->offload_unavailable = true;
-+		}
-+		return SCANOUT_CANDIDATE;
++	if (scene_output->offload_unavailable || list_len < 2) {
++		return SCANOUT_INELIGIBLE;
 +	}
 +
-+	if (scene_output->offload_unavailable || list_len < 2) {
++	// A backend that cannot show a layer will not say so per commit - the DRM
++	// backend without libliftoff accepts the state and displays nothing - so ask
++	// before setting one up rather than paying a frame to find out.
++	if (!scene_output->output->backend->features.output_layers) {
++		scene_output->offload_unavailable = true;
 +		return SCANOUT_INELIGIBLE;
 +	}
 +
@@ -336,7 +349,6 @@ index 7bc8b76..b790573 100644
 +	// The offer stands until the commit answers it. Until then the surface above
 +	// the video is the display engine's business, not the renderer's.
 +	scene_output->offload_offered = true;
-+	scene_output->offload_refusals = 0;
 +	if (!scene_output->offload_active) {
 +		scene_output->offload_active = true;
 +		// The answer arrives with the next frame, and a scene that has just
@@ -352,7 +364,7 @@ index 7bc8b76..b790573 100644
  bool wlr_scene_output_build_state(struct wlr_scene_output *scene_output,
  		struct wlr_output_state *state, const struct wlr_scene_output_state_options *options) {
  	struct wlr_scene_output_state_options default_options = {0};
-@@ -2439,13 +2711,22 @@ bool wlr_scene_output_build_state(struct wlr_scene_output *scene_output,
+@@ -2439,13 +2723,24 @@ bool wlr_scene_output_build_state(struct wlr_scene_output *scene_output,
  	wlr_output_state_set_damage(state, &scene_output->pending_commit_damage);
  
  	// We only want to try direct scanout if:
@@ -361,6 +373,8 @@ index 7bc8b76..b790573 100644
 +	//   single opaque-backed surface above it the backend can put on a plane
  	// - There are no color transforms that need to be applied
  	// - Damage highlight debugging is not enabled
++	scene_output_read_offload_verdict(scene_output);
++
  	enum scene_direct_scanout_result scanout_result = SCANOUT_INELIGIBLE;
 -	if (options->color_transform == NULL && !render_gamma_lut && list_len == 1
 +	if (options->color_transform == NULL && !render_gamma_lut
