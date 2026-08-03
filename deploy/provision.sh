@@ -591,6 +591,35 @@ cat > /etc/xdg/labwc/autostart <<'LABWCSYS'
 LABWCSYS
 ok "kiosk labwc session (desktop chrome disabled)"
 
+# A compositor that can hand a fullscreen video to the display hardware instead of
+# compositing it - the difference between a 4K film playing under the app's UI and
+# one dropping most of its frames. Not a distro package: it is labwc + wlroots with
+# five patches (see scripts/install-labwc-planes.sh for what each one is for).
+#
+# Optional in both directions. The build is non-fatal, and the session wrapper runs
+# whichever compositor is actually installed, so a box that never gets this - an
+# OTA-only one, or one where the build fails - keeps working exactly as before.
+echo "==> compositor with display-plane offload (4K video under the app UI)"
+PLANES_SH="$HERE/install-labwc-planes.sh"
+if [ -f "$PLANES_SH" ]; then
+  sh "$PLANES_SH" && ok "labwc with plane offload" \
+    || warn "plane-offload build failed - the box keeps the distro labwc and composites as before"
+else
+  warn "install-labwc-planes.sh missing - skipping (distro labwc, no plane offload)"
+fi
+
+# greetd starts the session through the wrapper rather than labwc directly, so a
+# patched compositor that will not come up costs one restart instead of the TV.
+if [ -f "$HERE/tvbox-compositor" ] && install -m 755 -o root -g root \
+    "$HERE/tvbox-compositor" /usr/local/bin/tvbox-compositor; then
+  if [ -f /etc/greetd/config.toml ] && grep -q '^command = "labwc"' /etc/greetd/config.toml; then
+    sed -i 's|^command = "labwc"|command = "tvbox-compositor"|' /etc/greetd/config.toml
+  fi
+  ok "session wrapper (falls back to the distro labwc for the boot if the patched one fails)"
+else
+  warn "tvbox-compositor missing - greetd keeps starting labwc directly"
+fi
+
 echo
 if [ "$FAIL" = 0 ]; then
   echo "==> provision OK. Group changes need a reboot to reach the user session."

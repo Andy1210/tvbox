@@ -1,0 +1,143 @@
+#!/bin/sh
+# Build + install a labwc that can put a fullscreen video on a display plane
+# (root; called by deploy/provision.sh and by the SD-image build).
+#
+# Why this is not a distro package: a Wayland compositor composites everything
+# into one buffer, and at 3840x2160 that is a full-screen GPU pass per frame on
+# top of the one the player already does. A Pi 5 fits one of the two. The display
+# hardware can compose the same scene for free - vc4 offers 48 overlay planes
+# with alpha blending - but nothing in the wlroots stack asks it to. Five patches
+# do, and they are not in any release yet:
+#
+#   wlroots-0001  the libliftoff interface never set the two colour-management
+#                 connector properties, and the guard that noticed rejected EVERY
+#                 commit carrying an image description. This is the one that made
+#                 the rest unreachable.
+#   wlroots-0002  direct scan-out was refused whenever the state carried a mode,
+#                 an enable or a render format - which a compositor that rebuilds
+#                 its pending state every frame always does.
+#   wlroots-0003  wlr_scene never drives output layers, so a surface above a
+#                 fullscreen video forces the whole output through the renderer.
+#   wlroots-0004  libliftoff searches plane assignments against a deadline; vc4
+#                 exposes 56 planes and the search never finishes.
+#   wlroots-0005  the composition fallback is armed even when it is not needed,
+#                 and on hardware with one plane at zpos 0 it takes the plane the
+#                 video needs.
+#   labwc-0001    output states labwc builds itself describe no layers, which
+#                 wlroots rejects, and a failed render-format probe leaves the
+#                 format at the last candidate it tried.
+#
+# Measured on a Pi 5 with a 4K HEVC film and the Plex UI over it: the compositor's
+# GPU time goes from 67% to 0% and dropped frames from ~17/s to none.
+#
+# Safe to re-run: it no-ops when the installed build already matches the pinned
+# sources and this exact patch set. /usr/local is outside apt, so
+# unattended-upgrades will never touch this copy - re-run the script to move on.
+#
+# NOT run by OTA, which can never install packages. An OTA-only box keeps the
+# distro labwc and composites as before; the session wrapper (deploy/tvbox-
+# compositor) picks whichever is actually installed.
+set -eu
+
+WLROOTS_REF="${WLROOTS_REF:-0.20.2}"
+WLROOTS_COMMIT="${WLROOTS_COMMIT:-d783533489e1f75d6886c2ab5c5960090ef268f8}"
+LABWC_REF="${LABWC_REF:-0.20.0}"
+LABWC_COMMIT="${LABWC_COMMIT:-d5b5b765c7907a21a61081da6e3e1f38dbe17ff8}"
+
+PREFIX=/usr/local
+STAMP="$PREFIX/share/tvbox/labwc-planes.stamp"
+# infra.list lands every shipped file flat next to this script (~/.tvbox/), so the
+# patches are found by name rather than by directory.
+HERE=$(cd "$(dirname "$0")" && pwd)
+
+patches() {
+  # Applied in name order; the numbering above is the order they must go in.
+  find "$HERE" -maxdepth 1 -name "$1-0*.patch" 2>/dev/null | sort
+}
+
+WLROOTS_PATCHES=$(patches wlroots)
+LABWC_PATCHES=$(patches labwc)
+if [ -z "$WLROOTS_PATCHES" ] || [ -z "$LABWC_PATCHES" ]; then
+  echo "labwc plane offload: patches missing next to $0 - nothing to do" >&2
+  exit 0
+fi
+
+# The stamp is what makes this idempotent, and it has to cover the patches as
+# well as the refs: editing a patch without moving a tag must still rebuild.
+# Word splitting on the two patch lists is deliberate throughout: they are
+# newline-separated paths this script generated itself.
+# shellcheck disable=SC2086
+WANT=$({ echo "$WLROOTS_COMMIT $LABWC_COMMIT"; cat $WLROOTS_PATCHES $LABWC_PATCHES; } |
+  sha256sum | cut -d" " -f1)
+if [ -f "$STAMP" ] && [ "$(cat "$STAMP")" = "$WANT" ] && [ -x "$PREFIX/bin/labwc" ]; then
+  echo "labwc plane offload already installed ($WANT) - nothing to do"
+  exit 0
+fi
+
+echo "==> building wlroots $WLROOTS_REF + labwc $LABWC_REF with plane offload"
+
+# meson/ninja plus the two stacks' build dependencies. libliftoff, libsfdo and
+# libdisplay-info are all packaged - only the patched wlroots/labwc are not.
+DEBIAN_FRONTEND=noninteractive apt-get install -y -qq \
+  git meson ninja-build pkg-config \
+  libwayland-dev wayland-protocols libdrm-dev libgbm-dev libegl-dev libgles-dev \
+  libinput-dev libxkbcommon-dev libpixman-1-dev libseat-dev libudev-dev \
+  libdisplay-info-dev libliftoff-dev hwdata \
+  libxcb1-dev libxcb-composite0-dev libxcb-render0-dev libxcb-res0-dev \
+  libxcb-ewmh-dev libxcb-icccm4-dev libxcb-errors-dev \
+  libcairo2-dev libpango1.0-dev librsvg2-dev libsfdo-dev libpng-dev
+
+SRC=$(mktemp -d)
+# INT/TERM too: dash does not run an EXIT trap on a signal, and this build takes
+# many minutes - a Ctrl-C would otherwise leak the tree.
+trap 'rm -rf "$SRC"' EXIT INT TERM
+
+fetch() { # repo ref commit dir
+  # A tag is mutable and this builds and installs as root, so the commit decides.
+  git clone --depth 1 --branch "$2" "$1" "$SRC/$4" >/dev/null
+  got=$(cd "$SRC/$4" && git rev-parse HEAD)
+  if [ "$got" != "$3" ]; then
+    echo "$4 $2 is $got, expected $3 - refusing to build" >&2
+    exit 1
+  fi
+}
+
+apply() { # dir patches...
+  dir=$1; shift
+  for p in "$@"; do
+    ( cd "$dir" && git apply --whitespace=nowarn "$p" ) || {
+      echo "failed to apply $(basename "$p") - refusing to install a half-patched build" >&2
+      exit 1
+    }
+  done
+}
+
+fetch https://gitlab.freedesktop.org/wlroots/wlroots.git \
+  "$WLROOTS_REF" "$WLROOTS_COMMIT" wlroots
+apply "$SRC/wlroots" $WLROOTS_PATCHES
+meson setup "$SRC/wlroots/build" "$SRC/wlroots" \
+  --prefix="$PREFIX" --libdir="lib/$(dpkg-architecture -qDEB_HOST_MULTIARCH)" \
+  --buildtype=release -Dexamples=false >/dev/null
+ninja -C "$SRC/wlroots/build" >/dev/null
+ninja -C "$SRC/wlroots/build" install >/dev/null
+ldconfig
+
+fetch https://github.com/labwc/labwc.git "$LABWC_REF" "$LABWC_COMMIT" labwc
+apply "$SRC/labwc" $LABWC_PATCHES
+# --wrap-mode=nofallback is load-bearing: without it meson quietly builds labwc's
+# own wlroots subproject, and the compositor that comes out has none of the above.
+PKG_CONFIG_PATH="$PREFIX/lib/$(dpkg-architecture -qDEB_HOST_MULTIARCH)/pkgconfig" \
+meson setup "$SRC/labwc/build" "$SRC/labwc" \
+  --prefix="$PREFIX" --libdir="lib/$(dpkg-architecture -qDEB_HOST_MULTIARCH)" \
+  --buildtype=release --wrap-mode=nofallback >/dev/null
+ninja -C "$SRC/labwc/build" >/dev/null
+ninja -C "$SRC/labwc/build" install >/dev/null
+ldconfig
+
+# The stamp is written last, so an interrupted build is retried rather than
+# mistaken for a finished one - and the session wrapper reads it to decide
+# whether this box has a compositor that can offload at all.
+install -d "$(dirname "$STAMP")"
+printf "%s" "$WANT" > "$STAMP"
+
+echo "labwc plane offload installed: $("$PREFIX/bin/labwc" --version | head -1)"

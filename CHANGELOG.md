@@ -10,11 +10,13 @@ write for the person on the couch (what changes for THEM), not for developers.
 ### hu
 
 - A 4K filmek végre folyamatosak. Eddig a box a képkockák háromnegyedét eldobta 4K-ban - diavetítésnek látszott -, mert a videót és a fölötte lévő kezelőfelületet egyszerre kellett kirajzolnia, és a kettő nem fért bele. Mostantól a 4K képet közvetlenül adja tovább a képernyőnek, így akkor is sima marad, ha közben a menü vagy a lejátszósáv látszik.
+- A menü a film fölött sem szakítja meg a lejátszást: a képet és a fölötte lévő kezelőfelületet mostantól maga a tévé-kimenet teszi össze, nem a box rajzolja újra mindkettőt. Frissen telepített vagy újraprovisionált boxon jár, a régieken a következő provisionig marad a mostani működés.
 - Ennek egy ára van: a 4K HDR filmeknél a színeket ezután nem a box igazítja a tévéhez, hanem úgy mennek ki, ahogy a filmben vannak - sötét jeleneteken világosabbnak, kontrasztosabbnak kevésbé látszhatnak. A Full HD filmeket ez nem érinti.
 
 ### en
 
 - 4K films finally play smoothly. The box used to drop three frames in four at 4K - it looked like a slideshow - because it had to draw both the video and the UI sitting over it, and the two did not fit. It now hands the 4K picture straight to the screen, so it stays smooth even while a menu or the playback bar is up.
+- Opening a menu over a film no longer costs the playback anything: the TV output itself now puts the picture and the UI over it together, instead of the box redrawing both. Freshly flashed or re-provisioned boxes get this; existing ones keep working as they do now until their next provision.
 - One thing changes with it: on 4K HDR films the box no longer adapts the colours to your TV, so they go out as the film has them - dark scenes can look lighter and less contrasty. Full HD films are unaffected.
 
 ### notes
@@ -40,6 +42,32 @@ Not release notes for the TV - for whoever runs the boxes:
   the frame drops. The lasting fix is HDR passthrough (let the panel tone-map,
   as a Fire TV does), which needs a compositor with colour management; labwc
   0.9.8 / wlroots 0.19.1 advertises none.
+
+**The compositor's own 4K pass is gone too** - the second half of the same
+problem. Removing ours left the video smooth only while nothing sat over it; a
+fullscreen translucent UI still sent the whole output through the renderer, at
+67% of the V3D. `scripts/install-labwc-planes.sh` builds labwc 0.20.0 + wlroots
+0.20.2 with five patches (`scripts/patches/`) that let the display hardware
+compose instead: the film lands on the vc4 primary plane, the UI on an overlay,
+and the compositor's GPU time drops to **0%**. Measured with the Plex UI open
+over a 2160p23.976 film: 0 dropped and 0 delayed frames.
+
+Four things to know about it:
+
+- **It only reaches provisioned boxes.** The build needs apt and root, which OTA
+  has neither of, so an OTA-only box keeps the distro labwc and composites as
+  before. Same caveat as libcec and the diagnostics units.
+- **greetd now starts `tvbox-compositor`, not labwc.** That wrapper prefers the
+  patched build and falls back to the distro one for the rest of the boot if it
+  fails to come up, because a from-source compositor that will not start is a TV
+  that shows nothing. The marker lives in `/run`, so the next boot tries again.
+- **`WLR_DRM_FORCE_LIBLIFTOFF=1` is required and set by the wrapper.** wlroots
+  only touches planes through libliftoff, and keeps it behind that variable.
+- **One of the five is a plain wlroots bug worth upstreaming**, not a tvbox
+  quirk: the liftoff interface never set the two colour-management connector
+  properties, and the guard that noticed rejected every commit carrying an image
+  description - which labwc attaches to all of them. Enabling libliftoff on any
+  wlroots compositor therefore breaks presentation outright.
 
 ## 1.23.0
 
