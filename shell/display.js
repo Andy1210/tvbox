@@ -70,6 +70,22 @@ function cadenceRank(refreshExact, fps) {
 // The mode the UI lives at: the panel's own preferred resolution, capped to
 // 1080p, at the highest refresh that resolution offers. A 720p set gets 720p, a
 // 1080p set 1080p, a 4K set 1080p (the launcher is not worth 8.3 Mpixels).
+// What the panel can show, as opposed to what it is showing. The UI runs at 1080p
+// on a 4K set, so anything that asks the window system how big the screen is gets
+// told 1080p and decides accordingly - a streaming client picks its stream that
+// way, and picks it before the mode switch for the video has happened.
+//
+// The PREFERRED mode is the answer rather than the largest one: a TV may advertise
+// a DCI-4K mode (4096 wide) that this hardware cannot drive, and claiming it would
+// be a worse lie than the one being corrected.
+function panelResolution(modes) {
+  const usable = (modes || []).filter((m) => m.width > 0 && m.height > 0);
+  if (!usable.length) return null;
+  const preferred = usable.find((m) => m.preferred);
+  const best = preferred || usable.reduce((a, m) => (m.width * m.height > a.width * a.height ? m : a));
+  return { width: best.width, height: best.height };
+}
+
 function pickUiMode(modes, maxHeight = UI_MAX_HEIGHT) {
   if (!modes || !modes.length) return null;
   const fits = modes.filter((m) => m.height <= maxHeight);
@@ -139,4 +155,14 @@ function apply(env, output, mode, cb) {
   );
 }
 
-module.exports = { parse, list, apply, pickUiMode, pickContentMode, cadenceRank, UI_MAX_HEIGHT, UI_MAX_REFRESH };
+module.exports = {
+  parse,
+  list,
+  apply,
+  pickUiMode,
+  pickContentMode,
+  panelResolution,
+  cadenceRank,
+  UI_MAX_HEIGHT,
+  UI_MAX_REFRESH,
+};
