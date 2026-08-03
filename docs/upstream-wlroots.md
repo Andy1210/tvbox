@@ -1,9 +1,9 @@
 # Upstreaming the plane-offload patches
 
-The six patches in [`scripts/patches/`](../scripts/patches/) are not tvbox
+The seven patches in [`scripts/patches/`](../scripts/patches/) are not tvbox
 quirks. Two are plain wlroots bugs that affect every compositor, one is a fix
-that upstream already knows it needs, and the rest are the feature this box
-needed. This file is what to file, where, and in what order.
+upstream already knows it needs, one fills a gap in the backend API, and the
+rest are the feature this box needed. This file is what to file, where, and in what order.
 
 **Everything below has to be done by hand in a browser.** Two things block
 automation on `gitlab.freedesktop.org`:
