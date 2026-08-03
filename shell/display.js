@@ -4,7 +4,7 @@
 // selection rules. labwc tracks the output size for fullscreen surfaces, so the
 // shell window follows a mode change with no extra work. Callers pass the session's
 // Wayland env (main's childEnv) - wlr-randr needs WAYLAND_DISPLAY / XDG_RUNTIME_DIR.
-const { execFile } = require("child_process");
+const { execFile, execFileSync } = require("child_process");
 
 // Parse `wlr-randr` text into { output, modes:[{ key,width,height,refresh,refreshExact,current,preferred }] }.
 // `refresh` is rounded to whole Hz for a stable id ("WxH@60"); `refreshExact` is
@@ -139,6 +139,18 @@ function list(env, cb) {
   execFile("wlr-randr", [], { env, timeout: 8000 }, (e, out) => cb(e ? null : parse(out)));
 }
 
+// The same read, blocking. Only for startup, and only because of what needs it:
+// an app window is told the panel's resolution at preload time and never asks
+// again, so an answer that arrives a few milliseconds later is no answer at all.
+// One wlr-randr before the first window is a fair price for not having to race.
+function listSync(env) {
+  try {
+    return parse(execFileSync("wlr-randr", [], { env, timeout: 8000, encoding: "utf8" }));
+  } catch (e) {
+    return null;
+  }
+}
+
 // Apply a parsed mode object, using its EXACT refresh so wlr-randr matches.
 function apply(env, output, mode, cb) {
   if (!output || !mode) return cb(false, "bad mode");
@@ -158,6 +170,7 @@ function apply(env, output, mode, cb) {
 module.exports = {
   parse,
   list,
+  listSync,
   apply,
   pickUiMode,
   pickContentMode,
