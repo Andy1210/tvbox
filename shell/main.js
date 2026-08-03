@@ -18,6 +18,7 @@ const playeropts = require("./playeropts"); // app stream terms -> mpv args/comm
 const { redact } = require("./redact"); // an app's console line may carry ITS credentials; the shell's log is a file
 const display = require("./display"); // wlr-randr resolution/refresh control
 const displaymode = require("./displaymode"); // adaptive mode: UI mode + per-video claims
+const videoout = require("./videoout"); // which mpv renderer a stream needs
 const textinput = require("./textinput"); // typing into a keyboard-less app (OSK / phone)
 const lang = require("./lang"); // what language a remote web app is told it runs in
 const audio = require("./audio"); // wpctl sink list + volume (device audio settings)
@@ -1990,6 +1991,9 @@ function launchMpv(url, startPos, pip, rect, streams) {
     "--no-config",
     "--no-osc",
     "--no-input-default-bindings",
+    // The renderer that works for anything, including software-decoded streams.
+    // adaptMpvMode swaps it for the zero-copy output where that one cannot keep
+    // up (videoout.js) - the property is settable, so no relaunch.
     "--vo=gpu",
     "--gpu-api=opengl",
     "--hwdec=auto-safe",
@@ -2105,11 +2109,12 @@ function launchMpv(url, startPos, pip, rect, streams) {
 // aspect correction, with the decoded size as fallback - on the box dwidth came
 // back "property unavailable" at the very moment dheight was already readable.
 function readVideoProps() {
-  const props = ["container-fps", "dwidth", "dheight", "width", "height"];
-  return Promise.all(props.map((p) => mpvQuery(["get_property", p]))).then(([fps, dw, dh, w, h]) => ({
+  const props = ["container-fps", "dwidth", "dheight", "width", "height", "hwdec-current"];
+  return Promise.all(props.map((p) => mpvQuery(["get_property", p]))).then(([fps, dw, dh, w, h, hwdec]) => ({
     fps: Number(fps) || 0,
     width: Number(dw) || Number(w) || 0,
     height: Number(dh) || Number(h) || 0,
+    hwdec: typeof hwdec === "string" ? hwdec : "",
   }));
 }
 
@@ -2121,6 +2126,11 @@ function readVideoProps() {
 function adaptMpvMode(seq, done) {
   const claim = (content) => {
     if (mpvSeq !== seq || !mpv) return done(); // stopped or superseded while we read
+    if (videoout.zeroCopyVideo(content, mpvPip)) {
+      // `vo` is settable while paused, so this costs nothing visible - it lands in
+      // the same paused window as the mode switch, before the first frame.
+      mpvCmd({ command: ["set_property", "vo", videoout.ZERO_COPY_VO] });
+    }
     if (!(content.fps > 0)) {
       console.log("[player] no container-fps - leaving the display mode alone");
       return done();
@@ -2150,7 +2160,14 @@ function adaptMpvMode(seq, done) {
       setTimeout(
         () =>
           readVideoProps()
-            .then((c2) => claim({ fps: c2.fps || c.fps, width: c2.width || c.width, height: c2.height || c.height }))
+            .then((c2) =>
+              claim({
+                fps: c2.fps || c.fps,
+                width: c2.width || c.width,
+                height: c2.height || c.height,
+                hwdec: c2.hwdec || c.hwdec,
+              }),
+            )
             .catch(failed),
         400,
       );
