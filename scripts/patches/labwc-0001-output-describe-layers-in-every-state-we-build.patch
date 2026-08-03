@@ -1,6 +1,6 @@
-From b7e05e401bc3c0a6ecd952d189870fabcf01d049 Mon Sep 17 00:00:00 2001
+From 69debe6a3308690fcc74ee4f681d1c6d4f498d56 Mon Sep 17 00:00:00 2001
 From: Andy1210 <andy1210@gmail.com>
-Date: Mon, 3 Aug 2026 12:00:00 +0200
+Date: Mon, 3 Aug 2026 18:00:00 +0200
 Subject: [PATCH] output: describe the output layers in every state we build
 
 wlroots requires every output test and commit to describe every layer on the

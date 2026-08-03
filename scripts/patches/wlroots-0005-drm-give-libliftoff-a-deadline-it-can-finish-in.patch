@@ -1,0 +1,55 @@
+From 8c18df5d5e6013d32158c6b9e417a8a0b6bea35f Mon Sep 17 00:00:00 2001
+From: Andy1210 <andy1210@gmail.com>
+Date: Mon, 3 Aug 2026 18:00:00 +0200
+Subject: [PATCH 5/6] backend/drm: give libliftoff a deadline it can finish in
+
+libliftoff searches layer-to-plane mappings against a timeout and returns
+whatever it has when the time is up. Its 1 ms default is a sensible per-frame
+budget, but the search is not per-frame: the mapping is cached and only recomputed
+when the layer set changes.
+
+On hardware with a dozen candidate planes the default expires first and the answer
+is "candidate planes: 0" - no layer placed, and whether it happens at all depends
+on the order the search takes. Ask for enough time to finish.
+---
+ backend/drm/libliftoff.c | 17 ++++++++++++++++-
+ 1 file changed, 16 insertions(+), 1 deletion(-)
+
+diff --git a/backend/drm/libliftoff.c b/backend/drm/libliftoff.c
+index a953724..a554b81 100644
+--- a/backend/drm/libliftoff.c
++++ b/backend/drm/libliftoff.c
+@@ -13,6 +13,11 @@
+ #include "config.h"
+ #include "types/wlr_output.h"
+ 
++
++// Deadline for libliftoff's plane search; see the call site for why the
++// default is too short.
++#define WLR_DRM_LIFTOFF_TIMEOUT_NS (20 * 1000 * 1000)
++
+ static void log_handler(enum liftoff_log_priority priority, const char *fmt, va_list args) {
+ 	enum wlr_log_importance importance = WLR_SILENT;
+ 	switch (priority) {
+@@ -479,7 +484,17 @@ static bool commit(struct wlr_drm_backend *drm,
+ 		struct wlr_drm_crtc *crtc = conn->crtc;
+ 
+ #if HAVE_LIBLIFTOFF_0_5
+-		int ret = liftoff_output_apply(crtc->liftoff, req, flags, NULL);
++		/*
++		 * libliftoff returns the best mapping it found before the deadline, and
++		 * its 1 ms default is short enough that hardware with a dozen candidate
++		 * planes runs out of time and reports none. The search is not per-frame -
++		 * the mapping is cached until the layer set changes - so the budget can
++		 * afford to be the one that finishes.
++		 */
++		const struct liftoff_output_apply_options options = {
++			.timeout_ns = WLR_DRM_LIFTOFF_TIMEOUT_NS,
++		};
++		int ret = liftoff_output_apply(crtc->liftoff, req, flags, &options);
+ #else
+ 		int ret = liftoff_output_apply(crtc->liftoff, req, flags);
+ #endif
+-- 
+2.47.3
+
