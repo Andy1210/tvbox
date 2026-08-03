@@ -1426,8 +1426,16 @@ function systemInfo(cb) {
 // the `display` capability, and the mpv path below is just the first caller.
 // Mode selection lives in display.js (pure, unit-tested), arbitration in
 // displaymode.js.
+// What the panel can show. Read as a side effect of the mode reads the arbiter
+// already does - at startup and on every output change - so nothing extra runs.
+let panelResolution = null;
 const dmode = displaymode.create({
-  getModes: (cb) => display.list({ ...process.env, ...WL_ENV }, cb),
+  getModes: (cb) =>
+    display.list({ ...process.env, ...WL_ENV }, (info) => {
+      const panel = display.panelResolution(info && info.modes);
+      if (panel) panelResolution = panel;
+      cb(info);
+    }),
   applyMode: (output, mode, cb) => display.apply({ ...process.env, ...WL_ENV }, output, mode, cb),
   log: (m) => console.log("[display]", m),
 });
@@ -3334,6 +3342,10 @@ ipcMain.on("tvbox:app", (e) => {
     // "off" for an app that has its own on-screen keyboard (YouTube's leanback UI):
     // replacing a working keyboard with ours would be a downgrade.
     textInput: rt.textInput === "off" ? "off" : "auto",
+    // What the panel can show, which is not what the window system will say while
+    // the UI is at 1080p on a 4K set. An app that picks a stream from the screen
+    // size needs the panel's answer; what it does with it is the app's business.
+    panel: panelResolution,
   };
 });
 

@@ -136,3 +136,27 @@ test("an UNKNOWN size never selects an SD mode (mpv reports fps before dwidth)",
   assert.strictEqual(label(display.pickContentMode(sd, { width: 0, height: 0, fps: 60 })), "1280x720@60");
   assert.strictEqual(label(display.pickContentMode(sd, { width: -1, height: -1, fps: 50 })), "1920x1080@50");
 });
+
+// A TV can advertise a DCI-4K mode this hardware cannot drive, so the panel's
+// answer is the PREFERRED mode rather than the biggest one.
+test("panelResolution prefers the preferred mode", () => {
+  const modes = [
+    { width: 1920, height: 1080, preferred: false },
+    { width: 4096, height: 2160, preferred: false },
+    { width: 3840, height: 2160, preferred: true },
+  ];
+  assert.deepStrictEqual(display.panelResolution(modes), { width: 3840, height: 2160 });
+});
+
+test("panelResolution falls back to the largest mode", () => {
+  const modes = [
+    { width: 1280, height: 720, preferred: false },
+    { width: 1920, height: 1080, preferred: false },
+  ];
+  assert.deepStrictEqual(display.panelResolution(modes), { width: 1920, height: 1080 });
+});
+
+test("panelResolution has no answer without modes", () => {
+  assert.strictEqual(display.panelResolution([]), null);
+  assert.strictEqual(display.panelResolution(null), null);
+});

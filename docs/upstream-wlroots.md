@@ -245,31 +245,38 @@ request; it is independent of all of the above and stands on its own (a failed
 render-format probe leaving the format at the last candidate it tried is a bug
 with or without layers).
 
-## Open regression — the offload is NOT ready to enable by default
+## The regression that was open, and what it turned out to be
 
-Measured on `tvbox-livingroom` 2026-08-03, with the patched build: **disabling an
-output and re-enabling it does not work.**
+Found and fixed on 2026-08-03. Worth keeping, because the cause is not in
+wlroots at all.
+
+With the patched build, an output that was turned off could not be turned back
+on:
 
 ```
 [ERROR] [libliftoff] drmCrtcGetSequence: Invalid argument
 [DEBUG] connector HDMI-A-1: liftoff_output_apply failed: Operation not permitted
-[ERROR] Swapchain for output 'HDMI-A-1' failed test
 ```
 
-`wlr-randr --output HDMI-A-1 --off` succeeds; `--on` then fails and the output
-cannot be brought back — a restart of the session does not recover it either,
-because the new session hits the same wall. The box was restored by pointing
-greetd back at `/usr/bin/labwc`.
+`drmCrtcGetSequence` is not in upstream libliftoff 0.5.0. The Raspberry Pi OS
+package is `0.5.0-1.1+rpt6`, maintained by David Turner — the same person who
+opened #3794 — and its "allocation optimisation patches" budget the plane search
+against the CRTC's vblank sequence. On a CRTC being switched off there is no
+sequence to read, so the call fails and the whole apply returns EPERM.
 
-Not yet established: whether this is our patches or plain
-`WLR_DRM_FORCE_LIBLIFTOFF=1` on stock wlroots. `drmCrtcGetSequence` is
-libliftoff's own call, and it fails on a CRTC that is not active, which points at
-libliftoff rather than at us — but that has to be measured, not assumed, by
-running stock wlroots with liftoff forced and repeating the off/on.
+It only happens when wlroots passes `liftoff_output_apply_options`, which is
+exactly what our deadline patch added. Measured both ways: with the patch,
+`--off` succeeds and `--on` never does; without it, off/on is clean and there is
+not one `drmCrtcGetSequence` line.
 
-Whichever it is, it has to be answered before the wrapper prefers the patched
-build on any box: an idle blank or a DPMS off would land in exactly this state,
-with no picture and no way back short of an SSH login.
+The fix is in `wlroots-0005`: pass the options only for a connector that is meant
+to show something. A commit that disables an output has nothing to allocate, so
+the default budget is fine for it. Verified: off/on works, the offload still
+engages, 0 dropped frames at 2160p.
+
+Worth mentioning to David Turner when the #3794 comment goes up — the RPi patch
+is fine on its own, and it is wlroots asking for a deadline on a dying CRTC that
+brings the two together badly.
 
 ## What our own review found that upstream will ask about
 

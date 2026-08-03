@@ -258,7 +258,7 @@ const { ipcRenderer } = require("electron");
   if (info.bridgeFile) {
     try {
       const adapter = require(info.bridgeFile);
-      adapter.setup({ ipcRenderer, caps });
+      adapter.setup({ ipcRenderer, caps, panel: info.panel || null });
     } catch (e) {
       console.warn("[bridge] adapter '" + info.bridge + "' failed to load:", e.message);
     }
