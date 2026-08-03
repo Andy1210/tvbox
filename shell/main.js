@@ -18,6 +18,7 @@ const playeropts = require("./playeropts"); // app stream terms -> mpv args/comm
 const { redact } = require("./redact"); // an app's console line may carry ITS credentials; the shell's log is a file
 const display = require("./display"); // wlr-randr resolution/refresh control
 const displaymode = require("./displaymode"); // adaptive mode: UI mode + per-video claims
+const videoout = require("./videoout"); // which mpv renderer a stream needs
 const textinput = require("./textinput"); // typing into a keyboard-less app (OSK / phone)
 const lang = require("./lang"); // what language a remote web app is told it runs in
 const audio = require("./audio"); // wpctl sink list + volume (device audio settings)
@@ -1425,8 +1426,16 @@ function systemInfo(cb) {
 // the `display` capability, and the mpv path below is just the first caller.
 // Mode selection lives in display.js (pure, unit-tested), arbitration in
 // displaymode.js.
+// What the panel can show. Read as a side effect of the mode reads the arbiter
+// already does - at startup and on every output change - so nothing extra runs.
+let panelResolution = null;
 const dmode = displaymode.create({
-  getModes: (cb) => display.list({ ...process.env, ...WL_ENV }, cb),
+  getModes: (cb) =>
+    display.list({ ...process.env, ...WL_ENV }, (info) => {
+      const panel = display.panelResolution(info && info.modes);
+      if (panel) panelResolution = panel;
+      cb(info);
+    }),
   applyMode: (output, mode, cb) => display.apply({ ...process.env, ...WL_ENV }, output, mode, cb),
   log: (m) => console.log("[display]", m),
 });
@@ -1990,6 +1999,9 @@ function launchMpv(url, startPos, pip, rect, streams) {
     "--no-config",
     "--no-osc",
     "--no-input-default-bindings",
+    // The renderer that works for anything, including software-decoded streams.
+    // adaptMpvMode swaps it for the zero-copy output where that one cannot keep
+    // up (videoout.js) - the property is settable, so no relaunch.
     "--vo=gpu",
     "--gpu-api=opengl",
     "--hwdec=auto-safe",
@@ -2105,11 +2117,12 @@ function launchMpv(url, startPos, pip, rect, streams) {
 // aspect correction, with the decoded size as fallback - on the box dwidth came
 // back "property unavailable" at the very moment dheight was already readable.
 function readVideoProps() {
-  const props = ["container-fps", "dwidth", "dheight", "width", "height"];
-  return Promise.all(props.map((p) => mpvQuery(["get_property", p]))).then(([fps, dw, dh, w, h]) => ({
+  const props = ["container-fps", "dwidth", "dheight", "width", "height", "hwdec-current"];
+  return Promise.all(props.map((p) => mpvQuery(["get_property", p]))).then(([fps, dw, dh, w, h, hwdec]) => ({
     fps: Number(fps) || 0,
     width: Number(dw) || Number(w) || 0,
     height: Number(dh) || Number(h) || 0,
+    hwdec: typeof hwdec === "string" ? hwdec : "",
   }));
 }
 
@@ -2121,6 +2134,11 @@ function readVideoProps() {
 function adaptMpvMode(seq, done) {
   const claim = (content) => {
     if (mpvSeq !== seq || !mpv) return done(); // stopped or superseded while we read
+    if (videoout.zeroCopyVideo(content, mpvPip)) {
+      // `vo` is settable while paused, so this costs nothing visible - it lands in
+      // the same paused window as the mode switch, before the first frame.
+      mpvCmd({ command: ["set_property", "vo", videoout.ZERO_COPY_VO] });
+    }
     if (!(content.fps > 0)) {
       console.log("[player] no container-fps - leaving the display mode alone");
       return done();
@@ -2142,20 +2160,29 @@ function adaptMpvMode(seq, done) {
     console.warn("[player] display mode adapt failed:", (e && e.message) || e);
     done();
   };
-  readVideoProps()
-    .then((c) => {
-      if (c.fps > 0 && c.width > 0) return claim(c);
-      // The video output can still be settling right after the first frame - one
-      // more go, keeping whatever we already learned.
-      setTimeout(
-        () =>
-          readVideoProps()
-            .then((c2) => claim({ fps: c2.fps || c.fps, width: c2.width || c.width, height: c2.height || c.height }))
-            .catch(failed),
-        400,
-      );
-    })
-    .catch(failed);
+  // Properties that settle late get a few more goes, keeping whatever each read
+  // already learned: dwidth/fps come back "property unavailable" for the first
+  // second or so after a paused start, and hwdec-current stays unavailable until
+  // the decoder has actually run - which is what decides the renderer. Re-read
+  // only while something we act on is still missing, so an ordinary file is not
+  // held up: below 4K the hwdec answer changes nothing, so it is not waited for.
+  const settle = (prev, tries) =>
+    readVideoProps().then((c) => {
+      const merged = {
+        fps: c.fps || prev.fps,
+        width: c.width || prev.width,
+        height: c.height || prev.height,
+        hwdec: c.hwdec || prev.hwdec,
+      };
+      // Height counts as missing too: the renderer is chosen from it, and the two
+      // axes settle independently (dwidth has come back unavailable at the very
+      // moment dheight was already readable, so the reverse can happen as well).
+      const missing =
+        !(merged.fps > 0 && merged.width > 0 && merged.height > 0) || videoout.hwdecPending(merged, mpvPip);
+      if (!missing || tries <= 0) return merged;
+      return new Promise((r) => setTimeout(() => r(settle(merged, tries - 1)), 250));
+    });
+  settle({ fps: 0, width: 0, height: 0, hwdec: "" }, 6).then(claim).catch(failed);
 }
 
 // Paused-start handshake: switch the mode, then play. The 6s failsafe is
@@ -3315,6 +3342,10 @@ ipcMain.on("tvbox:app", (e) => {
     // "off" for an app that has its own on-screen keyboard (YouTube's leanback UI):
     // replacing a working keyboard with ours would be a downgrade.
     textInput: rt.textInput === "off" ? "off" : "auto",
+    // What the panel can show, which is not what the window system will say while
+    // the UI is at 1080p on a 4K set. An app that picks a stream from the screen
+    // size needs the panel's answer; what it does with it is the app's business.
+    panel: panelResolution,
   };
 });
 
@@ -3903,6 +3934,11 @@ app.whenReady().then(async () => {
   // Put the output at the UI mode: the compositor boots at the EDID preferred
   // mode, which on a 4K set means drawing the launcher at 8.3 Mpixels.
   dmode.refresh();
+  // And once, blocking, before any window exists: the refresh above is async, and
+  // an app's preload reads the panel resolution exactly once, when its window is
+  // created. Losing that race means the app spends its whole life believing the
+  // screen is whatever the UI happens to be running at.
+  panelResolution = display.panelResolution((display.listSync({ ...process.env, ...WL_ENV }) || {}).modes);
   watchDisplayMode();
   win = new BrowserWindow({
     fullscreen: true,

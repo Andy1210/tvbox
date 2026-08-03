@@ -1,0 +1,130 @@
+From 4262c345cd627b399404437361866efc6befb691 Mon Sep 17 00:00:00 2001
+From: Andy1210 <andy1210@gmail.com>
+Date: Mon, 3 Aug 2026 18:00:00 +0200
+Subject: [PATCH 2/6] backend/drm: set the colour props on the liftoff
+ interface
+
+The liftoff interface never set Colorspace, HDR_OUTPUT_METADATA or max bpc, and
+the guard that noticed the first two spelled its condition as
+iface != &atomic_iface - which is also true of the liftoff interface, even though
+libliftoff drives the same atomic API.
+
+The result is not a colour-management fallback but a dead output: every test and
+every commit that carries an image description is refused, so a compositor that
+attaches one to each frame cannot present at all once libliftoff is in use.
+
+The two colour-management values are already computed by the shared
+drm_atomic_connector_prepare(), and the metadata blob is freed by the shared
+apply/rollback, so the interface only had to put them in the request. max bpc
+comes with them rather than after: it is derived from the scanned-out format and
+clamped to what the connector advertises, and left alone it keeps whatever the
+previous DRM master set - so signalling BT2020 and PQ without it means asking for
+HDR and possibly transmitting it at 8 bits, or attempting deep colour on a link
+that cannot carry it. pick_max_bpc() is exported for that.
+
+The guard is narrowed to the legacy interface, which is the one with no atomic
+request to put any of this in.
+---
+ backend/drm/atomic.c        |  4 ++--
+ backend/drm/drm.c           |  4 ++--
+ backend/drm/libliftoff.c    | 27 ++++++++++++++++++++++++++-
+ include/backend/drm/iface.h |  8 ++++++++
+ 4 files changed, 38 insertions(+), 5 deletions(-)
+
+diff --git a/backend/drm/atomic.c b/backend/drm/atomic.c
+index faa535d..a33c9b0 100644
+--- a/backend/drm/atomic.c
++++ b/backend/drm/atomic.c
+@@ -274,7 +274,7 @@ static uint64_t max_bpc_for_format(uint32_t format) {
+ 	}
+ }
+ 
+-static uint64_t pick_max_bpc(struct wlr_drm_connector *conn, struct wlr_drm_fb *fb) {
++uint64_t drm_atomic_pick_max_bpc(struct wlr_drm_connector *conn, struct wlr_drm_fb *fb) {
+ 	uint32_t format = DRM_FORMAT_INVALID;
+ 	struct wlr_dmabuf_attributes attribs = {0};
+ 	if (wlr_buffer_get_dmabuf(fb->wlr_buf, &attribs)) {
+@@ -508,7 +508,7 @@ static void atomic_connector_add(struct atomic *atom,
+ 			DRM_MODE_CONTENT_TYPE_GRAPHICS);
+ 	}
+ 	if (modeset && active && conn->props.max_bpc != 0 && conn->max_bpc_bounds[1] != 0) {
+-		atomic_add(atom, conn->id, conn->props.max_bpc, pick_max_bpc(conn, state->primary_fb));
++		atomic_add(atom, conn->id, conn->props.max_bpc, drm_atomic_pick_max_bpc(conn, state->primary_fb));
+ 	}
+ 	if (conn->props.colorspace != 0) {
+ 		atomic_add(atom, conn->id, conn->props.colorspace, state->colorspace);
+diff --git a/backend/drm/drm.c b/backend/drm/drm.c
+index bd29872..6142ced 100644
+--- a/backend/drm/drm.c
++++ b/backend/drm/drm.c
+@@ -887,8 +887,8 @@ static bool drm_connector_prepare(struct wlr_drm_connector_state *conn_state, bo
+ 	}
+ 
+ 	if ((state->committed & WLR_OUTPUT_STATE_IMAGE_DESCRIPTION) &&
+-			conn->backend->iface != &atomic_iface) {
+-		wlr_log(WLR_DEBUG, "Image descriptions are only supported by the atomic interface");
++			conn->backend->iface == &legacy_iface) {
++		wlr_log(WLR_DEBUG, "Image descriptions are not supported by the legacy interface");
+ 		return false;
+ 	}
+ 
+diff --git a/backend/drm/libliftoff.c b/backend/drm/libliftoff.c
+index 333beac..bdbe7eb 100644
+--- a/backend/drm/libliftoff.c
++++ b/backend/drm/libliftoff.c
+@@ -320,7 +320,32 @@ static bool add_connector(drmModeAtomicReq *req,
+ 		ok = ok && add_prop(req, conn->id, conn->props.content_type,
+ 			DRM_MODE_CONTENT_TYPE_GRAPHICS);
+ 	}
+-	// TODO: set "max bpc"
++	/*
++	 * Colour depth and colour management, the three connector properties the
++	 * atomic interface sets. The two colour-management values are already
++	 * computed for us by the shared drm_atomic_connector_prepare(), and the
++	 * metadata blob is freed by the shared apply/rollback, so all that was
++	 * missing was putting them in the request.
++	 *
++	 * max bpc has to come with them rather than after: it is derived from the
++	 * scanned-out format and clamped to what the connector advertises, and left
++	 * alone it keeps whatever the previous DRM master set - so signalling BT2020
++	 * and PQ without it means asking for HDR and possibly transmitting it at 8
++	 * bits, or attempting deep colour on a link that cannot carry it.
++	 */
++	if (modeset && active && conn->props.max_bpc != 0 &&
++			conn->max_bpc_bounds[1] != 0) {
++		ok = ok && add_prop(req, conn->id, conn->props.max_bpc,
++			drm_atomic_pick_max_bpc(conn, state->primary_fb));
++	}
++	if (conn->props.colorspace != 0) {
++		ok = ok && add_prop(req, conn->id, conn->props.colorspace,
++			state->colorspace);
++	}
++	if (conn->props.hdr_output_metadata != 0) {
++		ok = ok && add_prop(req, conn->id, conn->props.hdr_output_metadata,
++			state->hdr_output_metadata);
++	}
+ 	ok = ok &&
+ 		add_prop(req, crtc->id, crtc->props.mode_id, state->mode_id) &&
+ 		add_prop(req, crtc->id, crtc->props.active, active);
+diff --git a/include/backend/drm/iface.h b/include/backend/drm/iface.h
+index bc96105..848bc79 100644
+--- a/include/backend/drm/iface.h
++++ b/include/backend/drm/iface.h
+@@ -35,6 +35,14 @@ bool create_fb_damage_clips_blob(struct wlr_drm_backend *drm,
+ 	int width, int height, const pixman_region32_t *damage, uint32_t *blob_id);
+ bool drm_atomic_reset(struct wlr_drm_backend *drm);
+ 
++/**
++ * Colour depth to ask a connector for, given the buffer being scanned out.
++ *
++ * Shared with the libliftoff interface, which builds its own atomic request.
++ */
++uint64_t drm_atomic_pick_max_bpc(struct wlr_drm_connector *conn,
++	struct wlr_drm_fb *fb);
++
+ bool drm_atomic_connector_prepare(struct wlr_drm_connector_state *state,
+ 	bool modeset);
+ void drm_atomic_connector_apply_commit(struct wlr_drm_connector_state *state);
+-- 
+2.47.3
+

@@ -1,0 +1,59 @@
+From 0f9528fb8c287c110f985d09d2a166c185a235dc Mon Sep 17 00:00:00 2001
+From: Andy1210 <andy1210@gmail.com>
+Date: Mon, 3 Aug 2026 18:00:00 +0200
+Subject: [PATCH 5/6] backend/drm: give libliftoff a deadline it can finish in
+
+libliftoff searches layer-to-plane mappings against a timeout and returns
+whatever it has when the time is up. Its 1 ms default is a sensible per-frame
+budget, but the search is not per-frame: the mapping is cached and only recomputed
+when the layer set changes.
+
+On hardware with a dozen candidate planes the default expires first and the answer
+is "candidate planes: 0" - no layer placed, and whether it happens at all depends
+on the order the search takes. Ask for enough time to finish.
+---
+ backend/drm/libliftoff.c | 21 ++++++++++++++++++++-
+ 1 file changed, 20 insertions(+), 1 deletion(-)
+
+diff --git a/backend/drm/libliftoff.c b/backend/drm/libliftoff.c
+index bdbe7eb..88765df 100644
+--- a/backend/drm/libliftoff.c
++++ b/backend/drm/libliftoff.c
+@@ -433,6 +433,8 @@ static void connector_update_layers_feedback(const struct wlr_drm_connector_stat
+ 	}
+ }
+ 
++#define LIFTOFF_ALLOC_TIMEOUT_NS (5 * 1000 * 1000)
++
+ static bool commit(struct wlr_drm_backend *drm,
+ 		const struct wlr_drm_device_state *state,
+ 		struct wlr_drm_page_flip *page_flip, uint32_t flags, bool test_only) {
+@@ -478,7 +480,24 @@ static bool commit(struct wlr_drm_backend *drm,
+ 		struct wlr_drm_crtc *crtc = conn->crtc;
+ 
+ #if HAVE_LIBLIFTOFF_0_5
+-		int ret = liftoff_output_apply(crtc->liftoff, req, flags, NULL);
++		/*
++		 * libliftoff returns the best mapping it found before the deadline, and
++		 * its 1 ms default is short enough that hardware with a dozen candidate
++		 * planes runs out of time and reports none. The search is not per-frame -
++		 * the mapping is cached until the layer set changes - so the budget can
++		 * afford to be the one that finishes.
++		 *
++		 * Only for a connector that is meant to show something. A libliftoff that
++		 * measures its budget against the CRTC's vblank sequence cannot do so on a
++		 * CRTC being switched off, and answers the whole commit with an error -
++		 * which would leave an output that can be turned off and never back on.
++		 * There is nothing to allocate for that commit anyway.
++		 */
++		const struct liftoff_output_apply_options options = {
++			.timeout_ns = LIFTOFF_ALLOC_TIMEOUT_NS,
++		};
++		int ret = liftoff_output_apply(crtc->liftoff, req, flags,
++			state->connectors[i].active ? &options : NULL);
+ #else
+ 		int ret = liftoff_output_apply(crtc->liftoff, req, flags);
+ #endif
+-- 
+2.47.3
+

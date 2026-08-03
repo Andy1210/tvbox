@@ -268,7 +268,49 @@ touched one file, `npx prettier --write <file>` is enough; when in doubt run
     `EGL_PLATFORM=surfaceless` - if surfaceless says V3D and wayland says llvmpipe,
     this is it. **Only takes effect at the next session start.**
 - The Pi 5 has **no H.264 hardware decode** - mpv runs `--vo=gpu` with
-  software decode; don't add hwdec flags blindly.
+  software decode; don't add hwdec flags blindly. It kept the HEVC decoder,
+  which is what all 4K content here is.
+- **Two GPU passes do not fit at 4K, and one of them is the compositor's.**
+  `--vo=gpu` renders every frame on the V3D; labwc has to composite a second
+  full 4K pass for as long as any window sits over the video, which is always
+  (the app UI is a fullscreen transparent window above mpv). Together they miss
+  vblank: **~17 dropped frames a second at 4K with the decoder idle at zero**,
+  and it is not the app - our own near-static launcher costs the same 15/s as
+  the Plex UI, so no app-side quiescing helps. `shell/videoout.js` removes OUR
+  pass instead: for fullscreen hardware-decoded video **from 1440p up**
+  (`ZERO_COPY_MIN_HEIGHT`) it switches mpv to
+  **`dmabuf-wayland`** (decoded frame handed to the compositor untouched, 0
+  drops, 4% of a core). `vo` is settable at runtime, so it lands in the same
+  paused window as the display-mode switch, before the first frame. Two limits
+  keep it narrow: that output shows **nothing** for a software-decoded stream
+  (it fails at the hwupload), and it processes nothing, so it **tone-maps
+  nothing** - HDR from 1440p up reaches the panel as raw PQ. Under that the GPU
+  renderer keeps up (the output mode follows the content, so a 1080p film is
+  composited at 1080p) and is kept for its tone mapping. Measured dead ends,
+  don't retry:
+  `gpu-next` presents a frozen first frame on v3dv (its drop counter reads 0,
+  which is how it fools a naive measurement), `--gpu-api=vulkan` and
+  `gpu-next --gpu-api=opengl` render nothing, and no timing knob
+  (`video-sync`, `swapchain-depth`, decoder queue) moves the 17/s.
+- **The compositor's pass is gone as well, and that one needed patching labwc and
+  wlroots.** Removing ours left the video smooth only while nothing sat over it -
+  a fullscreen translucent UI still sent the whole output through the renderer,
+  67% of the V3D. `scripts/install-labwc-planes.sh` builds labwc 0.20.0 +
+  wlroots 0.20.2 with the six patches in `scripts/patches/`, and the display
+  hardware composes instead: film on the vc4 primary plane, UI on an overlay,
+  compositor at **0% GPU**, 0 dropped frames with the Plex UI open. Things that
+  bite: the whole path only works with **`WLR_DRM_FORCE_LIBLIFTOFF=1`** (wlroots
+  touches planes through libliftoff only, and keeps it behind that variable -
+  which `deploy/tvbox-compositor` sets); greetd starts **`tvbox-compositor`**
+  rather than labwc, so a patched build that cannot come up costs one restart
+  instead of the TV; and the build needs root+apt, so **OTA-only boxes never get
+  it** and composite as before. Two of the six are plain wlroots bugs: the
+  libliftoff interface never set the colour-management connector properties and
+  the guard that noticed rejected every commit carrying an image description
+  (labwc attaches one to all of them), and `pixel_format_has_alpha()` calls a
+  buffer translucent unless its format is on an allowlist that named four of the
+  58 YCbCr formats wlroots knows - P030, which this hardware decodes 10-bit video
+  into, was not one of them, so no video buffer could ever scan out.
 - mpv PiP runs under **XWayland** (`DISPLAY`, no `WAYLAND_DISPLAY`) because
   Wayland clients can't self-position; fullscreen mpv is a Wayland client
   behind the transparent window. The `raiseWindow` retry loop after launch is
