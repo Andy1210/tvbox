@@ -44,10 +44,24 @@ fi
 WLR_DRM_FORCE_LIBLIFTOFF=1
 export WLR_DRM_FORCE_LIBLIFTOFF
 
-started=$(cut -d" " -f1 /proc/uptime | cut -d. -f1)
-"$PATCHED" "$@"
-rc=$?
-ended=$(cut -d" " -f1 /proc/uptime | cut -d. -f1)
+# The commonest quick failure is not the compositor at all: a session restart can
+# leave the previous one still holding the DRM device for a second or two, and
+# whoever starts in that window gets "Resource temporarily unavailable". Demoting
+# the box for the rest of the boot over that would be wrong, so a quick failure
+# earns one more go before it counts.
+attempt=1
+while :; do
+	started=$(cut -d" " -f1 /proc/uptime | cut -d. -f1)
+	"$PATCHED" "$@"
+	rc=$?
+	ended=$(cut -d" " -f1 /proc/uptime | cut -d. -f1)
+	[ "$rc" -eq 0 ] && break
+	[ $((ended - started)) -ge 20 ] && break
+	[ "$attempt" -ge 2 ] && break
+	attempt=2
+	echo "tvbox: patched labwc exited $rc after $((ended - started))s - one more go" >&2
+	sleep 3
+done
 
 # A clean exit is the session ending, whenever it happens, and a failure after
 # the session has been up for a while is not a startup problem - neither is a
