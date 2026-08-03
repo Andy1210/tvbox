@@ -240,10 +240,12 @@ written, so `git am` them onto a branch per MR and push.
 | `liftoff-deadline`     | `wlroots-0004-drm-give-libliftoff-a-deadline-it-can-finish-in.patch`  | References #3794 and !4348 | Ready, and quote !4348's description in the MR: upstream documented the problem and never fixed it.                                        |
 | —                      | `wlroots-0003` (scene offload) and `wlroots-0005` (composition layer) | #3794 / !4348              | **Hold.** Send the comment above first. These two only make sense together, and the scene half overlaps !4348 by design.                   |
 
-`labwc-0001` goes to <https://github.com/labwc/labwc> as an ordinary pull
-request; it is independent of all of the above and stands on its own (a failed
+`labwc-0001` went to <https://github.com/labwc/labwc> as an ordinary pull
+request — **[labwc#3685](https://github.com/labwc/labwc/pull/3685)**, opened
+2026-08-03, against `master` rather than the 0.20.0 tag (it applies cleanly to
+both). It is independent of everything above and stands on its own: a failed
 render-format probe leaving the format at the last candidate it tried is a bug
-with or without layers).
+with or without layers.
 
 ## The regression that was open, and what it turned out to be
 
