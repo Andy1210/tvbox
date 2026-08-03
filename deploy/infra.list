@@ -24,6 +24,18 @@ deploy/cursor_idle_hide.py
 deploy/tvbox
 deploy/provision.sh
 scripts/install-libcec8.sh
+# labwc + wlroots with display-plane offload: the build script, the seven patches
+# it applies, and the session wrapper that runs whichever compositor is installed.
+# Patch basenames carry their own ordering - they land flat next to the script.
+scripts/install-labwc-planes.sh
+scripts/patches/wlroots-0001-render-alpha-less-ycbcr-formats-are-opaque.patch
+scripts/patches/wlroots-0002-drm-colour-props-on-the-liftoff-interface.patch
+scripts/patches/wlroots-0003-backend-publish-output-layer-support.patch
+scripts/patches/wlroots-0004-scene-offload-the-top-surface-to-an-output-layer.patch
+scripts/patches/wlroots-0005-drm-give-libliftoff-a-deadline-it-can-finish-in.patch
+scripts/patches/wlroots-0006-drm-do-not-arm-the-composition-layer-when-offloading.patch
+scripts/patches/labwc-0001-output-describe-layers-in-every-state-we-build.patch
+deploy/tvbox-compositor
 deploy/tvbox-cec.service
 deploy/tvbox-remote.service
 deploy/tvbox-gamepad.service

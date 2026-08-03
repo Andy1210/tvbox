@@ -4,7 +4,7 @@
 // selection rules. labwc tracks the output size for fullscreen surfaces, so the
 // shell window follows a mode change with no extra work. Callers pass the session's
 // Wayland env (main's childEnv) - wlr-randr needs WAYLAND_DISPLAY / XDG_RUNTIME_DIR.
-const { execFile } = require("child_process");
+const { execFile, execFileSync } = require("child_process");
 
 // Parse `wlr-randr` text into { output, modes:[{ key,width,height,refresh,refreshExact,current,preferred }] }.
 // `refresh` is rounded to whole Hz for a stable id ("WxH@60"); `refreshExact` is
@@ -44,6 +44,7 @@ function parse(stdout) {
 // Pure, so shell/display.test.js can pin the behaviour without an output.
 
 const UI_MAX_HEIGHT = 1080; // a 4K panel still draws the UI at 1080p
+const UI_MAX_REFRESH = 60.5; // 60 Hz plus rounding slack (59.94 and 60 both qualify)
 
 // How many display refreshes each video frame gets. An INTEGER means every frame
 // is held the same length - smooth. 23.976 fps on 60 Hz is 2.5023, so frames
@@ -69,6 +70,22 @@ function cadenceRank(refreshExact, fps) {
 // The mode the UI lives at: the panel's own preferred resolution, capped to
 // 1080p, at the highest refresh that resolution offers. A 720p set gets 720p, a
 // 1080p set 1080p, a 4K set 1080p (the launcher is not worth 8.3 Mpixels).
+// What the panel can show, as opposed to what it is showing. The UI runs at 1080p
+// on a 4K set, so anything that asks the window system how big the screen is gets
+// told 1080p and decides accordingly - a streaming client picks its stream that
+// way, and picks it before the mode switch for the video has happened.
+//
+// The PREFERRED mode is the answer rather than the largest one: a TV may advertise
+// a DCI-4K mode (4096 wide) that this hardware cannot drive, and claiming it would
+// be a worse lie than the one being corrected.
+function panelResolution(modes) {
+  const usable = (modes || []).filter((m) => m.width > 0 && m.height > 0);
+  if (!usable.length) return null;
+  const preferred = usable.find((m) => m.preferred);
+  const best = preferred || usable.reduce((a, m) => (m.width * m.height > a.width * a.height ? m : a));
+  return { width: best.width, height: best.height };
+}
+
 function pickUiMode(modes, maxHeight = UI_MAX_HEIGHT) {
   if (!modes || !modes.length) return null;
   const fits = modes.filter((m) => m.height <= maxHeight);
@@ -76,9 +93,13 @@ function pickUiMode(modes, maxHeight = UI_MAX_HEIGHT) {
   const pref = pool.find((m) => m.preferred);
   const area = (m) => m.width * m.height;
   const target = pref || pool.reduce((a, b) => (area(b) > area(a) ? b : a));
-  return pool
-    .filter((m) => m.width === target.width && m.height === target.height)
-    .reduce((a, b) => (b.refreshExact > a.refreshExact ? b : a));
+  const same = pool.filter((m) => m.width === target.width && m.height === target.height);
+  // Not the highest refresh the panel offers: the UI is drawn by Chromium, which
+  // paints at the output's rate, and on a Pi 5 that is what the GPU runs out of -
+  // the Plex client alone measured 104% of the V3D at 1080p120 against 64% at
+  // 1080p60, for a UI that cannot render 120 frames a second anyway.
+  const capped = same.filter((m) => m.refreshExact <= UI_MAX_REFRESH);
+  return (capped.length ? capped : same).reduce((a, b) => (b.refreshExact > a.refreshExact ? b : a));
 }
 
 // The mode to play THIS content at. Refresh comes first: a matching refresh is
@@ -118,6 +139,18 @@ function list(env, cb) {
   execFile("wlr-randr", [], { env, timeout: 8000 }, (e, out) => cb(e ? null : parse(out)));
 }
 
+// The same read, blocking. Only for startup, and only because of what needs it:
+// an app window is told the panel's resolution at preload time and never asks
+// again, so an answer that arrives a few milliseconds later is no answer at all.
+// One wlr-randr before the first window is a fair price for not having to race.
+function listSync(env) {
+  try {
+    return parse(execFileSync("wlr-randr", [], { env, timeout: 8000, encoding: "utf8" }));
+  } catch (e) {
+    return null;
+  }
+}
+
 // Apply a parsed mode object, using its EXACT refresh so wlr-randr matches.
 function apply(env, output, mode, cb) {
   if (!output || !mode) return cb(false, "bad mode");
@@ -134,4 +167,15 @@ function apply(env, output, mode, cb) {
   );
 }
 
-module.exports = { parse, list, apply, pickUiMode, pickContentMode, cadenceRank, UI_MAX_HEIGHT };
+module.exports = {
+  parse,
+  list,
+  listSync,
+  apply,
+  pickUiMode,
+  pickContentMode,
+  panelResolution,
+  cadenceRank,
+  UI_MAX_HEIGHT,
+  UI_MAX_REFRESH,
+};

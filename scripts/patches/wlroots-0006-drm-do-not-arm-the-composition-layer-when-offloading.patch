@@ -1,0 +1,146 @@
+From 31c6f07749116c0bb2eafbdec2ac6ede57f64753 Mon Sep 17 00:00:00 2001
+From: Andy1210 <andy1210@gmail.com>
+Date: Mon, 3 Aug 2026 18:00:00 +0200
+Subject: [PATCH 6/6] backend/drm: do not arm the composition layer while
+ offloading
+
+The composition layer catches whatever cannot be offloaded, and it is armed with
+the same buffer at the same zpos as the primary layer. On hardware where the
+primary is the only plane at that level - vc4 pins its zpos to 0 and marks the
+property immutable - the two compete and libliftoff gives the plane to the
+fallback, so the real content is composited even though the arrangement fits.
+
+Asked directly on that hardware, libliftoff places a video layer and a UI layer on
+a primary and an overlay with nothing composited, right up until the composition
+layer joins them, at which point the video gets no plane at all.
+
+Leave the fallback out of the contest when a layer is actually armed; a state that
+only describes disabled layers keeps it, since a layer with no framebuffer never
+gets a plane and so cannot take one from anything. Because nothing else then
+covers an allocation that leaves the primary layer out, check that the frame
+reached a plane at all - either layer will do, they carry the same buffer.
+---
+ backend/drm/libliftoff.c | 89 ++++++++++++++++++++++++++++++++++++----
+ 1 file changed, 81 insertions(+), 8 deletions(-)
+
+diff --git a/backend/drm/libliftoff.c b/backend/drm/libliftoff.c
+index 88765df..54de81f 100644
+--- a/backend/drm/libliftoff.c
++++ b/backend/drm/libliftoff.c
+@@ -357,25 +357,76 @@ static bool add_connector(drmModeAtomicReq *req,
+ 			ok = ok && add_prop(req, crtc->id, crtc->props.vrr_enabled, state->vrr_enabled);
+ 		}
+ 
++		/*
++		 * The composition layer is the fallback for whatever cannot be
++		 * offloaded, and it carries the same buffer at the same zpos as the
++		 * primary layer. Arming it unconditionally costs the primary plane on
++		 * hardware where that is the only plane at zpos 0 - vc4 pins the
++		 * primary's zpos there and marks it immutable - because both layers
++		 * then compete for it and libliftoff gives it to the fallback.
++		 *
++		 * Measured on that hardware, asking libliftoff directly: a video layer
++		 * and a UI layer land on the primary and an overlay with nothing
++		 * composited, right up until the composition layer joins them, at which
++		 * point the video gets no plane at all.
++		 *
++		 * So when the compositor has ARMED a layer, let libliftoff place it and
++		 * leave the fallback out of the contest. A state that only describes
++		 * disabled layers is not offloading anything and keeps its fallback: an
++		 * unarmed layer carries no framebuffer and libliftoff never gives it a
++		 * plane, so there would be nothing for the fallback to lose the plane to.
++		 *
++		 * The cost when the armed layer cannot be placed is a dropped frame, not a
++		 * degraded one: with the fallback invisible, libliftoff will not accept an
++		 * allocation that leaves any visible layer out, so the commit fails. The
++		 * compositor reads the layer's accepted flag, composites the next frame,
++		 * and the disabled layer that comes with it frees the search again.
++		 */
++		bool offloading = false;
++		if (state->base->committed & WLR_OUTPUT_STATE_LAYERS) {
++			for (size_t i = 0; i < state->base->layers_len; i++) {
++				if (state->base->layers[i].buffer != NULL) {
++					offloading = true;
++					break;
++				}
++			}
++		}
++
+ 		ok = ok && set_plane_props(crtc->primary,
+ 			crtc->primary->liftoff_layer, state->primary_fb, 0,
+ 			&state->primary_viewport.dst_box,
+ 			&state->primary_viewport.src_box);
+-		ok = ok && set_plane_props(crtc->primary,
+-			crtc->liftoff_composition_layer, state->primary_fb, 0,
+-			&state->primary_viewport.dst_box,
+-			&state->primary_viewport.src_box);
++		if (!offloading) {
++			ok = ok && set_plane_props(crtc->primary,
++				crtc->liftoff_composition_layer, state->primary_fb, 0,
++				&state->primary_viewport.dst_box,
++				&state->primary_viewport.src_box);
++		} else {
++			// Frame-scoped properties outlive the frame that set them, so a
++			// disarmed fallback would keep a damage blob that has since been
++			// destroyed and a fence fd belonging to a commit that is long done.
++			ok = ok && liftoff_layer_set_property(
++				crtc->liftoff_composition_layer, "FB_ID", 0) == 0;
++			liftoff_layer_set_property(crtc->liftoff_composition_layer,
++				"FB_DAMAGE_CLIPS", 0);
++			liftoff_layer_set_property(crtc->liftoff_composition_layer,
++				"IN_FENCE_FD", -1);
++		}
+ 
+ 		liftoff_layer_set_property(crtc->primary->liftoff_layer,
+ 			"FB_DAMAGE_CLIPS", state->fb_damage_clips);
+-		liftoff_layer_set_property(crtc->liftoff_composition_layer,
+-			"FB_DAMAGE_CLIPS", state->fb_damage_clips);
++		if (!offloading) {
++			liftoff_layer_set_property(crtc->liftoff_composition_layer,
++				"FB_DAMAGE_CLIPS", state->fb_damage_clips);
++		}
+ 
+ 		if (state->primary_in_fence_fd >= 0) {
+ 			liftoff_layer_set_property(crtc->primary->liftoff_layer,
+ 				"IN_FENCE_FD", state->primary_in_fence_fd);
+-			liftoff_layer_set_property(crtc->liftoff_composition_layer,
+-				"IN_FENCE_FD", state->primary_in_fence_fd);
++			if (!offloading) {
++				liftoff_layer_set_property(crtc->liftoff_composition_layer,
++					"IN_FENCE_FD", state->primary_in_fence_fd);
++			}
+ 		}
+ 
+ 		if (state->base->committed & WLR_OUTPUT_STATE_LAYERS) {
+@@ -512,6 +563,28 @@ static bool commit(struct wlr_drm_backend *drm,
+ 			wlr_drm_conn_log(conn, WLR_DEBUG, "Failed to scan-out cursor plane");
+ 			goto out;
+ 		}
++
++		/*
++		 * Did the frame the compositor prepared reach a plane at all? With the
++		 * fallback out of the contest, nothing else covers an allocation that
++		 * leaves the primary layer out.
++		 *
++		 * The question is about the PLANES and not about needs_composition: the
++		 * primary layer and the fallback carry the same buffer, so that is true of
++		 * whichever of the two libliftoff did not pick, and asking it instead
++		 * rejects perfectly good frames.
++		 */
++#if HAVE_LIBLIFTOFF_0_5
++		// Only for a connector that is meant to show something: disabling one
++		// deliberately leaves its primary layer without a framebuffer, and
++		// therefore without a plane.
++		if (state->connectors[i].active &&
++				liftoff_layer_get_plane(crtc->primary->liftoff_layer) == NULL &&
++				liftoff_layer_get_plane(crtc->liftoff_composition_layer) == NULL) {
++			wlr_drm_conn_log(conn, WLR_DEBUG, "Failed to scan-out primary plane");
++			goto out;
++		}
++#endif
+ 	}
+ 
+ 	ok = drmModeAtomicCommit(drm->fd, req, flags, page_flip) == 0;
+-- 
+2.47.3
+

@@ -1,0 +1,70 @@
+From 83279ec7d34aa590f664f1b87275bba753fcf8ea Mon Sep 17 00:00:00 2001
+From: Andy1210 <andy1210@gmail.com>
+Date: Mon, 3 Aug 2026 18:00:00 +0200
+Subject: [PATCH 1/6] render: alpha-less YCbCr formats are opaque
+
+pixel_format_has_alpha() answers from an allowlist of opaque formats and returns
+true for anything not on it. pixel_format_is_ycbcr() knows 58 YCbCr formats; four
+of them are on that list.
+
+So a compositor handed a 10-bit 4:2:0 video buffer - P030, which is what a
+Raspberry Pi HEVC decoder produces - is told it may be translucent, while the
+8-bit P010 beside it is not. Everything that depends on knowing better is lost:
+occlusion culling keeps drawing what the video covers, and direct scan-out is
+refused for a buffer that could have gone straight to a plane.
+
+None of the formats added here has an alpha channel. The ones deliberately left
+off are the six that do: AYUV, Y410, Y412, Y416, Y0L0 and Y0L2, whose X-prefixed
+siblings are the alpha-less variants and are included.
+---
+ render/pixel_format.c | 26 ++++++++++++++++++++++----
+ 1 file changed, 22 insertions(+), 4 deletions(-)
+
+diff --git a/render/pixel_format.c b/render/pixel_format.c
+index c60dd9d..a740ef4 100644
+--- a/render/pixel_format.c
++++ b/render/pixel_format.c
+@@ -211,10 +211,6 @@ static const uint32_t opaque_pixel_formats[] = {
+ 	DRM_FORMAT_XBGR2101010,
+ 	DRM_FORMAT_XBGR16161616F,
+ 	DRM_FORMAT_XBGR16161616,
+-	DRM_FORMAT_YVYU,
+-	DRM_FORMAT_VYUY,
+-	DRM_FORMAT_NV12,
+-	DRM_FORMAT_P010,
+ };
+ 
+ static const size_t pixel_format_info_size =
+@@ -299,7 +295,29 @@ bool pixel_format_info_check_stride(const struct wlr_pixel_format_info *fmt,
+ 	return true;
+ }
+ 
++// The YCbCr formats that carry alpha. Stated as the exceptions rather than as a
++// list of the rest, so that a format added to pixel_format_is_ycbcr() cannot go
++// on being treated as translucent because a second list was not updated.
++static bool ycbcr_format_has_alpha(uint32_t fmt) {
++	switch (fmt) {
++	case DRM_FORMAT_AYUV:
++	case DRM_FORMAT_Y0L0:
++	case DRM_FORMAT_Y0L2:
++	case DRM_FORMAT_Y410:
++	case DRM_FORMAT_Y412:
++	case DRM_FORMAT_Y416:
++		return true;
++	default:
++		return false;
++	}
++}
++
++bool pixel_format_is_ycbcr(uint32_t format);
++
+ bool pixel_format_has_alpha(uint32_t fmt) {
++	if (pixel_format_is_ycbcr(fmt)) {
++		return ycbcr_format_has_alpha(fmt);
++	}
+ 	for (size_t i = 0; i < opaque_pixel_formats_size; i++) {
+ 		if (fmt == opaque_pixel_formats[i]) {
+ 			return false;
+-- 
+2.47.3
+
