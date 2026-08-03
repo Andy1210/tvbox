@@ -26,7 +26,9 @@ Not release notes for the TV - for whoever runs the boxes:
   core instead of 12-20%. The decoder was never the problem - it dropped nothing
   in either case.
 - The renderer is chosen per stream in `shell/videoout.js`: the zero-copy output
-  (`dmabuf-wayland`) only for fullscreen, hardware-decoded, 4K-class video.
+  (`dmabuf-wayland`) only for fullscreen, hardware-decoded video of 1440p or
+  more (`ZERO_COPY_MIN_HEIGHT`) - so a 1440p HDR file loses tone mapping too,
+  not only 4K.
   Everything else keeps `--vo=gpu` and its tone mapping, because that output
   shows **nothing** for a software-decoded stream and does not exist under
   XWayland, where PiP runs.

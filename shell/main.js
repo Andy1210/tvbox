@@ -2166,7 +2166,11 @@ function adaptMpvMode(seq, done) {
         height: c.height || prev.height,
         hwdec: c.hwdec || prev.hwdec,
       };
-      const missing = !(merged.fps > 0 && merged.width > 0) || videoout.hwdecPending(merged, mpvPip);
+      // Height counts as missing too: the renderer is chosen from it, and the two
+      // axes settle independently (dwidth has come back unavailable at the very
+      // moment dheight was already readable, so the reverse can happen as well).
+      const missing =
+        !(merged.fps > 0 && merged.width > 0 && merged.height > 0) || videoout.hwdecPending(merged, mpvPip);
       if (!missing || tries <= 0) return merged;
       return new Promise((r) => setTimeout(() => r(settle(merged, tries - 1)), 250));
     });

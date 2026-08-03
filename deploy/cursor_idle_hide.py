@@ -7,9 +7,14 @@ on screen and never moves. Hide it when the pointer is idle by parking it far
 off-screen with wlrctl, and let it reappear the instant a real mouse moves, so a
 mouse the owner actually uses still works.
 
+A box with NO pointer device at all still gets a drawn cursor - the compositor
+has one whether or not anything can move it - and that one is the worst case,
+because nothing will ever move it off the picture again. So the park does not
+wait for a pointer device to have been found: idle is idle.
+
 Launched from ~/.config/labwc/autostart, where it inherits the session's
-WAYLAND_DISPLAY (wlrctl needs it). Best-effort: with no pointer device, or no
-evdev/wlrctl, it does nothing.
+WAYLAND_DISPLAY (wlrctl needs it). Best-effort: with no evdev or no wlrctl, it
+does nothing.
 """
 import os
 import subprocess
@@ -84,7 +89,7 @@ def main():
         time.sleep(1.0)
         with _lock:
             idle = time.monotonic() - _last
-            if idle >= IDLE_SEC and not _hidden and _watched:
+            if idle >= IDLE_SEC and not _hidden:
                 _hidden = True
                 _park()
 

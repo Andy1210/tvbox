@@ -66,6 +66,25 @@ test("UI mode: the panel's preferred resolution, capped at 1080p", () => {
   assert.strictEqual(label(display.pickUiMode(modesOf(NO_FILM))), "1920x1080@60");
 });
 
+// The panel this was found on offers 1080p120, and taking it cost the UI dearly:
+// Chromium paints at the output's rate, and the Plex client alone measured 104%
+// of the Pi 5's GPU at 120 Hz against 64% at 60.
+test("UI mode: a high-refresh panel is capped at 60 Hz", () => {
+  const HIGH_REFRESH = `HDMI-A-1 "LG Electronics LG TV"
+    1920x1080 px, 59.939999 Hz
+    1920x1080 px, 60.000000 Hz (preferred)
+    1920x1080 px, 100.000000 Hz
+    1920x1080 px, 120.000000 Hz (current)
+`;
+  assert.strictEqual(label(display.pickUiMode(modesOf(HIGH_REFRESH))), "1920x1080@60");
+  // A panel that offers NOTHING at or below the cap still gets a mode.
+  const ONLY_FAST = `HDMI-A-1 "LG Electronics LG TV"
+    1920x1080 px, 100.000000 Hz
+    1920x1080 px, 120.000000 Hz (preferred)
+`;
+  assert.strictEqual(label(display.pickUiMode(modesOf(ONLY_FAST))), "1920x1080@120");
+});
+
 test("24p content prefers a matching refresh over matching resolution", () => {
   // 720p film: 1280x720 exists but only at 50/59.94/60, all of which judder.
   const m = display.pickContentMode(modesOf(LG_768), { width: 1280, height: 720, fps: 23.976 });
