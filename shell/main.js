@@ -3934,6 +3934,11 @@ app.whenReady().then(async () => {
   // Put the output at the UI mode: the compositor boots at the EDID preferred
   // mode, which on a 4K set means drawing the launcher at 8.3 Mpixels.
   dmode.refresh();
+  // And once, blocking, before any window exists: the refresh above is async, and
+  // an app's preload reads the panel resolution exactly once, when its window is
+  // created. Losing that race means the app spends its whole life believing the
+  // screen is whatever the UI happens to be running at.
+  panelResolution = display.panelResolution((display.listSync({ ...process.env, ...WL_ENV }) || {}).modes);
   watchDisplayMode();
   win = new BrowserWindow({
     fullscreen: true,
