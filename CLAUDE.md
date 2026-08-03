@@ -277,14 +277,17 @@ touched one file, `npx prettier --write <file>` is enough; when in doubt run
   vblank: **~17 dropped frames a second at 4K with the decoder idle at zero**,
   and it is not the app - our own near-static launcher costs the same 15/s as
   the Plex UI, so no app-side quiescing helps. `shell/videoout.js` removes OUR
-  pass instead: for fullscreen hardware-decoded 4K it switches mpv to
+  pass instead: for fullscreen hardware-decoded video **from 1440p up**
+  (`ZERO_COPY_MIN_HEIGHT`) it switches mpv to
   **`dmabuf-wayland`** (decoded frame handed to the compositor untouched, 0
   drops, 4% of a core). `vo` is settable at runtime, so it lands in the same
   paused window as the display-mode switch, before the first frame. Two limits
   keep it narrow: that output shows **nothing** for a software-decoded stream
   (it fails at the hwupload), and it processes nothing, so it **tone-maps
-  nothing** - HDR reaches the panel as raw PQ. Below 4K the GPU renderer keeps
-  up and is kept for its tone mapping. Measured dead ends, don't retry:
+  nothing** - HDR from 1440p up reaches the panel as raw PQ. Under that the GPU
+  renderer keeps up (the output mode follows the content, so a 1080p film is
+  composited at 1080p) and is kept for its tone mapping. Measured dead ends,
+  don't retry:
   `gpu-next` presents a frozen first frame on v3dv (its drop counter reads 0,
   which is how it fools a naive measurement), `--gpu-api=vulkan` and
   `gpu-next --gpu-api=opengl` render nothing, and no timing knob

@@ -19,7 +19,7 @@ test("software-decoded video keeps the GPU renderer", () => {
   assert.equal(videoout.zeroCopyVideo({ fps: 24, width: 3840, height: 2160 }, false), false);
 });
 
-test("below 4K the GPU renderer keeps up, so its tone mapping is kept", () => {
+test("under 1440p the GPU renderer keeps up, so its tone mapping is kept", () => {
   assert.equal(videoout.zeroCopyVideo({ ...uhd, width: 1920, height: 1080 }, false), false);
   assert.equal(videoout.zeroCopyVideo({ ...uhd, width: 1280, height: 720 }, false), false);
   // 1440p is the floor, not an exclusive bound.
