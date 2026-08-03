@@ -494,7 +494,11 @@ tvbox/
 Actively developed for a Raspberry Pi 5 + labwc/Wayland target. CEC behaviour
 and IPTV/codec tuning are TV- and provider-specific; the defaults here are
 chosen for broad compatibility (e.g. `mpv --vo=gpu --gpu-api=opengl`, software
-H.264 decode on the Pi 5, which has no H.264 hardware decoder).
+H.264 decode on the Pi 5, which has no H.264 hardware decoder). 4K playback is
+the exception: there the GPU renderer and the compositor cannot both have the
+frame, so hardware-decoded 4K is handed to the compositor untouched
+(`dmabuf-wayland`) - smooth with the UI over it, at the cost of mpv's HDR tone
+mapping. See `shell/videoout.js`.
 
 ## License
 
