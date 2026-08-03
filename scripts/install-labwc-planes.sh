@@ -44,6 +44,14 @@
 # compositor) picks whichever is actually installed.
 set -eu
 
+# wlroots 0.20 needs libxkbcommon >= 1.8, and Debian trixie ships 1.7.0, so this
+# is part of the build rather than a dependency that can be installed. It lands in
+# /usr/local like everything else here, which means every binary on the box links
+# it - libxkbcommon keeps its soname across these releases, and the distro labwc
+# this falls back to runs fine against it, but it is a system-wide change and not
+# a private one.
+XKBCOMMON_REF="${XKBCOMMON_REF:-xkbcommon-1.8.1}"
+XKBCOMMON_COMMIT="${XKBCOMMON_COMMIT:-b3465081878e80ca6c11fe35c81787ec374ec15a}"
 WLROOTS_REF="${WLROOTS_REF:-0.20.2}"
 WLROOTS_COMMIT="${WLROOTS_COMMIT:-d783533489e1f75d6886c2ab5c5960090ef268f8}"
 LABWC_REF="${LABWC_REF:-0.20.0}"
@@ -72,7 +80,7 @@ fi
 # Word splitting on the two patch lists is deliberate throughout: they are
 # newline-separated paths this script generated itself.
 # shellcheck disable=SC2086
-WANT=$({ echo "$WLROOTS_COMMIT $LABWC_COMMIT"; cat $WLROOTS_PATCHES $LABWC_PATCHES; } |
+WANT=$({ echo "$XKBCOMMON_COMMIT $WLROOTS_COMMIT $LABWC_COMMIT"; cat $WLROOTS_PATCHES $LABWC_PATCHES; } |
   sha256sum | cut -d" " -f1)
 if [ -f "$STAMP" ] && [ "$(cat "$STAMP")" = "$WANT" ] && [ -x "$PREFIX/bin/labwc" ]; then
   echo "labwc plane offload already installed ($WANT) - nothing to do"
@@ -90,7 +98,8 @@ DEBIAN_FRONTEND=noninteractive apt-get install -y -qq \
   libdisplay-info-dev libliftoff-dev hwdata \
   libxcb1-dev libxcb-composite0-dev libxcb-render0-dev libxcb-res0-dev \
   libxcb-ewmh-dev libxcb-icccm4-dev libxcb-errors-dev \
-  libcairo2-dev libpango1.0-dev librsvg2-dev libsfdo-dev libpng-dev
+  libcairo2-dev libpango1.0-dev librsvg2-dev libsfdo-dev libpng-dev \
+  bison libxml2-dev
 
 SRC=$(mktemp -d)
 # INT/TERM too: dash does not run an EXIT trap on a signal, and this build takes
@@ -99,7 +108,7 @@ trap 'rm -rf "$SRC"' EXIT INT TERM
 
 fetch() { # repo ref commit dir
   # A tag is mutable and this builds and installs as root, so the commit decides.
-  git clone --depth 1 --branch "$2" "$1" "$SRC/$4" >/dev/null
+  git clone --quiet --depth 1 --branch "$2" "$1" "$SRC/$4"
   got=$(cd "$SRC/$4" && git rev-parse HEAD)
   if [ "$got" != "$3" ]; then
     echo "$4 $2 is $got, expected $3 - refusing to build" >&2
@@ -117,14 +126,30 @@ apply() { # dir patches...
   done
 }
 
+# Only when the distro's is too old: replacing a working system library is not
+# something to do for the sake of tidiness.
+have_xkb=$(pkg-config --modversion xkbcommon 2>/dev/null || echo 0)
+if [ "$(printf "1.8.0\n%s\n" "$have_xkb" | sort -V | head -1)" != "1.8.0" ]; then
+  echo "==> libxkbcommon $have_xkb is older than 1.8 - building $XKBCOMMON_REF"
+  fetch https://github.com/xkbcommon/libxkbcommon.git \
+    "$XKBCOMMON_REF" "$XKBCOMMON_COMMIT" xkbcommon
+  meson setup "$SRC/xkbcommon/build" "$SRC/xkbcommon" \
+    --prefix="$PREFIX" --libdir="lib/$(dpkg-architecture -qDEB_HOST_MULTIARCH)" \
+    --buildtype=release -Denable-docs=false -Denable-wayland=false \
+    -Denable-x11=false -Denable-xkbregistry=false
+  ninja -C "$SRC/xkbcommon/build"
+  ninja -C "$SRC/xkbcommon/build" install
+  ldconfig
+fi
+
 fetch https://gitlab.freedesktop.org/wlroots/wlroots.git \
   "$WLROOTS_REF" "$WLROOTS_COMMIT" wlroots
 apply "$SRC/wlroots" $WLROOTS_PATCHES
 meson setup "$SRC/wlroots/build" "$SRC/wlroots" \
   --prefix="$PREFIX" --libdir="lib/$(dpkg-architecture -qDEB_HOST_MULTIARCH)" \
-  --buildtype=release -Dexamples=false >/dev/null
-ninja -C "$SRC/wlroots/build" >/dev/null
-ninja -C "$SRC/wlroots/build" install >/dev/null
+  --buildtype=release -Dexamples=false
+ninja -C "$SRC/wlroots/build"
+ninja -C "$SRC/wlroots/build" install
 ldconfig
 
 fetch https://github.com/labwc/labwc.git "$LABWC_REF" "$LABWC_COMMIT" labwc
@@ -134,9 +159,9 @@ apply "$SRC/labwc" $LABWC_PATCHES
 PKG_CONFIG_PATH="$PREFIX/lib/$(dpkg-architecture -qDEB_HOST_MULTIARCH)/pkgconfig" \
 meson setup "$SRC/labwc/build" "$SRC/labwc" \
   --prefix="$PREFIX" --libdir="lib/$(dpkg-architecture -qDEB_HOST_MULTIARCH)" \
-  --buildtype=release --wrap-mode=nofallback >/dev/null
-ninja -C "$SRC/labwc/build" >/dev/null
-ninja -C "$SRC/labwc/build" install >/dev/null
+  --buildtype=release --wrap-mode=nofallback
+ninja -C "$SRC/labwc/build"
+ninja -C "$SRC/labwc/build" install
 ldconfig
 
 # The stamp is written last, so an interrupted build is retried rather than
