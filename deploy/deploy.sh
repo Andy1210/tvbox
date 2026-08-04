@@ -89,7 +89,9 @@ echo "==> Electron (npm install)"
 # which on a box means a silent ~110 MB download into shell.log while the boot
 # watchdog is counting. Do it here, where it can fail loudly. Idempotent: it
 # exits 0 when the binary is already there.
-( cd ~/.tvbox/shell && node node_modules/electron/install.js >/dev/null 2>&1 ) \
+# stdout only: the progress bar is noise, but the reason a download failed is
+# the whole point of running it here.
+( cd ~/.tvbox/shell && node node_modules/electron/install.js >/dev/null ) \
   && ok "electron binary" || bad "electron binary download failed"
 chmod +x ~/.tvbox/run-shell.sh ~/.tvbox/shell/audio-default.sh ~/.tvbox/tvbox 2>/dev/null || true
 
