@@ -73,7 +73,7 @@ const INFRA_FILES = [
   // OTA-only box just carries the files until the next provision, and keeps
   // compositing as before in the meantime.
   "install-labwc-planes.sh",
-  "wlroots-0001-render-alpha-less-ycbcr-formats-are-opaque.patch",
+  "wlroots-0001-render-p030-is-opaque.patch",
   "wlroots-0002-drm-colour-props-on-the-liftoff-interface.patch",
   "wlroots-0003-backend-publish-output-layer-support.patch",
   "wlroots-0004-scene-offload-the-top-surface-to-an-output-layer.patch",
