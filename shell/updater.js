@@ -389,8 +389,10 @@ async function apply() {
       await run("npm", ["ci", "--no-audit", "--no-fund"], { cwd: path.join(stage, "shell") });
       // Electron 43 has no postinstall hook - the binary download moved to its
       // own `install-electron` bin - so npm ci leaves node_modules/electron
-      // without a dist/, and the staged release would boot into nothing and be
-      // rolled back. Idempotent, and it only runs on the npm ci path.
+      // without a dist/. electron's index.js would fetch it at the staged
+      // release's first start instead, i.e. a ~110 MB download inside the 90 s
+      // the boot watchdog gives an update to commit itself before it counts as
+      // a failed boot. Fetch it here, where failing just fails the update.
       await run("node", ["node_modules/electron/install.js"], { cwd: path.join(stage, "shell") });
     }
     // move into place + atomic-ish symlink flip, with the rollback marker

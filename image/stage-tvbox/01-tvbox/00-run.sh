@@ -608,9 +608,13 @@ passwd -l ${FIRST_USER_NAME}
 # only the tvbox CLI (shell/cli.js, "#!/usr/bin/env node") uses the system one.
 su - ${FIRST_USER_NAME} -c 'cd ~/.tvbox/shell && npm ci --no-audit --no-fund'
 # Electron 43 has no postinstall hook any more - the binary download moved to
-# its own `install-electron` bin - so npm ci alone leaves node_modules/electron
-# with no dist/, and the flashed box has nothing to run. This IS the ~200 MB
-# download; it exits 0 when the binary is already in place.
+# its own install-electron bin - so npm ci alone leaves node_modules/electron
+# with no dist/. electron's index.js would then fetch it at the FIRST LAUNCH
+# instead: a silent ~110 MB download on a freshly flashed box that may not have
+# a network yet, inside the window the shell's boot watchdog counts. This is
+# that download, done where a failure stops the build; it exits 0 when the
+# binary is already in place.
+# (No backticks in this comment - see the heredoc note above.)
 su - ${FIRST_USER_NAME} -c 'cd ~/.tvbox/shell && node node_modules/electron/install.js'
 
 # tvbox CLI on PATH
