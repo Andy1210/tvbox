@@ -304,7 +304,15 @@ touched one file, `npx prettier --write <file>` is enough; when in doubt run
   which `deploy/tvbox-compositor` sets); greetd starts **`tvbox-compositor`**
   rather than labwc, so a patched build that cannot come up costs one restart
   instead of the TV; and the build needs root+apt, so **OTA-only boxes never get
-  it** and composite as before. Two of the six are plain wlroots bugs: the
+  it** and composite as before. Two operational traps: the patches carry their
+  subject in their filenames, so a renamed one used to leave the old copy in
+  `~/.tvbox/` and `install-labwc-planes.sh` applied both - two patches touching the
+  same lines refuse to apply and the box silently keeps the compositor it had (both
+  the deploy and the OTA sync now retire patches the shipped set no longer names).
+  And `systemctl restart greetd` on a live session can lose to itself: the previous
+  compositor holds `/dev/dri/card1` for a second or two, each attempt exits at once,
+  and systemd's start limit trips after five - leaving greetd `failed` with no
+  session at all. Stop greetd, kill the leftovers, wait, then start it once. Two of the six are plain wlroots bugs: the
   libliftoff interface never set the colour-management connector properties and
   the guard that noticed rejected every commit carrying an image description
   (labwc attaches one to all of them), and `pixel_format_has_alpha()` calls a

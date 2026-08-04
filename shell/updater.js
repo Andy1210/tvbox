@@ -454,6 +454,20 @@ function syncInfra(rel) {
     fs.copyFileSync(f, path.join(TVBOX, name));
     if (EXECUTABLE.includes(name)) fs.chmodSync(path.join(TVBOX, name), 0o755);
   }
+  // Copying does not retire. Every other infra file keeps its name for life, but
+  // the compositor patches carry their subject in theirs, so a renamed one leaves
+  // the old copy behind - and install-labwc-planes.sh applies whatever `*.patch`
+  // it finds beside itself. Two patches touching the same lines then refuse to
+  // apply, and the box silently keeps the compositor it had.
+  try {
+    for (const name of fs.readdirSync(TVBOX)) {
+      if (name.endsWith(".patch") && !INFRA_FILES.includes(name)) {
+        fs.rmSync(path.join(TVBOX, name), { force: true });
+      }
+    }
+  } catch (e) {
+    console.warn("[update] could not retire stale patches:", e.message);
+  }
   // labwc session autostart + environment + systemd user units live outside ~/.tvbox
   const auto = path.join(src, "labwc-autostart");
   if (fs.existsSync(auto)) {
