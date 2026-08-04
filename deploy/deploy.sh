@@ -47,6 +47,16 @@ while IFS= read -r line || [ -n "$line" ]; do # || guard: keep a final untermina
   INFRA_SRCS+=("$TVBOX/$line")
 done < "$TVBOX/deploy/infra.list"
 rsync -az "${INFRA_SRCS[@]}" "$PI:.tvbox/"
+# rsync copies, it does not retire. Every other infra file keeps its name for
+# life, but the compositor patches carry their subject in theirs, so renaming one
+# leaves the old copy behind - and install-labwc-planes.sh applies whatever
+# `*.patch` it finds next to itself. Two patches that touch the same lines then
+# refuse to apply, and the box keeps the compositor it had with no clue why.
+SHIPPED_PATCHES=$(printf '%s\n' "${INFRA_SRCS[@]}" | sed -n 's|.*/||p' | grep '\.patch$' || true)
+ssh "$PI" "cd ~/.tvbox 2>/dev/null || exit 0; for f in *.patch; do
+  [ -e \"\$f\" ] || continue
+  printf '%s\n' '$SHIPPED_PATCHES' | grep -qxF \"\$f\" || { echo \"   retiring stale patch: \$f\"; rm -f \"\$f\"; }
+done"
 
 # ---- the ONE root step: provision (apt baseline, udev/polkit, groups) ----
 # ssh -t gives sudo a TTY so it can prompt for the password; on a box with
