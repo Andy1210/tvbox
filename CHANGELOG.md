@@ -5,6 +5,41 @@ updates). `scripts/make-release.sh` lifts the current version's `hu`/`en`
 blocks into the OTA feed's `notes` - keep both languages, keep it short, and
 write for the person on the couch (what changes for THEM), not for developers.
 
+## 1.24.1
+
+### hu
+
+- Nincs látható változás: a 4K-s képjavítás egyik belső foltja lecserélődött egy
+  kisebbre, miután a labwc fejlesztői átnézték.
+
+### en
+
+- Nothing visible changes: one of the internal patches behind the 4K fix was
+  replaced with a smaller one after the labwc developers reviewed it.
+
+### notes
+
+Not release notes for the TV - for whoever runs the boxes:
+
+The labwc patch shipped in 1.24.0 did two things; it now does one.
+[labwc#3685](https://github.com/labwc/labwc/pull/3685) asked what sway does
+differently, since sway carries no equivalent of the `layer_states` array the
+patch added - and the answer is that sway builds a fresh `wlr_output_state` per
+frame and probes render formats on a separate config state, while labwc reuses one
+long-lived `output->pending` for both. In labwc a state can therefore still carry
+`WLR_OUTPUT_STATE_LAYERS` when a probe re-tests it later.
+
+Chasing that down showed the layer half was compensating for an earlier iteration
+of `wlroots-0004`, which kept its output layer alive between offload episodes
+where it now destroys it. Rebuilt without it and measured on `tvbox-livingroom`:
+the offload still engages (three DRM planes in use), no `All output layers must be
+specified`, no failed commits, 0 dropped and 0 delayed frames at 2160p23.976, and
+the compositor still at 0% GPU.
+
+What ships is the half that is a bug with or without layers: a failed
+render-format probe used to leave the format at the last candidate it tried, after
+which no swapchain could be created for that output at all.
+
 ## 1.24.0
 
 ### hu
@@ -47,7 +82,7 @@ Not release notes for the TV - for whoever runs the boxes:
 problem. Removing ours left the video smooth only while nothing sat over it; a
 fullscreen translucent UI still sent the whole output through the renderer, at
 67% of the V3D. `scripts/install-labwc-planes.sh` builds labwc 0.20.0 + wlroots
-0.20.2 with six patches (`scripts/patches/`) that let the display hardware
+0.20.2 with seven patches (`scripts/patches/`) that let the display hardware
 compose instead: the film lands on the vc4 primary plane, the UI on an overlay,
 and the compositor's GPU time drops to **0%**. Measured with the Plex UI open
 over a 2160p23.976 film: 0 dropped and 0 delayed frames.
@@ -60,10 +95,12 @@ Four things to know about it:
 - **greetd now starts `tvbox-compositor`, not labwc.** That wrapper prefers the
   patched build and falls back to the distro one for the rest of the boot if it
   fails to come up, because a from-source compositor that will not start is a TV
-  that shows nothing. The marker lives in `/run`, so the next boot tries again.
+  that shows nothing. A quick failure earns one retry first - a session restart can
+  leave the previous compositor holding the DRM device for a second or two - and
+  the marker lives in the user's runtime dir, a tmpfs, so the next boot tries again.
 - **`WLR_DRM_FORCE_LIBLIFTOFF=1` is required and set by the wrapper.** wlroots
   only touches planes through libliftoff, and keeps it behind that variable.
-- **Two of the six are plain wlroots bugs worth upstreaming**, not tvbox
+- **Two of the seven are plain wlroots bugs worth upstreaming**, not tvbox
   quirks. The liftoff interface never set the colour-management connector
   properties, and the guard that noticed rejected every commit carrying an image
   description - which labwc attaches to all of them, so enabling libliftoff on any

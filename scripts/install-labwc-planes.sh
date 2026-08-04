@@ -28,9 +28,9 @@
 #   wlroots-0006  the composition fallback is armed even when it is not needed,
 #                 and on hardware with one plane at zpos 0 it takes the plane the
 #                 video needs.
-#   labwc-0001    output states labwc builds itself describe no layers, which
-#                 wlroots rejects, and a failed render-format probe leaves the
-#                 format at the last candidate it tried.
+#   labwc-0001    a failed render-format probe leaves the format at the last
+#                 candidate it tried, and no swapchain can be created for it
+#                 afterwards - the output stops drawing entirely.
 #
 # Measured on a Pi 5 with a 4K HEVC film and the Plex UI over it: the compositor's
 # GPU time goes from 67% to 0% and dropped frames from ~17/s to none.
