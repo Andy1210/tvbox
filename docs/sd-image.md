@@ -284,8 +284,8 @@ downloadable artifact. Two phases:
 
 1. **Geometry + payload** - the image mounted, not running: partition table and
    types, rootfs size, ext4 free space _before_ the first-boot expand
-   (`MIN_FREE_MB`, **600 MB** in CI - the incident that prompted it shipped with
-   174 MB), `cmdline.txt` non-empty and carrying `root=PARTUUID=` /
+   (`MIN_FREE_MB`, **390 MB** - the check reads total free blocks, so the
+   incident that prompted it, 174 MB usable, is ~348 MB by this metric), `cmdline.txt` non-empty and carrying `root=PARTUUID=` /
    `rootfstype=ext4` / `vc4.force_hotplug=1`, a kernel and DTBs present, no
    orphaned `FSCK*.REC`, `/etc/fstab`'s PARTUUIDs matching the real ones, the `tv`
    account present with a locked password, and every runtime file OTA can never
