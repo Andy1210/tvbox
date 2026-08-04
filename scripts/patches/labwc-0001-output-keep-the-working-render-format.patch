@@ -1,6 +1,6 @@
-From d8df8b99c184548b8b54a5158404410d8efab897 Mon Sep 17 00:00:00 2001
+From b0d6482f41608a356d962ce9df0260d28555aeb4 Mon Sep 17 00:00:00 2001
 From: Andy1210 <andy1210@gmail.com>
-Date: Tue, 4 Aug 2026 07:56:36 +0200
+Date: Mon, 3 Aug 2026 18:00:00 +0200
 Subject: [PATCH] output: keep the working render format when every candidate
  fails
 
@@ -19,14 +19,14 @@ video's overlay surface to an output layer, which made a probe fail on a
 box where one never had before. The bug is not layer-specific though: any
 cause of a failed probe reaches it.
 ---
- src/output.c | 9 +++++++++
- 1 file changed, 9 insertions(+)
+ src/output.c | 2 ++
+ 1 file changed, 2 insertions(+)
 
 diff --git a/src/output.c b/src/output.c
-index 2dc9061e..56713985 100644
+index 2eab8ec..f91e92d 100644
 --- a/src/output.c
 +++ b/src/output.c
-@@ -87,12 +87,21 @@ uint32_t output_formats_10bit[] = {
+@@ -87,12 +87,14 @@ uint32_t output_formats_10bit[] = {
  static bool
  output_set_render_format(struct output *output, uint32_t candidates[], size_t count)
  {
@@ -37,17 +37,10 @@ index 2dc9061e..56713985 100644
  			return true;
  		}
  	}
-+	/*
-+	 * Every candidate failed. Leaving the last one on the pending state
-+	 * means no swapchain can be created for this output at all, and every
-+	 * frame after this fails with "Failed to pick primary buffer format" -
-+	 * blaming a format the renderer never supported, rather than whatever
-+	 * made the probe fail. Put back the one that was working.
-+	 */
 +	wlr_output_state_set_render_format(&output->pending, working);
  	return false;
  }
  
 -- 
-2.43.0
+2.47.3
 

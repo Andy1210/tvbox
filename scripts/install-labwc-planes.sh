@@ -6,7 +6,7 @@
 # into one buffer, and at 3840x2160 that is a full-screen GPU pass per frame on
 # top of the one the player already does. A Pi 5 fits one of the two. The display
 # hardware can compose the same scene for free - vc4 offers 48 overlay planes
-# with alpha blending - but nothing in the wlroots stack asks it to. Seven patches
+# with alpha blending - but nothing in the wlroots stack asks it to. Eight patches
 # do, and they are not in any release yet:
 #
 #   wlroots-0001  wlroots decides opacity from an allowlist of formats that named
@@ -28,6 +28,10 @@
 #   wlroots-0006  the composition fallback is armed even when it is not needed,
 #                 and on hardware with one plane at zpos 0 it takes the plane the
 #                 video needs.
+#   wlroots-0007  the liftoff interface refuses a commit whose cursor layer got
+#                 no plane - including a MODESET, whose primary buffer is the
+#                 empty one wlroots attaches for it. A resolution change then
+#                 fails outright.
 #   labwc-0001    a failed render-format probe leaves the format at the last
 #                 candidate it tried, and no swapchain can be created for it
 #                 afterwards - the output stops drawing entirely.

@@ -5,6 +5,51 @@ updates). `scripts/make-release.sh` lifts the current version's `hu`/`en`
 blocks into the OTA feed's `notes` - keep both languages, keep it short, and
 write for the person on the couch (what changes for THEM), not for developers.
 
+## 1.24.3
+
+### hu
+
+- Film után a tévé újra a rendes képfrissítésre vált vissza. Eddig előfordult,
+  hogy a film 24 Hz-es módján ragadt, és onnantól minden lassúnak tűnt rajta - a
+  menü és a játékok is.
+
+### en
+
+- After a film the TV goes back to its normal refresh rate again. It could get
+  stuck on the film's 24 Hz mode, and from then on everything on the box felt
+  slow - menus and games included.
+
+### notes
+
+Not release notes for the TV - for whoever runs the boxes:
+
+Reported as "even the NES emulator is slow". The output was on
+3840x2160@23.976 long after playback had stopped, and the shell knew it should
+not be: `claimedBy: null`, `desired 1920x1080@60`.
+
+Two separate defects, both fixed here.
+
+**The compositor refused the mode change.** Reproduced deterministically, 5/5:
+4K -> 1080p fails with `WLR_DRM_FORCE_LIBLIFTOFF=1`, succeeds without it, and
+succeeds on the distro labwc. The cause is upstream wlroots, not our patches:
+wlroots attaches an empty buffer for a modeset and the liftoff interface then
+refuses the whole commit if libliftoff gave the cursor layer no plane. Right for
+an ordinary frame, wrong for a modeset - the allocation describes a configuration
+that is about to change, over a buffer holding nothing. `wlroots-0007` skips that
+check on a modeset; our own primary-plane check gets the same treatment.
+
+**And nothing tried again.** `displaymode`'s apply callback re-settles when the
+target moved under it and otherwise reports and stops - including when the apply
+failed. A settle only starts on a claim, a release or a hotplug, so one failure
+left the output wherever the last claim put it. The `MAX_TRIES` machinery beside
+it is for an apply that reports success and does not stick, and is checked at the
+START of a settle, so it never saw this. A failed apply now re-settles, bounded by
+the same per-target budget and rate limit.
+
+Measured after both: 4K playback on three DRM planes with 0 dropped frames, the
+film ends, the mode returns to 1920x1080@60, and 5 of 5 manual 4K->1080p
+transitions succeed.
+
 ## 1.24.2
 
 ### hu

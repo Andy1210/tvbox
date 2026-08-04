@@ -1,7 +1,7 @@
-From 4262c345cd627b399404437361866efc6befb691 Mon Sep 17 00:00:00 2001
+From fa41808374566beeeac87693b8834c9b85844245 Mon Sep 17 00:00:00 2001
 From: Andy1210 <andy1210@gmail.com>
 Date: Mon, 3 Aug 2026 18:00:00 +0200
-Subject: [PATCH 2/6] backend/drm: set the colour props on the liftoff
+Subject: [PATCH 2/7] backend/drm: set the colour props on the liftoff
  interface
 
 The liftoff interface never set Colorspace, HDR_OUTPUT_METADATA or max bpc, and

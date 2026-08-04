@@ -1,7 +1,7 @@
-From 0f9528fb8c287c110f985d09d2a166c185a235dc Mon Sep 17 00:00:00 2001
+From 65dc5a6f6752effa793aa049ce9b7da6816e7b28 Mon Sep 17 00:00:00 2001
 From: Andy1210 <andy1210@gmail.com>
 Date: Mon, 3 Aug 2026 18:00:00 +0200
-Subject: [PATCH 5/6] backend/drm: give libliftoff a deadline it can finish in
+Subject: [PATCH 5/7] backend/drm: give libliftoff a deadline it can finish in
 
 libliftoff searches layer-to-plane mappings against a timeout and returns
 whatever it has when the time is up. Its 1 ms default is a sensible per-frame
