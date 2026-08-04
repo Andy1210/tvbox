@@ -114,7 +114,9 @@ jobs:
           set -e
           sudo apt-get install -y -qq systemd-container e2fsprogs file
           IMG=$(ls pi-gen/deploy/*.img.xz | head -1)
-          sudo -E MIN_ROOT_GB=3 MIN_FREE_MB=600 scripts/image-smoke.sh "$IMG"
+          # No MIN_FREE_MB here: the script's own default is the one place that
+          # number is decided, and an override here silently outranked it.
+          sudo -E MIN_ROOT_GB=3 scripts/image-smoke.sh "$IMG"
 
       - name: upload image artifact
         uses: actions/upload-artifact@v4
