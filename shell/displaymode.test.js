@@ -38,6 +38,7 @@ function sink(text, opts = {}) {
   const s = {
     applied: [],
     reads: 0,
+    failed: 0,
     getModes(cb) {
       s.reads++;
       later(() => cb({ output: "HDMI-A-1", modes: modes.map((m) => ({ ...m, current: m === cur })) }));
@@ -45,6 +46,12 @@ function sink(text, opts = {}) {
     applyMode(_output, mode, cb) {
       s.applied.push(id(mode));
       later(() => {
+        // `failTimes: n` = the first n applies report an error, as wlr-randr does
+        // when the compositor refuses the configuration.
+        if (s.failed < (opts.failTimes || 0)) {
+          s.failed++;
+          return cb(false, "failed to apply configuration");
+        }
         if (!opts.ignore) cur = modes.find((m) => id(m) === id(mode)) || cur;
         cb(true, "");
       });
@@ -208,4 +215,24 @@ test("no output (TV off) fails softly and applies nothing", async () => {
   assert.strictEqual(err, "no output");
   const r = await new Promise((res) => d.claim("app:plex", FILM, res));
   assert.deepStrictEqual(r, { ok: false, reason: "no output" });
+});
+
+// A failed apply used to be reported and forgotten. Nothing else asks again - a
+// settle only starts on a claim, a release or a hotplug - so the output stayed on
+// whatever the last claim put there. That is how a TV ends up sitting on a film's
+// 24 Hz mode after the film stops, with everything on it looking broken.
+test("a failed apply is retried, not reported and forgotten", async () => {
+  const s = sink(WLR_4K, { async: true, failTimes: 1 });
+  const d = svc(s);
+  await new Promise((r) => d.refresh(r));
+  assert.strictEqual(s.current(), "1920x1080@60", "the retry after the first failure took it");
+  assert.ok(s.applied.length >= 2, `expected a retry, applied: ${s.applied.join(", ")}`);
+});
+
+test("an apply that always fails still gives up inside the per-target budget", async () => {
+  const s = sink(WLR_4K, { async: true, failTimes: 99 });
+  const d = svc(s);
+  await new Promise((r) => d.refresh(r));
+  await new Promise((r) => setTimeout(r, 80));
+  assert.ok(s.applied.length <= 4, `a failing target must not be retried forever: ${s.applied.length}`);
 });

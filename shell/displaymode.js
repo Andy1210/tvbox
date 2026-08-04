@@ -128,6 +128,13 @@ function create({ getModes, applyMode, log, minApplyGapMs = MIN_APPLY_GAP_MS }) 
           // A claim/release landed while we were applying: go again rather than
           // answer with a mode nobody wants any more. The queue rides along.
           if (!same(want, desired())) return settle();
+          // An apply that FAILED is not an answer either. Nothing else will ask
+          // again - a settle only starts on a claim, a release or a hotplug - so a
+          // single failure would leave the output on whatever the last claim put
+          // there. That is how a TV ends up sitting on a film's 24 Hz mode after
+          // the film stops, with everything on it looking broken. Go again; the
+          // per-target budget and the rate limit above still bound it.
+          if (!ok) return settle();
           flush(ok, err, true);
         });
       }, wait);
