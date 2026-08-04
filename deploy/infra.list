@@ -34,7 +34,7 @@ scripts/patches/wlroots-0003-backend-publish-output-layer-support.patch
 scripts/patches/wlroots-0004-scene-offload-the-top-surface-to-an-output-layer.patch
 scripts/patches/wlroots-0005-drm-give-libliftoff-a-deadline-it-can-finish-in.patch
 scripts/patches/wlroots-0006-drm-do-not-arm-the-composition-layer-when-offloading.patch
-scripts/patches/labwc-0001-output-describe-layers-in-every-state-we-build.patch
+scripts/patches/labwc-0001-output-keep-the-working-render-format.patch
 deploy/tvbox-compositor
 deploy/tvbox-cec.service
 deploy/tvbox-remote.service
