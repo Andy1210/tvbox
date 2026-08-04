@@ -417,6 +417,21 @@ the offload still engages, three planes in use, no `All output layers must be
 specified`, no failed commits, 0 dropped frames at 2160p. So the patch is two
 lines and a comment now.
 
+**Then it changed shape once more, and that reason is worth keeping too.**
+cillian64 asked for the state's `WLR_OUTPUT_STATE_RENDER_FORMAT` bit to be
+cleared rather than the previously working format re-set: a `wlr_output_state`
+is a diff, and clearing the bit says "do not change the format at all" instead
+of asserting a value. It is also the safer of the two. Re-setting re-arms the
+bit, so `output_basic_test()` runs `output_pick_format()` again on the current
+format and can fail the whole commit for an output whose applied format is no
+longer pickable (a bandwidth-limited new mode, a renderer swap); clearing has no
+such path. He also asked for a debug line, since a probe that rejects every
+candidate is otherwise invisible - it is gated on the existing `silent` flag,
+because `output_state_setup_hdr()` runs twice per output on a config apply and
+the second pass is deliberately quiet. Retested on `tvbox-livingroom` with the
+final shape: three planes in use, compositor GPU time 0, 0 dropped and 0 delayed
+frames, no format errors and no failed commits.
+
 ## The regression that was open, and what it turned out to be
 
 Found and fixed on 2026-08-03. Worth keeping, because the cause is not in
