@@ -297,7 +297,11 @@ downloadable artifact. Two phases:
    `not-found` units, ssh host keys generated, `greetd` and `tvbox-diag` enabled,
    Electron's runtime executes and loads the shell's modules) and powers the
    container off. The injected files go on a **copy** of the image; the published
-   `.img.xz` is untouched.
+   `.img.xz` is untouched. **This phase does not run in CI** (`SKIP_BOOT=1`): on a
+   runner the container never produced any output and only ended when the timeout
+   killed it, seven minutes a build for nothing. Flashing a card and starting it
+   is the test that answers the same question honestly. Run it locally with
+   `scripts/image-smoke.sh <image>`.
 
 **What a pass does not prove**, so nobody reads more into it: it does not run the
 Raspberry Pi's kernel, its firmware, or a graphical session. QEMU's `raspi`

@@ -17,7 +17,11 @@
 #   2. BOOT - the image's OWN systemd, started under systemd-nspawn with arm64
 #      binfmt. Real init: generators, unit ordering, first-boot units, ssh host
 #      key generation. Assertions run INSIDE the booted system and it powers
-#      itself off.
+#      itself off. **CI runs phase 1 only** (SKIP_BOOT=1 in image.yml): under the
+#      runner's emulation the container never produced a single line of output and
+#      only ended when BOOT_TIMEOUT killed it, so it cost 7 minutes a build and
+#      proved nothing. Flashing a card is the honest test. Phase 2 is kept for
+#      local runs, where the emulation is yours to fix.
 #
 # What this deliberately does NOT do, so nobody reads a pass as more than it is:
 # it does not run the Raspberry Pi's own kernel, its firmware, or a graphical
