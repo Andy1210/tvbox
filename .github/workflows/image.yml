@@ -111,14 +111,15 @@ jobs:
       # ended when BOOT_TIMEOUT killed it, which cost 7 minutes per build to learn
       # nothing. Flashing a card and starting it is the honest test for that, and it
       # is a step someone takes before a release anyway. Phase 2 still runs locally:
-      # scripts/image-smoke.sh <image> without SKIP_BOOT.
+      # sudo scripts/image-smoke.sh <image>, without SKIP_BOOT (and it needs
+      # systemd-container there).
       #
       # BEFORE the upload on purpose: a broken image should fail the build rather
       # than become a downloadable artifact.
       - name: smoke-test the image (geometry + payload)
         run: |
           set -e
-          sudo apt-get install -y -qq systemd-container e2fsprogs file
+          sudo apt-get install -y -qq e2fsprogs file
           IMG=$(ls pi-gen/deploy/*.img.xz | head -1)
           # No MIN_FREE_MB here: the script's own default is the one place that
           # number is decided, and an override here silently outranked it.
