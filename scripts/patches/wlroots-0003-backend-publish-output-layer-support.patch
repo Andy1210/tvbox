@@ -1,7 +1,7 @@
-From 0efe6ab6a301d6f21027d34f31bcea0c43a1457c Mon Sep 17 00:00:00 2001
+From 589934ac766d74f5ce9904c5b0e647ec984d50b5 Mon Sep 17 00:00:00 2001
 From: Andy1210 <andy1210@gmail.com>
 Date: Mon, 3 Aug 2026 18:00:00 +0200
-Subject: [PATCH 3/6] backend: publish whether a backend can display output
+Subject: [PATCH 3/7] backend: publish whether a backend can display output
  layers
 
 wlr_output_layer_create() succeeds everywhere - it only fails on OOM - and

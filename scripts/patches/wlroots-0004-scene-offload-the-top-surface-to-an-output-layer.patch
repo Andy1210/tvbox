@@ -1,7 +1,7 @@
-From 01bca6cd1b3173e32f39c38556a82968a1b8ced9 Mon Sep 17 00:00:00 2001
+From 5c794971a8e7796f02ba0038006bacee7101c5c4 Mon Sep 17 00:00:00 2001
 From: Andy1210 <andy1210@gmail.com>
 Date: Mon, 3 Aug 2026 18:00:00 +0200
-Subject: [PATCH 4/6] scene: offload the top surface to an output layer
+Subject: [PATCH 4/7] scene: offload the top surface to an output layer
 
 The renderer is all-or-nothing: one surface above a fullscreen video sends the
 whole output through it. At 4K that is a full-screen composite per frame for
