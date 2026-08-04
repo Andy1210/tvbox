@@ -5,6 +5,70 @@ updates). `scripts/make-release.sh` lifts the current version's `hu`/`en`
 blocks into the OTA feed's `notes` - keep both languages, keep it short, and
 write for the person on the couch (what changes for THEM), not for developers.
 
+## 1.24.4
+
+### hu
+
+- Ezen a kiadáson nincs látható változás. A tévé képkezelését javító foltok
+  frissültek, úgy, ahogy azt a fejlesztőik kérték.
+
+### en
+
+- Nothing changes on screen in this one. The patches behind the box's display
+  handling were updated, in the shape their upstream projects asked for.
+
+### notes
+
+Not release notes for the TV - for whoever runs the boxes:
+
+Two compositor patches changed shape. Neither alters how a box that already
+runs 1.24.3 behaves; both were rebuilt and measured on `tvbox-livingroom`.
+
+**The labwc render-format fix went in the reviewer's shape.**
+[labwc#3685](https://github.com/labwc/labwc/pull/3685) now clears the pending
+state's `WLR_OUTPUT_STATE_RENDER_FORMAT` bit instead of re-setting the format
+that was working before the probe. A `wlr_output_state` is a diff, so clearing
+the bit says "do not change the format at all" rather than asserting a value -
+and it is the safer of the two: re-setting re-arms the bit, so
+`output_basic_test()` runs `output_pick_format()` again and can fail the whole
+commit on an output whose applied format is no longer pickable. The debug line
+the review asked for is gated on the existing `silent` flag, because
+`output_state_setup_hdr()` runs twice per output on a config apply and the
+second pass is deliberately quiet.
+
+**The wlroots P030 patch is one line now.** `wlroots-0001` adds
+`DRM_FORMAT_P030` to the existing opaque allowlist and nothing else. emersion
+rejected the inverted invariant on
+[issue 4112](https://gitlab.freedesktop.org/wlroots/wlroots/-/issues/4112):
+"YCbCr formats are opaque unless they are one of the six that carry alpha"
+would silently strip the alpha of a YUV format the kernel adds later, and
+`is_opaque` is only an optimisation, so an unknown format has to read as
+translucent. The general fix upstream is !5271, which widens the opaque list
+from 4 YCbCr formats to about 20 - but its generated table currently carries
+neither P030 nor P010, so the patch stays. `docs/upstream-wlroots.md` records
+the one check to run before dropping it.
+
+Measured with a 4K HEVC film and the Plex UI over it: three planes in use (the
+film as P030 on the primary, the UI on an overlay, the cursor on its own),
+labwc GPU time 0 ns over 15 s of playback, 0 dropped and 0 delayed frames, and
+no format errors in the session log.
+
+**A flashed SD card had no Electron at all, and the OTA path had the same
+hole.** electron 43 dropped its `postinstall` hook - the binary download moved
+to its own `install-electron` bin - so `npm ci` / `npm install` leaves
+`node_modules/electron` without a `dist/` and the box has nothing to run. All
+three install paths (the image build, `deploy.sh`, and the updater's `npm ci`
+branch, which would otherwise stage a release that boots into nothing and rolls
+back) now run `node node_modules/electron/install.js` themselves; it exits 0
+when the binary is already there.
+
+The image smoke test is what caught it, and it had two faults of its own: it
+looked for `run-shell.sh` under `shell/`, where infra files have never been
+installed, and its free-space floor was unreachable - pi-gen sizes the rootfs as
+used + (0.2 \* used + 200 MB), so 600 MB free cannot happen at this image size.
+Both the checks and the failures arrived in 1.22.0, so the number had never once
+been met. Nothing here changes a box that is already running.
+
 ## 1.24.3
 
 ### hu
