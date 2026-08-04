@@ -5,6 +5,43 @@ updates). `scripts/make-release.sh` lifts the current version's `hu`/`en`
 blocks into the OTA feed's `notes` - keep both languages, keep it short, and
 write for the person on the couch (what changes for THEM), not for developers.
 
+## 1.24.2
+
+### hu
+
+- Nincs látható változás: egy frissítés mostantól eltakarítja a korábbi verzió
+  már nem használt belső foltjait, amelyek különben megakadályozhatták a
+  képjavítás telepítését.
+
+### en
+
+- Nothing visible changes: an update now clears out internal patches an earlier
+  version no longer uses, which could otherwise block the picture fix from
+  installing.
+
+### notes
+
+Not release notes for the TV - for whoever runs the boxes:
+
+Renaming the labwc patch in 1.24.1 left the old one in `~/.tvbox/`. Every other
+infra file keeps its name for life, so nothing ever had to retire one - but the
+compositor patches carry their subject in their filenames, and
+`install-labwc-planes.sh` applies whatever `*.patch` it finds beside itself. Both
+copies add the same render-format restore, so the second refused to apply, the
+installer refused to install a half-patched build, and provision logged a warning
+nobody was reading. The box kept the compositor it already had, and the only
+visible sign was a stamp that never changed.
+
+Both channels that copy infra now drop `*.patch` files the shipped set does not
+name: `deploy.sh` after its rsync, `updater.js` after `syncInfra`. The image
+builds a fresh rootfs, so it was never affected.
+
+One operational trap recorded with it: `systemctl restart greetd` on a live
+session can lose to itself - the previous compositor still holds
+`/dev/dri/card1`, each attempt exits immediately, and systemd's start limit trips
+after five, leaving greetd `failed` with no session at all. Stop greetd, kill the
+leftovers, wait, then start it once.
+
 ## 1.24.1
 
 ### hu
