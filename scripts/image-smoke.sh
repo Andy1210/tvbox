@@ -33,13 +33,19 @@
 set -eu
 
 MIN_ROOT_GB="${MIN_ROOT_GB:-3}"    # the rootfs partition itself
-MIN_FREE_MB="${MIN_FREE_MB:-350}"  # usable space on a freshly flashed box, BEFORE its
-                                   # first-boot expand: the 174 MB regression lived here.
-                                   # It cannot be an arbitrary number: pi-gen sizes the
-                                   # rootfs as used + (0.2 * used + 200 MB), so the free
-                                   # space GROWS with the image and this floor only has to
-                                   # catch a margin that went missing. The real headroom
-                                   # comes from tvbox-expand-rootfs on first boot.
+MIN_FREE_MB="${MIN_FREE_MB:-390}"  # free space on a freshly flashed box, BEFORE its
+                                   # first-boot expand. This is dumpe2fs "Free blocks",
+                                   # so it INCLUDES the ~5% root reserve: the v1.18.0
+                                   # regression that prompted the check left 174 MB for
+                                   # everything else, which is ~348 MB by this metric.
+                                   # The floor is measured, not derived: pi-gen sizes the
+                                   # rootfs as used + (0.2 * used + 200 MB), but ext4
+                                   # metadata eats about half of that margin, and a real
+                                   # build measured 369 MB free while MISSING a ~300 MB
+                                   # Electron install - so a whole image lands near 430.
+                                   # 390 sits between the two with room either way, and
+                                   # it moves up on its own as the image grows. The real
+                                   # headroom comes from tvbox-expand-rootfs on first boot.
 BOOT_TIMEOUT="${BOOT_TIMEOUT:-420}" # arm64 userspace under emulation is slow
 # ...and a hard deadline on top of it: the injected unit powers the container off,
 # but a container process that will not terminate would otherwise outlive the
@@ -100,7 +106,7 @@ PARTS
   echo 'tv:!:20000:0:99999:7:::' >"$R/etc/shadow"
   for f in usr/local/sbin/tvbox-diag usr/local/sbin/tvbox-safemode \
     etc/systemd/system/tvbox-diag.service etc/systemd/system/tvbox-safemode.service \
-    home/tv/.tvbox/shell/main.js home/tv/.tvbox/shell/run-shell.sh \
+    home/tv/.tvbox/shell/main.js home/tv/.tvbox/run-shell.sh \
     home/tv/.tvbox/shell/launcher-dist/index.html \
     home/tv/.tvbox/shell/launcher-dist/assets/index-fake.js; do
     echo placeholder >"$R/$f"
@@ -339,7 +345,7 @@ t "ssh host keys are not empty" '[ -s "$(ls /etc/ssh/ssh_host_*_key | head -1)" 
 t "the ssh daemon is enabled" 'systemctl is-enabled ssh >/dev/null 2>&1 || systemctl is-enabled sshd >/dev/null 2>&1'
 t "the autologin session manager is enabled" 'systemctl is-enabled greetd >/dev/null 2>&1'
 t "the diagnostics report unit is enabled" 'systemctl is-enabled tvbox-diag.service >/dev/null 2>&1'
-t "the shell launcher script is valid sh" 'sh -n /home/tv/.tvbox/shell/run-shell.sh'
+t "the shell launcher script is valid sh" 'sh -n /home/tv/.tvbox/run-shell.sh'
 # The closest thing to "the shell starts" that a container can honestly answer:
 # the arm64 Electron binary executes and its bundled Node runs our code. A real
 # Wayland session is out of scope here (see the header of image-smoke.sh).
