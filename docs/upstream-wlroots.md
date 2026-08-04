@@ -450,6 +450,38 @@ Worth mentioning to David Turner when the #3794 comment goes up — the RPi patc
 is fine on its own, and it is wlroots asking for a deadline on a dying CRTC that
 brings the two together badly.
 
+## A third wlroots bug, found after the first two were filed
+
+`wlroots-0007`, and worth filing alongside the other two: **a resolution change
+fails outright on the libliftoff interface.**
+
+wlroots attaches an empty buffer to the output for a modeset
+(`output_ensure_buffer`), and `backend/drm/libliftoff.c` then refuses the whole
+commit if libliftoff did not give the cursor layer a plane:
+
+```c
+if (crtc->cursor && liftoff_layer_needs_composition(crtc->cursor->liftoff_layer)) {
+    wlr_drm_conn_log(conn, WLR_DEBUG, "Failed to scan-out cursor plane");
+    goto out;
+}
+```
+
+Right for an ordinary frame - there is no other way to draw a cursor on that path
+
+- and wrong for a modeset, whose allocation describes a configuration that is
+  about to change over a buffer holding nothing. The cursor is re-evaluated on the
+  first real frame either way.
+
+Measured on a Pi 5: 3840x2160 -> 1920x1080 fails **5 times out of 5** with
+`WLR_DRM_FORCE_LIBLIFTOFF=1`, succeeds without it, and succeeds on labwc 0.9.8 /
+wlroots 0.19. The only clue is that one DEBUG line; what the compositor tells the
+caller is "failed to apply configuration".
+
+What it looks like to a user: a TV stuck on a film's 24 Hz mode after the film
+ends, with everything on it - menus, games - feeling slow.
+
+The fix is one condition: skip the check when `state->modeset` is set.
+
 ## What our own review found that upstream will ask about
 
 Worth having ready rather than being told: the scene half still has open

@@ -1,7 +1,7 @@
-From 31c6f07749116c0bb2eafbdec2ac6ede57f64753 Mon Sep 17 00:00:00 2001
+From 206daa5e407735a9b4838724f60213bf723d4787 Mon Sep 17 00:00:00 2001
 From: Andy1210 <andy1210@gmail.com>
 Date: Mon, 3 Aug 2026 18:00:00 +0200
-Subject: [PATCH 6/6] backend/drm: do not arm the composition layer while
+Subject: [PATCH 6/7] backend/drm: do not arm the composition layer while
  offloading
 
 The composition layer catches whatever cannot be offloaded, and it is armed with
@@ -20,11 +20,11 @@ gets a plane and so cannot take one from anything. Because nothing else then
 covers an allocation that leaves the primary layer out, check that the frame
 reached a plane at all - either layer will do, they carry the same buffer.
 ---
- backend/drm/libliftoff.c | 89 ++++++++++++++++++++++++++++++++++++----
- 1 file changed, 81 insertions(+), 8 deletions(-)
+ backend/drm/libliftoff.c | 91 ++++++++++++++++++++++++++++++++++++----
+ 1 file changed, 83 insertions(+), 8 deletions(-)
 
 diff --git a/backend/drm/libliftoff.c b/backend/drm/libliftoff.c
-index 88765df..54de81f 100644
+index 88765df..def4968 100644
 --- a/backend/drm/libliftoff.c
 +++ b/backend/drm/libliftoff.c
 @@ -357,25 +357,76 @@ static bool add_connector(drmModeAtomicReq *req,
@@ -112,7 +112,7 @@ index 88765df..54de81f 100644
  		}
  
  		if (state->base->committed & WLR_OUTPUT_STATE_LAYERS) {
-@@ -512,6 +563,28 @@ static bool commit(struct wlr_drm_backend *drm,
+@@ -512,6 +563,30 @@ static bool commit(struct wlr_drm_backend *drm,
  			wlr_drm_conn_log(conn, WLR_DEBUG, "Failed to scan-out cursor plane");
  			goto out;
  		}
@@ -128,10 +128,12 @@ index 88765df..54de81f 100644
 +		 * rejects perfectly good frames.
 +		 */
 +#if HAVE_LIBLIFTOFF_0_5
-+		// Only for a connector that is meant to show something: disabling one
-+		// deliberately leaves its primary layer without a framebuffer, and
-+		// therefore without a plane.
-+		if (state->connectors[i].active &&
++		// Only for a connector that is meant to show something, and not while the
++		// mode is changing: disabling a connector deliberately leaves its primary
++		// layer without a framebuffer, and a modeset allocates over the empty
++		// buffer wlroots attaches for it. Neither is a frame that failed to reach
++		// a plane.
++		if (state->connectors[i].active && !state->modeset &&
 +				liftoff_layer_get_plane(crtc->primary->liftoff_layer) == NULL &&
 +				liftoff_layer_get_plane(crtc->liftoff_composition_layer) == NULL) {
 +			wlr_drm_conn_log(conn, WLR_DEBUG, "Failed to scan-out primary plane");
