@@ -1,0 +1,43 @@
+From 99dd75c7d4ef4de841b2f8cf59fbf470a102f624 Mon Sep 17 00:00:00 2001
+From: Andy1210 <andy1210@gmail.com>
+Date: Mon, 3 Aug 2026 18:00:00 +0200
+Subject: [PATCH 7/7] backend/drm: a modeset is not a failed cursor scan-out
+
+wlroots attaches an empty buffer to the output for a modeset, and the liftoff
+interface then refuses the whole commit if libliftoff did not give the cursor
+layer a plane. For an ordinary frame that is the right call - there is no other
+way to draw a cursor on this path. For a modeset it is not: the allocation
+describes a configuration that is about to change, over a buffer that holds
+nothing, and the cursor is re-evaluated on the first real frame either way.
+
+So a resolution change fails outright. Measured on a Raspberry Pi 5 with
+WLR_DRM_FORCE_LIBLIFTOFF=1: 3840x2160 -> 1920x1080 fails every time, with
+"Failed to scan-out cursor plane" as the only clue and "failed to apply
+configuration" reaching whoever asked. The same transition succeeds with
+libliftoff off, and on the atomic interface.
+---
+ backend/drm/libliftoff.c | 8 +++++++-
+ 1 file changed, 7 insertions(+), 1 deletion(-)
+
+diff --git a/backend/drm/libliftoff.c b/backend/drm/libliftoff.c
+index def4968..4b26d5a 100644
+--- a/backend/drm/libliftoff.c
++++ b/backend/drm/libliftoff.c
+@@ -558,7 +558,13 @@ static bool commit(struct wlr_drm_backend *drm,
+ 			goto out;
+ 		}
+ 
+-		if (crtc->cursor &&
++		/*
++		 * Not on a modeset: the primary buffer is the empty one attached for it,
++		 * the allocation describes a configuration that is about to change, and
++		 * the cursor is re-evaluated on the first real frame. Refusing here fails
++		 * the mode change itself.
++		 */
++		if (!state->modeset && crtc->cursor &&
+ 				liftoff_layer_needs_composition(crtc->cursor->liftoff_layer)) {
+ 			wlr_drm_conn_log(conn, WLR_DEBUG, "Failed to scan-out cursor plane");
+ 			goto out;
+-- 
+2.47.3
+
