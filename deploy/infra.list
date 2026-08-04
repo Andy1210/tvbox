@@ -28,7 +28,7 @@ scripts/install-libcec8.sh
 # it applies, and the session wrapper that runs whichever compositor is installed.
 # Patch basenames carry their own ordering - they land flat next to the script.
 scripts/install-labwc-planes.sh
-scripts/patches/wlroots-0001-render-alpha-less-ycbcr-formats-are-opaque.patch
+scripts/patches/wlroots-0001-render-p030-is-opaque.patch
 scripts/patches/wlroots-0002-drm-colour-props-on-the-liftoff-interface.patch
 scripts/patches/wlroots-0003-backend-publish-output-layer-support.patch
 scripts/patches/wlroots-0004-scene-offload-the-top-surface-to-an-output-layer.patch

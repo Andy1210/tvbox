@@ -46,6 +46,29 @@ So the deadline is known upstream and still unfixed. Our patch is the fix, and
 
 ## Issue 1 — the YCbCr opacity bug
 
+> **Filed as [issue 4112][i4112] and answered, and the answer changed our patch.**
+> emersion rejected the invariant proposed below: stating it as "YCbCr formats are
+> opaque unless they are one of the six that carry alpha" means a YUV format the
+> kernel adds LATER, with alpha, reads as opaque and has its alpha stripped.
+> `is_opaque` is only an optimisation, so an unknown format must read as
+> translucent - a missed optimisation is the correct failure. `wlroots-0001` is
+> therefore one line now: add `DRM_FORMAT_P030` to the existing allowlist, which
+> is the format this hardware actually produces.
+>
+> He pointed at **[!5271][mr5271]** (generate the format tables from go-kdfs) as
+> the general fix, and it does widen the opaque list from 4 YCbCr formats to about 20. **It does not close this issue as it stands**, measured against the MR's
+> current diff on 2026-08-04: the generated `pixel_format_is_opaque()` lists 64
+> formats and **P030 is not among them**, so `pixel_format_has_alpha(P030)` still
+> answers true. **P010 is missing from it too**, and that one IS on master's
+> hand-written list today, so the MR would turn it from opaque into
+> possibly-translucent. The P0xx multi-plane 10-bit formats look like they are not
+> coming through from the data source. Before dropping `wlroots-0001` after that
+> MR lands, check the one thing that matters: does the merged tree answer true for
+> `pixel_format_is_opaque(DRM_FORMAT_P030)`.
+
+[i4112]: https://gitlab.freedesktop.org/wlroots/wlroots/-/issues/4112
+[mr5271]: https://gitlab.freedesktop.org/wlroots/wlroots/-/merge_requests/5271
+
 Nothing exists for this. Searched: `pixel_format_has_alpha`, `P030 opaque`,
 `opaque yuv`, `nv12 opaque` — no hits.
 
@@ -393,7 +416,7 @@ written, so `git am` them onto a branch per MR and push.
 
 | Branch                 | Patch                                                                 | Links to                   | Standing                                                                                                                                   |
 | ---------------------- | --------------------------------------------------------------------- | -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
-| `ycbcr-opaque`         | `wlroots-0001-render-alpha-less-ycbcr-formats-are-opaque.patch`       | `Closes` issue 1           | Ready. Reviewed clean, no dependencies.                                                                                                    |
+| `ycbcr-opaque`         | `wlroots-0001-render-p030-is-opaque.patch`                            | `Closes` issue 1           | Answered upstream: the general fix is !5271, our one-line P030 addition stands until it lands WITH P030 on the list. See issue 1 above.    |
 | `liftoff-colour-props` | `wlroots-0002-drm-colour-props-on-the-liftoff-interface.patch`        | `Closes` issue 2           | Ready. Must stay ONE commit — the guard narrowing without the property hunk turns a clean refusal into silently ignored colour management. |
 | `liftoff-deadline`     | `wlroots-0004-drm-give-libliftoff-a-deadline-it-can-finish-in.patch`  | References #3794 and !4348 | Ready, and quote !4348's description in the MR: upstream documented the problem and never fixed it.                                        |
 | —                      | `wlroots-0003` (scene offload) and `wlroots-0005` (composition layer) | #3794 / !4348              | **Hold.** Send the comment above first. These two only make sense together, and the scene half overlaps !4348 by design.                   |

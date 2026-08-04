@@ -9,10 +9,13 @@
 # with alpha blending - but nothing in the wlroots stack asks it to. Eight patches
 # do, and they are not in any release yet:
 #
-#   wlroots-0001  wlroots decides opacity from an allowlist of formats that named
+#   wlroots-0001  wlroots decides opacity from an allowlist of formats that names
 #                 four of the 58 YCbCr formats it knows. P030 - what this hardware
-#                 decodes 10-bit video into - was not one of them, so a video
-#                 buffer read as possibly-translucent and could never scan out.
+#                 decodes 10-bit video into - is not one of them, so a video
+#                 buffer reads as possibly-translucent and can never scan out.
+#                 Adds that one format rather than inverting the rule: an unknown
+#                 format must read as translucent, or a YUV format with alpha
+#                 added later would silently have its alpha stripped.
 #   wlroots-0002  the libliftoff interface never set the colour-management
 #                 connector properties, and the guard that noticed rejected EVERY
 #                 commit carrying an image description. This is the one that made
