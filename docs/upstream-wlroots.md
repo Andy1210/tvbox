@@ -400,10 +400,22 @@ written, so `git am` them onto a branch per MR and push.
 
 `labwc-0001` went to <https://github.com/labwc/labwc> as an ordinary pull
 request — **[labwc#3685](https://github.com/labwc/labwc/pull/3685)**, opened
-2026-08-03, against `master` rather than the 0.20.0 tag (it applies cleanly to
-both). It is independent of everything above and stands on its own: a failed
-render-format probe leaving the format at the last candidate it tried is a bug
-with or without layers.
+2026-08-03 against `master`. It is independent of everything above and stands on
+its own: a failed render-format probe leaving the format at the last candidate it
+tried is a bug with or without layers.
+
+**It shrank in review, and the reason is worth keeping.** The first version also
+described the output's layers in every state labwc builds itself. johanmalm asked
+what sway does differently, since sway carries no such array — and the answer is
+that sway builds a fresh `wlr_output_state` per frame and probes formats on a
+separate config state, while labwc reuses one long-lived `output->pending` for
+both, so in labwc a state can still carry `WLR_OUTPUT_STATE_LAYERS` when a probe
+re-tests it. Chasing that down, the layer half turned out to be compensating for
+an earlier iteration of `wlroots-0004`, which kept its output layer alive between
+episodes where it now destroys it. Rebuilt without the layer half and measured:
+the offload still engages, three planes in use, no `All output layers must be
+specified`, no failed commits, 0 dropped frames at 2160p. So the patch is two
+lines and a comment now.
 
 ## The regression that was open, and what it turned out to be
 

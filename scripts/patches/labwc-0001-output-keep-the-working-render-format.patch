@@ -1,0 +1,53 @@
+From d8df8b99c184548b8b54a5158404410d8efab897 Mon Sep 17 00:00:00 2001
+From: Andy1210 <andy1210@gmail.com>
+Date: Tue, 4 Aug 2026 07:56:36 +0200
+Subject: [PATCH] output: keep the working render format when every candidate
+ fails
+
+output_set_render_format() walks its candidate list and leaves whichever
+it tried last on output->pending when none of them passes. From then on no
+swapchain can be created for that output, and every frame fails with
+"Failed to pick primary buffer format" - naming a colour format the
+renderer never supported, which is a long way from whatever actually made
+the probe fail.
+
+Remember the format that was working before the probe started, and put it
+back when the probe finds nothing.
+
+Found while running labwc against a wlroots patched to hand a fullscreen
+video's overlay surface to an output layer, which made a probe fail on a
+box where one never had before. The bug is not layer-specific though: any
+cause of a failed probe reaches it.
+---
+ src/output.c | 9 +++++++++
+ 1 file changed, 9 insertions(+)
+
+diff --git a/src/output.c b/src/output.c
+index 2dc9061e..56713985 100644
+--- a/src/output.c
++++ b/src/output.c
+@@ -87,12 +87,21 @@ uint32_t output_formats_10bit[] = {
+ static bool
+ output_set_render_format(struct output *output, uint32_t candidates[], size_t count)
+ {
++	uint32_t working = output->wlr_output->render_format;
+ 	for (size_t i = 0; i < count; i++) {
+ 		wlr_output_state_set_render_format(&output->pending, candidates[i]);
+ 		if (wlr_output_test_state(output->wlr_output, &output->pending)) {
+ 			return true;
+ 		}
+ 	}
++	/*
++	 * Every candidate failed. Leaving the last one on the pending state
++	 * means no swapchain can be created for this output at all, and every
++	 * frame after this fails with "Failed to pick primary buffer format" -
++	 * blaming a format the renderer never supported, rather than whatever
++	 * made the probe fail. Put back the one that was working.
++	 */
++	wlr_output_state_set_render_format(&output->pending, working);
+ 	return false;
+ }
+ 
+-- 
+2.43.0
+
