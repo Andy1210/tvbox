@@ -83,6 +83,12 @@ flatpak remote-add --user --if-not-exists flathub https://flathub.org/repo/flath
 
 echo "==> Electron (npm install)"
 ( cd ~/.tvbox/shell && npm install --no-audit --no-fund >/dev/null 2>&1 ) && ok "electron deps" || bad "npm install (shell) failed"
+# Electron 43 has no postinstall hook - the binary download moved to its own
+# `install-electron` bin - so npm alone leaves node_modules/electron without a
+# dist/, and the shell has nothing to run. Idempotent: it exits 0 when the
+# binary is already there, so this costs nothing on a repeat deploy.
+( cd ~/.tvbox/shell && node node_modules/electron/install.js >/dev/null 2>&1 ) \
+  && ok "electron binary" || bad "electron binary download failed"
 chmod +x ~/.tvbox/run-shell.sh ~/.tvbox/shell/audio-default.sh ~/.tvbox/tvbox 2>/dev/null || true
 
 echo "==> dev deploy wins over OTA (drop the \`current\` symlink + update markers)"

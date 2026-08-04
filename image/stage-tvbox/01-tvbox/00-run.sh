@@ -607,6 +607,11 @@ passwd -l ${FIRST_USER_NAME}
 # tooling - the shell itself runs on the Node that Electron BUNDLES (22.x), and
 # only the tvbox CLI (shell/cli.js, "#!/usr/bin/env node") uses the system one.
 su - ${FIRST_USER_NAME} -c 'cd ~/.tvbox/shell && npm ci --no-audit --no-fund'
+# Electron 43 has no postinstall hook any more - the binary download moved to
+# its own `install-electron` bin - so npm ci alone leaves node_modules/electron
+# with no dist/, and the flashed box has nothing to run. This IS the ~200 MB
+# download; it exits 0 when the binary is already in place.
+su - ${FIRST_USER_NAME} -c 'cd ~/.tvbox/shell && node node_modules/electron/install.js'
 
 # tvbox CLI on PATH
 su - ${FIRST_USER_NAME} -c 'mkdir -p ~/.local/bin && ln -sf ~/.tvbox/tvbox ~/.local/bin/tvbox'

@@ -33,8 +33,13 @@
 set -eu
 
 MIN_ROOT_GB="${MIN_ROOT_GB:-3}"    # the rootfs partition itself
-MIN_FREE_MB="${MIN_FREE_MB:-600}"  # usable space on a freshly flashed box, BEFORE its
-                                   # first-boot expand: the 174 MB regression lived here
+MIN_FREE_MB="${MIN_FREE_MB:-350}"  # usable space on a freshly flashed box, BEFORE its
+                                   # first-boot expand: the 174 MB regression lived here.
+                                   # It cannot be an arbitrary number: pi-gen sizes the
+                                   # rootfs as used + (0.2 * used + 200 MB), so the free
+                                   # space GROWS with the image and this floor only has to
+                                   # catch a margin that went missing. The real headroom
+                                   # comes from tvbox-expand-rootfs on first boot.
 BOOT_TIMEOUT="${BOOT_TIMEOUT:-420}" # arm64 userspace under emulation is slow
 # ...and a hard deadline on top of it: the injected unit powers the container off,
 # but a container process that will not terminate would otherwise outlive the
@@ -271,7 +276,7 @@ for f in \
   etc/systemd/system/tvbox-diag.service \
   etc/systemd/system/tvbox-safemode.service \
   home/tv/.tvbox/shell/main.js \
-  home/tv/.tvbox/shell/run-shell.sh \
+  home/tv/.tvbox/run-shell.sh \
   home/tv/.tvbox/shell/launcher-dist/index.html; do
   check "shipped: /$f" test -s "$ROOTMNT/$f"
 done
