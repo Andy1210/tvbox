@@ -625,11 +625,11 @@ anyway:
 
 **Measured again with both fixes installed**, same title, same method:
 
-| | before | after |
-| --- | --- | --- |
-| composited window at the start of the film | 4.67 s | **0.08 s** |
-| samples over 1 ms/s of GPU render time | 25 | **2** |
-| dropped / delayed / decoder-dropped frames | 0 / 0 / 0 | 0 / 0 / 0 |
+|                                            | before    | after      |
+| ------------------------------------------ | --------- | ---------- |
+| composited window at the start of the film | 4.67 s    | **0.08 s** |
+| samples over 1 ms/s of GPU render time     | 25        | **2**      |
+| dropped / delayed / decoder-dropped frames | 0 / 0 / 0 | 0 / 0 / 0  |
 
 The two frames that remain are the modeset itself. The log confirms both halves
 independently: no `failed to apply the HDR state` line and no
