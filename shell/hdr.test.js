@@ -3,6 +3,7 @@ const assert = require("node:assert");
 const fs = require("fs");
 const os = require("os");
 const path = require("path");
+const net = require("net");
 const hdr = require("./hdr");
 
 // A CTA-861 extension carrying the two blocks a set needs to be asked for PQ.
@@ -63,16 +64,73 @@ test("wants: PQ content on the plane path, on a capable panel", () => {
   assert.strictEqual(hdr.wants(null, true, true), false);
 });
 
-test("writeConfig writes the toggle and reports whether anything changed", () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "tvbox-hdr-"));
-  const file = path.join(dir, "labwc", "rc.xml");
-  assert.strictEqual(hdr.writeConfig(true, file), true);
-  assert.match(fs.readFileSync(file, "utf8"), /<hdr>yes<\/hdr>/);
-  // Same value again: nothing written, so nothing downstream is asked to reload.
-  assert.strictEqual(hdr.writeConfig(true, file), false);
-  assert.strictEqual(hdr.writeConfig(false, file), true);
-  assert.match(fs.readFileSync(file, "utf8"), /<hdr>no<\/hdr>/);
+test("claim asks the compositor for the output's colour space", async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "tvbox-hdr-test-"));
+  const socketPath = path.join(dir, "tvbox-wc.sock");
+  process.env.TVBOX_WC_SOCKET = socketPath;
+  for (const mod of ["./compositor", "./hdr"]) delete require.cache[require.resolve(mod)];
+  const hdrLive = require("./hdr");
+
+  const seen = [];
+  const server = net.createServer((connection) => {
+    connection.on("data", (chunk) => {
+      const req = JSON.parse(String(chunk).trim());
+      seen.push(req);
+      const ok =
+        req.request === "get_outputs"
+          ? { outputs: [{ name: "HDMIA-1", modes: [], connected: true, hdr: { supported: true, on: false } }] }
+          : null;
+      connection.write(JSON.stringify({ id: req.id, ok }) + "\n");
+    });
+  });
+  await new Promise((resolve) => server.listen(socketPath, resolve));
+
+  const applied = await new Promise((resolve) => hdrLive.claim(true, (ok) => resolve(ok)));
+  assert.equal(applied, true);
+  assert.deepEqual(
+    seen.map((r) => r.request),
+    ["get_outputs", "set_hdr"],
+  );
+  assert.equal(seen[1].output, "HDMIA-1");
+  assert.equal(seen[1].on, true);
+
+  server.close();
   fs.rmSync(dir, { recursive: true, force: true });
+  delete process.env.TVBOX_WC_SOCKET;
+  for (const mod of ["./compositor", "./hdr"]) delete require.cache[require.resolve(mod)];
+});
+
+test("a connector with no HDR properties is refused, not silently claimed", async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "tvbox-hdr-test-"));
+  const socketPath = path.join(dir, "tvbox-wc.sock");
+  process.env.TVBOX_WC_SOCKET = socketPath;
+  for (const mod of ["./compositor", "./hdr"]) delete require.cache[require.resolve(mod)];
+  const hdrLive = require("./hdr");
+
+  let setHdrCalls = 0;
+  const server = net.createServer((connection) => {
+    connection.on("data", (chunk) => {
+      const req = JSON.parse(String(chunk).trim());
+      if (req.request === "set_hdr") setHdrCalls++;
+      connection.write(
+        JSON.stringify({
+          id: req.id,
+          ok: { outputs: [{ name: "HDMIA-1", modes: [], connected: true, hdr: { supported: false, on: false } }] },
+        }) + "\n",
+      );
+    });
+  });
+  await new Promise((resolve) => server.listen(socketPath, resolve));
+
+  const applied = await new Promise((resolve) => hdrLive.claim(true, (ok, err) => resolve({ ok, err })));
+  assert.equal(applied.ok, false);
+  assert.match(applied.err, /HDR/);
+  assert.equal(setHdrCalls, 0);
+
+  server.close();
+  fs.rmSync(dir, { recursive: true, force: true });
+  delete process.env.TVBOX_WC_SOCKET;
+  for (const mod of ["./compositor", "./hdr"]) delete require.cache[require.resolve(mod)];
 });
 
 test("gammaPending waits only where the colour space matters", () => {
