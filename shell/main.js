@@ -188,7 +188,7 @@ function boxFree() {
   return boxIdle() && installing.size === 0 && !bundleRefreshBusy && !appsAutoBusy && !reconcile.busy();
 }
 // Restart the shell in-place: quit cleanly (localStorage flush, plugin stop);
-// the labwc respawn loop relaunches run-shell.sh, which follows the `current` symlink.
+// the session's respawn loop relaunches run-shell.sh, which follows the `current` symlink.
 function restartShell(why) {
   console.log("[main] restarting shell:", why || "");
   app.quit();
@@ -1464,12 +1464,12 @@ let panelResolution = null;
 let panelHdr = false; // the panel accepts BT2020 + PQ (EDID, read once at startup)
 const dmode = displaymode.create({
   getModes: (cb) =>
-    display.list({ ...process.env, ...WL_ENV }, (info) => {
+    display.list((info) => {
       const panel = display.panelResolution(info && info.modes);
       if (panel) panelResolution = panel;
       cb(info);
     }),
-  applyMode: (output, mode, cb) => display.apply({ ...process.env, ...WL_ENV }, output, mode, cb),
+  applyMode: (output, mode, cb) => display.apply(output, mode, cb),
   log: (m) => console.log("[display]", m),
 });
 const MPV_CLAIM = "shell:mpv"; // claim id for the shell's own player
@@ -1478,7 +1478,7 @@ const displayClaiming = new Set(); // app ids with a claim in flight (one at a t
 
 // A TV power cycle re-adds the output at the EDID PREFERRED mode (4K on a 4K set),
 // undoing whatever we chose, so re-assert on every output change. The event
-// payload is stale while labwc settles: debounce, then let the service re-read
+// payload is stale while the compositor settles: debounce, then let the service re-read
 // the live mode - that comparison also stops our own apply from re-triggering us.
 function watchDisplayMode() {
   let timer = null;
@@ -1702,7 +1702,7 @@ function serve() {
       // Read-only: what the output is at now, what the UI mode should be, and who
       // (if anyone) currently holds a video claim. Resolution is automatic, so
       // there is nothing to pick - the only action is /display/refresh below.
-      display.list({ ...process.env, ...WL_ENV }, (info) => {
+      display.list((info) => {
         const cur = info && info.modes.find((m) => m.current);
         jsonRes(res, {
           output: info ? info.output : "",
@@ -1864,7 +1864,7 @@ function serve() {
     if (p === "/") p = "/" + entry;
     serveStatic(res, root, p, path.join(root, entry));
   });
-  // A restart races the dying instance for the port (the labwc respawn loop
+  // A restart races the dying instance for the port (the session's respawn loop
   // restarts us within ~1s; the old process may not have released :PORT yet). Without a handler
   // EADDRINUSE is an uncaught exception and the shell limps on WITHOUT its
   // server (black launcher, dead API) - so retry until the port frees up.
@@ -2204,13 +2204,10 @@ function adaptMpvMode(seq, done) {
       // the same paused window as the mode switch, before the first frame.
       mpvCmd({ command: ["set_property", "vo", videoout.ZERO_COPY_VO] });
     }
-    // And the output's colour space, before the claim below: labwc re-reads the
-    // config on SIGHUP but only an output reconfiguration puts it on the
-    // connector, and the mode claim IS that reconfiguration.
-    // Wait for the signal to be delivered before the mode change: labwc applies
-    // the colour space when it reconfigures, and the mode change is the next
-    // reconfiguration. The caller unpauses in done(), so both land before the
-    // first frame.
+    // And the output's colour space, before the claim below. Order matters for a
+    // reason that outlives any one compositor: the colour space covers the whole
+    // output, so it has to be in place before the film's first frame reaches a
+    // plane, and the caller unpauses in done().
     setHdr(hdrout.wants(content, zeroCopy, panelHdr), () => {
       if (!(content.fps > 0)) {
         console.log("[player] no container-fps - leaving the display mode alone");
@@ -2267,7 +2264,7 @@ function adaptMpvMode(seq, done) {
 }
 
 // Paused-start handshake: switch the mode, then play. The 6s failsafe is
-// load-bearing - if wlr-randr wedges or the claim never answers, the film must
+// load-bearing - if the compositor wedges or the claim never answers, the film must
 // still start. (launchMpv arms a second one for "the observer never connected".)
 function startMpvPlayback(seq) {
   if (mpvStartedSeq === seq) return; // exactly one handshake per launch
@@ -2541,8 +2538,9 @@ function foregroundApp(id) {
 // raiseWindow() stands down until the app exits.
 //
 // The hide is DELAYED, not immediate: the app needs a couple of seconds to map its
-// window, and hiding first would show the bare desktop in the gap. A freshly mapped
-// toplevel stacks above ours on labwc, so the launcher can stay up until then.
+// window, and hiding first would leave the screen black in the gap. The compositor
+// keeps our windows above every other client, so what covers the gap is the
+// launcher itself, until the delay is up.
 const NATIVE_HIDE_DELAY_MS = 2500;
 function openNativeApp(m, extraArgs) {
   const deps = apps.appDeps(m);
@@ -4029,7 +4027,7 @@ app.whenReady().then(async () => {
   // an app's preload reads the panel resolution exactly once, when its window is
   // created. Losing that race means the app spends its whole life believing the
   // screen is whatever the UI happens to be running at.
-  panelResolution = display.panelResolution((display.listSync({ ...process.env, ...WL_ENV }) || {}).modes);
+  panelResolution = display.panelResolution((display.listSync() || {}).modes);
   // Whether the set can be asked for PQ at all. Read from the EDID once: a TV
   // does not grow the capability while it is plugged in, and a box whose panel
   // cannot do it never touches the compositor's colour space.
