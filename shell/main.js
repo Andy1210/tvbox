@@ -2140,12 +2140,16 @@ function readVideoProps() {
 // trusts that pairing (scripts/patches/wlroots-0009), so releasing matters as much
 // as claiming - an SDR film left on a PQ output would lose the plane, and 4K with
 // it.
-function setHdr(on) {
+function setHdr(on, cb) {
+  const next = cb || (() => {});
   try {
-    if (hdrout.writeConfig(on)) hdrout.reload();
+    // Nothing to apply if the value did not change - and then nothing to wait for.
+    if (!hdrout.writeConfig(on)) return next();
+    return hdrout.reload(next);
   } catch (e) {
     console.warn("[player] hdr toggle failed:", (e && e.message) || e);
   }
+  next();
 }
 
 // Match the output to the video, then hand control back to the caller (which
@@ -2165,19 +2169,24 @@ function adaptMpvMode(seq, done) {
     // And the output's colour space, before the claim below: labwc re-reads the
     // config on SIGHUP but only an output reconfiguration puts it on the
     // connector, and the mode claim IS that reconfiguration.
-    setHdr(hdrout.wants(content, zeroCopy, panelHdr));
-    if (!(content.fps > 0)) {
-      console.log("[player] no container-fps - leaving the display mode alone");
-      return done();
-    }
-    dmode.claim(MPV_CLAIM, content, (r) => {
-      // Nothing on this panel divides into the content's rate (a 60Hz-only set and
-      // a 24p film): resample instead of juddering. This is what the old manual
-      // "match content framerate" toggle did, decided per file now.
-      if (r && r.reason === "no-matching-mode") {
-        mpvCmd({ command: ["set_property", "video-sync", "display-resample"] });
+    // Wait for the signal to be delivered before the mode change: labwc applies
+    // the colour space when it reconfigures, and the mode change is the next
+    // reconfiguration. The caller unpauses in done(), so both land before the
+    // first frame.
+    setHdr(hdrout.wants(content, zeroCopy, panelHdr), () => {
+      if (!(content.fps > 0)) {
+        console.log("[player] no container-fps - leaving the display mode alone");
+        return done();
       }
-      done();
+      dmode.claim(MPV_CLAIM, content, (r) => {
+        // Nothing on this panel divides into the content's rate (a 60Hz-only set and
+        // a 24p film): resample instead of juddering. This is what the old manual
+        // "match content framerate" toggle did, decided per file now.
+        if (r && r.reason === "no-matching-mode") {
+          mpvCmd({ command: ["set_property", "video-sync", "display-resample"] });
+        }
+        done();
+      });
     });
   };
   // Nothing in this chain rejects today (mpvQuery resolves null on every failure),

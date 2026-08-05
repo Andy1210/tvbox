@@ -345,7 +345,12 @@ touched one file, `npx prettier --write <file>` is enough; when in doubt run
   into a 1080p transcode. Which path the client picks varies per start, which is
   what made this look like a race in our own code. Fix is one server setting:
   Settings -> Network -> **LAN Networks = `192.168.1.0/24`** (`LanNetworksBandwidth`
-  over the API), after which a hairpinned request is local too. Diagnose from the
+  over the API), which is right for what was MEASURED here - the request arrived
+  from `192.168.1.1`, the router's LAN address, and that subnet is now declared
+  local. Not yet confirmed against a recurrence: the client has taken the LAN path
+  on every start since. If a request ever shows up from the actual public IP,
+  `LAN Networks` cannot cover it and the setting to reach for is
+  **Treat WAN IP As LAN Bandwidth**. Diagnose from the
   PMS log with the token: `curl "$PMS/diagnostics/logs?X-Plex-Token=..."` and look
   for `location=` and `Reached Decision` next to the box's IP - "App cannot direct
   play this item" is the client's own profile refusing, not the server's.
