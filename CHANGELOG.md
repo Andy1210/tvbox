@@ -5,6 +5,55 @@ updates). `scripts/make-release.sh` lifts the current version's `hu`/`en`
 blocks into the OTA feed's `notes` - keep both languages, keep it short, and
 write for the person on the couch (what changes for THEM), not for developers.
 
+## 1.24.5
+
+### hu
+
+- **A HDR filmek végre HDR-ben szólnak.** Ha a tévé tudja és a film is HDR, a box
+  átkapcsolja a tévét HDR módba a lejátszás idejére, utána visszaáll. A kép nem
+  lapos többé, és a 4K ugyanolyan sima marad, mint eddig.
+
+### en
+
+- **HDR films finally play in HDR.** When the TV can do it and the film is HDR,
+  the box switches the set into HDR mode for the film and back afterwards. No more
+  flat picture, and 4K stays as smooth as it was.
+
+### notes
+
+Not release notes for the TV - for whoever runs the boxes:
+
+The output's colour space is claimed for the film and released after it, because
+it covers the WHOLE output and the compositor's renderer cannot convert anything
+into it. Neither "always on" nor "always off" works: an SDR film on a PQ output
+and a PQ film on an SDR output both fail wlroots' scan-out check, and 4K falls
+back to compositing (~17 dropped frames a second).
+
+Three more patches in `scripts/patches/` carry it. `wlroots-0008` reports the
+output colour transform, which is what a compositor checks before it will drive an
+HDR output - and deliberately NOT the input one, which advertises
+`wp_color_manager_v1` and made the Chromium UI render wider than anything converts
+back (a visibly washed out Home screen). `wlroots-0009` stops direct scan-out from
+comparing colour spaces, because without that protocol every buffer claims sRGB -
+including a PQ film. `labwc-0002` applies `<hdr>` on reconfigure: SIGHUP alone
+re-reads the config and never touches the connector, so nothing outside the
+compositor could drive the colour space at all.
+
+`shell/hdr.js` decides it: the panel's capability from the EDID once at startup,
+the content's from mpv's `video-params/gamma`, and only for PQ that also takes the
+zero-copy path - below that mpv tone-maps the frame itself and a PQ output would
+map it twice. `video-params/gamma` has the same late-property race as
+`hwdec-current`, which is why the settle loop now carries it and waits for it.
+
+Measured on tvbox-livingroom with a 4K DV/HDR remux: connector `Default` at rest,
+`BT2020_RGB` with the film's P030 buffer on the primary plane during playback, 0
+dropped frames, and `Default` again after. Boxes that never ran provision keep
+compositing as before - the patches need the root build.
+
+Unrelated but worth knowing: Plex's "random" 1080p transcodes were the server
+classifying the box as remote when it connected through the public address.
+CLAUDE.md carries the diagnosis and the one server setting that fixes it.
+
 ## 1.24.4
 
 ### hu
