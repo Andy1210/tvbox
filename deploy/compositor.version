@@ -1,0 +1,11 @@
+# The tvbox-wc release the box runs, verified by sha256.
+#
+# Sourced by install-compositor.sh. With TAG empty it builds from a source tree on
+# the box instead, which is the development path and the only one until the first
+# release is cut.
+#
+# To pin a release:
+#   TAG=v0.1.0
+#   SHA256=<sha256 of tvbox-wc-aarch64 from that release>
+TAG=""
+SHA256=""

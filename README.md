@@ -78,8 +78,11 @@ per app; the shell launches each one, either as a local bundle composited over
 ## Hardware and OS
 
 - **Raspberry Pi 5** (aarch64). A Pi 4 may work but is untested.
-- **Raspberry Pi OS (Debian trixie)** with a **labwc/Wayland** session and
-  autologin. The shell is a Wayland client and expects a compositor at login.
+- **Raspberry Pi OS (Debian trixie)**. The box runs its own Wayland compositor,
+  [tvbox-wc](https://github.com/Andy1210/tvbox-wc), started by greetd at
+  autologin; the shell is one of its clients. The compositor exists because a
+  general one composites the whole screen into a single buffer, and at 4K a Pi 5
+  cannot afford that pass next to the player's own.
 - A TV with **HDMI-CEC** for the remote (LG SIMPLINK, Samsung Anynet+, Sony
   Bravia Sync, etc.). Enable it in the TV's settings.
 - **Optional: a Bluetooth or USB remote.** Any evdev remote works as a second
@@ -153,8 +156,9 @@ custom image, which is why the box ships its own boot-partition preseed.
 
 ### Option B: manual install onto Raspberry Pi OS (deploy.sh)
 
-On the Pi, once: flash **Raspberry Pi OS**, boot to a **labwc/Wayland desktop
-with autologin**, and make sure you can SSH in from your dev machine.
+On the Pi, once: flash **Raspberry Pi OS** (Lite is enough), make sure autologin
+is set up, and make sure you can SSH in from your dev machine. `provision.sh`
+installs the compositor and points greetd at it.
 
 From a checkout on your dev machine (needs Node + `rsync` + `ssh`):
 
@@ -171,7 +175,8 @@ From a checkout on your dev machine (needs Node + `rsync` + `ssh`):
   root-free. App-specific binaries and bundles are **not** preinstalled;
 - installs the **CEC to uinput** bridge as the `tvbox-cec` systemd **user**
   service (device access via the udev rule + groups, not root);
-- writes the **labwc autostart** so the Pi boots straight into the shell.
+- installs the **compositor** and the session script it starts, so the Pi boots
+  straight into the shell.
 
 After provision, nothing on the box runs as root: the shell, the CEC bridge,
 bundle installs (`flatpak --user`) and settings (audio, display, WiFi via a
@@ -485,13 +490,13 @@ tvbox/
   launcher/      React 10-foot HOME screen (built into the shell)
   cec/           HDMI-CEC to uinput remote bridge (tvbox-cec systemd service)
   remote/        BT/USB (evdev) to uinput bridge (tvbox-remote systemd service): per-device button remap
-  deploy/        one-shot provision + deploy script, labwc autostart
+  deploy/        one-shot provision + deploy script, the session it installs
   docs/          setup guides (Spotify, etc.) + screenshots
 ```
 
 ## Status
 
-Actively developed for a Raspberry Pi 5 + labwc/Wayland target. CEC behaviour
+Actively developed for a Raspberry Pi 5, on its own Wayland compositor. CEC behaviour
 and IPTV/codec tuning are TV- and provider-specific; the defaults here are
 chosen for broad compatibility (e.g. `mpv --vo=gpu --gpu-api=opengl`, software
 H.264 decode on the Pi 5, which has no H.264 hardware decoder). High-resolution

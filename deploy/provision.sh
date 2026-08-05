@@ -41,13 +41,13 @@ echo "==> apt baseline"
 # diagnosable. -qq already keeps normal output quiet.
 apt-get update -qq || warn "apt update failed (stale package lists?)"
 # Hard deps: the box is non-functional without these (Electron, remote, audio,
-# focus). wlr-randr backs the Settings resolution/refresh picker (shell/display.js);
-# wlrctl is the separate wlroots control tool - they are NOT the same binary.
+# the compositor). The lib* ones are what tvbox-wc links against; on a Lite image
+# nothing else pulls them in, and the box has no session without them.
 # python3-venv + pip: the Fire TV remote IR programmer (Settings -> Peripherals)
 # installs bleak into a user-space venv on demand; without these that one
 # feature can't set up (everything else is unaffected). dbus-fast ships an
 # aarch64 wheel, so no compiler is pulled in by it.
-HARD="cec-utils python3 python3-evdev python3-venv python3-pip wlrctl wlr-randr pipewire pipewire-pulse wireplumber nodejs npm"
+HARD="cec-utils python3 python3-evdev python3-venv python3-pip pipewire pipewire-pulse wireplumber nodejs npm libgbm1 libseat1 libinput10 libxkbcommon0 libwayland-server0 libegl1 libgles2"
 apt-get install -y -qq $HARD && ok "core deps ($HARD)" || bad "core apt deps - install manually: $HARD"
 # Soft deps: on-demand app-install tooling (flatpak/curl/git) + output config.
 # gcc/libc6-dev: the CEC bridge compiles cec/cec_vendor_shim.c on the box (LG
@@ -57,12 +57,10 @@ apt-get install -y -qq $HARD && ok "core deps ($HARD)" || bad "core apt deps - i
 # (Lite-based) box has NO system sans font, so Chromium renders blank/tofu -
 # one ubiquitous Latin font makes the whole UI legible (kept in sync with the
 # image's 00-packages).
-# grim: Wayland screenshot tool - not used by the box itself, but lets a dev
-# capture the running UI over ssh (`grim ~/shot.png`) to see what's on screen.
 # iw: turns WiFi power saving off on the RUNNING radio, so the drop-in below
 # doesn't have to wait for a reconnect. Soft on purpose - without it the setting
 # still lands, just at the next boot instead of immediately.
-SOFT="jq flatpak kanshi curl git unzip ca-certificates gcc libc6-dev swaybg fonts-dejavu-core grim iw"
+SOFT="jq flatpak curl git unzip ca-certificates gcc libc6-dev fonts-dejavu-core iw"
 apt-get install -y -qq $SOFT && ok "extra deps ($SOFT)" || warn "some extra deps missing: $SOFT"
 
 # Shared media stack in the core (kept in sync with image/stage-tvbox): mpv is
@@ -91,15 +89,15 @@ else
 fi
 
 # Always give the compositor an output, even with the TV off or unplugged.
-# labwc (0.9.8/wlroots 0.19) BUSY-LOOPS with zero outputs: a session started with
-# no sink measured ~65% of a core in labwc alone, ~200% once Electron joined in
+# A compositor with zero outputs has nothing to pace it, and Electron then spins
+# against it: measured ~65% of a core in the compositor alone, ~200% once Electron
 # (~35k Wayland roundtrips/s on its main thread) - which is where a box plugged
 # in while the TV was off sat until someone turned the TV on. Recovery on the
 # TV coming back was clean, so this is purely about never being in that state.
 # `vc4.force_hotplug=1`, NOT `video=HDMI-A-1:e`: the latter is what stops vc4
 # feeding CEC its physical address on kernels 6.14-6.18 (sharp edge in CLAUDE.md).
 # Verified with this on: CEC keeps a real physical address and the remote works.
-echo "==> always-on HDMI output (vc4.force_hotplug=1 - labwc spins with no output)"
+echo "==> always-on HDMI output (vc4.force_hotplug=1 - the session spins with no output)"
 # KEEP IN SYNC with image/stage-tvbox/01-tvbox/00-run.sh, which does the same to
 # the image's cmdline.txt. Normalise EVERY occurrence, not just the first: a
 # cmdline carrying both `vc4.force_hotplug=1` and a later `=0` would otherwise
@@ -569,59 +567,47 @@ else
   ok "no sudo grant (set SUDO=true in the boot partition's tvbox.conf to enable)"
 fi
 
-# tvbox is a kiosk: the Electron shell owns the whole screen. The stock system
-# labwc session (/etc/xdg/labwc/autostart) launches the Pi desktop - the panel
-# (wf-panel-pi) and the file-manager that draws the wallpaper + desktop icons
-# (pcmanfm-pi), both under lwrespawn (so they respawn if merely killed). Those
-# flash behind the shell whenever it restarts (e.g. after an app install). Stop
-# them at the SOURCE: replace the system autostart so they never start. The tvbox
-# user autostart (~/.config/labwc/autostart) runs kanshi, audio, a solid-black
-# background (swaybg), and the shell; lxsession-xdg-autostart still runs session
-# agents. Idempotent; the original is backed up once.
-echo "==> kiosk session (no Pi desktop: panel / wallpaper / icons never start)"
-mkdir -p /etc/xdg/labwc
-if [ -f /etc/xdg/labwc/autostart ] && [ ! -f /etc/xdg/labwc/autostart.pre-tvbox ]; then
-  cp /etc/xdg/labwc/autostart /etc/xdg/labwc/autostart.pre-tvbox
-fi
-cat > /etc/xdg/labwc/autostart <<'LABWCSYS'
-# tvbox kiosk - the Pi desktop (panel + file-manager/wallpaper/desktop-icons) is
-# intentionally NOT started; the tvbox shell owns the screen. See the box user's
-# ~/.config/labwc/autostart (kanshi, audio, black background, the Electron shell).
-/usr/bin/lxsession-xdg-autostart
-LABWCSYS
-ok "kiosk labwc session (desktop chrome disabled)"
-
-# A compositor that can hand a fullscreen video to the display hardware instead of
-# compositing it - the difference between a 4K film playing under the app's UI and
-# one dropping most of its frames. Not a distro package: it is labwc + wlroots with
-# five patches (see scripts/install-labwc-planes.sh for what each one is for).
-#
-# Optional in both directions. The build is non-fatal, and the session wrapper runs
-# whichever compositor is actually installed, so a box that never gets this - an
-# OTA-only one, or one where the build fails - keeps working exactly as before.
-echo "==> compositor with display-plane offload (4K video under the app UI)"
-PLANES_SH="$HERE/install-labwc-planes.sh"
-if [ -f "$PLANES_SH" ]; then
-  sh "$PLANES_SH" && ok "labwc with plane offload" \
-    || warn "plane-offload build failed - the box keeps the distro labwc and composites as before"
+# The box's own compositor. A general one composites the whole screen into one
+# buffer, which at 4K is a GPU pass the Pi cannot afford next to the player's own;
+# tvbox-wc puts the film on a display plane and the shell's translucent UI on an
+# overlay above it, and does no per-frame GPU work while a film plays.
+echo "==> compositor (tvbox-wc)"
+if [ -f "$HERE/install-compositor.sh" ]; then
+  sh "$HERE/install-compositor.sh" && ok "tvbox-wc" \
+    || bad "compositor install failed - the box will have no session"
 else
-  warn "install-labwc-planes.sh missing - skipping (distro labwc, no plane offload)"
+  bad "install-compositor.sh missing - the box will have no session"
 fi
 
-# greetd starts the session through the wrapper rather than labwc directly, so a
-# patched compositor that will not come up costs one restart instead of the TV.
-if [ -f "$HERE/tvbox-compositor" ] && install -m 755 -o root -g root \
-    "$HERE/tvbox-compositor" /usr/local/bin/tvbox-compositor; then
-  # Any shape that names labwc, since the path has been written both ways; a
-  # config pointing at something else entirely is somebody's choice, not ours.
+# greetd starts the compositor, which starts the session. The wrapper is root-owned
+# so this config never has to change; what it runs (~/.tvbox/session.sh) is
+# user-space and therefore OTA-updatable.
+if [ -f "$HERE/tvbox-session" ] && install -m 755 -o root -g root \
+    "$HERE/tvbox-session" /usr/local/bin/tvbox-session; then
   if [ -f /etc/greetd/config.toml ]; then
-    sed -i -E 's|^command = "(/usr(/local)?/bin/)?labwc"|command = "tvbox-compositor"|' \
+    # Any shape a previous version wrote, since the path has been spelled several
+    # ways; a config pointing at something else entirely is somebody's choice.
+    sed -i -E 's@^command = ".*(labwc|tvbox-compositor|tvbox-wc).*"@command = "tvbox-wc -- /usr/local/bin/tvbox-session"@' \
       /etc/greetd/config.toml
   fi
-  ok "session wrapper (falls back to the distro labwc for the boot if the patched one fails)"
+  ok "session (greetd -> tvbox-wc -> tvbox-session)"
 else
-  warn "tvbox-compositor missing - greetd keeps starting labwc directly"
+  bad "tvbox-session missing - greetd has nothing to start"
 fi
+
+# Retire the labwc session this box may have been provisioned with. Its packages
+# stay (removing them could take Chromium's dependencies with them), but nothing
+# starts them any more, and the patched build under /usr/local would otherwise sit
+# ahead of the distro one on PATH forever.
+for stale in /usr/local/bin/labwc /usr/local/bin/tvbox-compositor \
+    /usr/local/share/tvbox/labwc-planes.stamp; do
+  [ -e "$stale" ] && rm -rf "$stale"
+done
+rm -rf /usr/local/lib/aarch64-linux-gnu/libwlroots* /etc/xdg/labwc/autostart
+if [ -f /etc/xdg/labwc/autostart.pre-tvbox ]; then
+  mv /etc/xdg/labwc/autostart.pre-tvbox /etc/xdg/labwc/autostart
+fi
+ok "labwc session retired"
 
 echo
 if [ "$FAIL" = 0 ]; then

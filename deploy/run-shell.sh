@@ -1,6 +1,6 @@
 #!/bin/sh
-# Launch the tvbox Electron shell inside the labwc Wayland session.
-# Invoked from ~/.config/labwc/autostart in a respawn loop (restarts on crash).
+# Launch the tvbox Electron shell inside the Wayland session.
+# Invoked from ~/.tvbox/session.sh in a respawn loop (restarts on crash).
 #
 # OTA health gate: updater.js installs a release under ~/.tvbox/versions/<v>,
 # flips the ~/.tvbox/current symlink and writes update/pending ("<prev> <new>").
