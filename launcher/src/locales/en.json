@@ -57,7 +57,15 @@
     "hiddenSsid": "Hidden network name (SSID)",
     "country": "Wi-Fi country",
     "countryHint": "Regulatory region, applies at the next restart.",
-    "countryAuto": "Default"
+    "countryAuto": "Default",
+    "radioTurnOff": "Turn the wifi radio off",
+    "radioTurnOn": "Turn the wifi radio on",
+    "radioOnHint": "On ethernet the wifi only disturbs Bluetooth",
+    "radioOffHint": "The radio is off",
+    "radioTurningOff": "Turning off…",
+    "radioTurningOn": "Turning on…",
+    "radioNeedsEthernet": "Needs a wired connection, or the box would leave the network",
+    "radioFailed": "Could not change the radio"
   },
   "display": {
     "title": "Display",

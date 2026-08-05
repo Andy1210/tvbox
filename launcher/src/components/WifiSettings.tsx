@@ -3,7 +3,7 @@ import { setFocus } from "@noriginmedia/norigin-spatial-navigation";
 import { useI18n } from "../lib/i18n";
 import { FocusButton } from "./FocusButton";
 import { Osk } from "./Osk";
-import { wifiStatus, wifiList, wifiConnect, wifiForget, type WifiNet, type WifiStatus } from "../lib/wifi";
+import { wifiStatus, wifiList, wifiConnect, wifiForget, wifiRadio, type WifiNet, type WifiStatus } from "../lib/wifi";
 import { FocusContext, useFocusable } from "@noriginmedia/norigin-spatial-navigation";
 import { useBackspace } from "../lib/useBackspace";
 import { useConfigStore } from "../stores/config";
@@ -201,6 +201,17 @@ export function WifiSettings() {
     );
   }
 
+  // Turning it off needs a wired carrier, and the shell is what decides that -
+  // asking here too would just be a second opinion that can go stale between the
+  // render and the press.
+  const toggleRadio = async () => {
+    const want = !status?.radio;
+    setMsg(want ? t("wifi.radioTurningOn") : t("wifi.radioTurningOff"));
+    const r = await wifiRadio(want);
+    setMsg(r.ok ? "" : r.error === "no-ethernet" ? t("wifi.radioNeedsEthernet") : t("wifi.radioFailed"));
+    refresh();
+  };
+
   const eth = status?.ethernet;
   return (
     <div className="mt-[3vh]">
@@ -222,6 +233,20 @@ export function WifiSettings() {
           <span className="text-fg-dim text-[1.8vh]">
             {t("wifi.ethConnected")}
             {eth.ip ? " · " + eth.ip : ""}
+          </span>
+        </div>
+      )}
+      {status?.radio !== null && status?.radio !== undefined && (
+        <div className="mb-[1.4vh] flex items-center gap-[1.5vw] text-[2.1vh]">
+          <FocusButton
+            focusKey="wifi-radio"
+            onEnter={toggleRadio}
+            className="px-[2vw] py-[1.2vh] rounded-[1vh] bg-white/5 text-[1.9vh] font-semibold"
+          >
+            {status.radio ? t("wifi.radioTurnOff") : t("wifi.radioTurnOn")}
+          </FocusButton>
+          <span className="text-fg-dim text-[1.8vh]">
+            {status.radio ? t("wifi.radioOnHint") : t("wifi.radioOffHint")}
           </span>
         </div>
       )}

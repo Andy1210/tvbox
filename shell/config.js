@@ -110,6 +110,9 @@ function publicConfig() {
       // root-side tvbox-wifi-country service (the shell has no root); "" = the
       // image default.
       country: (c.wifi && c.wifi.country) || "",
+      // On unless the owner turned it off: a box that never touched this setting
+      // must keep the radio it came up with.
+      radio: !(c.wifi && c.wifi.radio === false),
     },
     bluetooth: {
       // Turn L2CAP Enhanced Retransmission Mode off for ALL Bluetooth links.
@@ -432,6 +435,9 @@ function setWifi(wifi) {
   const c = load();
   const cc = wifi && typeof wifi.country === "string" ? wifi.country.toUpperCase() : undefined;
   if (cc !== undefined && /^([A-Z]{2})?$/.test(cc)) c.wifi = { ...c.wifi, country: cc };
+  // A REAL boolean only - this takes parsed JSON off the HTTP API, and coercing
+  // would let the string "false" turn the radio off (same rule as setBluetooth).
+  if (wifi && typeof wifi.radio === "boolean") c.wifi = { ...c.wifi, radio: wifi.radio };
   save(c);
 }
 function rawWifi() {
