@@ -65,11 +65,11 @@ function parseEdidHdr(edid) {
 // The connected panel's EDID, from the first DRM connector that has one. A box
 // with no EDID (a set that answered nothing) simply gets no HDR.
 function readPanelEdid(sysfs = "/sys/class/drm") {
-  let dirs = [];
+  let dirs;
   try {
     dirs = fs.readdirSync(sysfs).filter((d) => d.includes("-HDMI-") || d.includes("-DP-"));
   } catch (e) {
-    return null;
+    return null; // no DRM in sight (a container, a test host)
   }
   for (const d of dirs) {
     try {
