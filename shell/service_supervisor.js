@@ -6,6 +6,7 @@
 // exponential backoff and a failure ceiling for free. This replaces the
 // Spotify-specific librespot respawn logic that used to live in main.js.
 const { spawn } = require("child_process");
+const fs = require("fs");
 
 // One supervised service. `spec`:
 //   argv:        () => [bin, ...args]   recomputed on every (re)start, so runtime
@@ -16,16 +17,72 @@ const { spawn } = require("child_process");
 //                instead of fast - never fully stops (default 5)
 //   onGiveUp():  called once when the ceiling is hit (e.g. reset UI to idle)
 //   log(msg):    optional progress/diagnostic sink
+//
+// A spec that asks for a piped stderr gets it FORWARDED to log(): a service dies
+// for a reason, and an exit code on its own sends you looking for the wrong one -
+// a held port reads exactly like a missing binary. An unread pipe is also a hazard
+// of its own, since a child that fills it blocks on write.
+
+// How many times to clear a leftover instance before starting anyway and letting
+// the ordinary backoff report the failure. Bounded so a process that refuses to
+// die cannot hold the service in a reap loop.
+const MAX_REAP_PASSES = 3;
+
 class Supervisor {
   constructor() {
-    this.svcs = new Map(); // name -> { spec, proc, timer, fails }
+    this.svcs = new Map(); // name -> { spec, proc, timer, fails, reaps }
   }
 
   // Register + start a service (replacing any existing one of the same name).
   spawn(name, spec) {
     this.stop(name);
-    this.svcs.set(name, { spec, proc: null, timer: null, fails: 0 });
+    this.svcs.set(name, { spec, proc: null, timer: null, fails: 0, reaps: 0 });
     this._start(name);
+  }
+
+  // A supervised child outlives a parent that dies by signal - SIGKILL and a crash
+  // both skip the shutdown path - and the leftover keeps whatever the new instance
+  // needs: rclone holds its listening port, so every respawn exits at once. An
+  // identical command line that is not one of our own children is such a leftover;
+  // argv() is recomputed per start and deterministic, so this compares the whole
+  // argument list rather than matching a pattern. Signals only reach our own uid,
+  // which is the other half of why an exact match is safe.
+  _reapStale(name, argv) {
+    const s = this.svcs.get(name);
+    const mine = new Set();
+    for (const other of this.svcs.values()) {
+      if (other.proc && other.proc.pid) mine.add(other.proc.pid);
+    }
+    const want = argv.join("\0");
+    let entries;
+    try {
+      entries = fs.readdirSync("/proc");
+    } catch (e) {
+      return 0; // no procfs: nothing to inspect, nothing to reap
+    }
+    let reaped = 0;
+    for (const entry of entries) {
+      const pid = Number(entry);
+      if (!pid || pid === process.pid || mine.has(pid)) continue;
+      let cmdline;
+      try {
+        cmdline = fs.readFileSync("/proc/" + pid + "/cmdline", "utf8");
+      } catch (e) {
+        continue; // exited, or another user's process
+      }
+      // procfs terminates the last argument too, so drop that before comparing.
+      if (cmdline.replace(/\0$/, "") !== want) continue;
+      // Ask once, insist afterwards: a service that ignored SIGTERM would
+      // otherwise keep the port and the reason for the next pass would be the same.
+      const sig = s && s.reaps > 0 ? "SIGKILL" : "SIGTERM";
+      try {
+        process.kill(pid, sig);
+        reaped++;
+      } catch (e) {
+        /* exited between the read and the signal */
+      }
+    }
+    return reaped;
   }
 
   _start(name) {
@@ -33,19 +90,52 @@ class Supervisor {
     if (!s) return; // stopped in the meantime
     const spec = s.spec;
     const argv = spec.argv();
+    if (s.reaps < MAX_REAP_PASSES && this._reapStale(name, argv) > 0) {
+      s.reaps++;
+      if (spec.log) spec.log("cleared a leftover instance, starting in a moment");
+      // A beat, so the leftover releases its port or device before the new one
+      // asks for it. Not a failure, so the backoff counter is left alone.
+      s.timer = setTimeout(() => {
+        s.timer = null;
+        this._start(name);
+      }, 900);
+      return;
+    }
     const startedAt = Date.now();
     if (spec.log) spec.log("spawn: " + argv.join(" "));
     // child_process.spawn doesn't throw on ENOENT - it emits "error" async - but
     // guard against a malformed argv just in case.
     let proc;
     try {
-      proc = spawn(argv[0], argv.slice(1), { env: spec.env, stdio: spec.stdio || "ignore" });
+      // stderr is piped by DEFAULT, not on request: a supervised service that fails
+      // silently is the expensive kind, and a spec that wants it quiet can still say
+      // so explicitly.
+      proc = spawn(argv[0], argv.slice(1), {
+        env: spec.env,
+        stdio: spec.stdio || ["ignore", "ignore", "pipe"],
+      });
     } catch (e) {
       if (spec.log) spec.log("spawn threw: " + e.message);
       this._respawn(name, true);
       return;
     }
     s.proc = proc;
+    // Whatever the child says about its own failure. Read rather than left to fill:
+    // a pipe nobody drains stops the child at 64 KB.
+    if (spec.log && proc.stderr) {
+      let tail = "";
+      proc.stderr.setEncoding("utf8");
+      proc.stderr.on("data", (chunk) => {
+        tail += chunk;
+        const lines = tail.split("\n");
+        tail = lines.pop(); // keep the unterminated remainder for the next chunk
+        for (const line of lines) {
+          const msg = line.trim();
+          if (msg) spec.log(msg.slice(0, 300));
+        }
+      });
+      proc.stderr.on("error", () => {}); // the pipe closing with the child is normal
+    }
     proc.on("error", (e) => {
       if (spec.log) spec.log("spawn error: " + e.message);
       this._respawn(name, true);
@@ -66,6 +156,9 @@ class Supervisor {
     if (!s) return;
     s.proc = null;
     s.fails = rapid ? s.fails + 1 : 0;
+    // A service that ran long enough to count as healthy earns its reap passes
+    // back, so a leftover from a LATER crash is cleared too.
+    if (!rapid) s.reaps = 0;
     const ceiling = s.spec.ceiling || 5;
     if (s.fails === ceiling) {
       // crossing the ceiling: warn once + let the plugin reset its UI
@@ -121,6 +214,7 @@ class Supervisor {
       }
     }
     s.fails = 0;
+    s.reaps = 0;
     s.timer = setTimeout(() => {
       s.timer = null;
       this._start(name);
