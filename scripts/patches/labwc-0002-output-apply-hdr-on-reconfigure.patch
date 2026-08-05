@@ -1,4 +1,4 @@
-From cd99e7a35a06cda9affe9ccaed2d9da34e085e32 Mon Sep 17 00:00:00 2001
+From f55b46adec8d95299ac7f80fef13f2f43356a0d9 Mon Sep 17 00:00:00 2001
 From: Andy1210 <andy1210@gmail.com>
 Date: Wed, 5 Aug 2026 11:06:06 +0200
 Subject: [PATCH] output: apply <hdr> on reconfigure
@@ -15,12 +15,19 @@ the output came up.
 This is what lets something outside the compositor drive the colour space at all.
 On this box the shell claims HDR for the duration of PQ playback and releases it
 after, which it does by writing the config and sending SIGHUP.
+The commit is left to the next frame rather than done here. A reload runs whenever
+the signal arrives, often enough on top of a page-flip already in flight, and a
+failed commit leaves the render format on the long-lived pending state - which is
+what makes wlr_scene refuse direct scan-out, so a film stops reaching a display
+plane. The frame path commits that same state, so the colour space rides along
+with the damage once the flip has completed.
+
 ---
- src/server.c | 26 ++++++++++++++++++++++++++
- 1 file changed, 26 insertions(+)
+ src/server.c | 27 +++++++++++++++++++++++++++
+ 1 file changed, 27 insertions(+)
 
 diff --git a/src/server.c b/src/server.c
-index d0c8c04..4d4d396 100644
+index d0c8c04..13e633d 100644
 --- a/src/server.c
 +++ b/src/server.c
 @@ -66,6 +66,7 @@
@@ -31,7 +38,7 @@ index d0c8c04..4d4d396 100644
  #include "output-virtual.h"
  #include "regions.h"
  #include "resize-indicator.h"
-@@ -119,6 +120,31 @@ reload_config_and_theme(void)
+@@ -119,6 +120,32 @@ reload_config_and_theme(void)
  	resize_indicator_reconfigure();
  	kde_server_decoration_update_default();
  	workspaces_reconfigure();
@@ -49,16 +56,17 @@ index d0c8c04..4d4d396 100644
 +			continue;
 +		}
 +		output_state_setup_hdr(output, /*silent*/ true);
-+		if (!output_state_commit(output)) {
-+			/*
-+			 * Worth saying: a failed commit leaves the render format on
-+			 * the pending state, and a state carrying one is refused
-+			 * direct scan-out - so this would present later as a video
-+			 * that stopped reaching a display plane.
-+			 */
-+			wlr_log(WLR_ERROR, "failed to apply the HDR state on output %s",
-+				output->wlr_output->name);
-+		}
++		/*
++		 * Leave the commit to the next frame instead of doing it here. A
++		 * reload runs whenever the signal arrives, which is often enough
++		 * on top of a page-flip already in flight ("a page-flip is already
++		 * pending"), and a failed commit leaves the render format on the
++		 * long-lived pending state - which is what makes wlr_scene refuse
++		 * direct scan-out, so a film stops reaching a display plane. The
++		 * frame path commits output->pending, so the new colour space
++		 * rides along with the damage once the flip has completed.
++		 */
++		wlr_output_schedule_frame(output->wlr_output);
 +	}
  }
  
