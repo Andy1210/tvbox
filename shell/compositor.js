@@ -87,7 +87,9 @@ function toDisplayInfo(ok) {
   const out = ok && ok.outputs && ok.outputs[0];
   if (!out) return null;
   const modes = (out.modes || []).map((m) => ({
-    key: m.w + "x" + m.h + "@" + (m.refresh / 1000).toFixed(3),
+    // The key rounds on purpose: two modes that share it (23.976 and 24) are
+    // meant to collide there and be told apart by refreshExact.
+    key: m.w + "x" + m.h + "@" + Math.round(m.refresh / 1000),
     width: m.w,
     height: m.h,
     refresh: Math.round(m.refresh / 1000),

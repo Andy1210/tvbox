@@ -1,48 +1,10 @@
-// tvbox display control (Wayland/wlroots via wlr-randr): lists the connected
+// tvbox display control, over the compositor's own control socket: lists the connected
 // output's modes, picks which one to be at, and switches. Who wants what and when
 // lives in displaymode.js; this file is the wlr-randr surface plus the pure
 // selection rules. labwc tracks the output size for fullscreen surfaces, so the
 // shell window follows a mode change with no extra work. Callers pass the session's
 // Wayland env (main's childEnv) - wlr-randr needs WAYLAND_DISPLAY / XDG_RUNTIME_DIR.
-const { execFile, execFileSync } = require("child_process");
 const compositor = require("./compositor");
-
-// Parse `wlr-randr` text into { output, modes:[{ key,width,height,refresh,refreshExact,current,preferred }] }.
-// `refresh` is rounded to whole Hz for a stable id ("WxH@60"); `refreshExact` is
-// the real value we hand back to wlr-randr - a rounded "@60Hz" can miss a mode
-// whose real refresh is 60.015Hz.
-//
-// EVERY mode is kept, including ones that share a rounded key. 23.976 and 24.000
-// both round to "@24" but are NOT interchangeable: 23.976 content on a 24.000 Hz
-// output drifts 0.1% (a repeated frame every ~41s), and 29.97 on 60.000 likewise.
-// Dropping one of them is why asking for "1920x1080@24" used to hand back 24.000.
-// wlr-randr prints no interlace flag, so a 1080i/1080p pair at the same rate is
-// indistinguishable here (and to `--mode`); nothing downstream can prefer one.
-function parse(stdout) {
-  let output = null;
-  const modes = [];
-  for (const line of (stdout || "").split("\n")) {
-    const oh = /^(\S+) "/.exec(line); // e.g.  HDMI-A-1 "LG Electronics ..."
-    if (oh) {
-      if (!output) output = oh[1];
-      continue;
-    }
-    const mm = /^\s+(\d+)x(\d+)\s+px,\s+([\d.]+)\s+Hz(.*)$/.exec(line);
-    if (!mm) continue;
-    const width = Number(mm[1]),
-      height = Number(mm[2]);
-    const refreshExact = parseFloat(mm[3]);
-    const refresh = Math.round(refreshExact);
-    const current = /current/.test(mm[4] || "");
-    const preferred = /preferred/.test(mm[4] || "");
-    const key = width + "x" + height + "@" + refresh;
-    modes.push({ key, width, height, refresh, refreshExact, current, preferred });
-  }
-  return output ? { output, modes } : null;
-}
-
-// ---- mode selection -------------------------------------------------------------
-// Pure, so shell/display.test.js can pin the behaviour without an output.
 
 const UI_MAX_HEIGHT = 1080; // a 4K panel still draws the UI at 1080p
 const UI_MAX_REFRESH = 60.5; // 60 Hz plus rounding slack (59.94 and 60 both qualify)
@@ -136,18 +98,8 @@ function pickContentMode(modes, content) {
   return pool[0].m;
 }
 
-// The compositor's own socket first, wlr-randr after. tvbox-wc answers a mode
-// query directly and does not implement wlr-output-management at all, so on that
-// compositor wlr-randr has nothing to talk to; on labwc it is the only path.
 function list(env, cb) {
-  if (compositor.available()) {
-    return compositor.list((info) => (info ? cb(info) : wlrList(env, cb)));
-  }
-  wlrList(env, cb);
-}
-
-function wlrList(env, cb) {
-  execFile("wlr-randr", [], { env, timeout: 8000 }, (e, out) => cb(e ? null : parse(out)));
+  compositor.list(cb);
 }
 
 // The same read, blocking. Only for startup, and only because of what needs it:
@@ -155,43 +107,15 @@ function wlrList(env, cb) {
 // again, so an answer that arrives a few milliseconds later is no answer at all.
 // One wlr-randr before the first window is a fair price for not having to race.
 function listSync(env) {
-  if (compositor.available()) {
-    const info = compositor.listSync();
-    if (info) return info;
-  }
-  try {
-    return parse(execFileSync("wlr-randr", [], { env, timeout: 8000, encoding: "utf8" }));
-  } catch (e) {
-    return null;
-  }
+  return compositor.listSync();
 }
 
 // Apply a parsed mode object, using its EXACT refresh so wlr-randr matches.
 function apply(env, output, mode, cb) {
-  if (!output || !mode) return cb(false, "bad mode");
-  if (compositor.available()) {
-    return compositor.apply(output, mode, (ok, err) => (ok ? cb(true, "") : wlrApply(env, output, mode, cb)));
-  }
-  wlrApply(env, output, mode, cb);
-}
-
-function wlrApply(env, output, mode, cb) {
-  if (!output || !mode) return cb(false, "bad mode");
-  const spec = mode.width + "x" + mode.height + "@" + mode.refreshExact.toFixed(3) + "Hz";
-  execFile("wlr-randr", ["--output", output, "--mode", spec], { env, timeout: 12000 }, (e, _o, err) =>
-    cb(
-      !e,
-      e
-        ? String(err || e.message || "")
-            .trim()
-            .slice(0, 160)
-        : "",
-    ),
-  );
+  compositor.apply(output, mode, cb);
 }
 
 module.exports = {
-  parse,
   list,
   listSync,
   apply,

@@ -4,6 +4,32 @@
 const test = require("node:test");
 const assert = require("node:assert");
 const display = require("./display");
+const compositor = require("./compositor");
+
+// Refresh rates below read as they do from the compositor: integer millihertz.
+// wlr-randr printed float noise for the same modes (60.014999 for 60.015,
+// 29.969999 for 29.97) - the same rate, a different number of digits.
+
+// The mode lists below are REAL, captured from the two TVs this was developed on
+// with wlr-randr, and that is the point of pinning them. The compositor answers
+// the same lists in its own shape, so they are converted here and go through the
+// production path (compositor.toDisplayInfo) rather than a parser of their own.
+function modesFrom(text) {
+  const outputs = [{ name: text.trim().split(/\s/)[0], modes: [], connected: true }];
+  for (const line of text.split("\n")) {
+    const m = line.match(/^\s+(\d+)x(\d+) px, ([\d.]+) Hz(.*)$/);
+    if (!m) continue;
+    const mode = {
+      w: Number(m[1]),
+      h: Number(m[2]),
+      refresh: Math.round(Number(m[3]) * 1000),
+      preferred: /preferred/.test(m[4]),
+    };
+    if (/current/.test(m[4])) outputs[0].current = mode;
+    outputs[0].modes.push(mode);
+  }
+  return compositor.toDisplayInfo({ outputs }).modes;
+}
 
 // A 768p-panel LG that still accepts 1080p, and offers the film rates ONLY at
 // 1080p - the case that decides refresh-over-resolution.
@@ -35,7 +61,7 @@ const NO_FILM = `HDMI-A-1 "Generic"
     1920x1080 px, 60.000000 Hz (preferred, current)
 `;
 
-const modesOf = (txt) => display.parse(txt).modes;
+const modesOf = (txt) => modesFrom(txt);
 const label = (m) => (m ? `${m.width}x${m.height}@${m.refreshExact}` : String(m));
 
 test("parse keeps modes that share a rounded key (23.976 vs 24.000)", () => {
@@ -61,7 +87,7 @@ test("cadenceRank: integer multiples are smooth, 2.5x and drift are not", () => 
 });
 
 test("UI mode: the panel's preferred resolution, capped at 1080p", () => {
-  assert.strictEqual(label(display.pickUiMode(modesOf(LG_768))), "1360x768@60.014999");
+  assert.strictEqual(label(display.pickUiMode(modesOf(LG_768))), "1360x768@60.015");
   assert.strictEqual(label(display.pickUiMode(modesOf(UHD))), "1920x1080@60", "4K panel -> 1080p UI");
   assert.strictEqual(label(display.pickUiMode(modesOf(NO_FILM))), "1920x1080@60");
 });
@@ -93,7 +119,7 @@ test("24p content prefers a matching refresh over matching resolution", () => {
 
 test("exact cadence wins over the drifting 1000/1001 sibling", () => {
   const m = display.pickContentMode(modesOf(LG_768), { width: 1920, height: 1080, fps: 29.97 });
-  assert.strictEqual(label(m), "1920x1080@29.969999", "not 30.000, which would drift");
+  assert.strictEqual(label(m), "1920x1080@29.97", "not 30.000, which would drift");
 });
 
 test("30p and 25p land on their multiples", () => {
@@ -118,7 +144,7 @@ test("60p content is already fine on a 60 Hz panel", () => {
 });
 
 test("never drops below 720p, and unknown fps is not guessed at", () => {
-  const tiny = display.parse(`HDMI-A-1 "x"\n    640x480 px, 60.000000 Hz\n    1920x1080 px, 24.000000 Hz\n`).modes;
+  const tiny = modesFrom(`HDMI-A-1 "x"\n    640x480 px, 60.000000 Hz\n    1920x1080 px, 24.000000 Hz\n`);
   assert.strictEqual(label(display.pickContentMode(tiny, { width: 640, height: 480, fps: 24 })), "1920x1080@24");
   assert.strictEqual(display.pickContentMode(modesOf(LG_768), { width: 1920, height: 1080, fps: 0 }), null);
 });
@@ -128,10 +154,10 @@ test("an UNKNOWN size never selects an SD mode (mpv reports fps before dwidth)",
   // unavailable, so the claim arrives as { fps, width: 0, height: 0 }. Without a
   // floor the "smallest that fits" rule happily picks 640x480 - which is what the
   // TV would actually switch to for the whole film.
-  const sd = display.parse(
+  const sd = modesFrom(
     `HDMI-A-1 "x"\n    640x480 px, 60.000000 Hz\n    720x576 px, 50.000000 Hz\n` +
       `    1280x720 px, 60.000000 Hz\n    1920x1080 px, 50.000000 Hz\n`,
-  ).modes;
+  );
   assert.strictEqual(label(display.pickContentMode(sd, { fps: 60 })), "1280x720@60");
   assert.strictEqual(label(display.pickContentMode(sd, { width: 0, height: 0, fps: 60 })), "1280x720@60");
   assert.strictEqual(label(display.pickContentMode(sd, { width: -1, height: -1, fps: 50 })), "1920x1080@50");
