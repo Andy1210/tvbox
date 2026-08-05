@@ -535,3 +535,47 @@ questions that are why patches 0003 and 0005 are on hold.
 - Screen capture is safe by accident: capture takes
   `wlr_output_lock_attach_render()`, which turns direct scan-out off, so the
   offload stands down while a recorder runs.
+
+## HDR on the plane path (2026-08-05)
+
+`wlroots-0008` and `wlroots-0009` are what let a 4K HDR film reach the display
+**in HDR** without giving up the plane offload. Measured on `tvbox-livingroom`
+with the TV in HDR mode: connector `colorspace=BT2020_RGB`, the film's P030
+buffer on the primary plane, the app's UI on an overlay, labwc GPU time **0 ns
+over 10 s**, and no dropped frames once playback settles.
+
+They are two halves of one gate, and it took a wrong turn to find the second.
+
+**0008 — why the renderer has to claim something it cannot do.** labwc refuses
+HDR unless `renderer->features.output_color_transform` is set, and only the
+Vulkan renderer sets it. Vulkan is not usable here (see the sections above), so
+GLES2 has to report it. The claim is bounded: nothing in `render/gles2` reads
+`options->color_transform`, so a transform is ignored rather than refused, and
+in the plane path nothing is composited to transform in the first place.
+
+**`input_color_transform` must stay false, and this is the part to remember.**
+It looks like the same kind of harmless claim, and it is not: it makes labwc
+advertise `wp_color_manager_v1`, and the Chromium-based UI, seeing colour
+management, starts rendering in a wider space and expects the compositor to
+convert. Nothing converts. The owner spotted it immediately - "a Home sokkal
+fakóbb mint korábban" - and reverting to the shipped build restored it.
+
+**0009 — and why advertising it looked necessary at first.** With the protocol
+advertised, mpv tags its buffer PQ/BT2020 and `wlr_scene`'s scan-out rule is
+satisfied. Without it, every buffer reads as the DEFAULT sRGB/gamma2.2 - not as
+"untagged", which is the trap: a first attempt relaxed the untagged case and
+changed nothing, because that case never occurs. The diagnostic that settled it:
+
+```
+DIAG scanout refused: colour management (img_desc=0x..., buffer tf=8 prim=1)
+```
+
+`tf=8` is GAMMA22, `prim=1` is SRGB - for a PQ video buffer. So 0009 drops the
+comparison when the output carries an image description and trusts a policy
+instead: **the compositor only puts an output in a colour space while content in
+that space is playing.** The shell has to keep that promise; until it does,
+`<hdr>` stays off in the config and both patches are inert.
+
+**Upstream shape.** Neither patch is proposable as is - one reports a capability
+it lacks, the other removes a check. The honest upstream fix is a colour
+transform implementation in the GLES2 renderer, at which point both disappear.

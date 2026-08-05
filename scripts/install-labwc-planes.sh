@@ -6,7 +6,7 @@
 # into one buffer, and at 3840x2160 that is a full-screen GPU pass per frame on
 # top of the one the player already does. A Pi 5 fits one of the two. The display
 # hardware can compose the same scene for free - vc4 offers 48 overlay planes
-# with alpha blending - but nothing in the wlroots stack asks it to. Eight patches
+# with alpha blending - but nothing in the wlroots stack asks it to. Ten patches
 # do, and they are not in any release yet:
 #
 #   wlroots-0001  wlroots decides opacity from an allowlist of formats that names
@@ -35,6 +35,17 @@
 #                 no plane - including a MODESET, whose primary buffer is the
 #                 empty one wlroots attaches for it. A resolution change then
 #                 fails outright.
+#   wlroots-0008  a compositor will not put an output in an HDR colour space
+#                 unless the renderer reports an output colour transform. GLES2
+#                 transforms nothing, but where the display engine composes
+#                 there is nothing on the path to transform. (input_color_transform
+#                 stays false: that one advertises wp_color_manager_v1, and a
+#                 client that sees it renders wider and comes out washed out.)
+#   wlroots-0009  direct scan-out compares the buffer's colour space with the
+#                 output's, and without that protocol every buffer reads as
+#                 sRGB - so an HDR output would refuse the very video it is for.
+#                 Scan out on the compositor's policy instead: the output is
+#                 only put in a colour space while content in it is playing.
 #   labwc-0001    a failed render-format probe leaves the format at the last
 #                 candidate it tried, and no swapchain can be created for it
 #                 afterwards - the output stops drawing entirely.
