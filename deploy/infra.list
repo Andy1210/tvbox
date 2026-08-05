@@ -24,7 +24,7 @@ deploy/cursor_idle_hide.py
 deploy/tvbox
 deploy/provision.sh
 scripts/install-libcec8.sh
-# labwc + wlroots with display-plane offload: the build script, the ten patches
+# labwc + wlroots with display-plane offload: the build script, the eleven patches
 # it applies, and the session wrapper that runs whichever compositor is installed.
 # Patch basenames carry their own ordering - they land flat next to the script.
 scripts/install-labwc-planes.sh
@@ -38,6 +38,7 @@ scripts/patches/wlroots-0007-drm-a-modeset-is-not-a-failed-cursor-scan-out.patch
 scripts/patches/wlroots-0008-render-gles2-report-the-output-colour-transform.patch
 scripts/patches/wlroots-0009-scene-scan-out-onto-an-hdr-output.patch
 scripts/patches/labwc-0001-output-do-not-leave-a-failed-render-format.patch
+scripts/patches/labwc-0002-output-apply-hdr-on-reconfigure.patch
 deploy/tvbox-compositor
 deploy/tvbox-cec.service
 deploy/tvbox-remote.service
