@@ -2185,6 +2185,10 @@ function adaptMpvMode(seq, done) {
   // the film immediately instead of waiting for the failsafe.
   const failed = (e) => {
     console.warn("[player] display mode adapt failed:", (e && e.message) || e);
+    // We never learned what this file is, and a relaunch keeps the previous
+    // claim - so without this an SDR film following an HDR one would play on a
+    // PQ output. SDR is the safe answer to a question that got no answer.
+    setHdr(false);
     done();
   };
   // Properties that settle late get a few more goes, keeping whatever each read
