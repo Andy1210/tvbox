@@ -18,6 +18,11 @@ const { execFile } = require("child_process");
 const path = require("path");
 const os = require("os");
 
+// This file is OURS: writeConfig() rewrites it whole, so a hand-written labwc
+// config would be lost. Nothing in the box ships one - the session's config is
+// deploy/labwc-autostart and deploy/labwc-environment - so there is nothing to
+// merge with. Anyone who wants to customise labwc has to do it somewhere else,
+// or this has to grow a real merge.
 const RC_XML = path.join(os.homedir(), ".config", "labwc", "rc.xml");
 
 // CTA-861 extension blocks in an EDID. Both blocks are needed before a set can be
