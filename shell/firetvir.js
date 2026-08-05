@@ -18,6 +18,7 @@ const fs = require("fs");
 const path = require("path");
 const os = require("os");
 const https = require("https");
+const edid = require("./edid");
 
 const TVBOX = path.join(os.homedir(), ".tvbox");
 const PYENV = path.join(TVBOX, "pyenv");
@@ -35,15 +36,30 @@ const RAW_BASE = "https://raw.githubusercontent.com/probonopd/irdb/master/";
 const MAX_INDEX_BYTES = 30e6;
 const MAX_CSV_BYTES = 512e3;
 
-// Wayland env for wlr-randr (the shell inherits it; fill gaps like main.js WL_ENV).
-const WL_ENV = {
-  XDG_RUNTIME_DIR: process.env.XDG_RUNTIME_DIR || "/run/user/" + process.getuid(),
-  WAYLAND_DISPLAY: process.env.WAYLAND_DISPLAY || "wayland-0",
+// TV make -> irdb brand folder. The box learns the make from the HDMI EDID or the
+// CEC vendor id; we map the common ones so the UI can pre-select a brand.
+// Non-exhaustive on purpose - an unknown TV just means no suggestion, and the user
+// picks manually.
+// EDID manufacturer id -> brand. These are PNP ids, registered long before the
+// brands were what they are now, so none of them can be guessed from the name:
+// LG's is Goldstar's, Philips' is its own three letters, and Panasonic files as
+// Matsushita.
+const PNP_BRAND = {
+  GSM: "LG",
+  LGE: "LG",
+  SAM: "Samsung",
+  SNY: "Sony",
+  PHL: "Philips",
+  MEI: "Panasonic",
+  TSB: "Toshiba",
+  HIS: "Hisense",
+  TCL: "TCL",
+  SHP: "Sharp",
+  VIZ: "Vizio",
+  GRU: "Grundig",
+  LOE: "Loewe",
+  JVC: "JVC",
 };
-// TV make -> irdb brand folder. The box learns the make from the HDMI EDID
-// (wlr-randr "Make:") or the CEC vendor id; we map the common ones so the UI
-// can pre-select a brand. Non-exhaustive on purpose - an unknown TV just means
-// no suggestion, and the user picks manually.
 const CEC_VENDOR_BRAND = {
   "00e091": "LG",
   "00e0a6": "Sony", // some Sony sets
@@ -74,19 +90,23 @@ function makeToBrand(make) {
   for (const [needle, brand] of table) if (s.includes(needle)) return brand;
   return null;
 }
-// The connected TV's brand, from EDID make first (most reliable), else the CEC
-// vendor id the CEC bridge stored. Best-effort + fast; empty -> no suggestion.
+// The connected TV's brand, from the EDID first (most reliable), else the CEC
+// vendor id the CEC bridge stored. Best-effort + fast; null -> no suggestion.
+//
+// The EDID is read from sysfs rather than asked of the compositor: it is there
+// before the session starts, so this answers the same on a box whose session is
+// down.
 function suggestedBrand(cb) {
-  execFile("wlr-randr", [], { env: { ...process.env, ...WL_ENV }, timeout: 4000 }, (err, out) => {
-    const m = !err && /Make:\s*(.+)/.exec(out || "");
-    const fromEdid = m && makeToBrand(m[1]);
-    if (fromEdid) return cb(fromEdid);
-    let vendor = "";
-    try {
-      vendor = fs.readFileSync(path.join(TVBOX, "cec_tv_vendor"), "utf8").trim().toLowerCase();
-    } catch (e) {}
-    cb(CEC_VENDOR_BRAND[vendor] || null);
-  });
+  const block = edid.read();
+  // The set's own name first ("LG TV"), then the registered id: a name is what a
+  // human would recognise, an id is what a set that names itself "TV" still has.
+  const fromEdid = makeToBrand(edid.name(block)) || PNP_BRAND[edid.manufacturer(block) || ""];
+  if (fromEdid) return cb(fromEdid);
+  let vendor = "";
+  try {
+    vendor = fs.readFileSync(path.join(TVBOX, "cec_tv_vendor"), "utf8").trim().toLowerCase();
+  } catch (e) {}
+  cb(CEC_VENDOR_BRAND[vendor] || null);
 }
 
 // The keymap GATT service a programmable Amazon remote exposes. Its presence on

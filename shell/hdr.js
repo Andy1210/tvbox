@@ -13,69 +13,13 @@
 // So HDR is claimed for a PQ film that goes to the plane, and released when it
 // ends. Neither "always on" nor "always off" works: an SDR film on a PQ output
 // and a PQ film on an SDR output both lose the plane path, and with it 4K.
-const fs = require("fs");
-const path = require("path");
 const compositor = require("./compositor");
+const edid = require("./edid");
 
-// CTA-861 extension blocks in an EDID. Both blocks are needed before a set can be
-// asked for PQ: the colorimetry block says it accepts BT2020, the HDR static
-// metadata block says it accepts the PQ transfer function.
-//
-// Layout: byte 0 of an extension is the tag (0x02 = CTA-861), byte 2 is where the
-// DTDs start, and the data blocks live between byte 4 and there. Each block starts
-// with a byte of (tag << 5 | length); tag 7 is "extended", and then the next byte
-// says which extended block it is - 5 for colorimetry, 6 for HDR static metadata.
-function parseEdidHdr(edid) {
-  const out = { bt2020: false, pq: false };
-  if (!edid || edid.length < 128) return out;
-  for (let off = 128; off + 128 <= edid.length; off += 128) {
-    if (edid[off] !== 0x02) continue;
-    const end = edid[off + 2];
-    if (end <= 4) continue;
-    let i = off + 4;
-    while (i < off + end && i < off + 128) {
-      const tag = edid[i] >> 5;
-      const len = edid[i] & 0x1f;
-      if (len === 0) break;
-      if (tag === 7 && len >= 2) {
-        const ext = edid[i + 1];
-        // Colorimetry: byte 3 of the block, bits 5-7 are BT2020 cYCC/YCC/RGB.
-        if (ext === 5 && len >= 3) {
-          if ((edid[i + 2] & 0xe0) !== 0) out.bt2020 = true;
-        }
-        // HDR static metadata: byte 3 is the supported EOTFs, bit 2 is ST2084 PQ.
-        if (ext === 6 && len >= 3) {
-          if ((edid[i + 2] & 0x04) !== 0) out.pq = true;
-        }
-      }
-      i += len + 1;
-    }
-  }
-  return out;
-}
-
-// The connected panel's EDID, from the first DRM connector that has one. A box
-// with no EDID (a set that answered nothing) simply gets no HDR.
-function readPanelEdid(sysfs = "/sys/class/drm") {
-  let dirs;
-  try {
-    dirs = fs.readdirSync(sysfs).filter((d) => d.includes("-HDMI-") || d.includes("-DP-"));
-  } catch (e) {
-    return null; // no DRM in sight (a container, a test host)
-  }
-  for (const d of dirs) {
-    try {
-      const buf = fs.readFileSync(path.join(sysfs, d, "edid"));
-      if (buf && buf.length >= 128) return buf;
-    } catch (e) {
-      /* connector with nothing plugged in */
-    }
-  }
-  return null;
-}
-
+// A set can only be asked for PQ if it said it accepts both BT2020 and the PQ
+// transfer function.
 function panelSupportsHdr(sysfs) {
-  const caps = parseEdidHdr(readPanelEdid(sysfs));
+  const caps = edid.hdr(edid.read(sysfs));
   return caps.bt2020 && caps.pq;
 }
 
@@ -109,4 +53,4 @@ function claim(on, cb) {
   });
 }
 
-module.exports = { parseEdidHdr, readPanelEdid, panelSupportsHdr, wants, gammaPending, claim };
+module.exports = { panelSupportsHdr, wants, gammaPending, claim };
