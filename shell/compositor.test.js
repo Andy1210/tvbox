@@ -124,6 +124,38 @@ test("an error reply is an error, not a silent success", async () => {
   delete require.cache[require.resolve("./compositor")];
 });
 
+test("focus goes out as the owner, and the app id only when there is one", async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "tvbox-wc-test-"));
+  const socketPath = path.join(dir, "tvbox-wc.sock");
+  process.env.TVBOX_WC_SOCKET = socketPath;
+  delete require.cache[require.resolve("./compositor")];
+  const client = require("./compositor");
+
+  const seen = [];
+  const server = net.createServer((connection) => {
+    connection.on("data", (chunk) => {
+      seen.push(JSON.parse(String(chunk).trim()));
+      connection.write(JSON.stringify({ id: 1, ok: {} }) + "\n");
+    });
+  });
+  await new Promise((resolve) => server.listen(socketPath, resolve));
+
+  await new Promise((resolve) => client.setFocus("app", "plex", resolve));
+  await new Promise((resolve) => client.setFocus("launcher", null, resolve));
+
+  assert.deepEqual(seen[0].request, "set_focus");
+  assert.deepEqual({ owner: seen[0].owner, app: seen[0].app }, { owner: "app", app: "plex" });
+  // The launcher has no app id, and an empty string is not one: the compositor
+  // reads the owner, and a stale id would keep the Back key rewritten.
+  assert.equal(seen[1].owner, "launcher");
+  assert.ok(!("app" in seen[1]));
+
+  server.close();
+  fs.rmSync(dir, { recursive: true, force: true });
+  delete process.env.TVBOX_WC_SOCKET;
+  delete require.cache[require.resolve("./compositor")];
+});
+
 test("no socket means no compositor, and callers fall back", () => {
   process.env.TVBOX_WC_SOCKET = path.join(os.tmpdir(), "tvbox-wc-does-not-exist.sock");
   delete require.cache[require.resolve("./compositor")];
