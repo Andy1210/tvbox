@@ -997,7 +997,12 @@ function handlePost(p, data, res) {
   // Bluetooth airtime, and the two share one antenna. Refuse to turn it off with
   // no wired carrier - the box would leave the LAN and nothing here could undo it.
   if (p === "/tvbox/api/wifi/radio") {
-    const on = data.on === true;
+    // A real boolean or nothing at all. `data.on === true` would read every
+    // malformed body - a missing field, the STRING "false", a JSON `null` body
+    // (which parses, leaving `data` null) - as a request to turn the radio OFF,
+    // which is the one direction that can take a box off the network.
+    if (!data || typeof data.on !== "boolean") return jsonRes(res, { ok: false, error: "bad-request" });
+    const on = data.on;
     return ethernetStatus((eth) => {
       if (!on && !wifiradio.canDisable(eth)) {
         return jsonRes(res, { ok: false, error: "no-ethernet", ethernet: eth });
