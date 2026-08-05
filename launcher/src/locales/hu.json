@@ -568,5 +568,13 @@
     },
     "passClear": "Jelszó törlése",
     "passClearHint": "ezzel a kiszolgáló leáll"
-  }
+  },
+  "wifi.radioTurnOff": "Wifi rádió kikapcsolása",
+  "wifi.radioTurnOn": "Wifi rádió bekapcsolása",
+  "wifi.radioOnHint": "Kábelen a wifi csak a Bluetooth-t zavarja",
+  "wifi.radioOffHint": "A rádió ki van kapcsolva",
+  "wifi.radioTurningOff": "Kikapcsolás…",
+  "wifi.radioTurningOn": "Bekapcsolás…",
+  "wifi.radioNeedsEthernet": "Kábeles hálózat kell hozzá, különben a box lekerül a hálózatról",
+  "wifi.radioFailed": "A rádió átállítása nem sikerült"
 }

@@ -20,6 +20,7 @@ const display = require("./display"); // wlr-randr resolution/refresh control
 const displaymode = require("./displaymode"); // adaptive mode: UI mode + per-video claims
 const videoout = require("./videoout"); // which mpv renderer a stream needs
 const hdrout = require("./hdr"); // whether the output should be in PQ for this film
+const wifiradio = require("./wifiradio"); // the wifi radio as a setting, not just a pairing dip
 const textinput = require("./textinput"); // typing into a keyboard-less app (OSK / phone)
 const lang = require("./lang"); // what language a remote web app is told it runs in
 const audio = require("./audio"); // wpctl sink list + volume (device audio settings)
@@ -992,6 +993,21 @@ function handlePost(p, data, res) {
   if (p === "/tvbox/api/wifi/forget") {
     return wifiForget(String(data.ssid || ""), (r) => jsonRes(res, r));
   }
+  // The radio as a lasting choice: on a box that lives on ethernet it only costs
+  // Bluetooth airtime, and the two share one antenna. Refuse to turn it off with
+  // no wired carrier - the box would leave the LAN and nothing here could undo it.
+  if (p === "/tvbox/api/wifi/radio") {
+    const on = data.on === true;
+    return ethernetStatus((eth) => {
+      if (!on && !wifiradio.canDisable(eth)) {
+        return jsonRes(res, { ok: false, error: "no-ethernet", ethernet: eth });
+      }
+      wifiradio.setRadio({ ...process.env, ...WL_ENV }, on, (ok) => {
+        if (ok) config.setWifi({ radio: on });
+        jsonRes(res, { ok, radio: on, ethernet: eth });
+      });
+    });
+  }
   if (p === "/tvbox/api/system/timezone") {
     return setTimezone(String(data.timezone || ""), (r) => jsonRes(res, r));
   }
@@ -1627,7 +1643,16 @@ function serve() {
       return;
     }
     if (p === "/tvbox/api/wifi/status") {
-      wifiStatus((s) => ethernetStatus((eth) => jsonRes(res, { ...s, ethernet: eth })));
+      // The radio state comes from nmcli, not from the config: what the UI shows
+      // has to be what the box IS, so a radio something else turned back on does
+      // not read as off just because the setting says so.
+      wifiStatus((s) =>
+        ethernetStatus((eth) =>
+          wifiradio.state({ ...process.env, ...WL_ENV }, (radio) =>
+            jsonRes(res, { ...s, ethernet: eth, radio: radio === null ? null : radio === "enabled" }),
+          ),
+        ),
+      );
       return;
     }
     if (p === "/tvbox/api/system/region") {
@@ -3974,6 +3999,21 @@ app.whenReady().then(async () => {
   loadPlugins(); // require plugins + register their routes (deps-gated)
   apps.installAll((s) => console.log("[install]", s));
   serve();
+  // The radio is a stored choice, and nmcli's state survives a reboot - but a box
+  // that came back with it on because something else re-enabled it should still
+  // honour what the owner asked for. Only ever ENFORCES off, and only with a wired
+  // carrier: a box whose ethernet went away keeps its wifi.
+  if (config.publicConfig().wifi.radio === false) {
+    ethernetStatus((eth) => {
+      if (!wifiradio.canDisable(eth)) {
+        console.warn("[wifi] radio is set off but there is no ethernet - leaving it on");
+        return;
+      }
+      wifiradio.setRadio({ ...process.env, ...WL_ENV }, false, (ok) =>
+        console.log("[wifi] radio off (owner setting):", ok ? "applied" : "failed"),
+      );
+    });
+  }
   // A colour space outlives the shell: a compositor left in PQ by a film that
   // was playing when the shell went down would keep the launcher in it. Say no
   // before the first mode change, which is what applies it.
