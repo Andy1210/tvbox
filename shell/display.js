@@ -1,9 +1,8 @@
 // tvbox display control, over the compositor's own control socket: lists the connected
 // output's modes, picks which one to be at, and switches. Who wants what and when
-// lives in displaymode.js; this file is the wlr-randr surface plus the pure
-// selection rules. labwc tracks the output size for fullscreen surfaces, so the
-// shell window follows a mode change with no extra work. Callers pass the session's
-// Wayland env (main's childEnv) - wlr-randr needs WAYLAND_DISPLAY / XDG_RUNTIME_DIR.
+// lives in displaymode.js; this file is the compositor surface plus the pure
+// selection rules. The compositor tracks the output size for fullscreen surfaces, so the
+// shell window follows a mode change with no extra work.
 const compositor = require("./compositor");
 
 const UI_MAX_HEIGHT = 1080; // a 4K panel still draws the UI at 1080p
@@ -98,20 +97,20 @@ function pickContentMode(modes, content) {
   return pool[0].m;
 }
 
-function list(env, cb) {
+function list(cb) {
   compositor.list(cb);
 }
 
 // The same read, blocking. Only for startup, and only because of what needs it:
 // an app window is told the panel's resolution at preload time and never asks
 // again, so an answer that arrives a few milliseconds later is no answer at all.
-// One wlr-randr before the first window is a fair price for not having to race.
-function listSync(env) {
+function listSync() {
   return compositor.listSync();
 }
 
-// Apply a parsed mode object, using its EXACT refresh so wlr-randr matches.
-function apply(env, output, mode, cb) {
+// Apply a mode object as this module reports them, using its EXACT refresh: a
+// rounded 60 picks the wrong mode out of a 59.94/60 pair.
+function apply(output, mode, cb) {
   compositor.apply(output, mode, cb);
 }
 

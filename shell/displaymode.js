@@ -51,7 +51,7 @@ function create({ getModes, applyMode, log, minApplyGapMs = MIN_APPLY_GAP_MS }) 
     return (holder && holder.mode) || uiMode;
   }
 
-  // Coalesce concurrent `wlr-randr` reads into one process. Without this an app
+  // Coalesce concurrent mode reads into one request. Without this an app
   // looping claims spawns one per call - a fork bomb on a Pi 5.
   let modesWaiting = null;
   function modes(cb) {
@@ -81,7 +81,7 @@ function create({ getModes, applyMode, log, minApplyGapMs = MIN_APPLY_GAP_MS }) 
 
   // Put the output where `desired()` says, one switch at a time. `settling` is set
   // SYNCHRONOUSLY: claims arriving in the same tick must queue behind this one, not
-  // each fire their own wlr-randr.
+  // each fire their own read.
   function settle(cb) {
     if (cb) waiters.push(cb);
     if (settling) return; // whoever is settling will serve the queue when it lands
@@ -100,7 +100,7 @@ function create({ getModes, applyMode, log, minApplyGapMs = MIN_APPLY_GAP_MS }) 
         tries = 0; // it stuck; arm again for the next real hotplug
         return done(true, "");
       }
-      // wlr-randr exiting 0 does NOT mean the sink kept the mode (a marginal 4K60
+      // A mode change that was accepted does NOT mean the sink kept it (a marginal 4K60
       // link or an AVR can bounce straight back to preferred) and every attempt
       // blanks the screen, so give one target a few goes and then leave it alone.
       // Only observing it current (above), a new target, or a hotplug (rearm)
