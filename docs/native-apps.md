@@ -142,18 +142,17 @@ A native app is usually a flatpak, and a flatpak brings its own Mesa. On this
 hardware that matters more than it sounds: the Pi renders on **v3d** and scans out on
 **vc4**, which has no render node at all. (The node numbers are whatever the kernel
 handed out - `renderD128` and `card1` on the box this was developed against; the
-session detects the v3d one rather than assuming.) wlroots advertises the device it opened for KMS - the vc4 one -
-as the linux-dmabuf main device, and a Mesa that learns the device only that way
-(anything >= 25.1, which dropped the older `wl_drm` path) finds no render node,
-declines zink because v3dv has no `nullDescriptor`, and falls back to **llvmpipe**.
-The app then renders on the CPU with a perfectly good GPU sitting idle.
+session detects the v3d one rather than assuming.) A compositor that advertises
+the device it opened for KMS - the vc4 one - leaves a client with no render node
+to open: no driver, zink refused (v3dv has no `nullDescriptor`), **llvmpipe**.
+That is every flatpak app on a current runtime, because Mesa >= 25.1 dropped the
+`wl_drm` path the host's own Mesa still uses, and it is why RetroArch's GL cores
+ran on the CPU while its Vulkan path was perfect - Vulkan enumerates `/dev/dri`
+itself and never asks the compositor.
 
-The session therefore points wlroots at the v3d render node
-(`WLR_RENDER_DRM_DEVICE` in `~/.config/labwc/environment`, shipped as
-`deploy/labwc-environment`; `~/.config/labwc/autostart` re-derives the node from
-sysfs on every start, so the shipped default is only a starting point). Scanout still happens on vc4 through a dmabuf import,
-which is what the Pi has always done, and GL clients get V3D. It only takes effect
-at the next session start, since wlroots reads it once when it comes up.
+tvbox-wc names the **render** node in its dmabuf feedback, so a GL client gets the
+GPU. Scan-out still happens on vc4 through a dmabuf import, which is what the Pi
+has always done.
 
 What this hardware serves, for an app deciding which API to ask for:
 

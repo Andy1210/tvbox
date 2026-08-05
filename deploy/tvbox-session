@@ -1,0 +1,24 @@
+#!/bin/sh
+# The session greetd starts, through the compositor (installed to /usr/local/bin).
+#
+# greetd runs one command, so it runs `tvbox-wc -- tvbox-session`: the compositor
+# comes up, then starts this, and stops when it exits.
+#
+# All this does is reach the box user's own session script, which is user-space and
+# therefore OTA-updatable - the same split as run-shell.sh. If that script is
+# missing (a box that has never been deployed to), the compositor is deliberately
+# left running with nothing on it: an empty screen still has ssh, the diagnostics
+# report and safe mode behind it, while a session that exits immediately would make
+# greetd restart until its start limit and leave no session at all.
+set -u
+
+SESSION="$HOME/.tvbox/session.sh"
+
+if [ -x "$SESSION" ]; then
+	exec "$SESSION"
+fi
+
+echo "tvbox: $SESSION is missing - the compositor is up with no session" >&2
+while :; do
+	sleep 3600
+done

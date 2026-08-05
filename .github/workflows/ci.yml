@@ -86,7 +86,8 @@ jobs:
           # -S error: the scripts use intentional word-splitting (apt lists);
           # gate CI on real errors, not style
           shellcheck -S error \
-            deploy/deploy.sh deploy/provision.sh deploy/run-shell.sh deploy/labwc-autostart deploy/tvbox \
+            deploy/deploy.sh deploy/provision.sh deploy/run-shell.sh deploy/tvbox \
+            deploy/session.sh deploy/tvbox-session deploy/install-compositor.sh \
             deploy/tvbox-diag.sh deploy/tvbox-safemode.sh \
             scripts/copy-infra.sh scripts/make-release.sh scripts/build-image.sh \
             scripts/install-libcec8.sh scripts/image-smoke.sh \

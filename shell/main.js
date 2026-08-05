@@ -16,7 +16,7 @@ const config = require("./config");
 const pairing = require("./pairing");
 const playeropts = require("./playeropts"); // app stream terms -> mpv args/commands + the settable-property allowlist
 const { redact } = require("./redact"); // an app's console line may carry ITS credentials; the shell's log is a file
-const display = require("./display"); // wlr-randr resolution/refresh control
+const display = require("./display"); // resolution/refresh selection
 const displaymode = require("./displaymode"); // adaptive mode: UI mode + per-video claims
 const videoout = require("./videoout"); // which mpv renderer a stream needs
 const hdrout = require("./hdr"); // whether the output should be in PQ for this film
@@ -52,7 +52,7 @@ const pkg = require("./package.json"); // shell version (About/diagnostics)
 const { PORT } = require("./constants");
 const BASE = "http://localhost:" + PORT;
 const IPC = "/tmp/tvbox-mpv.sock";
-const APP_ID = "tvbox-shell"; // Wayland app_id (== package.json name); used by wlrctl raise
+const APP_ID = "tvbox-shell"; // Wayland app_id (== package.json name); the compositor stacks by it
 const LAUNCHER = path.join(__dirname, "launcher-dist"); // built React launcher (served under /tvbox/)
 // Inherit the session's Wayland env (run-shell.sh exports it); only fill gaps:
 // hardcoding uid 1000 breaks boxes whose first user isn't 1000 (Pi Imager custom user).
@@ -2382,10 +2382,10 @@ function onTvStandby() {
 }
 
 // Bring the FOREGROUND shell window (the active app's own window, or the
-// launcher) to the front and hand it focus (also via wlrctl, so the compositor
-// raises us above a just-exited mpv). Shared by playback start and by
-// showLauncher. All our windows share the Wayland app_id, and only one is
-// visible at a time, so the wlrctl focus lands on the right toplevel.
+// launcher) to the front and hand it focus. Shared by playback start and by
+// showLauncher. Nothing has to be said about mpv: the compositor keeps every
+// window of ours in front of anything else, which is what the transparent UI over
+// a playing film depends on.
 function raiseWindow() {
   // A native app is the visible toplevel and holds keyboard focus; raising a
   // window of ours over it would both hide the app and steal its input.
@@ -2399,7 +2399,6 @@ function raiseWindow() {
       w.focus();
       w.moveTop();
     } catch (e) {}
-    execFile("wlrctl", ["toplevel", "focus", "app_id:" + APP_ID], { env: { ...process.env, ...WL_ENV } }, () => {});
     return;
   }
   if (!win || win.isDestroyed()) return;
@@ -2409,7 +2408,6 @@ function raiseWindow() {
     win.show();
     win.focus();
     win.moveTop();
-    execFile("wlrctl", ["toplevel", "focus", "app_id:" + APP_ID], { env: { ...process.env, ...WL_ENV } }, () => {});
   } catch (e) {}
 }
 // Stop any other playback and bring the launcher forward, optionally at a hash

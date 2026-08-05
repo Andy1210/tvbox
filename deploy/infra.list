@@ -18,28 +18,16 @@ remote/firetv_tv_codes.example.json
 deploy/run-shell.sh
 deploy/tvbox-diag.sh
 deploy/tvbox-safemode.sh
-deploy/labwc-autostart
-deploy/labwc-environment
-deploy/cursor_idle_hide.py
+deploy/session.sh
 deploy/tvbox
 deploy/provision.sh
 scripts/install-libcec8.sh
-# labwc + wlroots with display-plane offload: the build script, the eleven patches
-# it applies, and the session wrapper that runs whichever compositor is installed.
-# Patch basenames carry their own ordering - they land flat next to the script.
-scripts/install-labwc-planes.sh
-scripts/patches/wlroots-0001-render-p030-is-opaque.patch
-scripts/patches/wlroots-0002-drm-colour-props-on-the-liftoff-interface.patch
-scripts/patches/wlroots-0003-backend-publish-output-layer-support.patch
-scripts/patches/wlroots-0004-scene-offload-the-top-surface-to-an-output-layer.patch
-scripts/patches/wlroots-0005-drm-give-libliftoff-a-deadline-it-can-finish-in.patch
-scripts/patches/wlroots-0006-drm-do-not-arm-the-composition-layer-when-offloading.patch
-scripts/patches/wlroots-0007-drm-a-modeset-is-not-a-failed-cursor-scan-out.patch
-scripts/patches/wlroots-0008-render-gles2-report-the-output-colour-transform.patch
-scripts/patches/wlroots-0009-scene-scan-out-onto-an-hdr-output.patch
-scripts/patches/labwc-0001-output-do-not-leave-a-failed-render-format.patch
-scripts/patches/labwc-0002-output-apply-hdr-on-reconfigure.patch
-deploy/tvbox-compositor
+# The compositor: the installer, the release it pins, and the session wrapper
+# greetd starts it with. The wrapper and the installer are root-installed by
+# provision.sh; session.sh above is the user-space part an OTA release can update.
+deploy/install-compositor.sh
+deploy/compositor.version
+deploy/tvbox-session
 deploy/tvbox-cec.service
 deploy/tvbox-remote.service
 deploy/tvbox-gamepad.service
