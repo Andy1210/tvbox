@@ -157,9 +157,12 @@ function setFocus(owner, app, cb) {
   request({ request: "set_focus", owner, app: app || undefined }, (e) => cb && cb(!e));
 }
 
-// Type a string into whatever holds the keyboard, as real key events.
-function typeText(text, cb) {
-  request({ request: "type_text", text: String(text) }, (e, ok) => cb && cb(!e, ok && ok.keys));
+// Type a string into whatever holds the keyboard, as real key events. `selectAll`
+// replaces what the field already holds rather than appending to it.
+function typeText(text, opts, cb) {
+  request({ request: "type_text", text: String(text), select_all: !!(opts && opts.selectAll) }, (e, ok) => {
+    if (cb) cb(!e, ok && ok.keys);
+  });
 }
 
 module.exports = { available, request, list, listSync, apply, setHdr, setFocus, typeText, toDisplayInfo, SOCKET };

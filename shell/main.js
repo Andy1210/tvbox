@@ -3940,7 +3940,7 @@ app.whenReady().then(async () => {
       // DESTROYS the window (the documented rollback lever), which would kill the page
       // we are about to type into - and the session with it.
       hideForTyping(id);
-      currentAppId = null; // the launcher is the foreground surface while typing
+      setForegroundApp(null); // the launcher is the foreground surface while typing
       win.show();
       try {
         win.webContents.send("tvbox-nav", { dest: "typing" });
@@ -3953,7 +3953,7 @@ app.whenReady().then(async () => {
           win.webContents.send("tvbox-nav", { dest: "home" }); // drop the typing view
         } catch (e) {}
       }
-      currentAppId = appId;
+      setForegroundApp(appId);
       if (unhideForTyping(appId)) {
         appwins.touch(appId);
         for (const p of popupsOf(appId)) {
@@ -3976,6 +3976,9 @@ app.whenReady().then(async () => {
     },
     pairingStop: () => pairing.stop(),
     isForeground: (id) => currentAppId === id,
+    // The compositor types into whatever holds the keyboard, which by now is the
+    // app window this session belongs to - onDone put it back in front.
+    typeText: (text) => compositor.typeText(text, { selectAll: true }),
   });
   // A restore replaced config.json + user apps - plugins only read credentials
   // at boot, so restart the shell shortly after (the phone page + TV UI get a
