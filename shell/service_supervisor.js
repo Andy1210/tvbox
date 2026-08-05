@@ -32,6 +32,18 @@ const MAX_REAP_PASSES = 3;
 // that writes no newline at all gets reported anyway rather than buffered.
 const MAX_LOG_LINE = 300;
 
+// Whether a process has no living parent. A leftover of ours has been reparented;
+// anything with a real parent is somebody else's business.
+function isOrphan(pid) {
+  try {
+    const status = fs.readFileSync("/proc/" + pid + "/status", "utf8");
+    const m = /^PPid:\s*(\d+)/m.exec(status);
+    return m !== null && m[1] === "1";
+  } catch (e) {
+    return false; // gone, or not ours to read - either way, not ours to signal
+  }
+}
+
 class Supervisor {
   constructor() {
     this.svcs = new Map(); // name -> { spec, proc, timer, fails, reaps }
@@ -46,11 +58,20 @@ class Supervisor {
 
   // A supervised child outlives a parent that dies by signal - SIGKILL and a crash
   // both skip the shutdown path - and the leftover keeps whatever the new instance
-  // needs: rclone holds its listening port, so every respawn exits at once. An
-  // identical command line that is not one of our own children is such a leftover;
-  // argv() is recomputed per start and deterministic, so this compares the whole
-  // argument list rather than matching a pattern. Signals only reach our own uid,
-  // which is the other half of why an exact match is safe.
+  // needs: rclone holds its listening port, so every respawn exits at once.
+  //
+  // Three things have to hold before signalling anything, because "kill whatever
+  // runs this command line" is a much broader promise than "clear my own
+  // leftovers": the command line must match in FULL (argv() is recomputed per start
+  // and deterministic, so this is an exact comparison and not a pattern), the
+  // process must not be one of our own children, and it must be ORPHANED - a live
+  // parent means somebody is still supervising it, and that somebody is not us.
+  //
+  // The limit worth naming: orphaned is read as PPid 1, which is where the kernel
+  // reparents on this hardware (measured). Under a subreaper - a pid namespace, or a
+  // service started by systemd --user - an orphan lands on the subreaper instead and
+  // this will not fire. A missed cleanup is the correct failure for that: the child's
+  // own stderr now reaches the log, so the reason is visible either way.
   _reapStale(name, argv) {
     const s = this.svcs.get(name);
     const mine = new Set();
@@ -76,6 +97,7 @@ class Supervisor {
       }
       // procfs terminates the last argument too, so drop that before comparing.
       if (cmdline.replace(/\0$/, "") !== want) continue;
+      if (!isOrphan(pid)) continue;
       // Ask once, insist afterwards: a service that ignored SIGTERM would
       // otherwise keep the port and the reason for the next pass would be the same.
       const sig = s && s.reaps > 0 ? "SIGKILL" : "SIGTERM";
