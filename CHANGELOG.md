@@ -5,6 +5,49 @@ updates). `scripts/make-release.sh` lifts the current version's `hu`/`en`
 blocks into the OTA feed's `notes` - keep both languages, keep it short, and
 write for the person on the couch (what changes for THEM), not for developers.
 
+## 1.24.6
+
+### hu
+
+- **A wifi rádió kikapcsolható** (Beállítások → WiFi). Ha a box kábelen van, ezzel a
+  távirányító érezhetően fürgébb lesz: a wifi és a Bluetooth ugyanazt az antennát
+  használja, és a rádió némán is elvesz belőle. Kábel nélkül a box nem engedi
+  kikapcsolni, hogy ne kerüljön le a hálózatról.
+
+### en
+
+- **The wifi radio can be turned off** (Settings → WiFi). On a box that runs on
+  ethernet this makes the remote noticeably quicker: wifi and Bluetooth share one
+  antenna, and the radio takes airtime even when idle. Without a cable the box
+  refuses to turn it off, so it cannot take itself off the network.
+
+### notes
+
+Not release notes for the TV - for whoever runs the boxes:
+
+`wifiradio.js` already dipped the radio for BLE pairing; this makes it a lasting
+choice. Stored as `wifi.radio`, applied with nmcli, and re-applied at startup so a
+radio something else brought back ends where the owner put it. The status route
+answers from nmcli rather than from the config, so the switch shows what the box
+IS.
+
+**The precondition is hard**: no wired carrier, no turning it off - the route
+answers `no-ethernet` and the startup path skips itself. A box that lost its
+ethernet and then obeyed a stored "off" would leave the LAN with nothing able to
+undo it.
+
+Confirmed on tvbox-livingroom: with the radio off the BT remote is quick again,
+which closes the "~20 s reconnect" behaviour that box had and the gaming box never
+did. That difference is now explained: it was airtime, not configuration.
+
+Two review findings worth keeping. The route read `data.on === true`, so any
+malformed body - a missing field, the STRING "false", a JSON `null` body - asked for
+the radio to be turned OFF, the one direction that can strand a box; it needs a real
+boolean now. And the new strings first went in as flat `"wifi.radioTurnOn"` keys,
+which the screen showed verbatim **with every check green**: the parity test
+flattens nesting into dotted paths, so a flat key is indistinguishable from a nested
+one. There is a third locale check now - no key name may contain a dot.
+
 ## 1.24.5
 
 ### hu
