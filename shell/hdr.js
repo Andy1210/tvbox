@@ -1,12 +1,12 @@
 // HDR output: on for the film, off for everything else.
 //
-// The box can hand a PQ video buffer straight to a display plane (the wlroots
-// patches in scripts/patches/), and the TV will switch into HDR for it - but only
-// if the output is in the matching colour space. Putting it there is not free:
-// the colour space covers the WHOLE output, so everything else on screen is then
-// sRGB content in a PQ frame, and the compositor cannot convert it (its renderer
-// has no colour transform). The scan-out path is patched to trust this module's
-// promise rather than compare colour spaces, which makes the promise load-bearing:
+// The box hands a PQ video buffer straight to a display plane, and the TV will
+// switch into HDR for it - but only if the output is in the matching colour space.
+// Putting it there is not free: the colour space covers the WHOLE output, so
+// everything else on screen is then sRGB content in a PQ frame, and the compositor
+// cannot convert it (its renderer has no colour transform). Nothing compares
+// colour spaces on the scan-out path, which makes this module's promise
+// load-bearing:
 //
 //   the output is in a colour space only while content in that space is playing.
 //
@@ -14,16 +14,8 @@
 // ends. Neither "always on" nor "always off" works: an SDR film on a PQ output
 // and a PQ film on an SDR output both lose the plane path, and with it 4K.
 const fs = require("fs");
-const { execFile } = require("child_process");
 const path = require("path");
-const os = require("os");
-
-// This file is OURS: writeConfig() rewrites it whole, so a hand-written labwc
-// config would be lost. Nothing in the box ships one - the session's config is
-// deploy/labwc-autostart and deploy/labwc-environment - so there is nothing to
-// merge with. Anyone who wants to customise labwc has to do it somewhere else,
-// or this has to grow a real merge.
-const RC_XML = path.join(os.homedir(), ".config", "labwc", "rc.xml");
+const compositor = require("./compositor");
 
 // CTA-861 extension blocks in an EDID. Both blocks are needed before a set can be
 // asked for PQ: the colorimetry block says it accepts BT2020, the HDR static
@@ -103,32 +95,18 @@ function gammaPending(content, candidate) {
   return !!candidate && !!content && !content.gamma;
 }
 
-// labwc reads <hdr> from rc.xml, and re-reads it on SIGHUP - but a re-read alone
-// does not touch the output. What applies it is the next output reconfiguration,
-// which is exactly what the display-mode claim does a moment later. So: write,
-// signal, and let the mode change carry it.
-function writeConfig(on, file = RC_XML) {
-  const xml =
-    '<?xml version="1.0"?>\n<labwc_config>\n  <core>\n    <hdr>' +
-    (on ? "yes" : "no") +
-    "</hdr>\n  </core>\n</labwc_config>\n";
-  fs.mkdirSync(path.dirname(file), { recursive: true });
-  let current = null;
-  try {
-    current = fs.readFileSync(file, "utf8");
-  } catch (e) {
-    /* first write */
-  }
-  if (current === xml) return false;
-  fs.writeFileSync(file, xml);
-  return true;
+// Claim the output's colour space, or give it back. The compositor holds the
+// claim; this module is the shell saying what is on screen.
+//
+// The output name is asked for rather than assumed: there is one connector on this
+// box, but its name is the driver's business.
+function claim(on, cb) {
+  const next = cb || (() => {});
+  compositor.list((info) => {
+    if (!info || !info.output) return next(false, "no output");
+    if (info.hdr && info.hdr.supported === false) return next(false, "this connector has no HDR properties");
+    compositor.setHdr(info.output, on, next);
+  });
 }
 
-// labwc re-reads rc.xml on SIGHUP, and that is only half the switch: a re-read
-// does not touch the connector, the next output reconfiguration does. The caller
-// follows this with the display-mode claim, which is that reconfiguration.
-function reload(cb) {
-  execFile("pkill", ["-HUP", "-x", "labwc"], () => cb && cb());
-}
-
-module.exports = { parseEdidHdr, readPanelEdid, panelSupportsHdr, wants, gammaPending, writeConfig, reload, RC_XML };
+module.exports = { parseEdidHdr, readPanelEdid, panelSupportsHdr, wants, gammaPending, claim };

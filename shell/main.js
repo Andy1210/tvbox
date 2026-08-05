@@ -2166,20 +2166,18 @@ function readVideoProps() {
 }
 
 // The output's colour space rides with the display mode: claimed for a PQ film
-// that reaches the plane, released when it ends. The compositor's scan-out path
-// trusts that pairing (scripts/patches/wlroots-0009), so releasing matters as much
-// as claiming - an SDR film left on a PQ output would lose the plane, and 4K with
-// it.
+// that reaches the plane, released when it ends. Releasing matters as much as
+// claiming - an SDR film left on a PQ output looks wrong, and the UI on its
+// overlay plane is read as PQ for as long as the claim is held.
+let hdrClaimed = false;
 function setHdr(on, cb) {
   const next = cb || (() => {});
-  try {
-    // Nothing to apply if the value did not change - and then nothing to wait for.
-    if (!hdrout.writeConfig(on)) return next();
-    return hdrout.reload(next);
-  } catch (e) {
-    console.warn("[player] hdr toggle failed:", (e && e.message) || e);
-  }
-  next();
+  if (!!on === hdrClaimed) return next();
+  hdrout.claim(on, (ok, err) => {
+    if (ok) hdrClaimed = !!on;
+    else console.warn("[player] hdr claim failed:", err);
+    next();
+  });
 }
 
 // Match the output to the video, then hand control back to the caller (which
