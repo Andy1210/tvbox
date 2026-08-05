@@ -6,7 +6,7 @@
 # into one buffer, and at 3840x2160 that is a full-screen GPU pass per frame on
 # top of the one the player already does. A Pi 5 fits one of the two. The display
 # hardware can compose the same scene for free - vc4 offers 48 overlay planes
-# with alpha blending - but nothing in the wlroots stack asks it to. Ten patches
+# with alpha blending - but nothing in the wlroots stack asks it to. Eleven patches
 # do, and they are not in any release yet:
 #
 #   wlroots-0001  wlroots decides opacity from an allowlist of formats that names
@@ -49,6 +49,9 @@
 #   labwc-0001    a failed render-format probe leaves the format at the last
 #                 candidate it tried, and no swapchain can be created for it
 #                 afterwards - the output stops drawing entirely.
+#   labwc-0002    reloading the config did not apply <hdr>: it sat there until
+#                 something else reconfigured the output, so nothing outside the
+#                 compositor could drive the colour space. The shell does now.
 #
 # Measured on a Pi 5 with a 4K HEVC film and the Plex UI over it: the compositor's
 # GPU time goes from 67% to 0% and dropped frames from ~17/s to none.
