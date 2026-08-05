@@ -1,9 +1,10 @@
 # Upstreaming the plane-offload patches
 
-The seven patches in [`scripts/patches/`](../scripts/patches/) are not tvbox
-quirks. Two are plain wlroots bugs that affect every compositor, one is a fix
-upstream already knows it needs, one fills a gap in the backend API, and the
-rest are the feature this box needed. This file is what to file, where, and in what order.
+The eleven patches in [`scripts/patches/`](../scripts/patches/) — nine against
+wlroots, two against labwc — are not tvbox quirks. Three are plain wlroots bugs
+that affect every compositor, one is a fix upstream already knows it needs, one
+fills a gap in the backend API, and the rest are the feature this box needed. This
+file is what to file, where, and in what order.
 
 **Everything below has to be done by hand in a browser.** Two things block
 automation on `gitlab.freedesktop.org`:
@@ -418,8 +419,13 @@ written, so `git am` them onto a branch per MR and push.
 | ---------------------- | --------------------------------------------------------------------- | -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
 | `ycbcr-opaque`         | `wlroots-0001-render-p030-is-opaque.patch`                            | `Closes` issue 1           | Answered upstream: the general fix is !5271, our one-line P030 addition stands until it lands WITH P030 on the list. See issue 1 above.    |
 | `liftoff-colour-props` | `wlroots-0002-drm-colour-props-on-the-liftoff-interface.patch`        | `Closes` issue 2           | Ready. Must stay ONE commit — the guard narrowing without the property hunk turns a clean refusal into silently ignored colour management. |
-| `liftoff-deadline`     | `wlroots-0004-drm-give-libliftoff-a-deadline-it-can-finish-in.patch`  | References #3794 and !4348 | Ready, and quote !4348's description in the MR: upstream documented the problem and never fixed it.                                        |
-| —                      | `wlroots-0003` (scene offload) and `wlroots-0005` (composition layer) | #3794 / !4348              | **Hold.** Send the comment above first. These two only make sense together, and the scene half overlaps !4348 by design.                   |
+| `liftoff-deadline`     | `wlroots-0005-drm-give-libliftoff-a-deadline-it-can-finish-in.patch`  | References #3794 and !4348 | Ready, and quote !4348's description in the MR: upstream documented the problem and never fixed it.                                        |
+| —                      | `wlroots-0004` (scene offload) and `wlroots-0006` (composition layer) | #3794 / !4348              | **Hold.** Send the comment above first. These two only make sense together, and the scene half overlaps !4348 by design.                   |
+
+The numbers in that table are the ones on the files today. They moved once already,
+when `wlroots-0003` (the backend feature bit) went in ahead of the scene half, and
+the numbers here were left behind — worth a look whenever a patch is added, since
+the set is applied in filename order.
 
 `labwc-0001` went to <https://github.com/labwc/labwc> as an ordinary pull
 request — **[labwc#3685](https://github.com/labwc/labwc/pull/3685)**, opened
@@ -579,3 +585,91 @@ that space is playing.** The shell has to keep that promise; until it does,
 **Upstream shape.** Neither patch is proposable as is - one reports a capability
 it lacks, the other removes a check. The honest upstream fix is a colour
 transform implementation in the GLES2 renderer, at which point both disappear.
+
+## The offload's own backoff was the film-start stutter (2026-08-05)
+
+Measured on `tvbox-livingroom`, a 4K HDR title started through the ordinary path,
+sampling labwc's `drm-engine-render` from `/proc/<labwc>/fdinfo/*` every 200 ms:
+the compositor burns **345-597 ms of GPU render time per second for the first
+4.6 s of the film**, then drops to **0.00 ms/s** for the rest of it. mpv is
+innocent throughout - `frame-drop-count`, `vo-delayed-frame-count` and
+`decoder-frame-drop-count` all stay at 0 and `estimated-vf-fps` holds 24.0 - so
+what the viewer sees is presentation, not decoding.
+
+It was `SCENE_OFFLOAD_BACKOFF` in `wlroots-0004`, and the unit was the bug: 60
+**frames** is one second at 60 Hz and two and a half at 23.976, the rate a 24p
+film runs at. The arming that fired is the one with no log line, inside
+`scene_try_layer_offload` where the offload's own `scene_entry_try_direct_scanout`
+comes back short. Proof it was that path rather than a backend refusal: **zero**
+`Output layer refused` / `giving up on this output` lines in the whole 47k-line
+log.
+
+The trigger sat one layer up. `shell/hdr.js` writes the config and sends SIGHUP;
+`labwc-0002` then committed the HDR state from inside the reload, which lands on a
+page-flip already in flight often enough to matter - `a page-flip is already
+pending`, `Failed to commit frame` - and a failed commit leaves
+`WLR_OUTPUT_STATE_RENDER_FORMAT` on labwc's long-lived pending state. A state
+carrying that bit is refused direct scan-out by `scene_entry_try_direct_scanout`,
+so the offload's attempt came back `SCANOUT_INELIGIBLE` and armed the wait. labwc's
+own comment at that site had predicted exactly this consequence.
+
+Both halves are fixed here, and both changes are the kind upstream would want
+anyway:
+
+- `wlroots-0004` expresses the wait as a duration, waits only on a failed **test**
+  (an ineligible scene is decided before any round trip and changes frame to
+  frame, so re-deciding it is cheap), and logs the first time either wait is
+  armed.
+- `labwc-0002` schedules a frame instead of committing inside the reload, so the
+  colour space rides along with the next frame's damage after the flip completes.
+
+**Measured again with both fixes installed**, same title, same method:
+
+|                                            | before    | after      |
+| ------------------------------------------ | --------- | ---------- |
+| composited window at the start of the film | 4.67 s    | **0.08 s** |
+| samples over 1 ms/s of GPU render time     | 25        | **2**      |
+| dropped / delayed / decoder-dropped frames | 0 / 0 / 0 | 0 / 0 / 0  |
+
+The two frames that remain are the modeset itself. The log confirms both halves
+independently: no `failed to apply the HDR state` line and no
+`a page-flip is already pending` anywhere, and no `Offload held off` line at all -
+the wait is never armed now. Total disturbance from the film mapping to scan-out
+being back: 699 ms, of which about 53 ms is four commits refused for
+`Failed to scan-out cursor plane`. Those are the `wlroots-0007` class on ordinary
+frames rather than a modeset, so that patch correctly does not suppress them; they
+were there before this work as well.
+
+Worth keeping as a technique: `drm-engine-render` on the compositor's `renderD128`
+fd needs no root and separates the two candidate causes on its own - climbing means
+frames are being composited, flat while mpv reports no drops means the panel is
+re-locking its mode and nothing in the box can help.
+
+**The explicit-synchronisation stand-down costs this box nothing**, which was a
+measurement rather than a hope. With the check installed, a film start produced zero
+`Not offloading: the top surface uses explicit synchronisation` lines and the offload
+engaged as before - so Chromium's surface here does not use
+`wp_linux_drm_syncobj_v1`, and refusing one that does is free insurance. Same run
+also showed the offload engaging TWICE in one start, which is the `offload_active`
+fix visible from outside: before it, the second engagement was silent and scheduled
+no frame to read its own verdict.
+
+### One review finding deliberately not acted on
+
+The offload layer can outlive the state that would have disabled it, by two routes:
+`scene_output_disable_offload_layer()` returns early when the state already carries
+`WLR_OUTPUT_STATE_LAYERS`, before reaching the branch that would drop the layer; and
+`wlr_scene_output_destroy()` destroys it without the disabled-layer frame first. Both
+are real, and both are left alone for now:
+
+- the main path is already handled by the two-step the code was written around -
+  describe the layer disabled for one frame, THEN drop it, gated on
+  `offload_disabled`;
+- the early return needs a compositor that sets output layers of its own, which is
+  the case `scene_try_layer_offload()` explicitly stands down on;
+- the destroy case is output teardown, where the plane configuration is going away
+  with it.
+
+If either is ever revisited, the smaller change is to test `layers > 1` before the
+`WLR_OUTPUT_STATE_LAYERS` early return, so an output that gained a layer elsewhere
+stops owning ours rather than keeping it undescribed.
