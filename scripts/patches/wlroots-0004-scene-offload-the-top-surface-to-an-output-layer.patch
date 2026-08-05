@@ -1,7 +1,7 @@
-From 5c794971a8e7796f02ba0038006bacee7101c5c4 Mon Sep 17 00:00:00 2001
+From 2c957d708f01924db38a68cdbf3c63c3bfac72a8 Mon Sep 17 00:00:00 2001
 From: Andy1210 <andy1210@gmail.com>
 Date: Mon, 3 Aug 2026 18:00:00 +0200
-Subject: [PATCH 4/7] scene: offload the top surface to an output layer
+Subject: [PATCH] scene: offload the top surface to an output layer
 
 The renderer is all-or-nothing: one surface above a fullscreen video sends the
 whole output through it. At 4K that is a full-screen composite per frame for
@@ -21,13 +21,22 @@ costs a frame that goes out without the top surface. The scene stands down
 entirely on an output whose compositor drives layers of its own, since a state has
 to describe every layer and this only ever describes one.
 
+The wait after an attempt that came to nothing is a duration rather than a count
+of frames, because the workload this exists for is a 24p film: 60 frames is one
+second at 60 Hz and two and a half at 23.976, which is a full-screen 4K composite
+sixty times over exactly when the plane matters most. And only a failed TEST is
+waited on - an ineligible scene is decided before any round trip and changes from
+one frame to the next, so re-deciding it is cheap. Both waits log the first time
+they are armed; the path was silent, which on screen reads as a slow box rather
+than as an offload standing down.
+
 Measured on a Raspberry Pi 5 (vc4) with a 4K film under a fullscreen translucent
 UI: the compositor GPU time goes from 67% to 0% and the player stops dropping
 frames.
 ---
  include/wlr/types/wlr_scene.h |  15 ++
- types/scene/wlr_scene.c       | 301 +++++++++++++++++++++++++++++++++-
- 2 files changed, 313 insertions(+), 3 deletions(-)
+ types/scene/wlr_scene.c       | 346 +++++++++++++++++++++++++++++++++-
+ 2 files changed, 358 insertions(+), 3 deletions(-)
 
 diff --git a/include/wlr/types/wlr_scene.h b/include/wlr/types/wlr_scene.h
 index 6c627b1..96e3f10 100644
@@ -63,7 +72,7 @@ index 6c627b1..96e3f10 100644
  
  		struct wlr_drm_syncobj_timeline *in_timeline;
 diff --git a/types/scene/wlr_scene.c b/types/scene/wlr_scene.c
-index 7bc8b76..e5c43e6 100644
+index 7bc8b76..aa1e81a 100644
 --- a/types/scene/wlr_scene.c
 +++ b/types/scene/wlr_scene.c
 @@ -1865,6 +1865,10 @@ void wlr_scene_output_destroy(struct wlr_scene_output *scene_output) {
@@ -77,7 +86,7 @@ index 7bc8b76..e5c43e6 100644
  	wl_array_release(&scene_output->render_list);
  	free(scene_output);
  }
-@@ -2310,6 +2314,286 @@ cleanup_transforms:
+@@ -2310,6 +2314,331 @@ cleanup_transforms:
  	return result;
  }
  
@@ -88,9 +97,44 @@ index 7bc8b76..e5c43e6 100644
 +// that goes out without the top surface, so the attempts have to be counted
 +// rather than repeated forever.
 +#define SCENE_OFFLOAD_MAX_REFUSALS 3
-+// Frames to wait before offering again. A refusal is about the buffers in front
-+// of the backend right now, so it says nothing about the next scene.
-+#define SCENE_OFFLOAD_BACKOFF 60
++// How long to wait before offering again after a refusal, in milliseconds. A
++// refusal is about the buffers in front of the backend right now, so it says
++// nothing about the next scene.
++//
++// A DURATION rather than a count of frames, because the workload this whole path
++// exists for is a 24p film: a wait tuned as 60 frames is one second at 60 Hz and
++// two and a half at 23.976, which is compositing a full 4K frame 60 times over
++// precisely when the plane matters most.
++#define SCENE_OFFLOAD_REFUSAL_BACKOFF_MS 500
++
++// The much shorter wait after the offload's own test commit failed. Nothing was
++// presented in that case, so this is not spacing out a cost paid in frames - it
++// only avoids repeating a round trip and libliftoff's plane search every frame.
++#define SCENE_OFFLOAD_TEST_BACKOFF_MS 100
++
++// Frames a wait comes to on this output. refresh is in mHz and is zero for an
++// output with no fixed rate, where 60 Hz is as good an assumption as any.
++static int scene_offload_backoff_frames(struct wlr_scene_output *scene_output, int ms) {
++	int32_t mhz = scene_output->output->refresh;
++	if (mhz <= 0) {
++		mhz = 60000;
++	}
++	int frames = (int)(((int64_t)ms * mhz) / 1000000);
++	return frames > 0 ? frames : 1;
++}
++
++// Hold off before offering again, and say so the first time. This used to be
++// silent, which is the worst property it could have had: the offload standing
++// down is invisible in a log and reads on screen as the box being slow.
++static void scene_output_hold_off_offload(struct wlr_scene_output *scene_output,
++		int ms, const char *why) {
++	int frames = scene_offload_backoff_frames(scene_output, ms);
++	if (scene_output->offload_backoff == 0) {
++		wlr_log(WLR_DEBUG, "Offload held off for %d frames (%d ms): %s",
++			frames, ms, why);
++	}
++	scene_output->offload_backoff = frames;
++}
 +
 +// Describe the offload layer, disabled, so that a plane it was given stops
 +// scanning out a buffer the scene has gone back to compositing. wlroots only
@@ -167,7 +211,8 @@ index 7bc8b76..e5c43e6 100644
 +		scene_output->offload_active = false;
 +		wlr_log(WLR_DEBUG, "Output layer refused, compositing instead");
 +	}
-+	scene_output->offload_backoff = SCENE_OFFLOAD_BACKOFF;
++	scene_output_hold_off_offload(scene_output, SCENE_OFFLOAD_REFUSAL_BACKOFF_MS,
++		"the backend accepted the offer and displayed no layer");
 +	// The commit that carried the offer counted its damage as handled, so nothing
 +	// would ask for another frame and the refused surface would stay off screen
 +	// until something unrelated damaged the output. This is the call that also
@@ -317,7 +362,16 @@ index 7bc8b76..e5c43e6 100644
 +	enum scene_direct_scanout_result scanout =
 +		scene_entry_try_direct_scanout(bottom, &pending, data);
 +	if (scanout != SCANOUT_SUCCESS) {
-+		scene_output->offload_backoff = SCENE_OFFLOAD_BACKOFF;
++		// Only a failed TEST is worth waiting on. SCANOUT_INELIGIBLE is decided
++		// from the scene before any round trip, it changes from one frame to the
++		// next - a state still carrying a render format refuses scan-out, and a
++		// compositor leaves one there after a failed commit - and re-deciding it
++		// costs a state copy. Waiting on that turned a transient into seconds of
++		// full-screen compositing at the start of every film.
++		if (scanout == SCANOUT_CANDIDATE) {
++			scene_output_hold_off_offload(scene_output,
++				SCENE_OFFLOAD_TEST_BACKOFF_MS, "the offload's test commit failed");
++		}
 +		wlr_output_state_finish(&pending);
 +		return scanout;
 +	}
@@ -364,7 +418,7 @@ index 7bc8b76..e5c43e6 100644
  bool wlr_scene_output_build_state(struct wlr_scene_output *scene_output,
  		struct wlr_output_state *state, const struct wlr_scene_output_state_options *options) {
  	struct wlr_scene_output_state_options default_options = {0};
-@@ -2439,13 +2723,24 @@ bool wlr_scene_output_build_state(struct wlr_scene_output *scene_output,
+@@ -2439,13 +2768,24 @@ bool wlr_scene_output_build_state(struct wlr_scene_output *scene_output,
  	wlr_output_state_set_damage(state, &scene_output->pending_commit_damage);
  
  	// We only want to try direct scanout if:
