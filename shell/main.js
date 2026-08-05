@@ -19,6 +19,7 @@ const { redact } = require("./redact"); // an app's console line may carry ITS c
 const display = require("./display"); // wlr-randr resolution/refresh control
 const displaymode = require("./displaymode"); // adaptive mode: UI mode + per-video claims
 const videoout = require("./videoout"); // which mpv renderer a stream needs
+const hdrout = require("./hdr"); // whether the output should be in PQ for this film
 const textinput = require("./textinput"); // typing into a keyboard-less app (OSK / phone)
 const lang = require("./lang"); // what language a remote web app is told it runs in
 const audio = require("./audio"); // wpctl sink list + volume (device audio settings)
@@ -1429,6 +1430,7 @@ function systemInfo(cb) {
 // What the panel can show. Read as a side effect of the mode reads the arbiter
 // already does - at startup and on every output change - so nothing extra runs.
 let panelResolution = null;
+let panelHdr = false; // the panel accepts BT2020 + PQ (EDID, read once at startup)
 const dmode = displaymode.create({
   getModes: (cb) =>
     display.list({ ...process.env, ...WL_ENV }, (info) => {
@@ -1924,7 +1926,10 @@ function stopMpv(keepMode) {
   // (mpvOwnerId is NOT cleared here: launchMpv calls this on relaunch right
   // after "play" set the owner. Every play re-assigns it, and without a running
   // mpv no first-frame reveal can consume a stale value.)
-  if (!keepMode) dmode.release(MPV_CLAIM);
+  if (!keepMode) {
+    setHdr(false);
+    dmode.release(MPV_CLAIM);
+  }
   clearMpvMedia(); // the clock stops with the process (see clearMpvMedia)
   mpvStartPending = false; // no paused-start handshake outlives the process
   if (mpv) {
@@ -2064,6 +2069,7 @@ function launchMpv(url, startPos, pip, rect, streams) {
     playingUrl = null;
     mpvStartPending = false;
     setVideoMode(false);
+    setHdr(false);
     dmode.release(MPV_CLAIM);
     emit({ type: "error" });
     emit({ type: "finished" });
@@ -2097,6 +2103,7 @@ function launchMpv(url, startPos, pip, rect, streams) {
     playingUrl = null;
     setVideoMode(false);
     mpvStartPending = false;
+    setHdr(false);
     dmode.release(MPV_CLAIM); // film over -> UI mode back (stopMpv covers our own kills)
     // The END of a film is an exit, not a stopMpv - mpv runs without --keep-open.
     // Without this the retained state topic keeps saying "playing" with a frozen
@@ -2117,13 +2124,32 @@ function launchMpv(url, startPos, pip, rect, streams) {
 // aspect correction, with the decoded size as fallback - on the box dwidth came
 // back "property unavailable" at the very moment dheight was already readable.
 function readVideoProps() {
-  const props = ["container-fps", "dwidth", "dheight", "width", "height", "hwdec-current"];
-  return Promise.all(props.map((p) => mpvQuery(["get_property", p]))).then(([fps, dw, dh, w, h, hwdec]) => ({
+  const props = ["container-fps", "dwidth", "dheight", "width", "height", "hwdec-current", "video-params/gamma"];
+  return Promise.all(props.map((p) => mpvQuery(["get_property", p]))).then(([fps, dw, dh, w, h, hwdec, gamma]) => ({
     fps: Number(fps) || 0,
     width: Number(dw) || Number(w) || 0,
     height: Number(dh) || Number(h) || 0,
     hwdec: typeof hwdec === "string" ? hwdec : "",
+    // The transfer function the file was mastered with; "pq" is HDR10/DV.
+    gamma: typeof gamma === "string" ? gamma : "",
   }));
+}
+
+// The output's colour space rides with the display mode: claimed for a PQ film
+// that reaches the plane, released when it ends. The compositor's scan-out path
+// trusts that pairing (scripts/patches/wlroots-0009), so releasing matters as much
+// as claiming - an SDR film left on a PQ output would lose the plane, and 4K with
+// it.
+function setHdr(on, cb) {
+  const next = cb || (() => {});
+  try {
+    // Nothing to apply if the value did not change - and then nothing to wait for.
+    if (!hdrout.writeConfig(on)) return next();
+    return hdrout.reload(next);
+  } catch (e) {
+    console.warn("[player] hdr toggle failed:", (e && e.message) || e);
+  }
+  next();
 }
 
 // Match the output to the video, then hand control back to the caller (which
@@ -2134,23 +2160,33 @@ function readVideoProps() {
 function adaptMpvMode(seq, done) {
   const claim = (content) => {
     if (mpvSeq !== seq || !mpv) return done(); // stopped or superseded while we read
-    if (videoout.zeroCopyVideo(content, mpvPip)) {
+    const zeroCopy = videoout.zeroCopyVideo(content, mpvPip);
+    if (zeroCopy) {
       // `vo` is settable while paused, so this costs nothing visible - it lands in
       // the same paused window as the mode switch, before the first frame.
       mpvCmd({ command: ["set_property", "vo", videoout.ZERO_COPY_VO] });
     }
-    if (!(content.fps > 0)) {
-      console.log("[player] no container-fps - leaving the display mode alone");
-      return done();
-    }
-    dmode.claim(MPV_CLAIM, content, (r) => {
-      // Nothing on this panel divides into the content's rate (a 60Hz-only set and
-      // a 24p film): resample instead of juddering. This is what the old manual
-      // "match content framerate" toggle did, decided per file now.
-      if (r && r.reason === "no-matching-mode") {
-        mpvCmd({ command: ["set_property", "video-sync", "display-resample"] });
+    // And the output's colour space, before the claim below: labwc re-reads the
+    // config on SIGHUP but only an output reconfiguration puts it on the
+    // connector, and the mode claim IS that reconfiguration.
+    // Wait for the signal to be delivered before the mode change: labwc applies
+    // the colour space when it reconfigures, and the mode change is the next
+    // reconfiguration. The caller unpauses in done(), so both land before the
+    // first frame.
+    setHdr(hdrout.wants(content, zeroCopy, panelHdr), () => {
+      if (!(content.fps > 0)) {
+        console.log("[player] no container-fps - leaving the display mode alone");
+        return done();
       }
-      done();
+      dmode.claim(MPV_CLAIM, content, (r) => {
+        // Nothing on this panel divides into the content's rate (a 60Hz-only set and
+        // a 24p film): resample instead of juddering. This is what the old manual
+        // "match content framerate" toggle did, decided per file now.
+        if (r && r.reason === "no-matching-mode") {
+          mpvCmd({ command: ["set_property", "video-sync", "display-resample"] });
+        }
+        done();
+      });
     });
   };
   // Nothing in this chain rejects today (mpvQuery resolves null on every failure),
@@ -2158,6 +2194,10 @@ function adaptMpvMode(seq, done) {
   // the film immediately instead of waiting for the failsafe.
   const failed = (e) => {
     console.warn("[player] display mode adapt failed:", (e && e.message) || e);
+    // We never learned what this file is, and a relaunch keeps the previous
+    // claim - so without this an SDR film following an HDR one would play on a
+    // PQ output. SDR is the safe answer to a question that got no answer.
+    setHdr(false);
     done();
   };
   // Properties that settle late get a few more goes, keeping whatever each read
@@ -2173,12 +2213,15 @@ function adaptMpvMode(seq, done) {
         width: c.width || prev.width,
         height: c.height || prev.height,
         hwdec: c.hwdec || prev.hwdec,
+        gamma: c.gamma || prev.gamma,
       };
       // Height counts as missing too: the renderer is chosen from it, and the two
       // axes settle independently (dwidth has come back unavailable at the very
       // moment dheight was already readable, so the reverse can happen as well).
       const missing =
-        !(merged.fps > 0 && merged.width > 0 && merged.height > 0) || videoout.hwdecPending(merged, mpvPip);
+        !(merged.fps > 0 && merged.width > 0 && merged.height > 0) ||
+        videoout.hwdecPending(merged, mpvPip) ||
+        hdrout.gammaPending(merged, videoout.zeroCopyCandidate(merged, mpvPip));
       if (!missing || tries <= 0) return merged;
       return new Promise((r) => setTimeout(() => r(settle(merged, tries - 1)), 250));
     });
@@ -3931,6 +3974,10 @@ app.whenReady().then(async () => {
   loadPlugins(); // require plugins + register their routes (deps-gated)
   apps.installAll((s) => console.log("[install]", s));
   serve();
+  // A colour space outlives the shell: a compositor left in PQ by a film that
+  // was playing when the shell went down would keep the launcher in it. Say no
+  // before the first mode change, which is what applies it.
+  setHdr(false);
   // Put the output at the UI mode: the compositor boots at the EDID preferred
   // mode, which on a 4K set means drawing the launcher at 8.3 Mpixels.
   dmode.refresh();
@@ -3939,6 +3986,11 @@ app.whenReady().then(async () => {
   // created. Losing that race means the app spends its whole life believing the
   // screen is whatever the UI happens to be running at.
   panelResolution = display.panelResolution((display.listSync({ ...process.env, ...WL_ENV }) || {}).modes);
+  // Whether the set can be asked for PQ at all. Read from the EDID once: a TV
+  // does not grow the capability while it is plugged in, and a box whose panel
+  // cannot do it never touches the compositor's colour space.
+  panelHdr = hdrout.panelSupportsHdr();
+  console.log("[display] panel HDR:", panelHdr ? "yes" : "no");
   watchDisplayMode();
   win = new BrowserWindow({
     fullscreen: true,

@@ -1,0 +1,54 @@
+From 3190e70e77dda270f5cc6834fce4975fd3ac73d0 Mon Sep 17 00:00:00 2001
+From: Andy1210 <andy1210@gmail.com>
+Date: Wed, 5 Aug 2026 10:38:28 +0200
+Subject: [PATCH 1/2] render/gles2: report the output colour transform
+
+A compositor checks this before it will put an output in an HDR colour space,
+and reporting false costs the HDR output entirely on hardware where nothing
+would have been transformed anyway.
+
+This renderer transforms nothing: no code in render/gles2 reads
+options->color_transform, so a transform handed to it is ignored rather than
+refused. Where the display engine composes - vc4 here, with the video on the
+primary plane and the app's UI on an overlay - the renderer is not on the path,
+and the frames that ARE composited while the output is HDR are the bounded cost:
+they are written as sRGB into a PQ buffer, unconverted.
+
+input_color_transform stays false on purpose. That bit is what makes a
+compositor advertise wp_color_manager_v1, and a client that sees colour
+management renders in a wider space and expects the compositor to convert.
+Measured on this box: the Chromium-based UI came out visibly washed out.
+---
+ render/gles2/renderer.c | 16 +++++++++++++++-
+ 1 file changed, 15 insertions(+), 1 deletion(-)
+
+diff --git a/render/gles2/renderer.c b/render/gles2/renderer.c
+index e362dae..c5c4e5b 100644
+--- a/render/gles2/renderer.c
++++ b/render/gles2/renderer.c
+@@ -526,7 +526,21 @@ struct wlr_renderer *wlr_gles2_renderer_create(struct wlr_egl *egl) {
+ 		return NULL;
+ 	}
+ 	wlr_renderer_init(&renderer->wlr_renderer, &renderer_impl, WLR_BUFFER_CAP_DMABUF);
+-	renderer->wlr_renderer.features.output_color_transform = false;
++	// What a compositor checks before it will put an output in an HDR colour
++	// space. This renderer transforms nothing - no code in render/gles2 reads
++	// options->color_transform, so one handed to it is ignored rather than
++	// refused - but where the display engine composes (vc4: video on the
++	// primary plane, the app's UI on an overlay) nothing on the path needs
++	// transforming, and reporting false costs the HDR output entirely.
++	//
++	// The cost is bounded to frames that ARE composited while the output is
++	// HDR: they are written as sRGB into a PQ buffer, unconverted.
++	//
++	// input_color_transform stays false deliberately: that one makes the
++	// compositor advertise wp_color_manager_v1, and a client that sees colour
++	// management renders in a wider space and expects conversion. Measured on
++	// this box: the Chromium-based UI came out visibly washed out.
++	renderer->wlr_renderer.features.output_color_transform = true;
+ 
+ 	wl_list_init(&renderer->buffers);
+ 	wl_list_init(&renderer->textures);
+-- 
+2.47.3
+

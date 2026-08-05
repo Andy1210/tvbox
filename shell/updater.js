@@ -80,7 +80,10 @@ const INFRA_FILES = [
   "wlroots-0005-drm-give-libliftoff-a-deadline-it-can-finish-in.patch",
   "wlroots-0006-drm-do-not-arm-the-composition-layer-when-offloading.patch",
   "wlroots-0007-drm-a-modeset-is-not-a-failed-cursor-scan-out.patch",
+  "wlroots-0008-render-gles2-report-the-output-colour-transform.patch",
+  "wlroots-0009-scene-scan-out-onto-an-hdr-output.patch",
   "labwc-0001-output-do-not-leave-a-failed-render-format.patch",
+  "labwc-0002-output-apply-hdr-on-reconfigure.patch",
   "tvbox-compositor", // greetd starts this, not labwc directly
   // Diagnostics + safe mode. Root-side, so a release only refreshes the copies in
   // ~/.tvbox/ - provision.sh is what installs them under /usr/local/sbin and /etc.
