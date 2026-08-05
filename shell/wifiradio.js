@@ -97,4 +97,20 @@ function armFuse(env, seconds) {
   };
 }
 
-module.exports = { state, withRadioOff, _test: { armFuse } };
+// Turning the radio off PERMANENTLY is a different thing from the pairing-time
+// dip above: it is what an owner asks for on a box that is on ethernet, where the
+// radio only costs Bluetooth airtime. It has one hard precondition - something
+// else has to carry the network, or the box disappears from the LAN with no way
+// back short of a keyboard.
+function canDisable(ethernet) {
+  return !!(ethernet && ethernet.connected);
+}
+
+function setRadio(env, on, cb, deps) {
+  const run = (deps && deps.run) || execFile;
+  run("nmcli", ["radio", "wifi", on ? "on" : "off"], { env, timeout: 8000 }, (err) => {
+    cb(!err);
+  });
+}
+
+module.exports = { state, withRadioOff, canDisable, setRadio, _test: { armFuse } };

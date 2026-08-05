@@ -51,6 +51,21 @@ describe("locale hygiene", () => {
   it("en and hu define identical key sets", () => {
     expect(flatten(en).sort()).toEqual(flatten(hu).sort());
   });
+  // A flat "wifi.radioTurnOn" key flattens to the same dotted path as a properly
+  // nested one, so the parity check above cannot tell them apart - and neither can
+  // the dead-key check, because the source really does reference that string. But
+  // translate() WALKS the nesting (app-sdk/src/i18n.tsx: path.split(".")), so a
+  // flat key never resolves and the UI shows the key itself. Ask directly.
+  it("has no dotted key names (translate walks the nesting)", () => {
+    const dotted = (obj: Record<string, unknown>, prefix = ""): string[] =>
+      Object.entries(obj).flatMap(([k, v]) => {
+        const here = prefix ? `${prefix}.${k}` : k;
+        const bad = k.includes(".") ? [here] : [];
+        return v && typeof v === "object" ? bad.concat(dotted(v as Record<string, unknown>, here)) : bad;
+      });
+    expect(dotted(en)).toEqual([]);
+    expect(dotted(hu)).toEqual([]);
+  });
   it("has no unused keys (every key is referenced in source or dynamic)", () => {
     const dead = flatten(en).filter((k) => !isDynamic(k) && !source.includes(`"${k}"`) && !source.includes(`'${k}'`));
     expect(dead).toEqual([]);

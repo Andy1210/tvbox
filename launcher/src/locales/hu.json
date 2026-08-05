@@ -57,7 +57,15 @@
     "hiddenSsid": "Rejtett hálózat neve (SSID)",
     "country": "Wi-Fi ország",
     "countryHint": "Rádiós szabályozási régió, a következő újraindításkor lép életbe.",
-    "countryAuto": "Alapértelmezett"
+    "countryAuto": "Alapértelmezett",
+    "radioTurnOff": "Wifi rádió kikapcsolása",
+    "radioTurnOn": "Wifi rádió bekapcsolása",
+    "radioOnHint": "Kábelen a wifi csak a Bluetooth-t zavarja",
+    "radioOffHint": "A rádió ki van kapcsolva",
+    "radioTurningOff": "Kikapcsolás…",
+    "radioTurningOn": "Bekapcsolás…",
+    "radioNeedsEthernet": "Kábeles hálózat kell hozzá, különben a box lekerül a hálózatról",
+    "radioFailed": "A rádió átállítása nem sikerült"
   },
   "display": {
     "title": "Kijelző",

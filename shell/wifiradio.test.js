@@ -130,3 +130,27 @@ test("state() reports only the two answers it trusts", () => {
     assert.strictEqual(seen.pop(), want, JSON.stringify(out));
   }
 });
+
+test("canDisable requires a wired carrier", () => {
+  // Turning the radio off is only ever safe when something else carries the LAN:
+  // the box has no other way back.
+  assert.strictEqual(wifiradio.canDisable({ connected: true, ip: "192.168.1.219" }), true);
+  assert.strictEqual(wifiradio.canDisable({ connected: false, ip: "" }), false);
+  assert.strictEqual(wifiradio.canDisable(null), false);
+  assert.strictEqual(wifiradio.canDisable(undefined), false);
+});
+
+test("setRadio asks nmcli for the state it was given, and reports failure", () => {
+  const calls = [];
+  const run = (cmd, args, opts, cb) => {
+    calls.push([cmd, args.join(" ")]);
+    cb(args[2] === "off" ? null : new Error("nmcli is unhappy"));
+  };
+  let ok = null;
+  wifiradio.setRadio({}, false, (r) => (ok = r), { run });
+  assert.deepStrictEqual(calls[0], ["nmcli", "radio wifi off"]);
+  assert.strictEqual(ok, true);
+  wifiradio.setRadio({}, true, (r) => (ok = r), { run });
+  assert.deepStrictEqual(calls[1], ["nmcli", "radio wifi on"]);
+  assert.strictEqual(ok, false); // a failed nmcli must not read as applied
+});
