@@ -1,4 +1,4 @@
-From 2c957d708f01924db38a68cdbf3c63c3bfac72a8 Mon Sep 17 00:00:00 2001
+From 5bb815f81fbf715a4138544861136fcbdf5ccc86 Mon Sep 17 00:00:00 2001
 From: Andy1210 <andy1210@gmail.com>
 Date: Mon, 3 Aug 2026 18:00:00 +0200
 Subject: [PATCH] scene: offload the top surface to an output layer
@@ -21,25 +21,22 @@ costs a frame that goes out without the top surface. The scene stands down
 entirely on an output whose compositor drives layers of its own, since a state has
 to describe every layer and this only ever describes one.
 
-The wait after an attempt that came to nothing is a duration rather than a count
-of frames, because the workload this exists for is a 24p film: 60 frames is one
-second at 60 Hz and two and a half at 23.976, which is a full-screen 4K composite
-sixty times over exactly when the plane matters most. And only a failed TEST is
-waited on - an ineligible scene is decided before any round trip and changes from
-one frame to the next, so re-deciding it is cheap. Both waits log the first time
-they are armed; the path was silent, which on screen reads as a slow box rather
-than as an offload standing down.
+A surface using explicit synchronisation is not offered at all. struct
+wlr_output_layer_state carries no wait timeline, so its acquire point cannot be
+honoured for a buffer handed to a plane, and the display engine would start reading
+while the client is still drawing. A missed offload is the correct failure for that
+- the alternative is scanning out an unfinished frame.
 
 Measured on a Raspberry Pi 5 (vc4) with a 4K film under a fullscreen translucent
 UI: the compositor GPU time goes from 67% to 0% and the player stops dropping
 frames.
 ---
- include/wlr/types/wlr_scene.h |  15 ++
- types/scene/wlr_scene.c       | 346 +++++++++++++++++++++++++++++++++-
- 2 files changed, 358 insertions(+), 3 deletions(-)
+ include/wlr/types/wlr_scene.h |  18 ++
+ types/scene/wlr_scene.c       | 365 +++++++++++++++++++++++++++++++++-
+ 2 files changed, 380 insertions(+), 3 deletions(-)
 
 diff --git a/include/wlr/types/wlr_scene.h b/include/wlr/types/wlr_scene.h
-index 6c627b1..96e3f10 100644
+index 6c627b1..8098124 100644
 --- a/include/wlr/types/wlr_scene.h
 +++ b/include/wlr/types/wlr_scene.h
 @@ -24,6 +24,7 @@
@@ -50,7 +47,7 @@ index 6c627b1..96e3f10 100644
  #include <wlr/types/wlr_linux_dmabuf_v1.h>
  #include <wlr/util/addon.h>
  #include <wlr/util/box.h>
-@@ -264,6 +265,20 @@ struct wlr_scene_output {
+@@ -264,6 +265,23 @@ struct wlr_scene_output {
  
  		struct wl_list damage_highlight_regions;
  
@@ -62,6 +59,9 @@ index 6c627b1..96e3f10 100644
 +		struct wlr_output_layer *offload_layer;
 +		struct wlr_output_layer_state offload_layer_state;
 +		bool offload_unavailable;
++		// Said once per output: a surface using explicit synchronisation cannot go
++		// on a layer, and repeating that per frame would drown the log.
++		bool offload_sync_warned;
 +		bool offload_active;
 +		bool offload_offered;
 +		bool offload_disabled;
@@ -72,7 +72,7 @@ index 6c627b1..96e3f10 100644
  
  		struct wlr_drm_syncobj_timeline *in_timeline;
 diff --git a/types/scene/wlr_scene.c b/types/scene/wlr_scene.c
-index 7bc8b76..aa1e81a 100644
+index 7bc8b76..b9b8b6d 100644
 --- a/types/scene/wlr_scene.c
 +++ b/types/scene/wlr_scene.c
 @@ -1865,6 +1865,10 @@ void wlr_scene_output_destroy(struct wlr_scene_output *scene_output) {
@@ -86,7 +86,7 @@ index 7bc8b76..aa1e81a 100644
  	wl_array_release(&scene_output->render_list);
  	free(scene_output);
  }
-@@ -2310,6 +2314,331 @@ cleanup_transforms:
+@@ -2310,6 +2314,344 @@ cleanup_transforms:
  	return result;
  }
  
@@ -218,7 +218,7 @@ index 7bc8b76..aa1e81a 100644
 +	// until something unrelated damaged the output. This is the call that also
 +	// schedules one.
 +	scene_output_damage_whole(scene_output);
-+	if (++scene_output->offload_refusals > SCENE_OFFLOAD_MAX_REFUSALS) {
++	if (++scene_output->offload_refusals >= SCENE_OFFLOAD_MAX_REFUSALS) {
 +		wlr_log(WLR_DEBUG, "Output layers refused %d times, giving up on this output",
 +			scene_output->offload_refusals);
 +		scene_output->offload_unavailable = true;
@@ -273,6 +273,19 @@ index 7bc8b76..aa1e81a 100644
 +	// A layer state carries no alpha, and a transform of its own is not what the
 +	// backend is being asked for, so a surface needing either cannot go on a plane.
 +	if (top_buffer->opacity != 1 || top_buffer->transform != data->transform) {
++		return SCANOUT_INELIGIBLE;
++	}
++
++	// struct wlr_output_layer_state carries no wait timeline, so an explicit-sync
++	// client's acquire point cannot be honoured for a buffer handed to a plane: the
++	// display engine would begin reading it while the client is still drawing into
++	// it. A missed offload is the correct failure for that.
++	if (top_buffer->wait_timeline != NULL) {
++		if (!scene_output->offload_sync_warned) {
++			scene_output->offload_sync_warned = true;
++			wlr_log(WLR_DEBUG, "Not offloading: the top surface uses explicit "
++				"synchronisation and an output layer has no wait timeline");
++		}
 +		return SCANOUT_INELIGIBLE;
 +	}
 +
@@ -418,7 +431,7 @@ index 7bc8b76..aa1e81a 100644
  bool wlr_scene_output_build_state(struct wlr_scene_output *scene_output,
  		struct wlr_output_state *state, const struct wlr_scene_output_state_options *options) {
  	struct wlr_scene_output_state_options default_options = {0};
-@@ -2439,13 +2768,24 @@ bool wlr_scene_output_build_state(struct wlr_scene_output *scene_output,
+@@ -2439,13 +2781,30 @@ bool wlr_scene_output_build_state(struct wlr_scene_output *scene_output,
  	wlr_output_state_set_damage(state, &scene_output->pending_commit_damage);
  
  	// We only want to try direct scanout if:
@@ -442,6 +455,12 @@ index 7bc8b76..aa1e81a 100644
 +		}
 +	}
 +	if (!scene_output->offload_offered) {
++		// The episode is over: this frame composited the top surface instead. Saying
++		// so matters because the offer path schedules the frame that reads the
++		// backend's answer only when it is starting an episode - left set, a later
++		// offer would go out with nothing to read its verdict, and a refusal would
++		// leave the top surface off screen until something else damaged the output.
++		scene_output->offload_active = false;
 +		scene_output_disable_offload_layer(scene_output, state);
  	}
  

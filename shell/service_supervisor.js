@@ -18,15 +18,19 @@ const fs = require("fs");
 //   onGiveUp():  called once when the ceiling is hit (e.g. reset UI to idle)
 //   log(msg):    optional progress/diagnostic sink
 //
-// A spec that asks for a piped stderr gets it FORWARDED to log(): a service dies
-// for a reason, and an exit code on its own sends you looking for the wrong one -
-// a held port reads exactly like a missing binary. An unread pipe is also a hazard
-// of its own, since a child that fills it blocks on write.
+// stderr is piped by default and FORWARDED to log(): a service dies for a reason,
+// and an exit code on its own sends you looking for the wrong one - a held port
+// reads exactly like a missing binary. It is always drained, log or no log, because
+// a child that fills the pipe blocks on write.
 
 // How many times to clear a leftover instance before starting anyway and letting
 // the ordinary backoff report the failure. Bounded so a process that refuses to
 // die cannot hold the service in a reap loop.
 const MAX_REAP_PASSES = 3;
+
+// Longest single stderr line forwarded to log(), and the point at which a child
+// that writes no newline at all gets reported anyway rather than buffered.
+const MAX_LOG_LINE = 300;
 
 class Supervisor {
   constructor() {
@@ -120,19 +124,35 @@ class Supervisor {
       return;
     }
     s.proc = proc;
-    // Whatever the child says about its own failure. Read rather than left to fill:
-    // a pipe nobody drains stops the child at 64 KB.
-    if (spec.log && proc.stderr) {
+    // Whatever the child says about its own failure. Drained whenever the pipe
+    // exists, log or no log: a pipe nobody reads stops the child at 64 KB, and
+    // since stderr is piped by default that would be a new way to hang a service.
+    if (proc.stderr) {
       let tail = "";
       proc.stderr.setEncoding("utf8");
+      const emit = (line) => {
+        const msg = line.trim();
+        if (msg && spec.log) spec.log(msg.slice(0, MAX_LOG_LINE));
+      };
       proc.stderr.on("data", (chunk) => {
         tail += chunk;
         const lines = tail.split("\n");
-        tail = lines.pop(); // keep the unterminated remainder for the next chunk
+        tail = lines.pop(); // the unterminated remainder belongs to the next chunk
         for (const line of lines) {
-          const msg = line.trim();
-          if (msg) spec.log(msg.slice(0, 300));
+          emit(line);
         }
+        // A child that never writes a newline would otherwise grow this without
+        // bound. Report what we have and start again rather than buffer forever.
+        if (tail.length > MAX_LOG_LINE) {
+          emit(tail);
+          tail = "";
+        }
+      });
+      // The last thing a service says on its way out often has no trailing
+      // newline, and that is exactly the line worth having.
+      proc.stderr.on("end", () => {
+        emit(tail);
+        tail = "";
       });
       proc.stderr.on("error", () => {}); // the pipe closing with the child is normal
     }

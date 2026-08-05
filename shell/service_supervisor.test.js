@@ -1,8 +1,12 @@
-// The supervisor with real child processes: the two behaviours worth testing are
-// the ones that only show up against a real /proc and a real pipe.
+// The supervisor with real child processes. Everything here needs a real /proc or a
+// real pipe to mean anything: a fake stderr never fills, and a fake process list
+// never contains the orphan the reap exists for.
 const test = require("node:test");
 const assert = require("node:assert");
 const { spawn } = require("child_process");
+const fs = require("fs");
+const os = require("os");
+const path = require("path");
 const { Supervisor } = require("./service_supervisor");
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -41,6 +45,57 @@ test("a service's stderr reaches the log, not just its exit code", async () => {
   );
   sup.stop("noisy");
   assert.ok(got, "the child's own reason and its exit code: " + JSON.stringify(lines));
+});
+
+test("the last line survives having no trailing newline", async () => {
+  // What a service says on its way out is usually unterminated, and it is the line
+  // worth having - dropping it puts back the exit-code-with-no-reason problem.
+  const sup = new Supervisor();
+  const lines = [];
+  sup.spawn("abrupt", {
+    argv: () => ["sh", "-c", "printf 'died mid-sentence' >&2; exit 3"],
+    log: (m) => lines.push(m),
+    ceiling: 1,
+  });
+  const got = await until(() => lines.some((l) => l === "died mid-sentence"));
+  sup.stop("abrupt");
+  assert.ok(got, "an unterminated final line must still be logged: " + JSON.stringify(lines));
+});
+
+test("a service with no log still has its stderr drained", async () => {
+  // stderr is piped by default, so a spec without a log would leave a pipe nobody
+  // reads - and a child that fills 64 KB of it blocks on write. The marker is what
+  // makes this a real test: a blocked child never reaches the line that writes it.
+  const marker = path.join(os.tmpdir(), "tvbox-sup-drain-" + process.pid);
+  fs.rmSync(marker, { force: true });
+  const sup = new Supervisor();
+  sup.spawn("chatty", {
+    // 400 KB of stderr, well past the 64 KB pipe, and then the marker.
+    argv: () => [
+      "sh",
+      "-c",
+      'awk \'BEGIN{while(n++<400){c=0; while(c++<1023) printf "x"; print ""}}\' >&2; : > \'' + marker + "'; exit 7",
+    ],
+  });
+  const wrote = await until(() => fs.existsSync(marker), 15000);
+  sup.stop("chatty");
+  fs.rmSync(marker, { force: true });
+  assert.ok(wrote, "a child writing 400 KB to an unlogged stderr must still run to the end");
+});
+
+test("a single enormous line does not grow without bound", async () => {
+  const sup = new Supervisor();
+  const lines = [];
+  sup.spawn("oneline", {
+    argv: () => ["sh", "-c", "awk 'BEGIN{while(c++<5000) printf \"y\"}' >&2; exit 4"],
+    log: (m) => lines.push(m),
+    ceiling: 1,
+  });
+  const got = await until(() => lines.some((l) => l.startsWith("yyy")));
+  sup.stop("oneline");
+  assert.ok(got, "the partial line must be reported: " + JSON.stringify(lines));
+  const longest = Math.max(...lines.map((l) => l.length));
+  assert.ok(longest <= 300, "and capped, longest was " + longest);
 });
 
 test("a leftover instance of the same service is cleared before starting", async () => {
