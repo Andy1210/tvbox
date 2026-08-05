@@ -3,11 +3,10 @@
 // Mode SELECTION is tested in display.test.js; this file fakes a sink instead.
 const test = require("node:test");
 const assert = require("node:assert");
-const display = require("./display");
 const compositor = require("./compositor");
 
-// The mode lists below are REAL, captured from the two TVs this was developed on
-// with wlr-randr, and that is the point of pinning them. The compositor answers
+// The mode lists below are REAL, captured from the two TVs this was developed on,
+// and that is the point of pinning them. The compositor answers
 // the same lists in its own shape, so they are converted here and go through the
 // production path (compositor.toDisplayInfo) rather than a parser of their own.
 function modesFrom(text) {

@@ -19,6 +19,7 @@ const { redact } = require("./redact"); // an app's console line may carry ITS c
 const display = require("./display"); // resolution/refresh selection
 const displaymode = require("./displaymode"); // adaptive mode: UI mode + per-video claims
 const videoout = require("./videoout"); // which mpv renderer a stream needs
+const maintenance = require("./maintenance"); // installs, flatpak/bundle refresh, restore reconcile
 const system = require("./system"); // network, clock, keyboard, name, About numbers
 const hdrout = require("./hdr"); // whether the output should be in PQ for this film
 const compositor = require("./compositor"); // the compositor's control socket
@@ -33,7 +34,6 @@ const mediastate = require("./mediastate"); // mpv + app now-playing + sink -> O
 const ir = require("./ir"); // IR blaster hub: TV volume/mute over ESPHome or Home Assistant
 const appwins = require("./appwindows"); // background-apps window registry + hidden-set policy (LRU/RAM guard)
 const nativeapp = require("./native"); // native (non-Electron) apps: RetroArch et al own the screen AND the input
-const flatpak = require("./flatpak"); // flatpak refs/versions/commits + updating one
 const fileserver = require("./fileserver"); // the box's folders over WebDAV (rclone, no root)
 const firetvir = require("./firetvir"); // Fire TV remote IR programming (venv deps + irdb codesets + BLE tool)
 const apps = require("./install"); // manifests + install-recipe runner (shared with the tvbox CLI)
@@ -53,7 +53,6 @@ const pkg = require("./package.json"); // shell version (About/diagnostics)
 const { PORT } = require("./constants");
 const BASE = "http://localhost:" + PORT;
 const IPC = "/tmp/tvbox-mpv.sock";
-const APP_ID = "tvbox-shell"; // Wayland app_id (== package.json name); the compositor stacks by it
 const LAUNCHER = path.join(__dirname, "launcher-dist"); // built React launcher (served under /tvbox/)
 // Inherit the session's Wayland env (run-shell.sh exports it); only fill gaps:
 // hardcoding uid 1000 breaks boxes whose first user isn't 1000 (Pi Imager custom user).
@@ -179,14 +178,13 @@ function boxIdle() {
 // Is the box free to start something substantial? Idle as above, no install in
 // flight, and none of the shell's OWN background maintenance running. The last
 // part is not redundant: the nightly app auto-update spends its registry download
-// with the `installing` set still empty (it only fills during provisionFull), so
-// idle+installing alone would call the box free while it is already saturating the
-// link. Everything that starts background work asks this - the OTA auto-apply, the
-// bundle refresh, the app auto-update, and a plugin through `host.idle()` - so the
-// answers cannot drift apart. The flags it reads are declared with the jobs they
-// guard, below; nothing calls this before those run.
+// before any app is marked installing, so "idle and nothing installing" would call
+// the box free while it is already saturating the link. maintenance.js owns those
+// flags and answers for all of them. Everything that starts background work asks
+// this - the OTA auto-apply, the bundle refresh, the app auto-update, and a plugin
+// through `host.idle()` - so the answers cannot drift apart.
 function boxFree() {
-  return boxIdle() && installing.size === 0 && !bundleRefreshBusy && !appsAutoBusy && !reconcile.busy();
+  return boxIdle() && !maintenance.busy();
 }
 // Restart the shell in-place: quit cleanly (localStorage flush, plugin stop);
 // the session's respawn loop relaunches run-shell.sh, which follows the `current` symlink.
@@ -216,236 +214,6 @@ function emitConfigChange(sections) {
     }
   }
 }
-const installing = new Set(); // app ids whose bundle is being installed on-demand (UI)
-// Per-app install progress for the store UI: id -> { phase }. `phase` is a
-// coarse, reliable stage the launcher turns into "Downloading.../Installing..."
-// text (not a fragile parsed %), so an install shows a live stage instead of a
-// frozen screen. Every install step is also appended to ~/.tvbox/install.log so
-// a slow/stuck install can be diagnosed (there was no install log before).
-const installProgress = new Map(); // id -> { phase: "deps" | "bundle" | "finishing" }
-const INSTALL_LOG = path.join(os.homedir(), ".tvbox", "install.log");
-function setInstallPhase(id, phase) {
-  if (phase) installProgress.set(id, { phase });
-  else installProgress.delete(id);
-}
-function logInstall(id, line) {
-  try {
-    fs.appendFileSync(INSTALL_LOG, "[" + id + "] " + line + "\n");
-  } catch (e) {
-    /* best effort - a missing log must never fail an install */
-  }
-}
-// Run `cli.js <args>` for app <id> at stage <phase>, piping its output to the
-// install log (so flatpak/curl progress is inspectable) and resolving true on a
-// clean exit. Used for both the bundle fetch and the no-root binary-dep install.
-function spawnCli(args, id, phase) {
-  return new Promise((resolve) => {
-    setInstallPhase(id, phase);
-    logInstall(id, phase + " start: cli " + args.join(" "));
-    const child = spawn(process.execPath, [path.join(__dirname, "cli.js"), ...args], {
-      env: { ...process.env, ...WL_ENV, ELECTRON_RUN_AS_NODE: "1" },
-      stdio: ["ignore", "pipe", "pipe"],
-    });
-    const onData = (d) =>
-      String(d)
-        .split(/\r?\n/)
-        .forEach((l) => l.trim() && logInstall(id, l.trim()));
-    child.stdout.on("data", onData);
-    child.stderr.on("data", onData);
-    child.on("error", (e) => {
-      logInstall(id, phase + " spawn error: " + e.message);
-      resolve(false);
-    });
-    child.on("exit", (code) => {
-      logInstall(id, phase + " exit " + code);
-      resolve(code === 0);
-    });
-  });
-}
-// Full provision of a just-installed store app: fetch its no-root binary deps
-// AND its bundle (whichever it declares), in order, from ONE store action - so
-// the user never has to press the HOME tile to finish an install, and the app
-// only reaches HOME once it is actually launchable. A `service` app's plugin
-// still loads at boot, so it restarts once at the end (gated on idle); that is
-// the last step, after everything is in place (hot-loading without a restart is
-// a follow-up). Progress + the installing flag drive the store UI.
-async function provisionFull(id) {
-  const m = apps.manifestById(id);
-  if (!m || installing.has(id)) return;
-  installing.add(id);
-  let ok = true;
-  try {
-    const deps = apps.appDeps(m);
-    if (!deps.depsOk && deps.installable) ok = await spawnCli(["deps", id, "--download-only"], id, "deps");
-    if (ok && m.install && m.install.source && !apps.isInstalled(id))
-      ok = await spawnCli(["install", id], id, "bundle");
-  } catch (e) {
-    logInstall(id, "provision error: " + (e.message || e));
-    ok = false;
-  }
-  // Activate a service app's plugin WITHOUT a restart: hot-load registers its
-  // routes on the live server and starts its daemon. Only if hot-load fails do
-  // we fall back to a one-off restart (and only when idle, so nothing playing is
-  // interrupted); otherwise the plugin just loads on the next natural boot.
-  if (ok && m.service) {
-    setInstallPhase(id, "finishing");
-    if (hotLoadPlugin(id)) {
-      installing.delete(id);
-      setInstallPhase(id, null);
-      return;
-    }
-    if (boxIdle()) {
-      setTimeout(() => restartShell("service install (hot-load failed): " + id), 1200);
-      return; // keep installing/phase set until the restart
-    }
-  }
-  installing.delete(id);
-  setInstallPhase(id, null);
-}
-
-// Manual flatpak update for one app, the counterpart of the nightly
-// tvbox-flatpak-update timer: a flatpak-backed app (RetroArch runs one, Plex's
-// bundle is extracted from one) has a version the registry knows nothing about, so
-// the store needs a way to move it NOW rather than at 03:30.
-//
-// Out of process for the same reason an install is - a flatpak is hundreds of MB -
-// and it reuses `installing` + the progress phase, so the store shows the same
-// progress it does for an install. What actually changed is decided by the commit
-// before and after, since a rebuild can keep the version string.
-const flatpakResult = new Map(); // id -> { ok, changed, version } for the store's status line
-function startFlatpakUpdate(id, res) {
-  const m = apps.manifestById(id);
-  const refs = m ? flatpak.refsFor(m) : [];
-  if (!m || !refs.length) return jsonRes(res, { ok: false, error: "no flatpak" });
-  // Busy is a refusal, not a start. Reporting `installing` here would make the
-  // launcher wait for a flatpak result that a bundle install is never going to
-  // produce, and then read its absence as a failure.
-  if (installing.has(id)) return jsonRes(res, { ok: false, error: "busy" });
-  installing.add(id);
-  flatpakResult.delete(id);
-  (async () => {
-    const before = flatpak.commitsSync(refs);
-    const ok = await spawnCli(["flatpak-update", id], id, "flatpak");
-    flatpak.invalidate();
-    const after = flatpak.commitsSync(refs);
-    const changed = refs.some((f) => before[f.ref] !== after[f.ref]);
-    // The bundle is a copy of the flatpak's files, so a moved flatpak means the
-    // copy is now behind: bring it level in the same action.
-    if (ok && changed && apps.bundleStale(m)) await spawnCli(["install", id, "--force"], id, "bundle");
-    const versions = await flatpak.list({ fresh: true });
-    flatpakResult.set(id, {
-      ok,
-      changed,
-      version: refs.map((f) => (versions.get(f.ref) || {}).version).filter(Boolean)[0] || null,
-    });
-    installing.delete(id);
-    setInstallPhase(id, null);
-  })();
-  return jsonRes(res, { ok: true, updating: true });
-}
-
-// An extracted bundle stays behind when its flatpak moves, and the flatpak moves
-// on its own: the nightly timer updates it with the shell none the wiser. This is
-// what notices - out of process (a bundle can be large) and only when the box is
-// idle, since it replaces files an app may be serving from.
-let bundleRefreshBusy = false;
-async function bundleRefreshTick() {
-  if (!boxFree()) return;
-  // Behind its flatpak OR absent entirely. The second case is a settings restore:
-  // the manifest comes back, the bundle does not, and nothing else would ever pick
-  // that up (see bundleMissing in install.js).
-  const stale = apps.getManifests().filter((m) => apps.bundleStale(m) || apps.bundleMissing(m));
-  if (!stale.length) return;
-  bundleRefreshBusy = true;
-  try {
-    for (const m of stale) {
-      // a wake-up aborts the run; not boxFree(), whose flag this run itself holds
-      if (installing.size || !boxIdle()) break;
-      console.log(
-        apps.bundleMissing(m)
-          ? "[install] bundle missing, acquiring:"
-          : "[install] bundle behind its flatpak, refreshing:",
-        m.id,
-      );
-      installing.add(m.id);
-      await spawnCli(["install", m.id, "--force"], m.id, "bundle");
-      installing.delete(m.id);
-      setInstallPhase(m.id, null);
-    }
-  } finally {
-    bundleRefreshBusy = false;
-  }
-}
-
-// A restore brings the box's SETTINGS back; this brings back what sat behind
-// them. The desired state was recorded by the restore itself (reconcile.js), so
-// this only has to drive the acquisitions - out of process for the same reason
-// every other install is, and only while the box is free, since a restored box
-// is usually one someone is standing in front of.
-//
-// It runs on the boot AFTER the restore: the restart is what makes plugins re-read
-// the restored credentials, and doing this before it would race the very files the
-// restore just wrote.
-async function reconcileTick() {
-  // An app whose manifest was in the backup itself (the single-json form) is
-  // already here, so its own files can land before anything is downloaded.
-  backup.applyPendingAppFiles();
-  const desired = reconcile.pending();
-  if (!desired || !boxFree()) return;
-  console.log("[reconcile] re-acquiring", desired.apps.length, "app(s) after a", desired.reason);
-  await reconcile.run(desired, {
-    apps,
-    free: () => boxIdle() && installing.size === 0, // not boxFree(): this run holds that flag itself
-    installApp: (id) => store.install(config, id),
-    installDeps: (id) => withInstalling(id, () => spawnCli(["deps", id, "--download-only"], id, "deps")),
-    installBundle: (id) => withInstalling(id, () => spawnCli(["install", id], id, "bundle")),
-  });
-  const s = reconcile.state();
-  const retrying = reconcile.settle(desired);
-  console.log(
-    "[reconcile] done:",
-    s.done - s.failed.length,
-    "of",
-    s.total,
-    s.failed.length
-      ? "(" + s.failed.map((f) => f.id + "/" + f.kind).join(", ") + " failed" + (retrying ? ", will retry" : "") + ")"
-      : "",
-  );
-  // Every app that was going to arrive has arrived, so the files an app asked to
-  // have carried can be placed - and whatever still has no app to belong to is
-  // dropped rather than retried at every boot from here on.
-  backup.applyPendingAppFiles({ final: !retrying });
-  // Tiles come back on their own (manifests reload per /apps request), but a
-  // `service` app's plugin loads at boot only. Hot-load each one instead of
-  // restarting: the user is watching this happen on a box they just restored, and
-  // an unexplained restart at the end is exactly what a restore should not do.
-  //
-  // A `deps` step counts as much as an `app` one: loadOnePlugin is deps-gated, so an
-  // app whose package survived the restore but whose flatpak did not was SKIPPED at
-  // boot - installing the flatpak here is exactly what makes it loadable, and
-  // without this its routes and daemon would stay dead until some unrelated restart.
-  // hotLoadPlugin is idempotent (loadedPluginIds) and refuses anything still short
-  // of a dep, so calling it for every landed step is safe.
-  for (const step of s.steps) {
-    if ((step.kind === "app" || step.kind === "deps") && step.state === "done") hotLoadPlugin(step.id);
-  }
-}
-
-// Mark an app as installing for the duration of one step, so the store UI shows
-// the same progress it does for a manual install and nothing else starts work on
-// the same app underneath it.
-async function withInstalling(id, fn) {
-  installing.add(id);
-  try {
-    return await fn();
-  } finally {
-    installing.delete(id);
-    setInstallPhase(id, null);
-  }
-}
-
-// ---- LAN file server (WebDAV) ----
-//
 // Copying a screensaver image onto the box, or a console BIOS into the folder an
 // emulator reads, is not something a TV can do - and should not need ssh. The module
 // owns the decisions (which folders are offered, what gets served, refusing to serve
@@ -519,7 +287,11 @@ function appLaunchable(m) {
   const configured = rt.serve === "remote" && rt.urlConfig ? !!(config.appConfig(rt.urlConfig) || {}).baseUrl : true;
   const installable = !!(m.install && m.install.source);
   return (
-    m.status === "ready" && depsOk && configured && !installing.has(m.id) && (!installable || apps.isInstalled(m.id))
+    m.status === "ready" &&
+    depsOk &&
+    configured &&
+    !maintenance.isInstalling(m.id) &&
+    (!installable || apps.isInstalled(m.id))
   );
 }
 
@@ -560,10 +332,10 @@ function appTiles() {
       depsInstallable, // every missing binary is a no-root download dep -> UI-installable (no CLI)
       installable,
       installed: apps.isInstalled(m.id),
-      installing: installing.has(m.id),
+      installing: maintenance.isInstalling(m.id),
       configured,
       ready: appLaunchable(m), // see appLaunchable: the one definition HOME and HA share
-      progress: installProgress.get(m.id) || null,
+      progress: maintenance.progressFor(m.id) || null,
     };
   });
 }
@@ -920,10 +692,10 @@ function handlePost(p, data, res) {
     return jsonRes(res, { ok: true });
   }
   if (p === "/tvbox/api/apps/install") {
-    return startInstall(String(data.id || ""), res);
+    return maintenance.startInstall(String(data.id || ""), res);
   }
   if (p === "/tvbox/api/apps/deps") {
-    return startDeps(String(data.id || ""), res);
+    return maintenance.startDeps(String(data.id || ""), res);
   }
   if (p === "/tvbox/api/store/install") {
     const id = String(data.id || "");
@@ -935,13 +707,13 @@ function handlePost(p, data, res) {
         // bundle) in the SAME action, so the app reaches HOME only once it is
         // actually launchable - no "press the tile to finish" step. provisionFull
         // handles the final service-plugin restart itself, gated on idle.
-        if (r.ok) provisionFull(id);
+        if (r.ok) maintenance.provisionFull(id);
       })
       .catch((e) => jsonRes(res, { ok: false, error: String(e.message || e).slice(0, 120) }));
     return;
   }
   if (p === "/tvbox/api/store/flatpak-update") {
-    return startFlatpakUpdate(String(data.id || ""), res);
+    return maintenance.startFlatpakUpdate(String(data.id || ""), res);
   }
   if (p === "/tvbox/api/store/uninstall") {
     const id = String(data.id || "");
@@ -990,7 +762,7 @@ function handlePost(p, data, res) {
     const id = String(data.id || "");
     const m = apps.manifestById(id);
     if (!m || m.type !== "webclient") return jsonRes(res, { ok: false, error: "not removable" });
-    if (installing.has(id)) return jsonRes(res, { ok: false, error: "install in progress" });
+    if (maintenance.isInstalling(id)) return jsonRes(res, { ok: false, error: "install in progress" });
     if (currentAppId === id) showLauncher(); // never yank the bundle out from under the running app
     destroyAppWindow(id); // incl. a hidden background window
     return jsonRes(res, { ok: true, removed: apps.removeApp(id) });
@@ -1054,103 +826,6 @@ function btBatteryTick() {
       handleTvNotify({ kind: "lowBattery", name: d.name, battery: d.battery });
     }
   });
-}
-
-// Nightly app auto-update (the Fire TV model): in the OTA updater's 03-06h
-// window, when the box is idle and update.appsAuto isn't turned off, install
-// every pending registry update through the EXACT same path as the store's
-// Update button (store.install + provisionFull) - provisionFull's own idle
-// gating handles any service-plugin restart. One app at a time; re-checked
-// between apps so a wake-up aborts the run.
-let appsAutoBusy = false;
-async function appsAutoTick() {
-  const u = config.rawUpdate() || {};
-  if (u.appsAuto === false) return;
-  const h = new Date().getHours();
-  if (h < 3 || h > 5) return;
-  if (!boxFree()) return;
-  appsAutoBusy = true;
-  try {
-    const l = await store.listForUi(config)(true);
-    for (const id of l.updates || []) {
-      // re-checked per app: a user install started during the awaited registry
-      // refresh (or a provisionFull that just scheduled a service restart)
-      // must stop the run - store.install would swap ~/.tvbox/apps/<id> under it.
-      // Not boxFree(), whose flag this run itself holds.
-      if (!boxIdle() || installing.size) break;
-      console.log("[store] nightly app auto-update:", id);
-      const r = await store.install(config, id);
-      if (r && r.ok) await provisionFull(id);
-    }
-  } catch (e) {
-    console.warn("[store] nightly app auto-update failed:", String(e.message || e).slice(0, 160));
-  } finally {
-    appsAutoBusy = false;
-  }
-}
-
-// On-demand bundle install (e.g. Plex's flatpak) triggered from the launcher.
-// Runs the recipe OUT OF PROCESS (`node cli.js install <id>`) so a multi-minute
-// flatpak download never blocks the Electron main process / UI; the launcher
-// polls /tvbox/api/apps and sees `installing` then `installed` flip. User-space
-// only (flatpak --user / curl / git) - never root; apt deps are the `tvbox deps`
-// CLI's job. Restricted to a ready app that declares an install recipe.
-function startInstall(id, res) {
-  const m = apps.manifestById(id);
-  if (!m || !(m.install && m.install.source) || m.status !== "ready")
-    return jsonRes(res, { ok: false, error: "not installable" });
-  if (apps.isInstalled(id)) return jsonRes(res, { ok: true, installed: true });
-  if (installing.has(id)) return jsonRes(res, { ok: true, installing: true });
-  installing.add(id);
-  console.log("[install] on-demand start:", id);
-  // Run cli.js as Node via Electron's own binary (ELECTRON_RUN_AS_NODE) so we
-  // don't depend on a separate `node` being on PATH in the shell's env.
-  const child = spawn(process.execPath, [path.join(__dirname, "cli.js"), "install", id], {
-    env: { ...process.env, ...WL_ENV, ELECTRON_RUN_AS_NODE: "1" },
-    stdio: "ignore",
-  });
-  child.on("error", (e) => {
-    console.warn("[install]", id, "spawn error:", e.message);
-    installing.delete(id);
-  });
-  child.on("exit", (code) => {
-    console.log("[install]", id, "exit", code);
-    installing.delete(id);
-  });
-  return jsonRes(res, { ok: true, installing: true });
-}
-
-// Install an app's no-root binary deps (requires.download) from the UI - the
-// "remote-only, no CLI" path. Runs `cli.js deps <id> --download-only` out of
-// process (curl/tar can take seconds; never block the main process) and reuses
-// the `installing` flag so the launcher's poll shows progress. apt-only deps
-// are NOT touched here (they need root / the image / `tvbox deps`).
-function startDeps(id, res) {
-  const m = apps.manifestById(id);
-  if (!m) return jsonRes(res, { ok: false, error: "unknown app" });
-  const deps = apps.appDeps(m);
-  if (deps.depsOk) return jsonRes(res, { ok: true, depsOk: true });
-  if (!deps.installable)
-    return jsonRes(res, { ok: false, error: "needs setup on the box: tvbox deps " + id, missing: deps.missing });
-  if (installing.has(id)) return jsonRes(res, { ok: true, installing: true });
-  installing.add(id);
-  console.log("[deps] on-demand start:", id);
-  const child = spawn(process.execPath, [path.join(__dirname, "cli.js"), "deps", id, "--download-only"], {
-    env: { ...process.env, ...WL_ENV, ELECTRON_RUN_AS_NODE: "1" },
-    stdio: "ignore",
-  });
-  child.on("error", (e) => {
-    console.warn("[deps]", id, "spawn error:", e.message);
-    installing.delete(id);
-  });
-  child.on("exit", (code) => {
-    console.log("[deps]", id, "exit", code);
-    installing.delete(id);
-    // A freshly downloaded binary is now on PATH; activate a `service` plugin
-    // by hot-load (no restart) - same as the store install path.
-    if (code === 0 && m.service) hotLoadPlugin(id);
-  });
-  return jsonRes(res, { ok: true, installing: true });
 }
 
 // ---- plugin route dispatch ----
@@ -1501,11 +1176,11 @@ function serve() {
       });
       return;
     }
-    // App-store registry (Settings → Store). ?refresh=1 bypasses the 5-min cache.
     if (p === "/tvbox/api/fileserver") {
       const st = fileserver.status(config.rawFileserver(), fileserverDeps);
       return jsonRes(res, { ...st, installing: rcloneInstalling });
     }
+    // App-store registry (Settings → Store). ?refresh=1 bypasses the 5-min cache.
     if (p === "/tvbox/api/store/list") {
       const refresh = (req.url || "").includes("refresh=1");
       store
@@ -1515,11 +1190,11 @@ function serve() {
         .then((d) => {
           const apps2 = (d.apps || []).map((e) => ({
             ...e,
-            installing: installing.has(e.id),
-            progress: installProgress.get(e.id) || null,
-            flatpakStatus: flatpakResult.get(e.id) || null, // result of the last manual flatpak update
+            installing: maintenance.isInstalling(e.id),
+            progress: maintenance.progressFor(e.id) || null,
+            flatpakStatus: maintenance.flatpakStatusFor(e.id), // result of the last manual flatpak update
           }));
-          jsonRes(res, { ...d, apps: apps2, installing: [...installing] });
+          jsonRes(res, { ...d, apps: apps2, installing: maintenance.installingIds() });
         })
         .catch((e) => jsonRes(res, { apps: [], error: String(e.message || e).slice(0, 120) }));
       return;
@@ -3799,7 +3474,7 @@ app.whenReady().then(async () => {
       const a = config.rawApps();
       return !(a && a.background === false);
     },
-    memInfo,
+    memInfo: system.memInfo,
     foregroundId: () => currentAppId,
   });
   setInterval(() => appwins.ramGuardTick(), 60 * 1000); // evict hidden apps under memory pressure
@@ -3835,17 +3510,17 @@ app.whenReady().then(async () => {
   });
   updater.startSchedulers(); // boot check + 6h re-check + nightly idle auto-apply
   if (config.rawFileserver().enabled) applyFileserver(); // the LAN share survives a restart
-  setInterval(appsAutoTick, 30 * 60 * 1000); // nightly registry app auto-update (same window)
+  setInterval(maintenance.appsAutoTick, 30 * 60 * 1000); // nightly registry app auto-update (same window)
   // Not gated to the small hours like the registry check: a bundle whose flatpak
   // moved is BROKEN-ish now (the copy is older than the app it talks to), and the
   // work is a local file copy, not a download.
-  setTimeout(bundleRefreshTick, 2 * 60 * 1000);
-  setInterval(bundleRefreshTick, 6 * 60 * 60 * 1000);
+  setTimeout(maintenance.bundleRefreshTick, 2 * 60 * 1000);
+  setInterval(maintenance.bundleRefreshTick, 6 * 60 * 60 * 1000);
   // Sooner than the bundle refresh: this is the boot right after a restore, the
   // user is watching an empty HOME, and every tile they expect is behind it. The
   // re-check covers a box that was busy (or offline) at the first attempt.
-  setTimeout(reconcileTick, 20 * 1000);
-  setInterval(reconcileTick, 15 * 60 * 1000);
+  setTimeout(maintenance.reconcileTick, 20 * 1000);
+  setInterval(maintenance.reconcileTick, 15 * 60 * 1000);
   setTimeout(btBatteryTick, 5 * 60 * 1000); // early check after boot, then half-hourly
   setInterval(btBatteryTick, 30 * 60 * 1000);
   // Start plugin daemons once the HDMI sink is the default (librespot needs it).
@@ -3856,6 +3531,17 @@ app.whenReady().then(async () => {
   // A rename changes which MQTT topics the box belongs on, so the bridge has to
   // reconnect with it.
   system.init({ onHostnameChanged: applyMqttConfig });
+  // The background jobs need to know whether the box is free and how to reach the
+  // shell; nothing in them draws anything.
+  maintenance.init({
+    boxIdle,
+    boxFree,
+    restartShell,
+    hotLoadPlugin,
+    applyPendingAppFiles: (opts) => backup.applyPendingAppFiles(opts),
+    jsonRes,
+    childEnv: () => ({ ...process.env, ...WL_ENV }),
+  });
   ir.applyConfig(); // IR blaster hub; no-op if not configured
   // Keep the media state topic honest about which app is in front and how loud the
   // box is; both are cheap and neither is urgent (see MEDIA_TICK_MS).
