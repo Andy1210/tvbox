@@ -5,6 +5,71 @@ updates). `scripts/make-release.sh` lifts the current version's `hu`/`en`
 blocks into the OTA feed's `notes` - keep both languages, keep it short, and
 write for the person on the couch (what changes for THEM), not for developers.
 
+## 1.24.7
+
+### hu
+
+- **A film indulásakor nincs többé akadozás.** Eddig a kép az első pár másodpercben
+  szaggatott, aztán magától rendbe jött. Frissen telepített vagy újraprovisionált
+  boxon jár, a régieken a következő provisionig marad a mostani működés.
+- **A fájlmegosztás megint működik.** A box mappáit hálózaton kínáló szolgáltatás
+  napokig nem indult el, és semmi nem jelezte. Most elindul, és ha valami mégis
+  megakadályozza, azt meg is írja a naplóba.
+
+### en
+
+- **No more stutter when a film starts.** The picture used to judder for the first
+  couple of seconds and then settle by itself. Freshly flashed or re-provisioned
+  boxes get this; existing ones keep working as they do now until their next
+  provision.
+- **File sharing works again.** The service that offers the box's folders over the
+  network had not been starting for days, and nothing said so. Now it starts, and if
+  something does stop it, it says what in the log.
+
+### notes
+
+Not release notes for the TV - for whoever runs the boxes:
+
+**What the film-start stutter actually was.** Measured on `tvbox-livingroom` with a
+4K HDR title, sampling labwc's `drm-engine-render` from `/proc/<labwc>/fdinfo/*`
+every 200 ms: the compositor burned **345-597 ms of GPU render time per second for
+the first 4.6 s** of every film, then 0.00 ms/s for the rest. mpv was innocent
+throughout - zero dropped, delayed and decoder-dropped frames, a steady 24.0 fps -
+so it was presentation, not decoding.
+
+Two causes, one chain. `SCENE_OFFLOAD_BACKOFF` in `wlroots-0004` was 60 **frames**,
+which is one second at 60 Hz and two and a half at 23.976, the rate a 24p film runs
+at; it is a duration now, converted through the output's own refresh rate, and an
+ineligible scene is no longer waited on at all (it is decided before any round trip
+and changes frame to frame). The trigger was `labwc-0002` committing the HDR state
+from inside the config reload, which lands on a page-flip already in flight often
+enough to matter - and a failed commit leaves the render format on the long-lived
+pending state, which is exactly what makes `wlr_scene` refuse direct scan-out. It
+schedules a frame instead. **After: 4.67 s -> 0.08 s** of compositing, the two
+remaining frames being the modeset itself.
+
+**The split this release has, and it matters.** The file-server fix is shell code and
+arrives over OTA. The film-start fix is in the compositor patches: OTA ships the
+corrected `.patch` files and `install-labwc-planes.sh`, but it cannot RUN them - the
+build needs apt and root. So an OTA-only box gets the files and keeps the compositor
+it has until its next provision.
+
+**The file server had been down for two days and nothing pointed at it.** The holder
+was an orphaned `rclone serve webdav` on `:8098` with ppid 1, left by a shell that
+died by signal, and the log said only `exited code 1` because the stderr pipe was
+never drained. Now stderr is piped by default and forwarded line by line, and a
+leftover instance is cleared before starting - matched on the FULL argv, not one of
+our own children, and orphaned (PPid 1). Three traps came out of the AI review rather
+than out of writing it: piping stderr by default is itself a way to hang a service if
+nothing drains it; the last line a service writes usually has no newline and was
+being dropped; and "kill whatever runs this command line" is a much broader promise
+than "clear my own leftovers".
+
+**Technique worth reusing:** `drm-engine-render` on the compositor's `renderD128` fd
+needs no root and separates a compositing stall from the panel re-locking its mode -
+climbing means frames are being composited, flat while mpv reports no drops means the
+TV, and nothing in the box can help.
+
 ## 1.24.6
 
 ### hu
