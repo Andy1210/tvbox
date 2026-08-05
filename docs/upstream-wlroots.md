@@ -645,6 +645,15 @@ fd needs no root and separates the two candidate causes on its own - climbing me
 frames are being composited, flat while mpv reports no drops means the panel is
 re-locking its mode and nothing in the box can help.
 
+**The explicit-synchronisation stand-down costs this box nothing**, which was a
+measurement rather than a hope. With the check installed, a film start produced zero
+`Not offloading: the top surface uses explicit synchronisation` lines and the offload
+engaged as before - so Chromium's surface here does not use
+`wp_linux_drm_syncobj_v1`, and refusing one that does is free insurance. Same run
+also showed the offload engaging TWICE in one start, which is the `offload_active`
+fix visible from outside: before it, the second engagement was silent and scheduled
+no frame to read its own verdict.
+
 ### One review finding deliberately not acted on
 
 The offload layer can outlive the state that would have disabled it, by two routes:
