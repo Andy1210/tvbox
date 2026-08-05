@@ -98,22 +98,57 @@ test("a single enormous line does not grow without bound", async () => {
   assert.ok(longest <= 300, "and capped, longest was " + longest);
 });
 
+function ppidOf(pid) {
+  try {
+    const m = /^PPid:\s*(\d+)/m.exec(fs.readFileSync("/proc/" + pid + "/status", "utf8"));
+    return m ? Number(m[1]) : -1;
+  } catch (e) {
+    return -1;
+  }
+}
+
+// A real orphan, the way one actually appears: a shell backgrounds the process and
+// exits, so the kernel reparents it. A process spawned straight from this test would
+// have a LIVE parent and must not be reaped at all - which is the next test.
+async function makeOrphan(cmd, matchArgv) {
+  spawn("sh", ["-c", cmd + " &"], { stdio: "ignore" });
+  let pid = -1;
+  await until(() => {
+    for (const entry of fs.readdirSync("/proc")) {
+      const p = Number(entry);
+      if (!p) continue;
+      let cmdline;
+      try {
+        cmdline = fs.readFileSync("/proc/" + p + "/cmdline", "utf8");
+      } catch (e) {
+        continue;
+      }
+      if (cmdline.replace(/\0$/, "") === matchArgv.join("\0") && ppidOf(p) === 1) {
+        pid = p;
+        return true;
+      }
+    }
+    return false;
+  });
+  return pid;
+}
+
 test("a leftover instance of the same service is cleared before starting", async () => {
-  // What an orphan looks like: the same command line, not our child. A parent killed
-  // by signal leaves exactly this, and it keeps the port or device the new one needs.
+  // What an orphan looks like: the same command line, no living parent. A shell that
+  // died by signal leaves exactly this, holding the port the new one needs.
   const argv = ["sleep", "31"];
-  const orphan = spawn(argv[0], argv.slice(1), { stdio: "ignore" });
-  await until(() => alive(orphan.pid));
+  const orphan = await makeOrphan("sleep 31", argv);
+  assert.notStrictEqual(orphan, -1, "the test needs a genuinely orphaned process");
 
   const sup = new Supervisor();
   const lines = [];
   sup.spawn("dup", { argv: () => argv, log: (m) => lines.push(m) });
 
-  const cleared = await until(() => !alive(orphan.pid));
+  const cleared = await until(() => !alive(orphan));
   const started = await until(() => lines.some((l) => l.startsWith("spawn: sleep 31")));
   sup.stop("dup");
   try {
-    orphan.kill("SIGKILL");
+    process.kill(orphan, "SIGKILL");
   } catch (e) {
     /* already reaped, which is the point */
   }
@@ -124,6 +159,50 @@ test("a leftover instance of the same service is cleared before starting", async
     "and it must say so: " + JSON.stringify(lines),
   );
   assert.ok(started, "then the service starts");
+});
+
+test("a process with the same argv but a living parent is left alone", async () => {
+  // "Kill whatever runs this command line" is a much broader promise than "clear my
+  // own leftovers": a live parent means somebody else is supervising it.
+  const argv = ["sleep", "34"];
+  const keeper = spawn("sh", ["-c", "sleep 34 & wait"], { stdio: "ignore" });
+  let victim = -1;
+  await until(() => {
+    for (const entry of fs.readdirSync("/proc")) {
+      const p = Number(entry);
+      if (!p) continue;
+      try {
+        if (fs.readFileSync("/proc/" + p + "/cmdline", "utf8").replace(/\0$/, "") !== argv.join("\0")) continue;
+      } catch (e) {
+        continue;
+      }
+      if (ppidOf(p) === keeper.pid) {
+        victim = p;
+        return true;
+      }
+    }
+    return false;
+  });
+  assert.notStrictEqual(victim, -1, "the test needs a live-parented process to protect");
+
+  const sup = new Supervisor();
+  const lines = [];
+  sup.spawn("polite", { argv: () => argv, log: (m) => lines.push(m) });
+  await until(() => lines.some((l) => l.startsWith("spawn: sleep 34")));
+  const survived = alive(victim);
+  sup.stop("polite");
+  keeper.kill("SIGKILL");
+  try {
+    process.kill(victim, "SIGKILL");
+  } catch (e) {
+    /* fine */
+  }
+
+  assert.ok(survived, "someone else's supervised child must not be reaped");
+  assert.ok(
+    !lines.some((l) => l.includes("cleared a leftover instance")),
+    "and nothing should claim it cleared one: " + JSON.stringify(lines),
+  );
 });
 
 test("reaping does not touch another service's live child", async () => {
