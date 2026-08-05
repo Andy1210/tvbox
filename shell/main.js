@@ -20,6 +20,7 @@ const display = require("./display"); // wlr-randr resolution/refresh control
 const displaymode = require("./displaymode"); // adaptive mode: UI mode + per-video claims
 const videoout = require("./videoout"); // which mpv renderer a stream needs
 const hdrout = require("./hdr"); // whether the output should be in PQ for this film
+const compositor = require("./compositor"); // the compositor's control socket
 const wifiradio = require("./wifiradio"); // the wifi radio as a setting, not just a pairing dip
 const textinput = require("./textinput"); // typing into a keyboard-less app (OSK / phone)
 const lang = require("./lang"); // what language a remote web app is told it runs in
@@ -126,6 +127,15 @@ let mpvStartPending = false; // fullscreen mpv launched paused, waiting for the 
 let mpvSeq = 0; // launch counter, so a stale start-gate timer can't touch a newer launch
 let mpvStartedSeq = 0; // the launch whose start handshake already ran
 let currentAppId = null; // which app is FOREGROUND (null = launcher); drives focus + video-mode targeting
+
+// The compositor cannot work out which of the launcher and an app owns the screen:
+// both are windows of this process. It needs to know, because the remote's Back
+// key is rewritten for an app (the app UIs only act on Backspace) and left alone
+// for the launcher, which handles the browser key itself.
+function setForegroundApp(id) {
+  currentAppId = id;
+  compositor.setFocus(id ? "app" : "launcher", id || null);
+}
 // A native app is MEANT to own the screen. Separate from nativeapp.running(): a
 // stop() only asks (SIGTERM), and the process can outlive the request by a moment,
 // so raising our own window must key off the intent, not the process. Cleared
@@ -2415,7 +2425,7 @@ function showLauncher(hash) {
   // (focused() sees the same app+window and only refreshes its label), i.e. the
   // keyboard would never come up again.
   textinput.dropFor(null);
-  currentAppId = null;
+  setForegroundApp(null);
   playingUrl = null;
   stopMpv();
   setVideoMode(false);
@@ -2500,7 +2510,7 @@ function foregroundApp(id) {
   if (!w) return false;
   applyAppLanguage(id); // the UI language may have changed while this app was away
   if (currentAppId && currentAppId !== id) leftForeground(currentAppId);
-  currentAppId = id;
+  setForegroundApp(id);
   appwins.touch(id);
   try {
     w.webContents.setAudioMuted(false);
@@ -2554,7 +2564,7 @@ function openNativeApp(m, extraArgs) {
   // running and in the one place both callers pass through, so a launch that failed
   // cannot leave a return target behind for whatever exits next.
   nativeHostApp = m.type === "native" ? null : m.id;
-  currentAppId = m.id; // makes boxIdle() false too: no OTA restart mid-game
+  setForegroundApp(m.id); // makes boxIdle() false too: no OTA restart mid-game
   nativeForeground = true;
   setTimeout(() => {
     if (!nativeapp.running() || nativeapp.id() !== m.id) return; // exited (or replaced) already
@@ -2696,7 +2706,7 @@ function openRemoteApp(m, url) {
   };
   stopMpv();
   setVideoMode(false); // no mpv behind a remote app; drop any prior session
-  currentAppId = m.id; // identity is per-window (windowAppId); this global only tracks foreground
+  setForegroundApp(m.id); // identity is per-window (windowAppId); this global only tracks foreground
   // Every remote window gets the sandbox-safe preload now: a capability app needs
   // it for its granted brokers (fetch/storage), and EVERY remote app needs the
   // text-input bridge (a focused field must be able to raise the on-screen
@@ -2807,7 +2817,9 @@ function openRemoteApp(m, url) {
         showLauncher();
         return;
       }
-      if (input.key === "BrowserBack" || input.key === "GoBack" || input.key === "Escape") {
+      // Backspace, not BrowserBack: while an app owns the screen the compositor has
+      // already rewritten the remote's Back key, and this popup belongs to an app.
+      if (input.key === "Backspace" || input.key === "Escape") {
         // Never let a key handler throw: Back would die with it and the popup would
         // be inescapable.
         let canBack;
@@ -2866,19 +2878,13 @@ function openRemoteApp(m, url) {
     wc.executeJavaScript(NO_WEBAUTHN_JS).catch(() => {});
   });
   // Remote Home key (CEC double-tap Back -> BrowserHome) returns to the launcher.
-  // BrowserBack/GoBack (a BT remote's Back button) -> re-injected as Backspace,
-  // same translation as the main window: a remote site (YouTube leanback) only
-  // handles the key the CEC remote would send, not the browser navigation keys.
+  // The BT remote's Back key needs no translation here any more: the compositor
+  // rewrites it while an app owns the screen, so this window already sees the key
+  // a remote site (YouTube leanback) knows.
   wc.on("before-input-event", (e, input) => {
     if (input.type === "keyDown" && input.key === "BrowserHome") {
       e.preventDefault();
       showLauncher();
-      return;
-    }
-    if (input.key === "BrowserBack" || input.key === "GoBack") {
-      e.preventDefault();
-      if (input.type !== "keyDown" && input.type !== "keyUp") return;
-      wc.sendInputEvent({ type: input.type === "keyDown" ? "keyDown" : "keyUp", keyCode: "Backspace" });
     }
   });
   // If this window goes away for ANY reason while it's still the active app
@@ -2922,7 +2928,7 @@ function openRemoteApp(m, url) {
 function openLocalApp(m) {
   const rt = m.runtime || {};
   textinput.dropFor(null);
-  currentAppId = m.id;
+  setForegroundApp(m.id);
   const w = new BrowserWindow({
     fullscreen: true,
     frame: false,
@@ -2947,20 +2953,14 @@ function openLocalApp(m) {
       ev.sourceId ? "(" + ev.sourceId + ":" + ev.lineNumber + ")" : "",
     );
   });
-  // Same BT-remote Back translation the main window did while an app owned it
-  // (BrowserBack/GoBack -> trusted Backspace; the app UIs only know the CEC form).
-  // Home is ALSO caught main-side here (not only in the renderer) so a hung app
-  // can't trap the box - the renderer's own Home handler still works normally.
+  // Home is caught main-side here (not only in the renderer) so a hung app can't
+  // trap the box - the renderer's own Home handler still works normally. Back needs
+  // nothing: the compositor rewrites it while an app owns the screen.
   w.webContents.on("before-input-event", (e, input) => {
     if (input.type === "keyDown" && input.key === "BrowserHome") {
       e.preventDefault();
       showLauncher();
-      return;
     }
-    if (input.key !== "BrowserBack" && input.key !== "GoBack") return;
-    e.preventDefault();
-    if (input.type !== "keyDown" && input.type !== "keyUp") return;
-    w.webContents.sendInputEvent({ type: input.type === "keyDown" ? "keyDown" : "keyUp", keyCode: "Backspace" });
   });
   // A crashed/gone renderer doesn't emit "closed", so recover to the launcher
   // explicitly - never leave the box stuck on a dead app window (the launcher
@@ -3966,7 +3966,7 @@ app.whenReady().then(async () => {
         }
         if (win && !win.isDestroyed()) win.hide(); // exactly one visible toplevel again
       } else {
-        currentAppId = null;
+        setForegroundApp(null);
         showLauncher(); // the app window died while we were typing
       }
     },
@@ -4060,21 +4060,6 @@ app.whenReady().then(async () => {
       redact(ev.message),
       ev.sourceId ? "(" + ev.sourceId + ":" + ev.lineNumber + ")" : "",
     );
-  });
-  // BT remotes (e.g. Fire TV) send Back as KEY_BACK -> DOM BrowserBack/GoBack.
-  // The launcher/sdk accept those directly, but a webclient app's own UI (the
-  // Plex HTPC client) only understands the CEC remote's form (Backspace). While
-  // an app owns this window, swallow the browser key and re-inject a real
-  // Backspace through the input pipeline (a trusted event - synthetic DOM
-  // events are not guaranteed to be honored). Never while the launcher is
-  // showing (currentAppId null) - it handles BrowserBack itself. The injected
-  // Backspace re-enters this handler but doesn't match, so no loop.
-  win.webContents.on("before-input-event", (e, input) => {
-    if (!currentAppId || (input.key !== "BrowserBack" && input.key !== "GoBack")) return;
-    e.preventDefault();
-    if (input.type !== "keyDown" && input.type !== "keyUp") return;
-    if (input.type === "keyDown") console.log("[input] " + input.key + " -> Backspace (app " + currentAppId + ")");
-    win.webContents.sendInputEvent({ type: input.type === "keyDown" ? "keyDown" : "keyUp", keyCode: "Backspace" });
   });
   win.loadURL(BASE + "/tvbox/"); // boot into the HOME launcher
   win.focus();
