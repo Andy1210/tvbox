@@ -566,7 +566,7 @@ satisfied. Without it, every buffer reads as the DEFAULT sRGB/gamma2.2 - not as
 "untagged", which is the trap: a first attempt relaxed the untagged case and
 changed nothing, because that case never occurs. The diagnostic that settled it:
 
-```
+```text
 DIAG scanout refused: colour management (img_desc=0x..., buffer tf=8 prim=1)
 ```
 
