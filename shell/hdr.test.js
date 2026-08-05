@@ -6,52 +6,7 @@ const path = require("path");
 const net = require("net");
 const hdr = require("./hdr");
 
-// A CTA-861 extension carrying the two blocks a set needs to be asked for PQ.
-// `colorimetry` and `eotf` are the bytes a real EDID puts there: the LG this was
-// developed against reports c0 (BT2020 YCC+RGB) and 0d (SDR|PQ|HLG).
-function edidWith({ colorimetry = null, eotf = null } = {}) {
-  const base = Buffer.alloc(128);
-  const ext = Buffer.alloc(128);
-  ext[0] = 0x02; // CTA-861
-  ext[1] = 0x03; // revision
-  let i = 4;
-  if (colorimetry !== null) {
-    ext[i++] = (7 << 5) | 3; // extended tag, 3 bytes follow
-    ext[i++] = 5; // colorimetry data block
-    ext[i++] = colorimetry;
-    ext[i++] = 0x00;
-  }
-  if (eotf !== null) {
-    ext[i++] = (7 << 5) | 3;
-    ext[i++] = 6; // HDR static metadata data block
-    ext[i++] = eotf;
-    ext[i++] = 0x01; // static metadata type 1
-  }
-  ext[2] = i; // where the DTDs would start
-  return Buffer.concat([base, ext]);
-}
-
-test("parseEdidHdr reads the two blocks a PQ set advertises", () => {
-  assert.deepStrictEqual(hdr.parseEdidHdr(edidWith({ colorimetry: 0xc0, eotf: 0x0d })), {
-    bt2020: true,
-    pq: true,
-  });
-});
-
-test("parseEdidHdr says no when either half is missing", () => {
-  assert.deepStrictEqual(hdr.parseEdidHdr(edidWith({ colorimetry: 0xc0 })), { bt2020: true, pq: false });
-  assert.deepStrictEqual(hdr.parseEdidHdr(edidWith({ eotf: 0x0d })), { bt2020: false, pq: true });
-  // An SDR-only set: colorimetry block present but no BT2020 bits, EOTF says SDR.
-  assert.deepStrictEqual(hdr.parseEdidHdr(edidWith({ colorimetry: 0x00, eotf: 0x01 })), {
-    bt2020: false,
-    pq: false,
-  });
-});
-
-test("parseEdidHdr survives a truncated or absent EDID", () => {
-  assert.deepStrictEqual(hdr.parseEdidHdr(null), { bt2020: false, pq: false });
-  assert.deepStrictEqual(hdr.parseEdidHdr(Buffer.alloc(64)), { bt2020: false, pq: false });
-});
+// EDID parsing lives in edid.js and is tested there.
 
 test("wants: PQ content on the plane path, on a capable panel", () => {
   const pq = { gamma: "pq" };
