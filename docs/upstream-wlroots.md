@@ -623,7 +623,44 @@ anyway:
 - `labwc-0002` schedules a frame instead of committing inside the reload, so the
   colour space rides along with the next frame's damage after the flip completes.
 
+**Measured again with both fixes installed**, same title, same method:
+
+| | before | after |
+| --- | --- | --- |
+| composited window at the start of the film | 4.67 s | **0.08 s** |
+| samples over 1 ms/s of GPU render time | 25 | **2** |
+| dropped / delayed / decoder-dropped frames | 0 / 0 / 0 | 0 / 0 / 0 |
+
+The two frames that remain are the modeset itself. The log confirms both halves
+independently: no `failed to apply the HDR state` line and no
+`a page-flip is already pending` anywhere, and no `Offload held off` line at all -
+the wait is never armed now. Total disturbance from the film mapping to scan-out
+being back: 699 ms, of which about 53 ms is four commits refused for
+`Failed to scan-out cursor plane`. Those are the `wlroots-0007` class on ordinary
+frames rather than a modeset, so that patch correctly does not suppress them; they
+were there before this work as well.
+
 Worth keeping as a technique: `drm-engine-render` on the compositor's `renderD128`
 fd needs no root and separates the two candidate causes on its own - climbing means
 frames are being composited, flat while mpv reports no drops means the panel is
 re-locking its mode and nothing in the box can help.
+
+### One review finding deliberately not acted on
+
+The offload layer can outlive the state that would have disabled it, by two routes:
+`scene_output_disable_offload_layer()` returns early when the state already carries
+`WLR_OUTPUT_STATE_LAYERS`, before reaching the branch that would drop the layer; and
+`wlr_scene_output_destroy()` destroys it without the disabled-layer frame first. Both
+are real, and both are left alone for now:
+
+- the main path is already handled by the two-step the code was written around -
+  describe the layer disabled for one frame, THEN drop it, gated on
+  `offload_disabled`;
+- the early return needs a compositor that sets output layers of its own, which is
+  the case `scene_try_layer_offload()` explicitly stands down on;
+- the destroy case is output teardown, where the plane configuration is going away
+  with it.
+
+If either is ever revisited, the smaller change is to test `layers > 1` before the
+`WLR_OUTPUT_STATE_LAYERS` early return, so an output that gained a layer elsewhere
+stops owning ours rather than keeping it undescribed.
