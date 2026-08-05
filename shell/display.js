@@ -5,6 +5,7 @@
 // shell window follows a mode change with no extra work. Callers pass the session's
 // Wayland env (main's childEnv) - wlr-randr needs WAYLAND_DISPLAY / XDG_RUNTIME_DIR.
 const { execFile, execFileSync } = require("child_process");
+const compositor = require("./compositor");
 
 // Parse `wlr-randr` text into { output, modes:[{ key,width,height,refresh,refreshExact,current,preferred }] }.
 // `refresh` is rounded to whole Hz for a stable id ("WxH@60"); `refreshExact` is
@@ -135,7 +136,17 @@ function pickContentMode(modes, content) {
   return pool[0].m;
 }
 
+// The compositor's own socket first, wlr-randr after. tvbox-wc answers a mode
+// query directly and does not implement wlr-output-management at all, so on that
+// compositor wlr-randr has nothing to talk to; on labwc it is the only path.
 function list(env, cb) {
+  if (compositor.available()) {
+    return compositor.list((info) => (info ? cb(info) : wlrList(env, cb)));
+  }
+  wlrList(env, cb);
+}
+
+function wlrList(env, cb) {
   execFile("wlr-randr", [], { env, timeout: 8000 }, (e, out) => cb(e ? null : parse(out)));
 }
 
@@ -144,6 +155,10 @@ function list(env, cb) {
 // again, so an answer that arrives a few milliseconds later is no answer at all.
 // One wlr-randr before the first window is a fair price for not having to race.
 function listSync(env) {
+  if (compositor.available()) {
+    const info = compositor.listSync();
+    if (info) return info;
+  }
   try {
     return parse(execFileSync("wlr-randr", [], { env, timeout: 8000, encoding: "utf8" }));
   } catch (e) {
@@ -153,6 +168,14 @@ function listSync(env) {
 
 // Apply a parsed mode object, using its EXACT refresh so wlr-randr matches.
 function apply(env, output, mode, cb) {
+  if (!output || !mode) return cb(false, "bad mode");
+  if (compositor.available()) {
+    return compositor.apply(output, mode, (ok, err) => (ok ? cb(true, "") : wlrApply(env, output, mode, cb)));
+  }
+  wlrApply(env, output, mode, cb);
+}
+
+function wlrApply(env, output, mode, cb) {
   if (!output || !mode) return cb(false, "bad mode");
   const spec = mode.width + "x" + mode.height + "@" + mode.refreshExact.toFixed(3) + "Hz";
   execFile("wlr-randr", ["--output", output, "--mode", spec], { env, timeout: 12000 }, (e, _o, err) =>
