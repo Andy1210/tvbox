@@ -39,7 +39,9 @@ test("mHz on the wire becomes Hz with the exact value kept", () => {
 
   const film = info.modes.find((m) => m.height === 1080 && m.refresh === 24);
   assert.equal(film.refreshExact, 23.976);
-  assert.equal(film.key, "1920x1080@23.976");
+  // The key rounds, so 23.976 and 24 collide there on purpose and are told
+  // apart by refreshExact - the pair is not interchangeable for a film.
+  assert.equal(film.key, "1920x1080@24");
 
   // 59.94 and 60 both round to 60, so the exact value is what separates them.
   const rates = info.modes.filter((m) => m.height === 1080 && m.refresh === 60).map((m) => m.refreshExact);
