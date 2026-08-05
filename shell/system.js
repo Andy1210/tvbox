@@ -17,7 +17,6 @@ const pkg = require("./package.json");
 // parsing of formats that are easy to get subtly wrong (nmcli escapes ':' inside a
 // value, and an SSID may contain one).
 let execFile = child.execFile;
-let spawn = child.spawn;
 
 // What a rename means beyond the hostname: the MQTT device id is derived from it
 // when unset, so the caller reconnects the bridge. Injected rather than imported,
@@ -27,7 +26,6 @@ function init(deps) {
   if (!deps) return;
   if (deps.onHostnameChanged) onHostnameChanged = deps.onHostnameChanged;
   if (deps.execFile) execFile = deps.execFile;
-  if (deps.spawn) spawn = deps.spawn;
 }
 
 // ---- WiFi (device setting: HOME → Settings shows status + a network picker) ----
@@ -318,6 +316,7 @@ function systemInfo(cb) {
 
 module.exports = {
   init,
+  memInfo,
   wifiStatus,
   ethernetStatus,
   systemRegion,
