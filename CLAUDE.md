@@ -335,6 +335,20 @@ touched one file, `npx prettier --write <file>` is enough; when in doubt run
   deploys; toggles both ways; the legacy empty `tvbox-sudo` marker also still
   works). It's for a human on the SSH shell - runtime code must still never call
   sudo.
+- **Plex's stream quality is decided by TWO things, and the second one is the
+  server's.** The client reports the panel resolution (the Plex bridge overrides
+  `window.screen` from `display.panelResolution()`, which is why it says 4K while
+  the UI runs at 1080p) - that part works. But the SERVER also classifies the
+  session as local or remote from the source IP, and a client that reaches it
+  through the public `plex.direct` address arrives from the ROUTER's IP: hairpin
+  NAT, `location=wan`, and the remote quality cap (12 Mbps) turns a 4K HDR film
+  into a 1080p transcode. Which path the client picks varies per start, which is
+  what made this look like a race in our own code. Fix is one server setting:
+  Settings -> Network -> **LAN Networks = `192.168.1.0/24`** (`LanNetworksBandwidth`
+  over the API), after which a hairpinned request is local too. Diagnose from the
+  PMS log with the token: `curl "$PMS/diagnostics/logs?X-Plex-Token=..."` and look
+  for `location=` and `Reached Decision` next to the box's IP - "App cannot direct
+  play this item" is the client's own profile refusing, not the server's.
 - **An extracted bundle is a COPY, and its flatpak moves on its own.** Plex's web
   UI is extracted out of `tv.plex.PlexHTPC` into `apps-data/plex`, while the nightly
   `tvbox-flatpak-update.timer` updates the flatpak underneath it - so the copy
