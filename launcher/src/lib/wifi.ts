@@ -36,11 +36,15 @@ export async function wifiList(): Promise<WifiNet[]> {
   }
 }
 
+/** Why a connect failed, in a form the UI can say in the user's own language.
+ * `error` is NetworkManager's own text, kept for the line underneath. */
+export type WifiFailure = "bad-ssid" | "bad-password" | "not-found" | "restore-failed" | "other";
+
 export async function wifiConnect(
   ssid: string,
   password: string,
   hidden = false,
-): Promise<{ ok: boolean; error?: string }> {
+): Promise<{ ok: boolean; error?: string; code?: WifiFailure }> {
   try {
     return await (
       await fetch("/tvbox/api/wifi/connect", {

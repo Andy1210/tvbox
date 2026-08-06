@@ -21,7 +21,12 @@ function withCommands(answers) {
       const done = typeof opts === "function" ? opts : cb;
       const line = [cmd].concat(args).join(" ");
       seen.push(line);
-      const key = Object.keys(answers).find((k) => line.includes(k));
+      // The longest matching key wins: with substring matching, "connection modify"
+      // also matches "sudo -n nmcli connection modify", and the generic answer would
+      // decide a test that exists to tell the two apart.
+      const key = Object.keys(answers)
+        .filter((k) => line.includes(k))
+        .sort((a, b) => b.length - a.length)[0];
       const answer = key === undefined ? null : answers[key];
       setImmediate(() => {
         if (answer === null) return done(new Error("Command failed: " + line), "", "");
@@ -191,22 +196,63 @@ test("a password that does not bring the network up is put back", () => {
 });
 
 test("the failure a user is shown is NetworkManager's, not sudo's", () => {
-  // Every call is retried with sudo, and a box only has passwordless sudo if
-  // someone asked for it in tvbox.conf. Reporting the sudo attempt's stderr makes
-  // every failure on an ordinary box read "sudo: a password is required".
+  // The connect keeps the sudo retry it had before any of this, and a box only has
+  // passwordless sudo if someone asked for it in tvbox.conf. Reporting the sudo
+  // attempt's stderr would make every failure read "sudo: a password is required" -
+  // on exactly the fleet that has no SSH to look any further.
+  const seen = withCommands({
+    ...SAVED,
+    "nmcli --wait 30 device wifi connect": { fail: true, stderr: "Error: No network with SSID 'Cafe' found." },
+    "sudo -n nmcli --wait 30 device wifi connect": { fail: true, stderr: "sudo: a password is required" },
+  });
+  return new Promise((resolve) => {
+    system.wifiConnect("Cafe", "beans", false, (r) => {
+      assert.strictEqual(r.error, "Error: No network with SSID 'Cafe' found.");
+      assert.strictEqual(r.code, "not-found");
+      assert.ok(
+        seen.some((c) => c.startsWith("sudo -n nmcli --wait")),
+        "the connect still retries with sudo",
+      );
+      resolve();
+    });
+  });
+});
+
+test("nothing this change added runs privileged", () => {
+  // Root at runtime is the one thing this codebase does not do. The profile write
+  // and the activation are new here, so they must not pick up a sudo retry by being
+  // refactored into the same helper as the connect.
   const seen = withCommands({
     ...SAVED,
     "802-11-wireless-security.psk connection show id tvbox-preseed": "oldsecret",
     "connection modify": { fail: true, stderr: "Error: property is invalid." },
-    "sudo -n nmcli connection modify": { fail: true, stderr: "sudo: a password is required" },
   });
   return new Promise((resolve) => {
     system.wifiConnect("DarkTL50", "short", false, (r) => {
       assert.strictEqual(r.error, "Error: property is invalid.");
-      assert.ok(
-        seen.some((c) => c.startsWith("sudo -n nmcli connection modify")),
-        "sudo was still tried",
+      assert.deepStrictEqual(
+        seen.filter((c) => c.startsWith("sudo")),
+        [],
       );
+      resolve();
+    });
+  });
+});
+
+test("a password that cannot be put back is reported as such", () => {
+  // The profile then holds a password nobody wants, and that is the difference
+  // between "try again" and "this one needs Forget first".
+  const seen = withCommands({
+    ...SAVED,
+    "802-11-wireless-security.psk connection show id tvbox-preseed": "oldsecret",
+    "wifi-sec.psk oldsecret": { fail: true, stderr: "Error: the profile is locked." },
+    "connection modify": "",
+  });
+  return new Promise((resolve) => {
+    system.wifiConnect("DarkTL50", "typo", false, (r) => {
+      assert.strictEqual(r.code, "restore-failed");
+      assert.match(r.error, /could not be put back/);
+      assert.ok(seen.some((c) => c.endsWith("wifi-sec.psk oldsecret")));
       resolve();
     });
   });

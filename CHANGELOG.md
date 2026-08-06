@@ -11,9 +11,9 @@ write for the person on the couch (what changes for THEM), not for developers.
 
 - **A wifi-jelszó, amit begépelsz, tényleg az érvényes.** Egy már ismert hálózatnál
   eddig a régen mentett jelszó ment ki helyette, és a csatlakozás azonnal elhasalt.
-  Ha a hálózat titkosítása közben változott meg, a doboz újraépíti a beállítást - és
-  ha így sem megy, most kiírja, mit mondott a rendszer, nem csak azt, hogy nem
-  sikerült.
+  Ha az új jelszóval sem sikerül felcsatlakozni, a doboz visszaírja a régit, és
+  megmondja, mi volt a baj - rossz jelszó, vagy nem válaszolt a hálózat. Semmit nem
+  töröl: ha egy mentett hálózat végleg elavult, a Felejtsd el gomb a tiéd.
 - **A kikapcsolt TV nem nézi végig helyetted a sorozatot.** A film közben
   kikapcsolt TV eddig úgy állította le a lejátszást, mintha a rész véget ért volna,
   amire a Plex pár másodperc múlva elindította a következőt - sötét szobában, végig.
@@ -28,9 +28,10 @@ write for the person on the couch (what changes for THEM), not for developers.
 
 - **The wifi password you type is the one that gets used.** On a network the box
   already knew, the saved password went out instead and the attempt failed at once.
-  If the network's security changed underneath, the box rebuilds its settings for
-  it - and when it still cannot join, it now says what the system said rather than
-  only that it failed.
+  If the new one does not get the box on either, the old password is put back and
+  the screen says what went wrong - a password that was not accepted, or a network
+  that did not answer. Nothing is deleted: a saved network that has gone stale for
+  good is what the Forget button is for.
 - **A TV switched off no longer watches the series for you.** Turning the TV off
   during a film used to end playback as if the episode had finished, so Plex
   started the next one a few seconds later, and kept going in a dark room. The same

@@ -3,7 +3,16 @@ import { setFocus } from "@noriginmedia/norigin-spatial-navigation";
 import { useI18n } from "../lib/i18n";
 import { FocusButton } from "./FocusButton";
 import { Osk } from "./Osk";
-import { wifiStatus, wifiList, wifiConnect, wifiForget, wifiRadio, type WifiNet, type WifiStatus } from "../lib/wifi";
+import {
+  wifiStatus,
+  wifiList,
+  wifiConnect,
+  wifiForget,
+  wifiRadio,
+  type WifiNet,
+  type WifiStatus,
+  type WifiFailure,
+} from "../lib/wifi";
 import { FocusContext, useFocusable } from "@noriginmedia/norigin-spatial-navigation";
 import { useBackspace } from "../lib/useBackspace";
 import { useConfigStore } from "../stores/config";
@@ -153,7 +162,7 @@ export function WifiSettings() {
     setDetail(r.ok ? "" : r.error || "");
     if (r.ok) refresh();
   };
-  const failureText = (r: { code?: string; error?: string }, ssid: string) => {
+  const failureText = (r: { code?: WifiFailure; error?: string }, ssid: string) => {
     if (r.code === "bad-ssid") return t("wifi.failedName");
     if (r.code === "bad-password") return t("wifi.failedBadPassword", { ssid });
     if (r.code === "not-found") return t("wifi.failedNotFound", { ssid });
