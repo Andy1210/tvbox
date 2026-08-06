@@ -8,7 +8,6 @@
 const { app, BrowserWindow, ipcMain, screen, session } = require("electron");
 const { spawn, execFile } = require("child_process");
 const http = require("http");
-const net = require("net");
 const fs = require("fs");
 const path = require("path");
 const os = require("os");
@@ -18,8 +17,8 @@ const playeropts = require("./playeropts"); // app stream terms -> mpv args/comm
 const { redact } = require("./redact"); // an app's console line may carry ITS credentials; the shell's log is a file
 const display = require("./display"); // resolution/refresh selection
 const displaymode = require("./displaymode"); // adaptive mode: UI mode + per-video claims
-const videoout = require("./videoout"); // which mpv renderer a stream needs
 const httpserver = require("./httpserver"); // the transport under the API: responses, static files, the origin gate
+const player = require("./player"); // the shared mpv, its display-mode and HDR claims
 const maintenance = require("./maintenance"); // installs, flatpak/bundle refresh, restore reconcile
 const system = require("./system"); // network, clock, keyboard, name, About numbers
 const hdrout = require("./hdr"); // whether the output should be in PQ for this film
@@ -53,7 +52,6 @@ const pkg = require("./package.json"); // shell version (About/diagnostics)
 
 const { PORT } = require("./constants");
 const BASE = "http://localhost:" + PORT;
-const IPC = "/tmp/tvbox-mpv.sock";
 const LAUNCHER = path.join(__dirname, "launcher-dist"); // built React launcher (served under /tvbox/)
 // Inherit the session's Wayland env (run-shell.sh exports it); only fill gaps:
 // hardcoding uid 1000 breaks boxes whose first user isn't 1000 (Pi Imager custom user).
@@ -101,13 +99,6 @@ app.commandLine.appendSwitch("enable-features", "UseOzonePlatform");
 const CONSOLE_TAG = { debug: "log", info: "info", warning: "warn", error: "error" };
 
 let win = null;
-let mpv = null;
-let mpvPip = false; // mpv is in PiP (small top-right) mode, not fullscreen
-let playingUrl = null;
-let mpvOwnerId = null; // app id whose player broker call launched mpv (video-mode target)
-let mpvStartPending = false; // fullscreen mpv launched paused, waiting for the display-mode switch
-let mpvSeq = 0; // launch counter, so a stale start-gate timer can't touch a newer launch
-let mpvStartedSeq = 0; // the launch whose start handshake already ran
 let currentAppId = null; // which app is FOREGROUND (null = launcher); drives focus + video-mode targeting
 
 // The compositor cannot work out which of the launcher and an app owns the screen:
@@ -155,7 +146,7 @@ const queued = { url: null, startPos: 0, streams: null };
 // to look at). HIDDEN app windows don't block idleness - they're muted/paused,
 // and the restart simply drops them (they reload on next launch).
 function boxIdle() {
-  return !mpv && !currentAppId && !(nowPlaying && nowPlaying.state === "playing");
+  return !player.running() && !currentAppId && !(nowPlaying && nowPlaying.state === "playing");
 }
 // Is the box free to start something substantial? Idle as above, no install in
 // flight, and none of the shell's OWN background maintenance running. The last
@@ -378,7 +369,7 @@ function setVideoMode(on, w) {
       .executeJavaScript("document.documentElement.classList." + (on ? "add" : "remove") + "('tvbox-video')")
       .catch(() => {});
   };
-  if (on) flip(w || appWindow(mpvOwnerId) || win);
+  if (on) flip(w || appWindow(player.owner()) || win);
   else if (w) flip(w);
   else {
     flip(win);
@@ -820,7 +811,6 @@ const dmode = displaymode.create({
   applyMode: (output, mode, cb) => display.apply(output, mode, cb),
   log: (m) => console.log("[display]", m),
 });
-const MPV_CLAIM = "shell:mpv"; // claim id for the shell's own player
 const appClaimId = (id) => "app:" + (id || "launcher"); // an app's own claim id
 const displayClaiming = new Set(); // app ids with a claim in flight (one at a time)
 
@@ -1092,7 +1082,7 @@ function serve() {
     }
     // TV powered off (from the CEC bridge) -> stop playback
     if (p === "/tvbox/api/tv/standby") {
-      onTvStandby();
+      player.onTvStandby();
       httpserver.jsonRes(res, { ok: true });
       return;
     }
@@ -1220,504 +1210,6 @@ function serve() {
   server.listen(PORT, "127.0.0.1", () => console.log("[main] server on :" + PORT));
 }
 
-// ---- mpv control ----
-// Player events go to every live window: the driving app (own window now) needs
-// them for its UI, the launcher for now-playing state. Listeners that don't
-// care simply have no handler registered.
-// Player events go to the launcher (now-playing state) and the FOREGROUND app
-// only - never a backgrounded app. A hidden app receiving "finished" and
-// auto-advancing would start mpv behind an opaque foreground (invisible video +
-// phantom audio) and keep the box from ever reporting idle.
-function emit(ev) {
-  const fg = currentAppId && appWindow(currentAppId);
-  for (const w of new Set([win, fg])) {
-    if (w && !w.isDestroyed()) {
-      try {
-        w.webContents.send("player-event", ev);
-      } catch (e) {}
-    }
-  }
-}
-// One request/response round-trip on the mpv IPC socket (mpvCmd is fire-and-
-// forget). Resolves null on any failure - callers treat that as "no tracks".
-function mpvQuery(command) {
-  return new Promise((resolve) => {
-    const s = net.connect(IPC);
-    const to = setTimeout(() => {
-      try {
-        s.destroy();
-      } catch (e) {}
-      resolve(null);
-    }, 2500);
-    s.on("error", () => {
-      clearTimeout(to);
-      resolve(null);
-    });
-    let buf = "";
-    s.on("connect", () => {
-      try {
-        s.write(JSON.stringify({ command, request_id: 77 }) + "\n");
-      } catch (e) {}
-    });
-    s.on("data", (d) => {
-      buf += d;
-      let nl;
-      while ((nl = buf.indexOf("\n")) >= 0) {
-        const line = buf.slice(0, nl);
-        buf = buf.slice(nl + 1);
-        let m;
-        try {
-          m = JSON.parse(line);
-        } catch (e) {
-          continue;
-        }
-        if (m.request_id === 77) {
-          clearTimeout(to);
-          try {
-            s.end();
-          } catch (e) {}
-          return resolve(m.error === "success" ? m.data : null);
-        }
-      }
-    });
-  });
-}
-
-function mpvCmd(obj) {
-  const s = net.connect(IPC);
-  s.on("error", () => {});
-  s.on("connect", () => {
-    try {
-      s.write(JSON.stringify(obj) + "\n");
-    } catch (e) {}
-    s.end();
-  });
-}
-// keepMode: launchMpv's own pre-launch stop, where releasing the display claim
-// would put the UI mode back for a second only for the new file to claim again.
-function stopMpv(keepMode) {
-  // (mpvOwnerId is NOT cleared here: launchMpv calls this on relaunch right
-  // after "play" set the owner. Every play re-assigns it, and without a running
-  // mpv no first-frame reveal can consume a stale value.)
-  if (!keepMode) {
-    setHdr(false);
-    dmode.release(MPV_CLAIM);
-  }
-  clearMpvMedia(); // the clock stops with the process (see clearMpvMedia)
-  mpvStartPending = false; // no paused-start handshake outlives the process
-  if (mpv) {
-    const pid = mpv.pid;
-    mpv.removeAllListeners("exit"); // our own kill must NOT signal "finished" to the app
-    try {
-      process.kill(-pid, "SIGTERM");
-    } catch (e) {
-      try {
-        mpv.kill("SIGTERM");
-      } catch (e2) {}
-    }
-    console.log("[player] stopMpv pid", pid);
-    mpv = null;
-  }
-  try {
-    fs.unlinkSync(IPC);
-  } catch (e) {}
-}
-// mpv logs its own COMMAND LINE, and the file it plays is on it - so this file
-// gets the media URL with whatever credentials it carries, and nothing here can
-// stop that: it is mpv writing, not us. What can be done is who may read it, so
-// the file is created 0600 first (mpv truncates an existing file and keeps its
-// mode). It is deliberately NOT one of the logs tvbox-diag copies to the boot
-// partition.
-function mpvLogPath() {
-  const p = path.join(os.homedir(), ".tvbox", "mpv.log");
-  try {
-    // O_NOFOLLOW, so a SYMLINK at this path is refused by the kernel rather than
-    // followed - checking with lstat first would leave the gap between the check
-    // and the open. It matters because mpv writes wherever this path leads and we
-    // would have chmodded that target on the way: ~/.tvbox is reachable through
-    // the file server, so "nobody can put a link there" is not a given.
-    const fd = fs.openSync(
-      p,
-      fs.constants.O_CREAT | fs.constants.O_WRONLY | fs.constants.O_APPEND | fs.constants.O_NOFOLLOW,
-      0o600,
-    );
-    try {
-      // A fifo or a device would take mpv's writes somewhere of its own too.
-      if (!fs.fstatSync(fd).isFile()) return null;
-      fs.fchmodSync(fd, 0o600);
-    } finally {
-      fs.closeSync(fd);
-    }
-  } catch (e) {
-    return null; // no log rather than a log we are not sure of; playback is unaffected
-  }
-  return p;
-}
-
-// Where a small player goes when the caller measured no placeholder: the top-right
-// quarter, inset. Only a caller that skipped the rect lands here - the Live TV app
-// measures its own hole - so this is a shape that looks deliberate rather than one
-// anybody depends on.
-function pipFallbackRect() {
-  if (!outputSize) return null; // no mode read yet: fullscreen is better than a guess
-  const w = Math.round(outputSize.width * 0.26);
-  const h = Math.round((w * 9) / 16);
-  const margin = Math.round(outputSize.width * 0.03);
-  return { x: outputSize.width - w - margin, y: margin, w, h };
-}
-
-function launchMpv(url, startPos, pip, rect, streams) {
-  // Fullscreen relaunch keeps the claim (the next file re-claims immediately, and
-  // releasing in between would blank the TV twice); going to PiP gives it back,
-  // because there the browse UI is what's on screen.
-  stopMpv(!pip);
-  const seq = ++mpvSeq; // this launch's identity for every async gate below
-  mpvPip = !!pip;
-  // mpv is a shared, dep-gated player service - spawned lazily only when a
-  // player-capable app actually plays, and only if the binary is present. A box
-  // that never opted into an mpv app (fresh install) has no mpv; degrade with a
-  // clear event instead of an ENOENT spawn. (Tiles are already greyed via the
-  // manifest's requires.bin, so this is the belt-and-suspenders path.)
-  if (!apps.onPath("mpv")) {
-    console.warn("[player] mpv not installed - cannot play (run: tvbox deps <app>)");
-    emit({ type: "error" });
-    emit({ type: "finished" });
-    return;
-  }
-  emit({ type: "buffering", on: true });
-  const args = [
-    "--no-config",
-    "--no-osc",
-    "--no-input-default-bindings",
-    // The renderer that works for anything, including software-decoded streams.
-    // adaptMpvMode swaps it for the zero-copy output where that one cannot keep
-    // up (videoout.js) - the property is settable, so no relaunch.
-    "--vo=gpu",
-    "--gpu-api=opengl",
-    "--hwdec=auto-safe",
-    "--input-ipc-server=" + IPC,
-    "--start=" + startPos,
-    // (the log file is appended below, when there is one we trust)
-    "--msg-level=all=error",
-  ];
-  // PiP (Live TV "browse while watching"): a small window. A Wayland client cannot
-  // place itself, so the COMPOSITOR places it - `rect` (device px, measured by the
-  // launcher from the on-screen placeholder) makes it match the placeholder exactly
-  // at any resolution, and a top-right quarter is the fallback when a caller sends
-  // none. It is set before mpv starts, so the window is never fullscreen first.
-  //
-  // mpv sits BEHIND the (transparent) Electron window and shows through a
-  // box-shadow "hole" the browse UI punches, so the launcher keeps keyboard focus
-  // (D-pad works) while the video is visible in the hole. The compositor keeps our
-  // windows in front for the same reason.
-  if (pip) {
-    compositor.placeWindow("mpv", rect && rect.w > 0 ? rect : pipFallbackRect());
-    args.push("--no-border");
-  } else {
-    compositor.placeWindow("mpv", null);
-    args.push("--no-border");
-    // Fullscreen starts PAUSED so the output can be switched to match the video
-    // BEFORE it plays (adaptMpvMode -> startMpvPlayback below): a mode change
-    // blanks HDMI for a second or two, which belongs before the first frame, not
-    // three seconds into the film. PiP never switches - the UI owns the screen there.
-    args.push("--pause=yes");
-    mpvStartPending = true;
-  }
-  const logFile = mpvLogPath();
-  if (logFile) args.push("--log-file=" + logFile);
-  if (audioSink) args.push("--audio-device=pipewire/" + audioSink);
-  // Track selection, per axis: what the app decided for itself (Plex resolves
-  // audio/subtitle server-side and ships the choice with the item) wins, and
-  // Settings > Picture & sound fills in the rest. The app's choice has to be
-  // spelled out because mpv's default `sid=auto` turns on any subtitle track
-  // carrying the container's default flag, which is how a film played with "no
-  // subtitles" in Plex came up with Hungarian subs anyway.
-  args.push(...playeropts.streamArgs(streams, config.rawPlayer()));
-  // "--" ends option parsing: a URL starting with "-" (or a crafted playlist
-  // entry) must always be argv's file position, never an mpv option.
-  args.push("--", url);
-  mpv = spawn("mpv", args, { env: { ...process.env, ...WL_ENV }, detached: true, stdio: "ignore" });
-  const child = mpv;
-  console.log("[player] mpv launched pid", mpv.pid, pip ? "(pip)" : "");
-  // A spawn that never got off the ground (EACCES, fork failure - ENOENT is already
-  // guarded above) emits "error" and no usable "exit". Unhandled it would take the
-  // shell down, and it must not leave a paused-start flag or a claim behind either.
-  child.on("error", (e) => {
-    console.error("[player] mpv spawn failed:", e.message);
-    child.removeAllListeners("exit"); // don't report "finished" twice
-    if (mpv === child) mpv = null;
-    playingUrl = null;
-    mpvStartPending = false;
-    setVideoMode(false);
-    setHdr(false);
-    dmode.release(MPV_CLAIM);
-    emit({ type: "error" });
-    emit({ type: "finished" });
-  });
-  // One-touch wake: video starting while the TV sleeps should light it up
-  // (voice/HA "play X" with the TV off). "on 0" is a no-op on a TV that's
-  // already on. The one exception: right after the USER put the TV on standby -
-  // the stop we emit as "finished" can make an app auto-play the next item
-  // (Plex on-deck), which must not switch the TV back on.
-  if (Date.now() - lastTvStandbyAt > 30 * 1000) cecPower(true);
-  // Never leave a paused-start film stuck: if the file hasn't loaded (or the IPC
-  // observer never came up) within 8s, do the mode handshake anyway. Tied to this
-  // launch's sequence number so a stale timer can't shortcut the NEXT film.
-  if (!pip) {
-    setTimeout(() => {
-      if (mpvSeq === seq && mpvStartPending) {
-        // The file hasn't loaded (a slow Plex/HLS start) or the IPC observer never
-        // came up: play rather than sit on a black screen. Deliberately NOT running
-        // the handshake here - it would claim a mode from a stream mpv hasn't opened
-        // yet. If the file does load later, the first-frame path still switches.
-        console.warn("[player] start gate timed out - playing anyway");
-        mpvStartPending = false;
-        mpvCmd({ command: ["set_property", "pause", false] });
-      }
-    }, 8000);
-  }
-  mpv.on("exit", (code, sig) => {
-    console.log("[player] mpv exited code", code, "sig", sig);
-    emit({ type: "finished" });
-    mpv = null;
-    playingUrl = null;
-    setVideoMode(false);
-    mpvStartPending = false;
-    setHdr(false);
-    dmode.release(MPV_CLAIM); // film over -> UI mode back (stopMpv covers our own kills)
-    // The END of a film is an exit, not a stopMpv - mpv runs without --keep-open.
-    // Without this the retained state topic keeps saying "playing" with a frozen
-    // position, so Home Assistant shows a film nobody is watching until the next
-    // playback, and `seek` would still be aimed at a dead socket.
-    clearMpvMedia();
-  });
-  // mpv grabs keyboard focus when its window maps (and can do so late), which
-  // would break D-pad nav - so keep pulling the launcher back to the front +
-  // focus for a few seconds. This works for both modes: fullscreen mpv is behind
-  // the transparent overlay, and PiP mpv is behind the transparent window showing
-  // through the browse UI's hole, so raising the launcher never hides the video.
-  [500, 1200, 2000, 3000, 4000].forEach((ms) => setTimeout(raiseWindow, ms));
-  setTimeout(() => observeMpv(seq, 0), 900);
-}
-// What the video actually is, per mpv. `container-fps` is the stream's declared
-// rate (not the drifting measured one); dwidth/dheight are the display size after
-// aspect correction, with the decoded size as fallback - on the box dwidth came
-// back "property unavailable" at the very moment dheight was already readable.
-function readVideoProps() {
-  const props = ["container-fps", "dwidth", "dheight", "width", "height", "hwdec-current", "video-params/gamma"];
-  return Promise.all(props.map((p) => mpvQuery(["get_property", p]))).then(([fps, dw, dh, w, h, hwdec, gamma]) => ({
-    fps: Number(fps) || 0,
-    width: Number(dw) || Number(w) || 0,
-    height: Number(dh) || Number(h) || 0,
-    hwdec: typeof hwdec === "string" ? hwdec : "",
-    // The transfer function the file was mastered with; "pq" is HDR10/DV.
-    gamma: typeof gamma === "string" ? gamma : "",
-  }));
-}
-
-// The output's colour space rides with the display mode: claimed for a PQ film
-// that reaches the plane, released when it ends. Releasing matters as much as
-// claiming - an SDR film left on a PQ output looks wrong, and the UI on its
-// overlay plane is read as PQ for as long as the claim is held.
-let hdrClaimed = false;
-function setHdr(on, cb) {
-  const next = cb || (() => {});
-  if (!!on === hdrClaimed) return next();
-  hdrout.claim(on, (ok, err) => {
-    if (ok) hdrClaimed = !!on;
-    else console.warn("[player] hdr claim failed:", err);
-    next();
-  });
-}
-
-// Match the output to the video, then hand control back to the caller (which
-// unpauses). A stream with no declared fps (some live HLS) leaves the mode alone.
-// `seq` is the launch this belongs to: reading mpv's properties can take seconds,
-// and a claim landing after that film was stopped would leave the launcher (or the
-// NEXT film) at the dead one's mode with nothing left to release it.
-function adaptMpvMode(seq, done) {
-  const claim = (content) => {
-    if (mpvSeq !== seq || !mpv) return done(); // stopped or superseded while we read
-    const zeroCopy = videoout.zeroCopyVideo(content, mpvPip);
-    if (zeroCopy) {
-      // `vo` is settable while paused, so this costs nothing visible - it lands in
-      // the same paused window as the mode switch, before the first frame.
-      mpvCmd({ command: ["set_property", "vo", videoout.ZERO_COPY_VO] });
-    }
-    // And the output's colour space, before the claim below. Order matters for a
-    // reason that outlives any one compositor: the colour space covers the whole
-    // output, so it has to be in place before the film's first frame reaches a
-    // plane, and the caller unpauses in done().
-    setHdr(hdrout.wants(content, zeroCopy, panelHdr), () => {
-      if (!(content.fps > 0)) {
-        console.log("[player] no container-fps - leaving the display mode alone");
-        return done();
-      }
-      dmode.claim(MPV_CLAIM, content, (r) => {
-        // Nothing on this panel divides into the content's rate (a 60Hz-only set and
-        // a 24p film): resample instead of juddering. This is what the old manual
-        // "match content framerate" toggle did, decided per file now.
-        if (r && r.reason === "no-matching-mode") {
-          mpvCmd({ command: ["set_property", "video-sync", "display-resample"] });
-        }
-        done();
-      });
-    });
-  };
-  // Nothing in this chain rejects today (mpvQuery resolves null on every failure),
-  // but playback must not hang on that staying true: anything thrown in here starts
-  // the film immediately instead of waiting for the failsafe.
-  const failed = (e) => {
-    console.warn("[player] display mode adapt failed:", (e && e.message) || e);
-    // We never learned what this file is, and a relaunch keeps the previous
-    // claim - so without this an SDR film following an HDR one would play on a
-    // PQ output. SDR is the safe answer to a question that got no answer.
-    setHdr(false);
-    done();
-  };
-  // Properties that settle late get a few more goes, keeping whatever each read
-  // already learned: dwidth/fps come back "property unavailable" for the first
-  // second or so after a paused start, and hwdec-current stays unavailable until
-  // the decoder has actually run - which is what decides the renderer. Re-read
-  // only while something we act on is still missing, so an ordinary file is not
-  // held up: below 4K the hwdec answer changes nothing, so it is not waited for.
-  const settle = (prev, tries) =>
-    readVideoProps().then((c) => {
-      const merged = {
-        fps: c.fps || prev.fps,
-        width: c.width || prev.width,
-        height: c.height || prev.height,
-        hwdec: c.hwdec || prev.hwdec,
-        gamma: c.gamma || prev.gamma,
-      };
-      // Height counts as missing too: the renderer is chosen from it, and the two
-      // axes settle independently (dwidth has come back unavailable at the very
-      // moment dheight was already readable, so the reverse can happen as well).
-      const missing =
-        !(merged.fps > 0 && merged.width > 0 && merged.height > 0) ||
-        videoout.hwdecPending(merged, mpvPip) ||
-        hdrout.gammaPending(merged, videoout.zeroCopyCandidate(merged, mpvPip));
-      if (!missing || tries <= 0) return merged;
-      return new Promise((r) => setTimeout(() => r(settle(merged, tries - 1)), 250));
-    });
-  settle({ fps: 0, width: 0, height: 0, hwdec: "" }, 6).then(claim).catch(failed);
-}
-
-// Paused-start handshake: switch the mode, then play. The 6s failsafe is
-// load-bearing - if the compositor wedges or the claim never answers, the film must
-// still start. (launchMpv arms a second one for "the observer never connected".)
-function startMpvPlayback(seq) {
-  if (mpvStartedSeq === seq) return; // exactly one handshake per launch
-  mpvStartedSeq = seq;
-  const go = () => {
-    if (mpvSeq !== seq || !mpvStartPending) return; // newer launch, or already playing
-    mpvStartPending = false;
-    mpvCmd({ command: ["set_property", "pause", false] });
-    // A mode switch remaps windows, so pull the app UI back over mpv again.
-    [200, 700, 1500].forEach((ms) => setTimeout(raiseWindow, ms));
-  };
-  setTimeout(go, 6000);
-  adaptMpvMode(seq, go);
-}
-
-function observeMpv(seq, tries) {
-  const s = net.connect(IPC);
-  let connected = false;
-  let firstPos = false;
-  s.on("error", (e) => {
-    console.log("[player] observer error", e.code);
-    // The observer is what starts playback now (paused launch), so an IPC socket
-    // that isn't up yet must be retried rather than dropped - but only for the
-    // launch it was started for, or a dead launch's retry chain would attach a
-    // second observer to the NEXT mpv.
-    if (!connected && mpv && mpvSeq === seq && (tries || 0) < 5)
-      setTimeout(() => observeMpv(seq, (tries || 0) + 1), 400);
-  });
-  s.on("connect", () => {
-    connected = true;
-    console.log("[player] observer connected");
-    // `paused-for-cache`, NOT `core-idle`: core-idle is also true while the USER
-    // has it paused, so reporting it as buffering told a client the player was
-    // stuck loading for as long as the film sat paused. Plex then spun its loader
-    // over the frozen frame and killed the session on its own 120 s
-    // BufferingTimeout ("Playback error"), measured on the box.
-    ["time-pos", "duration", "pause", "eof-reached", "paused-for-cache"].forEach((p, i) =>
-      s.write(JSON.stringify({ command: ["observe_property", i + 1, p] }) + "\n"),
-    );
-  });
-  let buf = "";
-  s.on("data", (d) => {
-    buf += d;
-    let nl;
-    while ((nl = buf.indexOf("\n")) >= 0) {
-      const line = buf.slice(0, nl);
-      buf = buf.slice(nl + 1);
-      let m;
-      try {
-        m = JSON.parse(line);
-      } catch (e) {
-        continue;
-      }
-      if (m.event !== "property-change") continue;
-      if (m.name === "time-pos" && m.data != null) {
-        // reveal the video (make the Electron window transparent) only in
-        // fullscreen; in PiP the browse UI stays opaque and mpv floats on top.
-        if (!firstPos) {
-          firstPos = true;
-          if (!mpvPip) {
-            console.log("[player] first frame -> reveal video");
-            setVideoMode(true);
-          }
-          // mpv maps its window and grabs keyboard focus exactly when playback
-          // actually starts. For a slow-to-buffer source (a Plex movie can take
-          // well over 5s to start) that happens AFTER the fixed post-launch raise
-          // retries ended, leaving mpv focused so the remote stops reaching the
-          // app UI. Re-raise on the real playback-start event (and a short burst
-          // after, since the focus grab can trail the first frame) - this covers
-          // any buffer delay, unlike the fixed launch-time window.
-          [0, 250, 700, 1500].forEach((ms) => setTimeout(raiseWindow, ms));
-          // The file is loaded now (that's what a time-pos means), so its real
-          // fps/size are readable: pick a mode for it, then let it play.
-          if (!mpvPip) startMpvPlayback(seq);
-        }
-        emit({ type: "playing" });
-        emit({ type: "position", ms: Math.round(m.data * 1000) });
-        mpvMedia.active = true;
-        mpvMedia.position = m.data;
-        publishMediaState();
-      } else if (m.name === "duration" && m.data != null) {
-        emit({ type: "duration", ms: Math.round(m.data * 1000) });
-        mpvMedia.duration = m.data;
-        publishMediaState();
-      } else if (m.name === "pause") {
-        // Observed for the media state only - the renderer learns about pausing
-        // from its own player calls.
-        mpvMedia.paused = !!m.data;
-        publishMediaState({ force: true });
-      } else if (m.name === "paused-for-cache") emit({ type: "buffering", on: !!m.data });
-      else if (m.name === "eof-reached" && m.data) {
-        console.log("[player] eof-reached");
-        emit({ type: "finished" });
-      }
-    }
-  });
-}
-
-// ---- IPC ----
-// TV turned off (signalled by the CEC bridge): stop active playback so a stream
-// doesn't keep running after the screen is off. Only the playback is stopped,
-// nothing is killed; the app's UI updates via the "finished" event.
-let lastTvStandbyAt = 0; // launchMpv suppresses its CEC wake right after this
-function onTvStandby() {
-  lastTvStandbyAt = Date.now();
-  if (!mpv) return;
-  console.log("[tv] standby -> stop playback");
-  playingUrl = null;
-  stopMpv();
-  setVideoMode(false);
-  emit({ type: "finished" });
-}
-
 // Bring the FOREGROUND shell window (the active app's own window, or the
 // launcher) to the front and hand it focus. Shared by playback start and by
 // showLauncher. Nothing has to be said about mpv: the compositor keeps every
@@ -1761,8 +1253,8 @@ function showLauncher(hash) {
   // keyboard would never come up again.
   textinput.dropFor(null);
   setForegroundApp(null);
-  playingUrl = null;
-  stopMpv();
+  player.setPlaying(null);
+  player.stop();
   setVideoMode(false);
   // A native app owns the screen, so Home has to END it, not hide it. Drop the
   // intent first: the process outlives the SIGTERM by a moment and raiseWindow
@@ -1891,8 +1383,8 @@ function openNativeApp(m, extraArgs) {
     return false;
   }
   textinput.dropFor(null); // a typing session cannot survive into an app we don't own
-  playingUrl = null;
-  stopMpv(); // the shared player must not hold the GPU, audio, or a mode claim
+  player.setPlaying(null);
+  player.stop(); // the shared player must not hold the GPU, audio, or a mode claim
   setVideoMode(false);
   if (!nativeapp.start(m, extraArgs)) return false;
   // Where the screen goes when the program exits: this app's own window if it has one
@@ -2040,7 +1532,7 @@ function openRemoteApp(m, url) {
       return false;
     }
   };
-  stopMpv();
+  player.stop();
   setVideoMode(false); // no mpv behind a remote app; drop any prior session
   setForegroundApp(m.id); // identity is per-window (windowAppId); this global only tracks foreground
   // Every remote window gets the sandbox-safe preload now: a capability app needs
@@ -2449,22 +1941,6 @@ const TV_COMMANDS = [
   "tv_on",
   "tv_off",
 ];
-// What mpv is doing right now. Kept here rather than read on demand: the observer
-// already streams it (observeMpv), and asking mpv over its socket per publish would
-// turn a state topic into a round trip.
-const mpvMedia = { active: false, paused: false, position: null, duration: null };
-// The clock stops with the process. Both ways mpv can go away have to come through
-// here - our own stopMpv AND mpv exiting on its own, which is what the end of a
-// film is - or a retained state topic keeps reporting a position for something
-// nobody is watching.
-function clearMpvMedia() {
-  if (!mpvMedia.active) return;
-  mpvMedia.active = false;
-  mpvMedia.paused = false;
-  mpvMedia.position = null;
-  mpvMedia.duration = null;
-  publishMediaState({ force: true });
-}
 let sinkState = { volume: null, muted: false };
 let lastMediaState = null;
 let mediaPublishTimer = null;
@@ -2488,7 +1964,7 @@ function publishMediaState(opts) {
     if (!mqttCtl) return;
     const next = mediastate.compose({
       nowPlaying,
-      mpv: mpvMedia,
+      mpv: player.media,
       volume: sinkState.volume,
       muted: sinkState.muted,
       currentApp: currentAppId,
@@ -2604,19 +2080,19 @@ function handleTvCommand(cmd) {
       showLauncher();
       break;
     case "pause":
-      mpvCmd({ command: ["set_property", "pause", true] });
+      player.cmd({ command: ["set_property", "pause", true] });
       forwardCommand(cmd);
       break;
     case "play":
     case "resume":
-      mpvCmd({ command: ["set_property", "pause", false] });
+      player.cmd({ command: ["set_property", "pause", false] });
       forwardCommand(cmd);
       break;
     case "stop":
-      playingUrl = null;
-      stopMpv();
+      player.setPlaying(null);
+      player.stop();
       setVideoMode(false);
-      emit({ type: "finished" });
+      player.emit({ type: "finished" });
       forwardCommand(cmd);
       break;
     case "next":
@@ -2652,7 +2128,7 @@ function handleTvCommand(cmd) {
       // so it is rejected here rather than sent. A real number, not a coercion:
       // Number(null) and Number("") are both 0, i.e. a silent seek to the start.
       const pos = cmd && typeof cmd.position === "number" ? cmd.position : NaN;
-      if (mpvMedia.active && Number.isFinite(pos) && pos >= 0) mpvCmd({ command: ["seek", pos, "absolute"] });
+      if (player.media.active && Number.isFinite(pos) && pos >= 0) player.cmd({ command: ["seek", pos, "absolute"] });
       else if (!Number.isFinite(pos)) console.warn("[mqtt] seek: bad position", cmd && cmd.position);
       break;
     }
@@ -2775,11 +2251,11 @@ function navTo(dest) {
   // that WILL navigate - an unconfigured remote app must not cost the current
   // stream (review F3).
   const stopPrevPlayback = () => {
-    if (mpv && currentAppId !== m.id) {
-      playingUrl = null;
-      stopMpv();
+    if (player.running() && currentAppId !== m.id) {
+      player.setPlaying(null);
+      player.stop();
       setVideoMode(false);
-      emit({ type: "finished" });
+      player.emit({ type: "finished" });
     }
     // Leaving a native app for another app ends its process: it has no background
     // state to keep, and letting it live would leave it holding the GPU and audio
@@ -3012,31 +2488,31 @@ ipcMain.handle("player", (e, action, payload) => {
   } else if (action === "play") {
     // remember whose window the video belongs to: the first-frame reveal
     // (setVideoMode(true) in observeMpv) must hit THAT window, not the launcher
-    mpvOwnerId = appIdForSender(e.sender);
-    if (mpv && playingUrl === queued.url && !mpvPip) {
-      if (mpvStartPending) {
+    player.setOwner(appIdForSender(e.sender));
+    if (player.running() && player.playing() === queued.url && !player.isPip()) {
+      if (player.startPending()) {
         // Still in the paused-start handshake: the mode switch starts it in a
         // moment. Unpausing here would put the switch INSIDE playback.
         console.log("[player] play during the start handshake - letting it finish");
       } else {
         console.log("[player] resume (already loaded)");
-        mpvCmd({ command: ["set_property", "pause", false] });
+        player.cmd({ command: ["set_property", "pause", false] });
       }
     } else if (queued.url) {
-      playingUrl = queued.url;
+      player.setPlaying(queued.url);
       setVideoMode(false);
-      ensureAudio(() => launchMpv(queued.url, queued.startPos, false, null, queued.streams));
+      ensureAudio(() => player.launch(queued.url, queued.startPos, false, null, queued.streams));
     } // fullscreen (also un-PiPs)
-  } else if (action === "pause") mpvCmd({ command: ["set_property", "pause", true] });
-  else if (action === "resume") mpvCmd({ command: ["set_property", "pause", false] });
+  } else if (action === "pause") player.cmd({ command: ["set_property", "pause", true] });
+  else if (action === "resume") player.cmd({ command: ["set_property", "pause", false] });
   else if (action === "stop") {
-    playingUrl = null;
-    stopMpv();
+    player.setPlaying(null);
+    player.stop();
     setVideoMode(false);
-  } else if (action === "seek") mpvCmd({ command: ["seek", payload.posSec || 0, "absolute"] });
+  } else if (action === "seek") player.cmd({ command: ["seek", payload.posSec || 0, "absolute"] });
   else if (action === "tracks") {
     // audio/subtitle tracks of the playing stream, for an in-playback picker
-    return mpvQuery(["get_property", "track-list"]).then((list) => ({
+    return player.query(["get_property", "track-list"]).then((list) => ({
       ok: Array.isArray(list),
       tracks: (Array.isArray(list) ? list : [])
         .filter((t) => t && (t.type === "audio" || t.type === "sub"))
@@ -3052,7 +2528,7 @@ ipcMain.handle("player", (e, action, payload) => {
     // { type: "audio"|"sub", id: <track id> | "no" | "auto" } - aid/sid switch
     const prop = payload.type === "sub" ? "sid" : "aid";
     const v = payload.id === "no" || payload.id === "auto" ? payload.id : Number(payload.id);
-    if (typeof v === "string" || Number.isFinite(v)) mpvCmd({ command: ["set_property", prop, v] });
+    if (typeof v === "string" || Number.isFinite(v)) player.cmd({ command: ["set_property", prop, v] });
   } else if (action === "select") {
     // Mid-playback version of the queue's `streams`, in the SAME ordinal terms
     // (`track` above speaks mpv track ids, which an app that never saw the track
@@ -3060,7 +2536,7 @@ ipcMain.handle("player", (e, action, payload) => {
     // RELAUNCHES mpv from `queued.streams`, so a selection only sent to the live
     // player would be quietly undone by the next toggle. Merged per axis - a
     // call that changes only the subtitle must not clear the audio choice.
-    for (const command of playeropts.streamCommands(payload)) mpvCmd({ command });
+    for (const command of playeropts.streamCommands(payload)) player.cmd({ command });
     queued.streams = playeropts.mergeStreams(queued.streams, payload);
   } else if (action === "prop") {
     // One allowlisted playback property (subtitle/audio sync, speed, volume,
@@ -3068,14 +2544,14 @@ ipcMain.handle("player", (e, action, payload) => {
     // "ok" for a setting that never landed has no way to notice.
     const v = playeropts.propValue(payload.name, payload.value);
     if (v === null) return { ok: false, error: "property not allowed or value out of range" };
-    mpvCmd({ command: ["set_property", payload.name, v] });
+    player.cmd({ command: ["set_property", payload.name, v] });
   } else if (action === "pip") {
     // Toggle the current channel between a PiP (at the launcher-measured rect) and
     // fullscreen. PiP needs the window transparent (so mpv behind shows through the
     // hole); fullscreen starts opaque and observeMpv reveals on the first frame.
-    if (playingUrl) {
+    if (player.playing()) {
       setVideoMode(!!payload.on);
-      ensureAudio(() => launchMpv(playingUrl, 0, !!payload.on, payload.rect, queued.streams));
+      ensureAudio(() => player.launch(player.playing(), 0, !!payload.on, payload.rect, queued.streams));
     }
   }
   return { ok: true };
@@ -3359,7 +2835,7 @@ app.whenReady().then(async () => {
   // A colour space outlives the shell: a compositor left in PQ by a film that
   // was playing when the shell went down would keep the launcher in it. Say no
   // before the first mode change, which is what applies it.
-  setHdr(false);
+  player.setHdr(false);
   // Put the output at the UI mode: the compositor boots at the EDID preferred
   // mode, which on a 4K set means drawing the launcher at 8.3 Mpixels.
   dmode.refresh();
@@ -3479,6 +2955,30 @@ app.whenReady().then(async () => {
   // A rename changes which MQTT topics the box belongs on, so the bridge has to
   // reconnect with it.
   system.init({ onHostnameChanged: applyMqttConfig });
+  // The player is a service, not a window: the shell hands it the four things it
+  // cannot know by itself - which windows hear a player event, how to reveal the
+  // video, the display-mode arbiter, and what the panel answered.
+  player.init({
+    sendEvent: (ev) => {
+      const fg = currentAppId && appWindow(currentAppId);
+      for (const w of new Set([win, fg])) {
+        if (w && !w.isDestroyed()) {
+          try {
+            w.webContents.send("player-event", ev);
+          } catch (e) {}
+        }
+      }
+    },
+    setVideoMode,
+    raiseWindow,
+    cecPower,
+    publishMediaState,
+    dmode,
+    panelHdr: () => panelHdr,
+    outputSize: () => outputSize,
+    audioSink: () => audioSink,
+    childEnv: () => ({ ...process.env, ...WL_ENV }),
+  });
   // The background jobs need to know whether the box is free and how to reach the
   // shell; nothing in them draws anything.
   maintenance.init({
@@ -3511,7 +3011,7 @@ app.whenReady().then(async () => {
 // rather than waiting them out and leaving the app behind.
 const NATIVE_SHUTDOWN_WAIT_MS = 2500;
 function shutdown() {
-  stopMpv();
+  player.stop();
   if (!nativeapp.running()) return finishShutdown();
   // The app was just asked to exit. Quitting immediately would take away the
   // process that owns it before it has written its files, and the escalation
