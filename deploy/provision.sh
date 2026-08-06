@@ -583,8 +583,11 @@ fi
 # the compositor (no network, an unpublished tag, a failed build) would otherwise
 # point greetd at a binary that is not there and purge the one that is - a box that
 # survives until its next reboot and then boots to nothing.
+# "Something to replace it with" means a binary that runs, not a file that exists:
+# a failed install (no network, an unpublished tag) leaves whatever was there
+# before, which may be nothing but a truncated download from an earlier attempt.
 HAVE_COMPOSITOR=no
-[ -x /usr/local/bin/tvbox-wc ] && HAVE_COMPOSITOR=yes
+[ -x /usr/local/bin/tvbox-wc ] && /usr/local/bin/tvbox-wc --version >/dev/null 2>&1 && HAVE_COMPOSITOR=yes
 
 # greetd starts the compositor, which starts the session. The wrapper is root-owned
 # so this config never has to change; what it runs (~/.tvbox/session.sh) is
