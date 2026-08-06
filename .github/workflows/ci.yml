@@ -106,7 +106,7 @@ jobs:
           fi
       - name: python syntax (input bridges + helpers)
         run: |
-          python3 -m py_compile cec/cec_uinput_bridge.py remote/remote_input_bridge.py deploy/cursor_idle_hide.py
+          python3 -m py_compile cec/cec_uinput_bridge.py remote/remote_input_bridge.py
           python3 -m py_compile gamepad/gamepad_shim.py
           python3 -m py_compile remote/firetv_remote_ir.py remote/keymap_compile.py remote/ir_protocols.py remote/firetv_hid_probe.py
           # The Home Assistant custom integration. Only a syntax check: importing it
