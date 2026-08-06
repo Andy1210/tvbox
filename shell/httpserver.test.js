@@ -69,6 +69,28 @@ test("a path that is not a file falls back to the SPA's index", () => {
   fs.rmSync(dir, { recursive: true, force: true });
 });
 
+test("a file that goes away mid-request is a 404, not a dead shell", () => {
+  // existsSync + statSync asks twice and the answer can change in between; the
+  // throw used to reach an http handler with no try/catch around it.
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "tvbox-http-"));
+  const res = fakeRes();
+  httpserver.serveStatic(res, dir, "/gone.js", null);
+  assert.strictEqual(res.status, 404);
+
+  // A directory is not a file either, and neither is a path with a NUL in it -
+  // statSync throws on that one rather than answering.
+  fs.mkdirSync(path.join(dir, "sub"));
+  const dirRes = fakeRes();
+  httpserver.serveStatic(dirRes, dir, "/sub", null);
+  assert.strictEqual(dirRes.status, 404);
+
+  const nulRes = fakeRes();
+  httpserver.serveStatic(nulRes, dir, "/a\u0000b", null);
+  assert.strictEqual(nulRes.status, 404);
+
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
 test("only our own pages may change state, and a tool with no Origin is not a page", () => {
   const origins = httpserver.ownOrigins(8097);
 
