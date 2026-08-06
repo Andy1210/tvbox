@@ -114,7 +114,7 @@ test("UNIT_WANTS mirrors each user unit's [Install] WantedBy", () => {
 // cannot satisfy it is never offered the update rather than being half-broken by
 // it. The check runs against a real socket path, so this drives it through
 // compositor.available().
-test("a release that needs the compositor is not offered to a box without one", () => {
+test("a release that needs the compositor is not offered to a box without one", async () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "tvbox-updater-"));
   const socketPath = path.join(dir, "tvbox-wc.sock");
   process.env.TVBOX_WC_SOCKET = socketPath;
@@ -139,8 +139,10 @@ test("a release that needs the compositor is not offered to a box without one", 
     assert.deepStrictEqual(fresh.unmetRequirements({ ...feed, requires: bad }), ["malformed-requires"], String(bad));
   }
 
+  // listen() creates the socket file asynchronously, and the check that follows is a
+  // stat: without waiting, this passes or fails on timing rather than on the code.
   const server = net.createServer(() => {});
-  server.listen(socketPath);
+  await new Promise((resolve) => server.listen(socketPath, resolve));
   assert.deepStrictEqual(fresh.unmetRequirements(feed), [], "a box with the socket meets it");
 
   server.close();
