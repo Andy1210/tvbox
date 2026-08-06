@@ -100,7 +100,7 @@ availability-gated on the status topic. No HA YAML needed for that.
 - `next`, `previous` - forwarded to the active app (e.g. Spotify)
 - `tv_on`, `tv_off` / `standby` - TV power over HDMI-CEC
 - `volume_up`, `volume_down` (+ optional `steps`: 1-10 repeats), `mute` - the
-  **TV's** volume over the configured IR blaster (Settings → Peripherals → IR
+  **TV's** volume over the configured IR blaster (Settings → Remotes & accessories → IR
   blaster; [ir-blaster.md](ir-blaster.md)). Ignored (`ok:false` logged) when no
   blaster is set up - CEC volume isn't a thing on most TVs, IR is the reliable
   path.

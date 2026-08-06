@@ -27,18 +27,15 @@
     "wifi": "Wi-Fi"
   },
   "settingsCat": {
-    "general": "Általános",
     "av": "Kép és hang",
     "network": "Hálózat",
-    "peripherals": "Perifériák",
+    "peripherals": "Távirányítók és eszközök",
     "apps": "Alkalmazások",
     "ambient": "Képernyővédő",
-    "store": "Alkalmazásbolt",
-    "system": "Rendszer és frissítés",
+    "system": "Rendszer",
     "about": "Névjegy"
   },
   "wifi": {
-    "connectedTo": "csatlakozva · {ssid}",
     "notConnected": "nincs kapcsolat",
     "rescan": "Keresés újra",
     "scanning": "Keresés…",
@@ -54,32 +51,39 @@
     "ethernet": "Ethernet",
     "ethConnected": "csatlakoztatva",
     "forget": "Elfelejtés",
-    "forgotten": "{ssid} elfelejtve",
     "forgetFailed": "Nem sikerült elfelejteni: {ssid}",
     "hidden": "Csatlakozás rejtett hálózathoz…",
     "hiddenSsid": "Rejtett hálózat neve (SSID)",
     "country": "Wi-Fi ország",
     "countryHint": "Rádiós szabályozási régió, a következő újraindításkor lép életbe.",
     "countryAuto": "Alapértelmezett",
-    "radioTurnOff": "Wifi rádió kikapcsolása",
-    "radioTurnOn": "Wifi rádió bekapcsolása",
     "radioOnHint": "Kábelen a wifi csak a Bluetooth-t zavarja",
     "radioOffHint": "A rádió ki van kapcsolva",
     "radioTurningOff": "Kikapcsolás…",
     "radioTurningOn": "Bekapcsolás…",
     "radioNeedsEthernet": "Kábeles hálózat kell hozzá, különben a box lekerül a hálózatról",
-    "radioFailed": "A rádió átállítása nem sikerült"
+    "radioFailed": "A rádió átállítása nem sikerült",
+    "groupConnection": "Kapcsolat",
+    "groupNetworks": "Hálózatok",
+    "groupRegion": "Régió",
+    "radio": "Wi-Fi rádió",
+    "savedNetwork": "mentve",
+    "signal": "Jelerősség",
+    "security": "Biztonság",
+    "securedYes": "jelszóval védett",
+    "securedNo": "nyílt",
+    "forgetHint": "A box nem csatlakozik rá többé magától",
+    "connect": "Csatlakozás"
   },
   "display": {
     "title": "Kijelző",
     "resolution": "Felbontás",
     "autoHint": "Automatikus: a felület legfeljebb 1080p-ben fut, a videó a tartalomhoz állítja a kimenetet. OK: újrafelismerés.",
-    "active": "aktív",
     "none": "Nincs elérhető mód",
     "applying": "Beállítás…",
     "failed": "Nem sikerült a módváltás",
-    "on": "Be",
-    "off": "Ki"
+    "redetect": "Kimenet újrafelismerése",
+    "redetectHint": "Kérdezzük meg újra a tv-t, ha valami elmozdította a kimenetet"
   },
   "typing": {
     "title": "Írd be",
@@ -108,7 +112,6 @@
     "sleepTimerHint": "A megadott idő után kikapcsolja a TV-t (a box megy tovább)."
   },
   "ambient": {
-    "title": "Képernyővédő",
     "enable": "Bekapcsolva tétlenség esetén",
     "idle": "Tétlenség (perc)",
     "city": "Város (időjárás)",
@@ -136,7 +139,9 @@
     "sleepNever": "Soha",
     "sleepAfter": "{min} perc",
     "bing": "Bing napi képek",
-    "bingHint": "A Bing napi háttérképei is bekerülnek a diavetítésbe"
+    "bingHint": "A Bing napi háttérképei is bekerülnek a diavetítésbe",
+    "groupContent": "Mit mutasson",
+    "minutes": "{n} perc"
   },
   "bt": {
     "title": "Bluetooth",
@@ -157,7 +162,17 @@
     "lowBattery": "Merül a távirányító",
     "lowBatteryMsg": "{name}: {pct}%. Hamarosan tölteni vagy elemet cserélni kell.",
     "ertm": "ERTM kikapcsolása (hibaelhárítás)",
-    "ertmHint": "Csak akkor kapcsold be, ha egy kontroller gombjai beragadnak vagy duplán nyomnak. Néhány kontroller - jellemzően az Xbox-osok - hibásan kezelik a Bluetooth ERTM újraküldését; kikapcsolva stabilabbak lesznek. Viszont MINDEN Bluetooth-eszközre érvényes, és elveszi az L2CAP saját hibajavítását, ami a hangeszközöket megzavarhatja. Újraindítás után lép életbe."
+    "ertmHint": "Csak akkor kapcsold be, ha egy kontroller gombjai beragadnak vagy duplán nyomnak. Néhány kontroller - jellemzően az Xbox-osok - hibásan kezelik a Bluetooth ERTM újraküldését; kikapcsolva stabilabbak lesznek. Viszont MINDEN Bluetooth-eszközre érvényes, és elveszi az L2CAP saját hibajavítását, ami a hangeszközöket megzavarhatja. Újraindítás után lép életbe.",
+    "groupDevices": "Eszközök",
+    "groupTroubleshooting": "Hibakeresés",
+    "connect": "Csatlakozás",
+    "disconnect": "Lecsatlakoztatás",
+    "state": "Állapot",
+    "battery": "Töltés",
+    "batteryAt": "töltés {pct}%",
+    "connectedN": "{n} csatlakozva",
+    "noneConnected": "semmi nincs csatlakozva",
+    "removeHint": "A box elfelejti ezt az eszközt"
   },
   "remote": {
     "title": "Távirányító gombok",
@@ -252,11 +267,13 @@
     "trackLangHint": "Ha van ilyen nyelvű hangsáv, azt választja (mpv).",
     "subLang": "Előnyben részesített felirat",
     "subLangHint": "Ha van ilyen nyelvű felirat, bekapcsolja (mpv).",
-    "langAuto": "Adás szerinti"
+    "langAuto": "Adás szerinti",
+    "output": "Kimenet",
+    "outputHint": "Hová menjen a hang",
+    "tracksTitle": "Lejátszási nyelvek",
+    "tracksHint": "Melyik hangsávot és feliratot válassza egy film"
   },
   "about": {
-    "title": "Diagnosztika",
-    "refresh": "Frissítés",
     "version": "Verzió",
     "device": "Eszköz",
     "ip": "IP-cím",
@@ -270,7 +287,10 @@
     "storage": "Tárhely (szabad/össz.)",
     "creditsTitle": "Nyílt forráskód",
     "creditsIntro": "A tvbox MIT-licencű, és az alábbi projektekre épül:",
-    "trademarks": "Nem áll kapcsolatban az Amazonnal, és nem az Amazon támogatja. A Fire TV és az Alexa az Amazon védjegyei; itt csak a kompatibilitás leírására szolgálnak. A Fire TV távirányító funkció a saját tulajdonú eszközöddel működik együtt, és kísérleti - a használat a saját felelősségedre történik."
+    "trademarks": "Nem áll kapcsolatban az Amazonnal, és nem az Amazon támogatja. A Fire TV és az Alexa az Amazon védjegyei; itt csak a kompatibilitás leírására szolgálnak. A Fire TV távirányító funkció a saját tulajdonú eszközöddel működik együtt, és kísérleti - a használat a saját felelősségedre történik.",
+    "groupDevice": "Eszköz",
+    "groupNetwork": "Hálózat",
+    "groupHealth": "Állapot"
   },
   "aboutCredits": {
     "electron": "alkalmazásváz",
@@ -353,12 +373,13 @@
     "rebootNow": "Újraindítás most",
     "rebootNone": "Nincs függőben újraindítás.",
     "appsAuto": "Alkalmazások automatikus frissítése",
-    "appsAutoHint": "Éjszaka, csak tétlen boxon telepíti az áruházi frissítéseket."
+    "appsAutoHint": "Éjszaka, csak tétlen boxon telepíti az áruházi frissítéseket.",
+    "groupAuto": "Automatikus",
+    "availableShort": "van frissítés"
   },
   "hostname": {
     "title": "Eszköz neve",
     "hint": "Nevezd el a boxot, hogy több box közül könnyen megkülönböztesd a hálózaton.",
-    "name": "Név",
     "later": "Elmentve - az új név a box következő frissítése után lép életbe."
   },
   "region": {
@@ -380,7 +401,9 @@
     "hourFormat": "Időformátum",
     "hourFormat_auto": "Automatikus",
     "hourFormat_12": "12 órás",
-    "hourFormat_24": "24 órás"
+    "hourFormat_24": "24 órás",
+    "regionTitle": "Idő és régió",
+    "regionHint": "Időzóna, billentyűzetkiosztás, óra"
   },
   "keymap": {
     "gb": "Angol (Egyesült Királyság)",
@@ -454,7 +477,9 @@
     "enterPin": "Add meg a PIN-kódot",
     "wrongPin": "Hibás PIN",
     "require": "PIN kérése kényes műveletekhez",
-    "requireHint": "Alkalmazás telepítése és törlése PIN-t kér."
+    "requireHint": "Alkalmazás telepítése és törlése PIN-t kér.",
+    "pinSet": "PIN beállítva",
+    "pinNotSet": "nincs PIN"
   },
   "mqtt": {
     "title": "MQTT / Home Assistant",
@@ -467,7 +492,12 @@
     "username": "Felhasználónév",
     "password": "Jelszó",
     "deviceId": "Eszközazonosító",
-    "saveFailed": "A beállítások mentése nem sikerült."
+    "saveFailed": "A beállítások mentése nem sikerült.",
+    "groupBroker": "Bróker",
+    "groupAuth": "Belépés",
+    "groupIdentity": "Azonosító",
+    "deviceIdHint": "A topic-szegmens, amin ez a box publikál. Két box soha ne használja ugyanazt.",
+    "portDefault": "1883"
   },
   "ir": {
     "title": "IR jeladó (TV hangerő)",
@@ -500,7 +530,10 @@
     "test": "Teszt",
     "testOk": "Elküldve.",
     "testFailed": "Küldés sikertelen: {error}",
-    "disconnected": "A jeladó nem elérhető: {error}"
+    "disconnected": "A jeladó nem elérhető: {error}",
+    "groupDevice": "Adó",
+    "groupTest": "Kipróbálás",
+    "portDefault": "alapértelmezett"
   },
   "firetvir": {
     "title": "Fire TV távirányító → TV IR",
@@ -579,6 +612,37 @@
       "share_failed": "Nem sikerült előkészíteni a megosztást (írási hiba)."
     },
     "passClear": "Jelszó törlése",
-    "passClearHint": "ezzel a kiszolgáló leáll"
+    "passClearHint": "ezzel a kiszolgáló leáll",
+    "address": "Cím",
+    "groupAccess": "Belépés"
+  },
+  "common": {
+    "on": "Be",
+    "off": "Ki",
+    "notSet": "nincs beállítva",
+    "selected": "kiválasztva",
+    "working": "dolgozik…"
+  },
+  "network": {
+    "wifiHint": "A hálózat, amin a box van",
+    "fileserverHint": "A box mappái számítógépről",
+    "mqttHint": "Most játszott tartalom, parancsok és értesítések MQTT-n"
+  },
+  "av": {
+    "displayHint": "Felbontás és képfrissítés",
+    "soundHint": "Kimenet és hangerő"
+  },
+  "peripherals": {
+    "btHint": "Hangszórók, távirányítók, kontrollerek",
+    "remoteHint": "Taníts be egy másik gombot a távirányítón",
+    "irHint": "TV-hangerő, ha a tv CEC-en nem fogadja"
+  },
+  "apps": {
+    "orderTitle": "Kezdőlap sorrendje",
+    "orderHint": "Mely appok látszanak, és milyen sorrendben"
+  },
+  "system": {
+    "updateHint": "Verzió és automatikus frissítés",
+    "backupHint": "Beállítások mentése telefonra, vagy visszaállítás"
   }
 }

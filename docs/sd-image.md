@@ -169,7 +169,7 @@ Notes:
     `010_pi-nopasswd`. `SUDO=true`/absent toggles it both ways. The tvbox shell
     itself always runs rootless - this only affects a human on the SSH shell.
   - **HOSTNAME** - the image default is `tvbox`; set this so multiple boxes are
-    distinct (also editable later on the TV: Settings → General → Device name).
+    distinct (also editable later on the TV: Settings → System → Device name).
   - **WIFI_COUNTRY** - the radio won't transmit on a channel its regulatory
     domain forbids, so a box flashed for another region needs this _before_ it
     ever associates - which is why it's here and not only in Settings. Weakest

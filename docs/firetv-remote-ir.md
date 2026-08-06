@@ -25,7 +25,7 @@ write it.
 
 ## 1. TV volume / power / mute from the remote's IR blaster
 
-### The easy way: Settings → Peripherals → "Fire TV remote → TV IR"
+### The easy way: Settings → Remotes & accessories → "Fire TV remote → TV IR"
 
 The guided on-TV flow does all of the below for you, no SSH:
 
@@ -133,7 +133,7 @@ keycode (a per-report band + the raw byte: 0xEF at 0x300, 0x02 at 0x400, above
 KEY_MAX so it can never collide with a real key) into the SAME per-device
 remap pipeline, so EVERY such button, whatever byte it sends, becomes
 learnable/mappable like any other button:
-**Settings → Peripherals → (remote) → learn a button → pick an action** (launch
+**Settings → Remotes & accessories → (remote) → learn a button → pick an action** (launch
 any installed app, `settings`, `appswitcher`, `power`, media/nav, …).
 
 No hwdb, no `captureAllNodes`, no per-box setup: `provision.sh` grants the
@@ -162,7 +162,7 @@ order:
 
 - The **TV's own remote over HDMI-CEC is never remapped** - it always drives
   the menu, so you can fix the BT remote from there.
-- **Settings → Peripherals → (remote) → "Reset this remote's buttons"** clears
+- **Settings → Remotes & accessories → (remote) → "Reset this remote's buttons"** clears
   all of that remote's remapping.
 - **Panic gesture:** hammer the SAME (remapped) button 8 times rapidly (under
   0.4s between taps) on the misbehaving remote; the bridge detects the raw

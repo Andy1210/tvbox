@@ -1,13 +1,28 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { act, cleanup, render, screen } from "@testing-library/react";
-import { FileServerSettings } from "./FileServerSettings";
-import { setupRemote, remote, setFocus } from "../test/remote";
+import type { ReactNode } from "react";
+import { FileServerPage } from "./fileserver";
+import { SettingsNavProvider } from "../nav";
+import { setupRemote, remote, setFocus } from "../../test/remote";
 
 // The box can clear a stored password (which stops the server), and the form had no
 // way to reach that: an empty entry means "keep the stored one", like every other
 // credential form here, so there was no path to "" at all. That is the kind of gap
-// nothing else catches - the shell側 works, the UI just cannot ask for it.
+// nothing else catches - the shell side works, the UI just cannot ask for it.
 setupRemote();
+
+// The same shape the real Settings root has: only the top of the stack is mounted,
+// so a drill-down can be driven with the remote instead of by calling internals.
+function withNav(root: ReactNode): ReactNode {
+  return (
+    <SettingsNavProvider>
+      {(stack) => {
+        const top = stack[stack.length - 1];
+        return top ? <div key={top.id}>{top.render()}</div> : root;
+      }}
+    </SettingsNavProvider>
+  );
+}
 
 const STATUS = (hasPass: boolean) => ({
   enabled: false,
@@ -44,12 +59,12 @@ describe("the file server form", () => {
 
   it("offers to clear the password only when one is stored, and clearing sends an empty one", async () => {
     const posted = stubShell(true);
-    render(<FileServerSettings />);
+    render(<FileServerPage />);
     await settle();
     expect(screen.queryByText("Clear password")).not.toBeNull();
     // Driven the way the box is: focus the control, press OK. That also proves the
     // focus key is reachable at all, which a synthetic click would not.
-    await setFocus("fsrv-pass-clear");
+    await setFocus("fs:pass-clear");
     await remote.ok();
     await settle();
     expect(posted).toContainEqual({ pass: "" });
@@ -57,7 +72,7 @@ describe("the file server form", () => {
 
   it("does not offer it when there is no password to clear", async () => {
     stubShell(false);
-    render(<FileServerSettings />);
+    render(<FileServerPage />);
     await settle();
     expect(screen.queryByText("Clear password")).toBeNull();
     // and it says what is missing instead
@@ -68,7 +83,7 @@ describe("the file server form", () => {
     // "stopped" plus a full set of controls that all fail is the wrong story: the box
     // is not reachable, and every control below would just error.
     vi.stubGlobal("fetch", () => Promise.reject(new Error("no shell")));
-    render(<FileServerSettings />);
+    render(<FileServerPage />);
     await settle();
     expect(screen.queryByText("Try again")).not.toBeNull(); // app.retry, shared with the store
     expect(screen.queryByText("Can't reach the box")).not.toBeNull();
@@ -77,18 +92,24 @@ describe("the file server form", () => {
 
   it("greys the switch while the binary that serves it is missing", async () => {
     const posted = stubShell(true, { rclone: false });
-    render(<FileServerSettings />);
+    render(<FileServerPage />);
     await settle();
-    await setFocus("fsrv-enabled");
+    await setFocus("fs:enabled");
     await remote.ok();
     await settle();
     expect(posted).toEqual([]); // nothing was configured that the box cannot honour
-    expect(screen.queryByText("rclone is not installed.")).not.toBeNull();
+    // Said at least once: the row carries it as a hint before the press, and the press
+    // adds it as an error - either is enough for the user to know why.
+    expect(screen.queryAllByText("rclone is not installed.").length).toBeGreaterThan(0);
   });
 
   it("renders the folders the box discovered, not a list of its own", async () => {
     stubShell(true);
-    render(<FileServerSettings />);
+    render(withNav(<FileServerPage />));
+    await settle();
+    // The folder list is a page of its own now, so walk to it with the remote.
+    await setFocus("fs:folders");
+    await remote.ok();
     await settle();
     // verbatim: this is the name the folder has over the network, so it is the name
     // to go looking for in a file manager - a translated label would name nothing

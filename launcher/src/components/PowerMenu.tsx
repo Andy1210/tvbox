@@ -93,7 +93,7 @@ export function PowerMenu({ onClose }: { onClose: () => void }) {
                 <span className="flex items-center justify-between w-full">
                   <span>{t("power.sleepTimer")}</span>
                   <span className={["text-[2vh]", timerLeftMin ? "text-accent" : "text-fg-dim"].join(" ")}>
-                    {timerLeftMin ? t("power.sleepTimerIn", { min: String(timerLeftMin) }) : t("display.off")}
+                    {timerLeftMin ? t("power.sleepTimerIn", { min: String(timerLeftMin) }) : t("common.off")}
                   </span>
                 </span>
                 <span className="text-[1.7vh] font-normal text-fg-dim">{t("power.sleepTimerHint")}</span>
