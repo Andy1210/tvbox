@@ -13,8 +13,12 @@
 const net = require("net");
 const path = require("path");
 
+// The runtime dir from the environment, and the uid's own when there is none:
+// hardcoding 1000 breaks a box whose first user is not (a Pi Imager custom user),
+// which is the same reason main.js derives WL_ENV that way.
 const SOCKET =
-  process.env.TVBOX_WC_SOCKET || path.join(process.env.XDG_RUNTIME_DIR || "/run/user/1000", "tvbox-wc.sock");
+  process.env.TVBOX_WC_SOCKET ||
+  path.join(process.env.XDG_RUNTIME_DIR || "/run/user/" + process.getuid(), "tvbox-wc.sock");
 
 const TIMEOUT_MS = 4000;
 

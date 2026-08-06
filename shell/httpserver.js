@@ -41,15 +41,41 @@ function jsonRes(res, obj) {
 function serveStatic(res, root, p, spaFallback) {
   const fp = path.join(root, p);
   const base = root.endsWith(path.sep) ? root : root + path.sep;
-  if ((fp === root || fp.startsWith(base)) && fs.existsSync(fp) && fs.statSync(fp).isFile()) {
+  if ((fp === root || fp.startsWith(base)) && isFile(fp)) {
     res.writeHead(200, { "Content-Type": MIME[path.extname(fp)] || "application/octet-stream" });
-    fs.createReadStream(fp).pipe(res);
-  } else if (spaFallback && fs.existsSync(spaFallback)) {
+    // A read that fails halfway (the file went away, an I/O error, a permission
+    // change) emits `error` on the stream, and an unhandled one takes the whole
+    // shell down with it. The headers are already out by then, so the only thing
+    // left to do is end the response.
+    const stream = fs.createReadStream(fp);
+    stream.on("error", (e) => {
+      console.warn("[http] read failed:", fp, e.message);
+      try {
+        res.end();
+      } catch (e2) {}
+    });
+    stream.pipe(res);
+  } else if (spaFallback && isFile(spaFallback)) {
     res.writeHead(200, { "Content-Type": "text/html" });
-    res.end(fs.readFileSync(spaFallback));
+    try {
+      res.end(fs.readFileSync(spaFallback));
+    } catch (e) {
+      res.end();
+    }
   } else {
     res.writeHead(404, { "Content-Type": "text/plain" });
     res.end("not found");
+  }
+}
+
+// One question, one syscall, and never a throw: existsSync followed by statSync
+// asks twice and the answer can change in between - a file removed at that moment
+// used to take the shell down rather than 404.
+function isFile(p) {
+  try {
+    return fs.statSync(p).isFile();
+  } catch (e) {
+    return false;
   }
 }
 

@@ -9,6 +9,7 @@ const os = require("os");
 const path = require("path");
 
 // Config writes land in a real file, so give this test its own box.
+const REAL_HOME = process.env.HOME;
 const home = fs.mkdtempSync(path.join(os.tmpdir(), "tvbox-routes-"));
 fs.mkdirSync(path.join(home, ".tvbox"), { recursive: true });
 process.env.HOME = home;
@@ -114,4 +115,7 @@ test("the wifi radio is never turned off by a malformed body", async () => {
   assert.deepStrictEqual(ran, [], "nothing may reach nmcli for a body that is not a boolean");
 });
 
-test.after(() => fs.rmSync(home, { recursive: true, force: true }));
+test.after(() => {
+  process.env.HOME = REAL_HOME;
+  fs.rmSync(home, { recursive: true, force: true });
+});
