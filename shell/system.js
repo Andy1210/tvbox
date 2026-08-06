@@ -209,27 +209,34 @@ function wifiConnect(ssid, password, hidden, cb) {
   // answer is not to send it. Refusing is safe: a network named this way cannot be
   // joined by this path, and saying so is better than leaking the password for it.
   if (ssid.startsWith("-")) return cb({ ok: false, error: "unsupported network name", code: "bad-ssid" });
-  // Every nmcli call is tried as us and then with sudo. WHICH error is reported
-  // matters: a box only has passwordless sudo when someone asked for it in
-  // tvbox.conf, so on an ordinary box the sudo half always fails with "sudo: a
-  // password is required" - report that and every failure looks the same. The
-  // unprivileged attempt is the one that spoke to NetworkManager.
+  // Only the network's own connect keeps a sudo fallback, because that one had it
+  // before any of this: nothing new here runs privileged. On this box the
+  // unprivileged nmcli is authorised for connection settings already (the box user
+  // is in netdev), and a box where it is not should say so rather than quietly
+  // escalating - root at runtime is the one thing this codebase does not do.
+  //
+  // WHICH error is reported matters: a box only has passwordless sudo when someone
+  // asked for it in tvbox.conf, so on an ordinary box the sudo half always fails
+  // with "sudo: a password is required" - report that and every failure looks the
+  // same. The unprivileged attempt is the one that spoke to NetworkManager.
   //
   // The message never falls back to the exception: node builds that as "Command
-  // failed: <the whole command line>", and one of these command lines carries the
-  // wifi password. It would be on the TV and in ~/.tvbox/shell.log, which backups
-  // and the diagnostics report both pick up.
+  // failed: <the whole command line>", and these command lines carry the wifi
+  // password. It would be on the TV and in ~/.tvbox/shell.log, which backups and
+  // the diagnostics report both pick up.
+  const failure = (err, err2) =>
+    String(err || err2 || "nmcli failed")
+      .trim()
+      .slice(0, 160) || "nmcli failed";
   const nm = (args, done) =>
+    execFile("nmcli", args, { timeout: (NM_WAIT_S + 5) * 1000 }, (e, out, err) =>
+      done(e ? failure(err) : null, String(out || "")),
+    );
+  const nmOrSudo = (args, done) =>
     execFile("nmcli", args, { timeout: (NM_WAIT_S + 5) * 1000 }, (e, _o, err) => {
       if (!e) return done(null);
       execFile("sudo", ["-n", "nmcli", ...args], { timeout: (NM_WAIT_S + 5) * 1000 }, (e2, _o2, err2) =>
-        done(
-          e2
-            ? String(err || err2 || "nmcli failed")
-                .trim()
-                .slice(0, 160) || "nmcli failed"
-            : null,
-        ),
+        done(e2 ? failure(err, err2) : null),
       );
     });
   // What went wrong, in a form the launcher can say in the user's own language. The
@@ -254,7 +261,7 @@ function wifiConnect(ssid, password, hidden, cb) {
     // Hidden networks aren't in the scan list, so nmcli must be told to probe for
     // the SSID instead of matching a scan result.
     if (hidden) args.push("hidden", "yes");
-    nm(args, (error) => answer(error));
+    nmOrSudo(args, (error) => answer(error));
   };
   if (!password) return fresh();
   // `nmcli device wifi connect` FINDS A MATCHING PROFILE or creates one, and a
@@ -276,25 +283,31 @@ function wifiConnect(ssid, password, hidden, cb) {
     // was given the password.
     const saved = profiles.filter((p) => p.ssid === ssid).sort((a, b) => a.name.localeCompare(b.name))[0];
     if (!saved) return fresh();
-    execFile(
-      "nmcli",
-      ["-s", "-g", "802-11-wireless-security.psk", "connection", "show", "id", saved.name],
-      { timeout: 8000 },
-      (readErr, previous) => {
-        const restore = (error) => {
-          const before = readErr ? "" : String(previous || "").trim();
-          const done = () => answer(error, classify(error));
-          if (!before) return done(); // nothing to put back
-          nm(["connection", "modify", "id", saved.name, "wifi-sec.psk", before], done);
-        };
-        nm(["connection", "modify", "id", saved.name, "wifi-sec.psk", password], (error) => {
-          if (error) return answer(error, classify(error));
-          nm(["--wait", String(NM_WAIT_S), "connection", "up", "id", saved.name], (upError) =>
-            upError ? restore(upError) : answer(null),
-          );
-        });
-      },
-    );
+    nm(["-s", "-g", "802-11-wireless-security.psk", "connection", "show", "id", saved.name], (readErr, out) => {
+      // Only the line ending: a password may legitimately begin or end with a
+      // space, and trimming it would restore a different password than was there.
+      const before = readErr ? "" : String(out).replace(/\r?\n$/, "");
+      const restore = (error) =>
+        !before
+          ? answer(error, classify(error)) // nothing to put back
+          : nm(["connection", "modify", "id", saved.name, "wifi-sec.psk", before], (restoreErr) =>
+              restoreErr
+                ? // The profile now holds the password that did not work and we
+                  // could not undo it. Say so: it is the difference between "try
+                  // again" and "this network needs Forget first".
+                  answer(
+                    error + " (and the previous password could not be put back: " + restoreErr + ")",
+                    "restore-failed",
+                  )
+                : answer(error, classify(error)),
+            );
+      nm(["connection", "modify", "id", saved.name, "wifi-sec.psk", password], (error) => {
+        if (error) return answer(error, classify(error));
+        nm(["--wait", String(NM_WAIT_S), "connection", "up", "id", saved.name], (upError) =>
+          upError ? restore(upError) : answer(null),
+        );
+      });
+    });
   });
 }
 
