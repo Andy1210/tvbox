@@ -254,7 +254,14 @@ function RemoteButtonsPage() {
   const { t } = useI18n();
   const nav = useSettingsNav();
   return (
-    <SettingsPage id="remote" title={t("remote.title")} onBack={nav.pop} animate="push" focusPolicy="legacy">
+    <SettingsPage
+      id="remote"
+      title={t("remote.title")}
+      subtitle={t("remote.hint")}
+      onBack={nav.pop}
+      animate="push"
+      focusPolicy="legacy"
+    >
       <RemoteRemap />
     </SettingsPage>
   );

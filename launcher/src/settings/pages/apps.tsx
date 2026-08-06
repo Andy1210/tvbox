@@ -18,7 +18,15 @@ function StorePage() {
   const { t } = useI18n();
   const nav = useSettingsNav();
   return (
-    <SettingsPage id="store" title={t("store.title")} onBack={nav.pop} animate="push" focusPolicy="legacy" width="full">
+    <SettingsPage
+      id="store"
+      title={t("store.title")}
+      subtitle={t("store.hint")}
+      onBack={nav.pop}
+      animate="push"
+      focusPolicy="legacy"
+      width="full"
+    >
       <StoreSettings />
     </SettingsPage>
   );
@@ -31,6 +39,7 @@ function AppOrderPage() {
     <SettingsPage
       id="apporder"
       title={t("apps.orderTitle")}
+      subtitle={t("appsettings.hint")}
       onBack={nav.pop}
       animate="push"
       focusPolicy="legacy"

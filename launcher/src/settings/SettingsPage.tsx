@@ -275,54 +275,60 @@ export function SettingsPage({
   return (
     <div
       ref={scrollRef}
+      // The padding and the matching negative margin are not decoration: a scroll
+      // container clips, and `overflow-y: auto` makes overflow-x clip too, so a
+      // focused control that grows - every FocusButton scales to 1.04 - loses its
+      // rounded ends and its right-hand value to the edge. This gives that growth
+      // somewhere to go while the content still starts exactly where it looks like it
+      // should. The inner div carries the width cap so the padding cannot shift it.
       className={
-        "h-full overflow-y-auto no-scrollbar" +
-        (animate === "push" ? " tv-page-push" : "") +
-        (width === "list" ? " max-w-[58vw]" : "")
+        "h-full overflow-y-auto no-scrollbar px-[1.8vw] -mx-[1.8vw]" + (animate === "push" ? " tv-page-push" : "")
       }
       // Headroom for a focused row that scrolls to the top edge: norigin uses
       // block:"nearest", so without it the topmost row pins to the very top and
       // hides the title above it.
       style={{ scrollPaddingTop: "14vh", scrollPaddingBottom: "8vh" }}
     >
-      {title && (
-        <div className="pb-[2.4vh]">
-          <h2 className="text-[3.1vh] font-bold leading-tight flex items-center gap-[0.8vw]">
-            {/* A page you can leave says so. The rail already shows which category
-                you are in, so this is the only breadcrumb the screen needs. */}
-            {onBack && (
-              <svg
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2.2"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                className="w-[2.6vh] h-[2.6vh] shrink-0 opacity-40"
-                aria-hidden="true"
-              >
-                <path d="M15 6l-6 6 6 6" />
-              </svg>
-            )}
-            {title}
-          </h2>
-          {subtitle && <p className="text-[1.9vh] text-fg-dim mt-[0.6vh] max-w-[52vw]">{subtitle}</p>}
-        </div>
-      )}
-      <PageScope value={id}>
-        {focusPolicy === "legacy" ? (
-          <FocusContext.Provider value={paneFocusKey}>
-            <div ref={paneRef} className={animate === "push" ? "tv-stagger" : undefined}>
-              {children}
-            </div>
-          </FocusContext.Provider>
-        ) : (
-          <div className={animate === "push" ? "tv-stagger" : undefined}>{children}</div>
+      <div className={width === "list" ? "max-w-[58vw]" : undefined}>
+        {title && (
+          <div className="pb-[2.4vh]">
+            <h2 className="text-[3.1vh] font-bold leading-tight flex items-center gap-[0.8vw]">
+              {/* A page you can leave says so. The rail already shows which category
+                  you are in, so this is the only breadcrumb the screen needs. */}
+              {onBack && (
+                <svg
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2.2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  className="w-[2.6vh] h-[2.6vh] shrink-0 opacity-40"
+                  aria-hidden="true"
+                >
+                  <path d="M15 6l-6 6 6 6" />
+                </svg>
+              )}
+              {title}
+            </h2>
+            {subtitle && <p className="text-[1.9vh] text-fg-dim mt-[0.6vh] max-w-[52vw]">{subtitle}</p>}
+          </div>
         )}
-      </PageScope>
-      {/* The last row must be able to sit clear of the screen edge when it is the
-          focused one, and a scroll container cannot use margin for that. */}
-      <div className="h-[8vh]" aria-hidden="true" />
+        <PageScope value={id}>
+          {focusPolicy === "legacy" ? (
+            <FocusContext.Provider value={paneFocusKey}>
+              <div ref={paneRef} className={animate === "push" ? "tv-stagger" : undefined}>
+                {children}
+              </div>
+            </FocusContext.Provider>
+          ) : (
+            <div className={animate === "push" ? "tv-stagger" : undefined}>{children}</div>
+          )}
+        </PageScope>
+        {/* The last row must be able to sit clear of the screen edge when it is the
+            focused one, and a scroll container cannot use margin for that. */}
+        <div className="h-[8vh]" aria-hidden="true" />
+      </div>
     </div>
   );
 }
