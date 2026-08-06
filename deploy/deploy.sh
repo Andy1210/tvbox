@@ -52,7 +52,7 @@ rsync -az "${INFRA_SRCS[@]}" "$PI:.tvbox/"
 # set is the one that mattered, since the build script applied every *.patch it
 # found next to itself.
 ssh "$PI" "cd ~/.tvbox 2>/dev/null || exit 0
-  rm -f ./*.patch install-labwc-planes.sh labwc-autostart labwc-environment cursor_idle_hide.py"
+  rm -f ./*.patch install-labwc-planes.sh labwc-autostart labwc-environment cursor_idle_hide.py tvbox-compositor"
 
 # ---- the ONE root step: provision (apt baseline, udev/polkit, groups) ----
 # ssh -t gives sudo a TTY so it can prompt for the password; on a box with

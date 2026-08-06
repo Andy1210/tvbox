@@ -47,7 +47,7 @@ apt-get update -qq || warn "apt update failed (stale package lists?)"
 # installs bleak into a user-space venv on demand; without these that one
 # feature can't set up (everything else is unaffected). dbus-fast ships an
 # aarch64 wheel, so no compiler is pulled in by it.
-HARD="cec-utils python3 python3-evdev python3-venv python3-pip pipewire pipewire-pulse wireplumber nodejs npm libgbm1 libseat1 libinput10 libxkbcommon0 libwayland-server0 libegl1 libgles2"
+HARD="cec-utils python3 python3-evdev python3-venv python3-pip pipewire pipewire-pulse wireplumber nodejs npm greetd seatd libgbm1 libseat1 libinput10 libxkbcommon0 libwayland-server0 libegl1 libgles2"
 apt-get install -y -qq $HARD && ok "core deps ($HARD)" || bad "core apt deps - install manually: $HARD"
 # Soft deps: on-demand app-install tooling (flatpak/curl/git) + output config.
 # gcc/libc6-dev: the CEC bridge compiles cec/cec_vendor_shim.c on the box (LG
@@ -578,19 +578,54 @@ if [ -f "$HERE/install-compositor.sh" ]; then
 else
   bad "install-compositor.sh missing - the box will have no session"
 fi
+# Everything below this line replaces the box's session, and none of it may run
+# unless there is something to replace it WITH. A provision that could not install
+# the compositor (no network, an unpublished tag, a failed build) would otherwise
+# point greetd at a binary that is not there and purge the one that is - a box that
+# survives until its next reboot and then boots to nothing.
+HAVE_COMPOSITOR=no
+[ -x /usr/local/bin/tvbox-wc ] && HAVE_COMPOSITOR=yes
 
 # greetd starts the compositor, which starts the session. The wrapper is root-owned
 # so this config never has to change; what it runs (~/.tvbox/session.sh) is
 # user-space and therefore OTA-updatable.
-if [ -f "$HERE/tvbox-session" ] && install -m 755 -o root -g root \
+if [ "$HAVE_COMPOSITOR" = no ]; then
+  warn "no compositor installed - leaving the session as it is"
+elif [ -f "$HERE/tvbox-session" ] && install -m 755 -o root -g root \
     "$HERE/tvbox-session" /usr/local/bin/tvbox-session; then
+  # A Lite install has greetd's own default config (or none at all), which starts
+  # a text greeter, and a box that never had our session has nothing to rewrite.
+  # Write one rather than reporting success over a config that points elsewhere.
+  if [ ! -f /etc/greetd/config.toml ] || ! grep -q "^command = " /etc/greetd/config.toml; then
+    install -d /etc/greetd
+    cat > /etc/greetd/config.toml <<GREETD
+[terminal]
+vt = 7
+
+[default_session]
+command = "tvbox-wc -- /usr/local/bin/tvbox-session"
+user = "$TVBOX_USER"
+GREETD
+    systemctl enable greetd >/dev/null 2>&1 || true
+  fi
   if [ -f /etc/greetd/config.toml ]; then
-    # Any shape a previous version wrote, since the path has been spelled several
-    # ways; a config pointing at something else entirely is somebody's choice.
-    sed -i -E 's@^command = ".*(labwc|tvbox-compositor|tvbox-wc).*"@command = "tvbox-wc -- /usr/local/bin/tvbox-session"@' \
+    # Only the shapes a previous version of THIS project wrote, anchored to the
+    # whole value. A pattern that matched any command line merely containing
+    # "labwc" would also rewrite a greeter someone set up themselves - e.g.
+    # `command = "labwc -C /etc/greetd -c labwc-gtkgreet"` - and leave the box with
+    # no way to log in but ours.
+    sed -i -E 's@^command = "(/usr(/local)?/bin/)?(labwc|tvbox-compositor)"@command = "tvbox-wc -- /usr/local/bin/tvbox-session"@' \
+      /etc/greetd/config.toml
+    sed -i -E 's@^command = "tvbox-wc( --.*)?"@command = "tvbox-wc -- /usr/local/bin/tvbox-session"@' \
       /etc/greetd/config.toml
   fi
-  ok "session (greetd -> tvbox-wc -> tvbox-session)"
+  if grep -q '^command = "tvbox-wc' /etc/greetd/config.toml 2>/dev/null; then
+    ok "session (greetd -> tvbox-wc -> tvbox-session)"
+  else
+    # Somebody else's greeter, left alone on purpose - but then this box does not
+    # start our session, and saying [ok] here would hide that.
+    warn "greetd starts something else - $(grep '^command = ' /etc/greetd/config.toml 2>/dev/null | head -1)"
+  fi
 else
   bad "tvbox-session missing - greetd has nothing to start"
 fi
@@ -605,6 +640,9 @@ fi
 # with labwc as an orphan) and it is deliberately NOT fatal - an apt that cannot
 # reach the network must not fail a provision whose real work is already done.
 echo "==> retiring labwc (one compositor on this box, not two)"
+if [ "$HAVE_COMPOSITOR" = no ]; then
+  warn "no compositor installed - keeping labwc, the box still needs a session"
+else
 for stale in /usr/local/bin/labwc /usr/local/bin/tvbox-compositor \
     /usr/local/share/tvbox/labwc-planes.stamp; do
   [ -e "$stale" ] && rm -rf "$stale"
@@ -614,7 +652,8 @@ DEBIAN_FRONTEND=noninteractive apt-get purge -y -qq \
   labwc wlrctl wlr-randr kanshi swaybg grim >/dev/null 2>&1 \
   && DEBIAN_FRONTEND=noninteractive apt-get autoremove -y --purge -qq >/dev/null 2>&1 \
   && ok "labwc and its tools purged" \
-  || warn "could not purge the old compositor packages (offline?) - nothing starts them either way"
+  || warn "could not purge the old compositor packages - nothing starts them either way"
+fi
 
 echo
 if [ "$FAIL" = 0 ]; then

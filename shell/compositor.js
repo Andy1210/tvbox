@@ -7,9 +7,9 @@
 // the output's colour space for HDR content, tell the compositor which of the
 // launcher and an app owns the screen, and type a string into a focused field.
 //
-// Everything degrades: with no socket - which is every box still on labwc -
-// available() is false and the callers fall back to the old path. That is
-// deliberate for the transition, not a permanent second implementation.
+// There is no fallback behind it: the display, HDR and typing paths call the socket
+// and nothing else. `available()` exists for one caller - the updater, which refuses
+// a release that needs a compositor this box has not got.
 const net = require("net");
 const path = require("path");
 

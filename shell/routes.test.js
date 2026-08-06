@@ -42,6 +42,7 @@ function fakeCtx(over = {}) {
     destroyAppWindow: () => {},
     dmode: { rearm: () => {}, refresh: (cb) => cb && cb(true, "") },
     emitConfigChange: () => {},
+    ensureAudio: (done) => done && done(),
     exitApp: () => {},
     fileserverStatus: () => ({ running: false }),
     foregroundApp: () => null,
@@ -62,6 +63,43 @@ function fakeCtx(over = {}) {
 }
 
 const jsonOf = (res) => JSON.parse(res.body);
+
+// The context is a seam between two files and nothing at runtime checks it: a
+// route that asks for something main.js does not provide throws TypeError inside
+// the request handler, which has no try/catch above it and no uncaughtException
+// handler behind it - the shell dies and the session respawns it. That is how
+// POST /tvbox/api/audio/default shipped broken; the fake below had the same gap,
+// so the tests agreed with the bug.
+function ctxKeysFrom(source, marker) {
+  const start = source.indexOf(marker);
+  assert.notStrictEqual(start, -1, "cannot find " + marker);
+  const end = source.indexOf("\n  };", start);
+  const body = source.slice(start, end === -1 ? source.indexOf("\n};", start) : end);
+  return new Set([...body.matchAll(/^\s{2,4}([a-zA-Z_]+)[,:]/gm)].map((m) => m[1]));
+}
+
+test("every ctx member a route uses is one the shell actually provides", () => {
+  const used = new Set(
+    [...fs.readFileSync(path.join(__dirname, "routes.js"), "utf8").matchAll(/ctx\.([a-zA-Z_]+)/g)].map((m) => m[1]),
+  );
+  const provided = ctxKeysFrom(fs.readFileSync(path.join(__dirname, "main.js"), "utf8"), "const routeCtx = {");
+
+  const missing = [...used].filter((name) => !provided.has(name));
+  assert.deepStrictEqual(missing, [], "main.js's routeCtx is missing these");
+
+  // And the fake in this file has to keep up, or a route can be broken in a way
+  // every test here still passes.
+  const faked = new Set(Object.keys(fakeCtx()));
+  assert.deepStrictEqual(
+    [...used].filter((name) => !faked.has(name)),
+    [],
+  );
+  // Nothing the shell hands over should be dead weight either.
+  assert.deepStrictEqual(
+    [...provided].filter((name) => !used.has(name)),
+    [],
+  );
+});
 
 test("a path with no route is a 404, not a silent success", () => {
   const res = fakeRes();

@@ -214,6 +214,22 @@ if (info.language) {
     },
     true,
   );
+  // The other half, and it is not for the typing screen: the shell needs to know
+  // when a field STOPPED being focused, because the remote's Back key arrives as a
+  // Backspace and a page with a text field focused is editing rather than
+  // navigating. focusout fires before the next focusin, so a move between two
+  // fields reports blur-then-focus and settles on focused.
+  document.addEventListener(
+    "focusout",
+    function (ev) {
+      var el = (ev.composedPath && ev.composedPath()[0]) || ev.target;
+      if (!fieldInfo(el)) return;
+      try {
+        ipcRenderer.send("kbd:blur");
+      } catch (e) {}
+    },
+    true,
+  );
 })();
 
 try {

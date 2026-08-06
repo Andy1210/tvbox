@@ -102,7 +102,8 @@ PARTS
   echo "arm_64bit=1" >"$B/config.txt"
   echo fake >"$B/kernel8.img"
   echo fake >"$B/bcm2712-rpi-5-b.dtb"
-  mkdir -p "$R/etc/ssh" "$R/usr/local/sbin" "$R/etc/systemd/system" \
+  mkdir -p "$R/etc/ssh" "$R/usr/local/sbin" "$R/usr/local/bin" "$R/etc/greetd" \
+    "$R/etc/systemd/system" \
     "$R/home/tv/.tvbox/shell/launcher-dist/assets" \
     "$R/home/tv/.tvbox/shell/node_modules/electron/dist"
   printf 'PARTUUID=%s /boot/firmware vfat defaults 0 2\nPARTUUID=%s / ext4 defaults,noatime 0 1\n' "$BU" "$RU" >"$R/etc/fstab"
@@ -110,11 +111,15 @@ PARTS
   echo 'tv:!:20000:0:99999:7:::' >"$R/etc/shadow"
   for f in usr/local/sbin/tvbox-diag usr/local/sbin/tvbox-safemode \
     etc/systemd/system/tvbox-diag.service etc/systemd/system/tvbox-safemode.service \
+    usr/local/bin/tvbox-wc usr/local/bin/tvbox-session home/tv/.tvbox/session.sh \
     home/tv/.tvbox/shell/main.js home/tv/.tvbox/run-shell.sh \
     home/tv/.tvbox/shell/launcher-dist/index.html \
     home/tv/.tvbox/shell/launcher-dist/assets/index-fake.js; do
     echo placeholder >"$R/$f"
   done
+  chmod 755 "$R/usr/local/bin/tvbox-wc" "$R/usr/local/bin/tvbox-session" "$R/home/tv/.tvbox/session.sh"
+  printf '[default_session]\ncommand = "tvbox-wc -- /usr/local/bin/tvbox-session"\nuser = "tv"\n' \
+    >"$R/etc/greetd/config.toml"
   # Not a real Electron - the arch check skips without file(1) and phase 2 is off.
   printf '#!/bin/true\n' >"$R/home/tv/.tvbox/shell/node_modules/electron/dist/electron"
   chmod 755 "$R/home/tv/.tvbox/shell/node_modules/electron/dist/electron"
@@ -285,11 +290,23 @@ for f in \
   usr/local/sbin/tvbox-safemode \
   etc/systemd/system/tvbox-diag.service \
   etc/systemd/system/tvbox-safemode.service \
+  usr/local/bin/tvbox-wc \
+  usr/local/bin/tvbox-session \
+  home/tv/.tvbox/session.sh \
   home/tv/.tvbox/shell/main.js \
   home/tv/.tvbox/run-shell.sh \
   home/tv/.tvbox/shell/launcher-dist/index.html; do
   check "shipped: /$f" test -s "$ROOTMNT/$f"
 done
+# The session chain, end to end: greetd starts the compositor, the compositor starts
+# the wrapper, the wrapper execs the box user's session script. Any one of them
+# missing is a flashed box that shows nothing - and tvbox-session deliberately
+# sleeps rather than exiting when the script is absent, so there is no crash to
+# notice either.
+check "greetd starts the compositor" sh -c \
+  "grep -q '^command = \"tvbox-wc -- /usr/local/bin/tvbox-session\"' '$ROOTMNT/etc/greetd/config.toml'"
+check "the compositor is executable" test -x "$ROOTMNT/usr/local/bin/tvbox-wc"
+check "the session script is executable" test -x "$ROOTMNT/home/tv/.tvbox/session.sh"
 check "the launcher bundle's assets are there too" sh -c "ls '$ROOTMNT'/home/tv/.tvbox/shell/launcher-dist/assets/*.js >/dev/null 2>&1"
 
 # The arm64 Electron install is ~100 MB fetched inside the chroot; an interrupted
