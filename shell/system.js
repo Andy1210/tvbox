@@ -164,6 +164,26 @@ function wifiList(cb) {
     },
   );
 }
+// The saved wifi profiles as name/ssid pairs.
+//
+// A profile's NAME need not be its SSID, and nmcli matches a network to a profile
+// by SSID: this box ships with one called `tvbox-preseed` carrying the house
+// network's ssid, and nmcli itself names a second profile for one network
+// "<ssid> 1". Looking a network up by name therefore misses the profile that will
+// actually be used, which is the one that has to be given the new password.
+function wifiSavedProfiles(cb) {
+  wifiSavedConnections((names) => {
+    if (!names.length) return cb([]);
+    const out = [];
+    let left = names.length;
+    for (const name of names)
+      execFile("nmcli", ["-g", "802-11-wireless.ssid", "connection", "show", name], { timeout: 8000 }, (e, o) => {
+        if (!e) out.push({ name, ssid: String(o || "").trim() });
+        if (--left === 0) cb(out);
+      });
+  });
+}
+
 // How long nmcli may spend on a connect. Long enough for a DHCP lease on a slow
 // AP, short enough that a wrong password is an answer and not a hang.
 const NM_WAIT_S = 30;
@@ -206,9 +226,9 @@ function wifiConnect(ssid, password, hidden, cb) {
   // this network's. Drop it and let nmcli build one from what the AP is actually
   // broadcasting - after a rescan, because a profile built from a stale scan comes
   // out with no key-mgmt at all and nmcli refuses it.
-  const rebuild = (why) => {
-    console.warn("[wifi] the saved profile for", ssid, "did not take:", why);
-    nm(["connection", "delete", "id", ssid], () => nm(["device", "wifi", "list", "--rescan", "yes"], () => fresh()));
+  const rebuild = (name, why) => {
+    console.warn("[wifi] the saved profile", name, "for", ssid, "did not take:", why);
+    nm(["connection", "delete", "id", name], () => nm(["device", "wifi", "list", "--rescan", "yes"], () => fresh()));
   };
   if (!password) return fresh();
   // `nmcli device wifi connect` FINDS A MATCHING PROFILE or creates one, and a
@@ -217,12 +237,13 @@ function wifiConnect(ssid, password, hidden, cb) {
   // but not provided". Replacing the secret is tried first because the profile is
   // what knows how this network is secured; rebuilding is the answer when that
   // knowledge is what has gone stale.
-  wifiSavedConnections((names) => {
-    if (!names.includes(ssid)) return fresh();
-    nm(["connection", "modify", "id", ssid, "wifi-sec.psk", password], (error) => {
-      if (error) return rebuild(error);
-      nm(["--wait", String(NM_WAIT_S), "connection", "up", "id", ssid], (upError) =>
-        upError ? rebuild(upError) : answer(null),
+  wifiSavedProfiles((profiles) => {
+    const saved = profiles.find((p) => p.ssid === ssid);
+    if (!saved) return fresh();
+    nm(["connection", "modify", "id", saved.name, "wifi-sec.psk", password], (error) => {
+      if (error) return rebuild(saved.name, error);
+      nm(["--wait", String(NM_WAIT_S), "connection", "up", "id", saved.name], (upError) =>
+        upError ? rebuild(saved.name, upError) : answer(null),
       );
     });
   });
