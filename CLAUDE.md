@@ -158,6 +158,16 @@ not optional and not launcher-scoped, it covers the whole repo. If you only
 touched one file, `npx prettier --write <file>` is enough; when in doubt run
 `npm run format`.
 
+- **A main.js change is not verified until the shell has restarted on a box.**
+  Nothing in the test suite loads main.js - it requires electron - so a load-time
+  error passes `node --check`, eslint and 340 unit tests and then kills the shell
+  in a respawn loop. The one that got through: an object built at MODULE level out
+  of `const`s declared further down the file, i.e. read while they were still in
+  their temporal dead zone (`Cannot access X before initialization`). Build that
+  kind of thing inside the function that uses it. After any deploy that touched
+  main.js: `pkill -f 'electron[/]dist'`, wait ~20s, then
+  `curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8097/tvbox/api/apps` -
+  a 000 means it never came up, and `~/.tvbox/shell.log` says why.
 - Deploy does NOT restart a running shell. Restart it with
   `ssh <pi-ssh-host> pkill -f 'electron[/]dist'` (the autostart respawn loop restarts it; note:
   a bare `pkill -f "electron ."` also matches your own ssh command line and

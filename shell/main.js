@@ -516,43 +516,49 @@ function handlePower(action, res) {
 // request with no Origin at all is not one of them.
 const OWN_ORIGINS = httpserver.ownOrigins(PORT);
 
-// What the write API is allowed to reach into. Everything here is the shell's own
-// state or its windows; anything that is a module of its own, routes.js requires
-// directly.
-const routeCtx = {
-  appIsRunning: (id) => !!appWindow(id),
-  applyFileserver,
-  applyMqttConfig,
-  audioSink: () => audioSink,
-  childEnv: () => ({ ...process.env, ...WL_ENV }),
-  destroyAppWindow,
-  dmode,
-  emitConfigChange,
-  exitApp,
-  fileserverStatus: () => fileserver.status(config.rawFileserver(), fileserverDeps),
-  foregroundApp: () => currentAppId,
-  handlePower,
-  installRclone: () => installRclone() || rcloneInstalling,
-  navTo,
-  // The launcher's own navigation, for the destinations navTo does not own.
-  navToLauncher: (dest) => {
-    if (win && !win.isDestroyed()) win.webContents.send("tvbox-nav", { dest });
-  },
-  publishMediaState,
-  publishNowPlaying: (data) => {
-    if (mqttCtl) mqttCtl.publish("nowplaying", data, { retain: true });
-  },
-  remoteBridgeCmd,
-  setNowPlaying: (data) => {
-    nowPlaying = data;
-  },
-  setSleepTimer,
-  setWidget,
-  showLauncher,
-  switchApp,
-};
-
 function serve() {
+  // What the write API is allowed to reach into. Everything here is the shell's own
+  // state or its windows; anything that is a module of its own, routes.js requires
+  // directly.
+  //
+  // Built HERE rather than at module level: half of what it names is declared
+  // further down the file, and a module-level literal captures those bindings while
+  // they are still in their temporal dead zone - the shell then dies at load with
+  // "Cannot access X before initialization", which no unit test sees because none
+  // of them can load this file.
+  const routeCtx = {
+    appIsRunning: (id) => !!appWindow(id),
+    applyFileserver,
+    applyMqttConfig,
+    audioSink: () => audioSink,
+    childEnv: () => ({ ...process.env, ...WL_ENV }),
+    destroyAppWindow,
+    dmode,
+    emitConfigChange,
+    exitApp,
+    fileserverStatus: () => fileserver.status(config.rawFileserver(), fileserverDeps),
+    foregroundApp: () => currentAppId,
+    handlePower,
+    installRclone: () => installRclone() || rcloneInstalling,
+    navTo,
+    // The launcher's own navigation, for the destinations navTo does not own.
+    navToLauncher: (dest) => {
+      if (win && !win.isDestroyed()) win.webContents.send("tvbox-nav", { dest });
+    },
+    publishMediaState,
+    publishNowPlaying: (data) => {
+      if (mqttCtl) mqttCtl.publish("nowplaying", data, { retain: true });
+    },
+    remoteBridgeCmd,
+    setNowPlaying: (data) => {
+      nowPlaying = data;
+    },
+    setSleepTimer,
+    setWidget,
+    showLauncher,
+    switchApp,
+  };
+
   const server = http.createServer((req, res) => {
     let p;
     try {
