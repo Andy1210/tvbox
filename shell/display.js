@@ -71,11 +71,28 @@ function pickUiMode(modes, maxHeight = UI_MAX_HEIGHT) {
 // mode that still covers the video (never below 720p, never above the panel).
 // Returns null when the panel has no matching refresh at all; the caller then
 // stays put and lets mpv resample.
+// How far a mode is from the picture, as the factor the player would resize by -
+// symmetric, so a 6% shrink counts as small and a 1.9x blow-up counts as large.
+//
+// The mode does NOT have to cover the content, and that is the point. A DCI-2K
+// broadcast is 2048x1080, six percent wider than 1080p and ordinary on IPTV, and
+// no mode below 4K is wider than it: "the smallest mode that covers it" put such a
+// stream on a 3840x2160 output, where mpv upscales and renders every frame at 8.3
+// Mpixels. Measured on the box with a live channel: 1318 dropped frames with the
+// decoder keeping up. Six percent of horizontal detail is the cheaper half of that
+// trade by a wide margin - and the same rule keeps a DCI-4K film (4096x2160) on a
+// 3840-wide panel at 4K instead of dropping it to 1080p, which is what "covers"
+// did when nothing covered it.
+function scaleDistance(mode, w, h) {
+  const fit = Math.min(mode.width / w, mode.height / h); // how the player fits the picture
+  return Math.abs(Math.log(fit));
+}
+
 function pickContentMode(modes, content) {
   if (!modes || !modes.length || !content || !(content.fps > 0)) return null;
   // An unknown (or nonsense) size means "assume the floor": mpv can report the
-  // framerate before dwidth/dheight are available, and the smallest-that-fits rule
-  // would otherwise happily drop a film to 640x480 because nothing said not to.
+  // framerate before dwidth/dheight are available, and a nearest-size rule would
+  // otherwise happily drop a film to 640x480 because nothing said not to.
   const w = content.width > 0 ? content.width : 1280;
   const h = content.height > 0 ? content.height : 720;
   const cands = [];
@@ -83,18 +100,17 @@ function pickContentMode(modes, content) {
     const rank = cadenceRank(m.refreshExact, content.fps);
     if (rank === null) continue;
     if (m.height < 720) continue; // 720p floor, whatever the content claims to be
-    cands.push({ m, rank, covers: m.width >= w && m.height >= h });
+    cands.push({ m, rank, distance: scaleDistance(m, w, h) });
   }
   if (!cands.length) return null;
-  const covering = cands.filter((c) => c.covers);
-  const pool = covering.length ? covering : cands; // nothing covers it -> best effort
-  pool.sort(
+  cands.sort(
     (a, b) =>
       a.rank - b.rank || // exact cadence beats a drifting one
-      a.m.width * a.m.height - b.m.width * b.m.height || // then the smallest that fits
-      a.m.refreshExact - b.m.refreshExact, // then the least work
+      a.distance - b.distance || // then the mode the picture has to be resized least for
+      a.m.width * a.m.height - b.m.width * b.m.height || // then the least work
+      a.m.refreshExact - b.m.refreshExact,
   );
-  return pool[0].m;
+  return cands[0].m;
 }
 
 function list(cb) {

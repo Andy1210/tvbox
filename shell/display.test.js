@@ -128,6 +128,47 @@ test("30p and 25p land on their multiples", () => {
   assert.strictEqual(label(display.pickContentMode(l, { width: 1920, height: 1080, fps: 25 })), "1920x1080@25");
 });
 
+// The 4K LG in the living room. What matters here is that it offers 4096x2160 at
+// all: that is the only mode wide enough for a DCI-2K stream, which is how a
+// 2048-pixel-wide broadcast used to reach for a 4K render.
+const UHD_LG = `HDMI-A-1 "LG Electronics LG TV"
+    1280x720 px, 50.000000 Hz
+    1920x1080 px, 25.000000 Hz
+    1920x1080 px, 50.000000 Hz
+    1920x1080 px, 60.000000 Hz (preferred, current)
+    3840x2160 px, 25.000000 Hz
+    3840x2160 px, 50.000000 Hz
+    4096x2160 px, 25.000000 Hz
+`;
+
+test("a DCI-2K broadcast stays at 1080p instead of forcing a 4K render", () => {
+  // 2048x1080 H.264 at 25fps, measured on the box. A Pi 5 has no H.264 hardware
+  // decoder, so mpv renders every frame itself - at 3840x2160 that was 1318
+  // dropped frames with the decoder keeping up and 36% of a core spare. Six
+  // percent of horizontal detail is the cheaper half of that trade.
+  const m = display.pickContentMode(modesOf(UHD_LG), { width: 2048, height: 1080, fps: 25 });
+  assert.strictEqual(label(m), "1920x1080@25");
+});
+
+test("a panel that has the content's exact width uses it", () => {
+  // Same height, so it costs the same to render: take the mode that loses nothing.
+  const dci = modesFrom(`HDMI-A-1 "x"\n    1920x1080 px, 25.000000 Hz\n    2048x1080 px, 25.000000 Hz\n`);
+  assert.strictEqual(label(display.pickContentMode(dci, { width: 2048, height: 1080, fps: 25 })), "2048x1080@25");
+});
+
+test("real 4K content still claims a 4K mode", () => {
+  const m = display.pickContentMode(modesOf(UHD_LG), { width: 3840, height: 2160, fps: 25 });
+  assert.strictEqual(label(m), "3840x2160@25");
+});
+
+test("a DCI-4K film stays at 4K on a 3840-wide panel", () => {
+  // 4096x2160 is wider than any mode this panel has. The old covers-it rule found
+  // nothing that covered the content and then took the SMALLEST candidate, which
+  // put a 4K film on 1080p; the nearest mode is obviously 3840x2160.
+  const uhd_only = modesFrom(`HDMI-A-1 "x"\n    1920x1080 px, 24.000000 Hz\n    3840x2160 px, 24.000000 Hz\n`);
+  assert.strictEqual(label(display.pickContentMode(uhd_only, { width: 4096, height: 2160, fps: 24 })), "3840x2160@24");
+});
+
 test("4K content gets a 4K mode; the UI cap does not apply to video", () => {
   const m = display.pickContentMode(modesOf(UHD), { width: 3840, height: 2160, fps: 24 });
   assert.strictEqual(label(m), "3840x2160@24");
