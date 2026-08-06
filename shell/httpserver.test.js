@@ -8,19 +8,31 @@ const path = require("path");
 
 const httpserver = require("./httpserver");
 
-// A response object that records instead of writing.
+// A response object that records instead of writing. It is also a usable sink for
+// a pipe, because serveStatic streams a real file rather than reading it, and
+// `done` resolves when the response is closed either way.
 function fakeRes() {
+  let closed;
   const res = {
     status: 0,
     headers: null,
     body: "",
     piped: null,
+    done: new Promise((r) => (closed = r)),
     writeHead(status, headers) {
       res.status = status;
       res.headers = headers;
     },
+    on: () => res,
+    once: () => res,
+    emit: () => false,
+    write(chunk) {
+      res.body += chunk;
+      return true;
+    },
     end(body) {
-      res.body = String(body || "");
+      if (body !== undefined) res.body = String(body || "");
+      closed();
     },
   };
   return res;
@@ -51,6 +63,41 @@ test("a sibling directory that merely shares a prefix is not inside the root", (
   const res = fakeRes();
   httpserver.serveStatic(res, path.join(dir, "plex"), "../plexi/config.json", null);
   assert.strictEqual(res.status, 404);
+
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
+test("a symlink out of the root is not inside it either", () => {
+  // An app's web/ directory is extracted from a tarball we did not write, so the
+  // link is the interesting case: the request path stays inside the root and the
+  // file it lands on does not.
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "tvbox-http-"));
+  const root = path.join(dir, "web");
+  fs.mkdirSync(root);
+  fs.writeFileSync(path.join(dir, "config.json"), '{"iptv":{"password":"hunter2"}}');
+  fs.symlinkSync(path.join(dir, "config.json"), path.join(root, "logo.png"));
+
+  const res = fakeRes();
+  httpserver.serveStatic(res, root, "/logo.png", null);
+  assert.strictEqual(res.status, 404);
+  assert.strictEqual(res.body.includes("hunter2"), false);
+
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
+test("a symlink that stays inside the root is served", async () => {
+  // The guard resolves both sides, so a root that is itself a symlink (the OTA
+  // `current` -> `versions/<v>` shape) must still serve its own files.
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "tvbox-http-"));
+  fs.mkdirSync(path.join(dir, "versions", "2.0.0", "web"), { recursive: true });
+  fs.writeFileSync(path.join(dir, "versions", "2.0.0", "web", "app.js"), "ok");
+  fs.symlinkSync(path.join(dir, "versions", "2.0.0"), path.join(dir, "current"));
+
+  const res = fakeRes();
+  httpserver.serveStatic(res, path.join(dir, "current", "web"), "/app.js", null);
+  assert.strictEqual(res.status, 200);
+  await res.done;
+  assert.strictEqual(res.body, "ok");
 
   fs.rmSync(dir, { recursive: true, force: true });
 });

@@ -64,6 +64,26 @@ function fakeCtx(over = {}) {
 
 const jsonOf = (res) => JSON.parse(res.body);
 
+test("a JSON null body is a refusal, not a dead shell", () => {
+  // `null` is valid JSON, so it reaches a route as the body. Every route reads a
+  // field off it immediately, and a TypeError here kills the shell: nothing
+  // catches it. Any page on our own origin can send this.
+  for (const p of ["/tvbox/api/config", "/tvbox/api/nav", "/tvbox/api/wifi/radio", "/tvbox/api/bt/pair"]) {
+    assert.doesNotThrow(() => routes.post(p, null, fakeRes(), fakeCtx()), p);
+  }
+});
+
+test("a bluetooth action is looked up among own properties only", () => {
+  // The action is a path segment. `__proto__` names something every object has,
+  // and it is truthy and not callable - the shape that gets past a `!fn` guard and
+  // then throws.
+  for (const action of ["__proto__", "constructor", "toString", "nope"]) {
+    const res = fakeRes();
+    assert.doesNotThrow(() => routes.post("/tvbox/api/bt/" + action, { mac: "AA:BB:CC:DD:EE:FF" }, res, fakeCtx()));
+    assert.strictEqual(res.status, 404, action);
+  }
+});
+
 // The context is a seam between two files and nothing at runtime checks it: a
 // route that asks for something main.js does not provide throws TypeError inside
 // the request handler, which has no try/catch above it and no uncaughtException
