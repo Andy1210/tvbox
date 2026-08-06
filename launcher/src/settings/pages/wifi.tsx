@@ -297,6 +297,9 @@ export function WifiPage({ embedded = false }: { embedded?: boolean } = {}) {
             key={n.ssid}
             id={"net-" + n.ssid}
             label={n.ssid}
+            // Whether it will ask for a password is the one thing worth knowing before
+            // you press it, and a word for it would cost the row a line.
+            leading={n.secured ? icons.lock : undefined}
             hint={n.active ? t("wifi.active") : n.known ? t("wifi.savedNetwork") : undefined}
             value={`${n.signal}%`}
             trailing={(n.known || n.active) && !embedded ? "chevron" : "none"}

@@ -38,7 +38,6 @@ const settle = () => act(async () => await new Promise((r) => setTimeout(r, 20))
 
 describe("the Home Assistant (MQTT) form", () => {
   beforeEach(() => {
-    setupRemote();
     // The page reads the shared config store, not a fetch of its own.
     useConfigStore.setState({ config: CONFIG as never, error: false });
   });

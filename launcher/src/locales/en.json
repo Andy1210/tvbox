@@ -224,7 +224,8 @@
     "learnTitle": "Assign a button to “{action}”",
     "learnBody": "Point the {remote} at the box and press the button you want to use for this.",
     "learnWarn": "Every press on this remote gets recorded, even an arrow. Cancel with a different remote (e.g. the TV's own), or it times out after about 10s.",
-    "panicHint": "Emergency fallback: if the remote becomes unusable because of its mapping, press the same remapped button 8 times fast and the box resets that remote's buttons."
+    "panicHint": "Emergency fallback: if the remote becomes unusable because of its mapping, press the same remapped button 8 times fast and the box resets that remote's buttons.",
+    "devicesCount": "{n} remotes"
   },
   "appsettings": {
     "title": "Apps",
@@ -290,7 +291,8 @@
     "trademarks": "Not affiliated with or endorsed by Amazon. Fire TV and Alexa are trademarks of Amazon; used only to describe compatibility. The Fire TV remote feature interoperates with hardware you own and is experimental - use at your own risk.",
     "groupDevice": "Device",
     "groupNetwork": "Network",
-    "groupHealth": "Health"
+    "groupHealth": "Health",
+    "refresh": "Refresh"
   },
   "aboutCredits": {
     "electron": "app shell",
@@ -375,7 +377,8 @@
     "appsAuto": "Update apps automatically",
     "appsAutoHint": "Installs app updates from the store overnight, only while the box is idle.",
     "groupAuto": "Automatic",
-    "availableShort": "update available"
+    "availableShort": "update available",
+    "needsSetup": "needs setting up again"
   },
   "hostname": {
     "title": "Device name",
@@ -621,7 +624,8 @@
     "off": "Off",
     "notSet": "not set",
     "selected": "selected",
-    "working": "working…"
+    "working": "working…",
+    "saveFailed": "Couldn't save that."
   },
   "network": {
     "wifiHint": "The network this box is on",

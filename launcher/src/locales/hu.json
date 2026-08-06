@@ -224,7 +224,8 @@
     "learnTitle": "Gomb hozzárendelése: „{action}”",
     "learnBody": "Irányítsd a(z) {remote} távirányítót a boxra, és nyomd meg azt a gombot, amit ehhez használni szeretnél.",
     "learnWarn": "Ezen a távirányítón minden gombnyomás rögzül, még egy nyíl is. A Mégse egy másik távirányítóval (pl. a TV távjával) nyomható, vagy kb. 10 mp után magától megszakad.",
-    "panicHint": "Vésztartalék: ha a távirányító a kiosztás miatt használhatatlanná válik, nyomd meg ugyanazt az átkötött gombot 8-szor gyorsan, és a box visszaállítja ennek a távirányítónak a gombjait."
+    "panicHint": "Vésztartalék: ha a távirányító a kiosztás miatt használhatatlanná válik, nyomd meg ugyanazt az átkötött gombot 8-szor gyorsan, és a box visszaállítja ennek a távirányítónak a gombjait.",
+    "devicesCount": "{n} távirányító"
   },
   "appsettings": {
     "title": "Alkalmazások",
@@ -290,7 +291,8 @@
     "trademarks": "Nem áll kapcsolatban az Amazonnal, és nem az Amazon támogatja. A Fire TV és az Alexa az Amazon védjegyei; itt csak a kompatibilitás leírására szolgálnak. A Fire TV távirányító funkció a saját tulajdonú eszközöddel működik együtt, és kísérleti - a használat a saját felelősségedre történik.",
     "groupDevice": "Eszköz",
     "groupNetwork": "Hálózat",
-    "groupHealth": "Állapot"
+    "groupHealth": "Állapot",
+    "refresh": "Frissítés"
   },
   "aboutCredits": {
     "electron": "alkalmazásváz",
@@ -375,7 +377,8 @@
     "appsAuto": "Alkalmazások automatikus frissítése",
     "appsAutoHint": "Éjszaka, csak tétlen boxon telepíti az áruházi frissítéseket.",
     "groupAuto": "Automatikus",
-    "availableShort": "van frissítés"
+    "availableShort": "van frissítés",
+    "needsSetup": "újra be kell állítani"
   },
   "hostname": {
     "title": "Eszköz neve",
@@ -621,7 +624,8 @@
     "off": "Ki",
     "notSet": "nincs beállítva",
     "selected": "kiválasztva",
-    "working": "dolgozik…"
+    "working": "dolgozik…",
+    "saveFailed": "Nem sikerült elmenteni."
   },
   "network": {
     "wifiHint": "A hálózat, amin a box van",

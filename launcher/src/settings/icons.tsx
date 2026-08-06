@@ -85,4 +85,33 @@ export const icons = {
     </>,
   ),
   plus: svg(<path d="M12 5v14M5 12h14" />),
+  keyboard: svg(
+    <>
+      <rect x="2" y="6" width="20" height="12" rx="2" />
+      <path d="M6 10h.01M10 10h.01M14 10h.01M18 10h.01M8 14h8" />
+    </>,
+  ),
+  mouse: svg(
+    <>
+      <rect x="6" y="3" width="12" height="18" rx="6" />
+      <path d="M12 7v4" />
+    </>,
+  ),
+  speaker: svg(
+    <>
+      <rect x="7" y="3" width="10" height="18" rx="3" />
+      <circle cx="12" cy="15" r="3" />
+      <path d="M12 7h.01" />
+    </>,
+  ),
+  bluetooth: svg(<path d="M7 7l10 10-5 4V3l5 4L7 17" />),
 };
+
+// What kind of thing a Bluetooth device is, as the box reported it. A name alone is
+// often useless ("BT5.0"), and what you do next depends on the answer.
+export function btGlyph(type: string) {
+  if (type === "keyboard") return icons.keyboard;
+  if (type === "mouse") return icons.mouse;
+  if (type === "audio") return icons.speaker;
+  return icons.bluetooth;
+}

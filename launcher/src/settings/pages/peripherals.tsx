@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { Fragment, useCallback, useEffect, useRef, useState } from "react";
 import { useI18n } from "../../lib/i18n";
 import { fetchBtStatus, fetchBtDevices, btScan, btAction, type BtDevice, type BtStatus } from "../../lib/bluetooth";
 import { fetchIrStatus } from "../../lib/ir";
@@ -7,6 +7,7 @@ import { SettingsPage } from "../SettingsPage";
 import { Group, InfoRow, Note, Row, ToggleRow } from "../Rows";
 import { useSettingsNav } from "../nav";
 import { useSummary, invalidateSummary } from "../summary";
+import { btGlyph } from "../icons";
 import { RemoteRemap } from "../../components/RemoteRemap";
 import { IrPage } from "./ir";
 
@@ -30,28 +31,49 @@ function BtDevicePage({ initial }: { initial: BtDevice }) {
   const [busy, setBusy] = useState("");
   const [msg, setMsg] = useState("");
 
+  const alive = useRef(true);
+  const left = useRef(false);
+  const busyRef = useRef("");
+  busyRef.current = busy;
+
   const reload = useCallback(async () => {
     invalidateSummary("bt");
     const list = await fetchBtDevices();
     const found = list.find((d) => d.mac === initial.mac);
-    if (found) setDevice(found);
+    if (found && alive.current) setDevice(found);
     return found;
   }, [initial.mac]);
+
   useEffect(() => {
+    alive.current = true;
     void reload();
+    // A BLE remote sleeps and drops its link on its own, so a page that read the
+    // state once would keep offering "Disconnect" for something already gone. Skip a
+    // tick during an action so the poll cannot clobber the optimistic state.
+    const iv = setInterval(() => {
+      if (!busyRef.current) void reload();
+    }, BT_POLL_MS);
+    return () => {
+      alive.current = false;
+      clearInterval(iv);
+    };
   }, [reload]);
 
   const run = async (action: Parameters<typeof btAction>[0], leave = false) => {
-    if (busy) return;
+    if (busy || left.current) return;
     setBusy(action);
     setMsg("");
     const r = await btAction(action, device.mac);
+    if (!alive.current) return;
     setBusy("");
     if (!r.ok) {
       setMsg(t("bt.failed", { name: device.name }));
       return;
     }
     if (leave) {
+      // Latched: Back pressed while the remove was in flight has already popped this
+      // page, and popping again would take the category pane with it.
+      left.current = true;
       nav.pop();
       return;
     }
@@ -110,13 +132,15 @@ function BluetoothPage() {
   busyRef.current = busy;
   scanningRef.current = scanning;
 
+  const alive = useRef(true);
   const refresh = useCallback(() => {
     invalidateSummary("bt");
-    void fetchBtStatus().then(setStatus);
-    void fetchBtDevices().then(setDevices);
+    void fetchBtStatus().then((s) => alive.current && setStatus(s));
+    void fetchBtDevices().then((d) => alive.current && setDevices(d));
   }, []);
 
   useEffect(() => {
+    alive.current = true;
     refresh();
     // A BLE remote sleeps and (dis)connects on its own, so poll while this page is
     // open or a stale "connected" lingers. Only while it is open - that is the point
@@ -125,14 +149,21 @@ function BluetoothPage() {
     const iv = setInterval(() => {
       if (!busyRef.current && !scanningRef.current) refresh();
     }, BT_POLL_MS);
-    return () => clearInterval(iv);
+    return () => {
+      alive.current = false;
+      clearInterval(iv);
+    };
   }, [refresh]);
 
   const scan = async () => {
     if (scanning) return;
     setScanning(true);
     setMsg("");
-    setDevices(await btScan(8));
+    // Eight seconds is long enough for the user to have left; writing the result then
+    // would be reporting a scan to a screen nobody is on.
+    const found = await btScan(8);
+    if (!alive.current) return;
+    setDevices(found);
     setScanning(false);
   };
 
@@ -141,6 +172,7 @@ function BluetoothPage() {
     setBusy(d.mac);
     setMsg(t(quiet ? "bt.pairingQuiet" : "bt.pairing", { name: d.name }));
     const r = await btAction(quiet ? "pair-quiet" : "pair", d.mac);
+    if (!alive.current) return;
     setBusy(null);
     setMsg(r.ok ? "" : t("bt.failed", { name: d.name }));
     setRetryQuiet(r.ok ? null : d);
@@ -159,34 +191,46 @@ function BluetoothPage() {
 
       <Group title={t("bt.groupDevices")}>
         {list.map((d) => (
-          <Row
-            key={d.mac}
-            id={"dev-" + d.mac}
-            label={d.name}
-            hint={d.battery != null ? t("bt.batteryAt", { pct: d.battery }) : undefined}
-            value={d.connected ? t("bt.connected") : d.paired ? t("bt.paired") : t("bt.pair")}
-            // A device we already know has more than one thing you might do with it;
-            // an unknown one has exactly one, and pays one press for it.
-            trailing={d.paired ? "chevron" : "none"}
-            onEnter={() =>
-              d.paired
-                ? nav.push({
-                    id: "bt-dev-" + d.mac,
-                    title: d.name,
-                    render: () => <BtDevicePage initial={d} />,
-                  })
-                : void pair(d)
-            }
-          />
+          <Fragment key={d.mac}>
+            <Row
+              id={"dev-" + d.mac}
+              label={d.name}
+              // A speaker and a keyboard with unhelpful names are otherwise the same
+              // row, and what you do next depends on which one it is.
+              leading={btGlyph(d.type)}
+              hint={d.battery != null ? t("bt.batteryAt", { pct: d.battery }) : undefined}
+              value={d.connected ? t("bt.connected") : d.paired ? t("bt.paired") : t("bt.pair")}
+              // A device we already know has more than one thing you might do with it;
+              // an unknown one has exactly one, and pays one press for it.
+              trailing={d.paired ? "chevron" : "none"}
+              disabled={!!busy}
+              onEnter={() =>
+                d.paired
+                  ? nav.push({
+                      id: "bt-dev-" + d.mac,
+                      title: d.name,
+                      render: () => <BtDevicePage initial={d} />,
+                    })
+                  : void pair(d)
+              }
+            />
+            {/* Under the device it failed for, not at the bottom of the list: this is
+                offered because THAT pairing failed, and off-screen it might as well
+                not exist. */}
+            {retryQuiet?.mac === d.mac && (
+              <Row
+                id={"quiet-" + d.mac}
+                label={t("bt.pairQuiet")}
+                hint={t("bt.pairQuietHint")}
+                trailing="none"
+                autoFocus
+                onEnter={() => void pair(d, true)}
+              />
+            )}
+          </Fragment>
         ))}
         {devices && !devices.length && <InfoRow label={t("bt.none")} value="" />}
       </Group>
-
-      {retryQuiet && (
-        <Group hint={t("bt.pairQuietHint")}>
-          <Row id="quiet" label={t("bt.pairQuiet")} trailing="none" onEnter={() => void pair(retryQuiet, true)} />
-        </Group>
-      )}
 
       <Group title={t("bt.groupTroubleshooting")} hint={t("bt.ertmHint")}>
         <ToggleRow
@@ -243,7 +287,8 @@ export function PeripheralsPane() {
           id="remote"
           label={t("remote.title")}
           hint={t("peripherals.remoteHint")}
-          value={remoteCount ? t("remote.customCount", { n: remoteCount }) : undefined}
+          // Not remote.customCount - that one counts remapped BUTTONS on one remote.
+          value={remoteCount ? t("remote.devicesCount", { n: remoteCount }) : undefined}
           onEnter={() => nav.push({ id: "remote", title: t("remote.title"), render: () => <RemoteButtonsPage /> })}
         />
         <Row
