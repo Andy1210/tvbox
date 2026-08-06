@@ -95,12 +95,20 @@ NOTES_EN="$NOTES_EN" NOTES_HU="$NOTES_HU" node -e "
     }
     if (!notes.en && !notes.hu) console.warn('warning: no CHANGELOG.md section for $VERSION - the TV will show no release notes');
   }
+  // What the box must already have for this release to be installable. It is
+  // declared in shell/package.json, because that is the thing being released -
+  // a release whose shell needs the compositor says so from the same file that
+  // says which version it is. The box refuses anything it cannot satisfy
+  // (REQUIREMENTS in shell/updater.js), which is how an OTA-only box is kept off
+  // a release that needs something only a re-flash can install.
+  const requires = JSON.parse(fs.readFileSync('shell/package.json', 'utf8')).tvboxRequires || [];
   fs.writeFileSync('$OUT/update.json', JSON.stringify({
     feedVersion: 1,
     version: '$VERSION',
     url: '$BASE_URL/$TARBALL',
     sha256: '$SHA256',
     publishedAt: new Date().toISOString(),
+    ...(requires.length ? { requires } : {}),
     ...(Object.keys(notes).length ? { notes } : {}),
   }, null, 2) + '\n');
 "

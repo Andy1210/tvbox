@@ -93,7 +93,13 @@ const INFRA_FILES = [
 ];
 // Files an earlier release installed and this one does not: they are removed on
 // update rather than left to be found by something that still looks for them.
-const RETIRED = ["install-labwc-planes.sh", "labwc-autostart", "labwc-environment", "cursor_idle_hide.py"];
+const RETIRED = [
+  "install-labwc-planes.sh",
+  "labwc-autostart",
+  "labwc-environment",
+  "cursor_idle_hide.py",
+  "tvbox-compositor", // the wrapper that chose between two labwc builds
+];
 
 const USER_UNITS = [
   "tvbox-cec.service",
@@ -392,6 +398,16 @@ async function apply() {
   if (!latest) await check();
   const cur = pkg.version || "0";
   if (!latest || cmpVer(latest.version, cur) <= 0) return status();
+  // The same gate the offer runs on. `available` already folds this in, so the UI
+  // never shows the button - but a POST straight at /update/apply would otherwise
+  // install a release into a box that cannot run it.
+  const unmet = unmetRequirements(latest);
+  if (unmet.length) {
+    state = "error";
+    error = "apply: " + latest.version + " needs " + unmet.join(", ");
+    console.warn("[updater]", error);
+    return status();
+  }
   const v = latest.version;
   const stage = path.join(UPDATE_DIR, "stage");
   const tarball = path.join(UPDATE_DIR, "release.tar.gz");
@@ -512,7 +528,13 @@ function syncInfra(rel) {
         fs.rmSync(path.join(TVBOX, name), { force: true });
       }
     }
-    fs.rmSync(path.join(os.homedir(), ".config", "labwc"), { recursive: true, force: true });
+    // ~/.config/labwc is the OLD session's only bootstrap - the autostart in it
+    // holds the shell's respawn loop. Removing it on a box that is still running
+    // that session leaves it with nothing to start at the next boot, so it goes
+    // only once this box is demonstrably on the compositor.
+    if (compositor.available()) {
+      fs.rmSync(path.join(os.homedir(), ".config", "labwc"), { recursive: true, force: true });
+    }
   } catch (e) {
     console.warn("[update] could not retire the old compositor's files:", e.message);
   }

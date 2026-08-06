@@ -334,7 +334,7 @@
     "checking": "Checking…",
     "upToDate": "Up to date",
     "available": "Update available: {version}",
-    "needsReprovision": "Version {version} needs the box to be set up again (re-flash or re-provision)",
+    "needsReprovision": "Version {version} needs the box to be set up again - re-flash it, or deploy from a computer",
     "install": "Install now",
     "installHint": "The box restarts at the end (a minute or two).",
     "downloading": "Downloading…",

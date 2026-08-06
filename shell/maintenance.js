@@ -266,8 +266,6 @@ async function withInstalling(id, fn) {
   }
 }
 
-// ---- LAN file server (WebDAV) ----
-//
 // Nightly app auto-update (the Fire TV model): in the OTA updater's 03-06h
 // window, when the box is idle and update.appsAuto isn't turned off, install
 // every pending registry update through the EXACT same path as the store's

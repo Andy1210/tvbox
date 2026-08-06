@@ -17,8 +17,8 @@ const playeropts = require("./playeropts"); // app stream terms -> mpv args/comm
 const { redact } = require("./redact"); // an app's console line may carry ITS credentials; the shell's log is a file
 const display = require("./display"); // resolution/refresh selection
 const displaymode = require("./displaymode"); // adaptive mode: UI mode + per-video claims
-const httpserver = require("./httpserver");
-const routes = require("./routes"); // the box's write API: every POST route and its validation // the transport under the API: responses, static files, the origin gate
+const httpserver = require("./httpserver"); // responses, static files, the origin gate
+const routes = require("./routes"); // the box's write API: every POST route and its validation
 const player = require("./player"); // the shared mpv, its display-mode and HDR claims
 const maintenance = require("./maintenance"); // installs, flatpak/bundle refresh, restore reconcile
 const system = require("./system"); // network, clock, keyboard, name, About numbers
@@ -188,6 +188,7 @@ function emitConfigChange(sections) {
     }
   }
 }
+// ---- LAN file server (WebDAV) ----
 // Copying a screensaver image onto the box, or a console BIOS into the folder an
 // emulator reads, is not something a TV can do - and should not need ssh. The module
 // owns the decisions (which folders are offered, what gets served, refusing to serve
@@ -378,8 +379,6 @@ function setVideoMode(on, w) {
   }
 }
 
-// ---- HTTP: launcher (/tvbox/), app manifests API, and the root web app (Plex) ----
-
 // Low-battery warning for connected BT remotes - a dead remote is a bricked
 // TV, so surface it while there's still charge. One toast per device per day;
 // the launcher localizes the { kind: "lowBattery" } payload itself.
@@ -535,6 +534,9 @@ function serve() {
     destroyAppWindow,
     dmode,
     emitConfigChange,
+    // The audio route re-runs the sink detection and answers with what it picked,
+    // so it needs both halves.
+    ensureAudio,
     exitApp,
     fileserverStatus: () => fileserver.status(config.rawFileserver(), fileserverDeps),
     foregroundApp: () => currentAppId,
@@ -1301,7 +1303,10 @@ function openRemoteApp(m, url) {
       }
       // Backspace, not BrowserBack: while an app owns the screen the compositor has
       // already rewritten the remote's Back key, and this popup belongs to an app.
-      if (input.key === "Backspace" || input.key === "Escape") {
+      // Which means a typed Backspace is indistinguishable from the remote's Back -
+      // so while a field is focused (this window is a sign-in page, that is most of
+      // the time) the key belongs to the field, and only Escape closes the popup.
+      if (input.key === "Escape" || (input.key === "Backspace" && !editingPages.has(cwc.id))) {
         // Never let a key handler throw: Back would die with it and the popup would
         // be inescapable.
         let canBack;
@@ -2034,11 +2039,18 @@ ipcMain.handle("textinput", (e, action, payload) => {
 
 // A field took focus in a remote app. Only the FOREGROUND app may raise the typing
 // screen - a background page moving its own focus must not take over the TV.
+// Which pages have a text field focused right now. Only one thing reads it, and it
+// is not the typing screen: the remote's Back key reaches a page as a Backspace
+// (the compositor rewrites it while an app owns the screen), so a page that is
+// editing must not have that read as "go back".
+const editingPages = new Set();
 ipcMain.on("kbd:focus", (e, field) => {
+  editingPages.add(e.sender.id);
   const id = windowAppId(e.sender) || popupAppId(e.sender);
   if (!id || id !== currentAppId) return;
   textinput.focused(id, e.sender, field || {});
 });
+ipcMain.on("kbd:blur", (e) => editingPages.delete(e.sender.id));
 
 ipcMain.on("nav", (e, dest) => {
   // "exit" is app-initiated teardown, so it targets the SENDER's app rather than
@@ -2609,6 +2621,12 @@ app.whenReady().then(async () => {
   // A rename changes which MQTT topics the box belongs on, so the bridge has to
   // reconnect with it.
   system.init({ onHostnameChanged: applyMqttConfig });
+  // Say who owns the screen, before anything else can. The compositor outlives the
+  // shell - the session's respawn loop restarts only this process - so it can still
+  // be holding "an app is in front" from before the restart, and would go on
+  // rewriting the remote's Back key for a launcher that handles the browser key
+  // itself. Same reason player.js starts its HDR claim as "nothing said yet".
+  setForegroundApp(currentAppId);
   // The player is a service, not a window: the shell hands it the four things it
   // cannot know by itself - which windows hear a player event, how to reveal the
   // video, the display-mode arbiter, and what the panel answered.
