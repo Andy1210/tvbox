@@ -11,6 +11,8 @@ const test = require("node:test");
 const assert = require("node:assert");
 const fs = require("node:fs");
 const path = require("node:path");
+const os = require("node:os");
+const net = require("node:net");
 const updater = require("./updater");
 
 // infra.list carries repo-relative paths; basenames land flat in ~/.tvbox and
@@ -105,4 +107,41 @@ test("UNIT_WANTS mirrors each user unit's [Install] WantedBy", () => {
       );
     }
   }
+});
+
+// A release can demand something an OTA cannot bring - the compositor, the session
+// greetd starts, an apt package - and the point of the gate is that a box which
+// cannot satisfy it is never offered the update rather than being half-broken by
+// it. The check runs against a real socket path, so this drives it through
+// compositor.available().
+test("a release that needs the compositor is not offered to a box without one", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "tvbox-updater-"));
+  const socketPath = path.join(dir, "tvbox-wc.sock");
+  process.env.TVBOX_WC_SOCKET = socketPath;
+  delete require.cache[require.resolve("./compositor")];
+  delete require.cache[require.resolve("./updater")];
+  const fresh = require("./updater");
+
+  const feed = {
+    feedVersion: 1,
+    version: "99.0.0",
+    url: "https://x/y.tgz",
+    sha256: "a".repeat(64),
+    requires: ["compositor"],
+  };
+
+  assert.deepStrictEqual(fresh.unmetRequirements(feed), ["compositor"]);
+  assert.deepStrictEqual(fresh.unmetRequirements({ ...feed, requires: [] }), []);
+  // Fail closed: a requirement this shell has never heard of is one it does not meet.
+  assert.deepStrictEqual(fresh.unmetRequirements({ ...feed, requires: ["time-travel"] }), ["time-travel"]);
+
+  const server = net.createServer(() => {});
+  server.listen(socketPath);
+  assert.deepStrictEqual(fresh.unmetRequirements(feed), [], "a box with the socket meets it");
+
+  server.close();
+  fs.rmSync(dir, { recursive: true, force: true });
+  delete process.env.TVBOX_WC_SOCKET;
+  delete require.cache[require.resolve("./compositor")];
+  delete require.cache[require.resolve("./updater")];
 });
