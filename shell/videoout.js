@@ -14,7 +14,9 @@
 // because it processes nothing it also tone-maps nothing, so HDR reaches the panel
 // as raw PQ. So it is used exactly where the GPU renderer cannot keep up and not
 // one case wider: fullscreen, hardware-decoded, 4K-class video. PiP is excluded on
-// top of that - it runs under XWayland, where this output does not exist.
+// top of that, now for the same reason as anything below 4K rather than because it
+// used to run under XWayland: the window is a quarter of the screen, the GPU
+// renderer keeps up at that size, and its tone mapping is worth having.
 const ZERO_COPY_VO = "dmabuf-wayland";
 
 // Below this the GPU renderer keeps up (the output mode follows the content, so a
