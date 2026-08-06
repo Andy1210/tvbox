@@ -81,13 +81,59 @@ function parseSpec(nat) {
     // sandbox is only a CHILD of this launcher process, so it survives the
     // launcher and gets reparented to init, leaving a full-screen app on the TV
     // that the shell no longer knows about.
-    return { cmd: "flatpak", args: ["run", "--die-with-parent", nat.flatpak, ...args], ref: nat.flatpak };
+    return {
+      cmd: "flatpak",
+      args: ["run", "--die-with-parent", ...decorationArgs(), nat.flatpak, ...args],
+      ref: nat.flatpak,
+    };
   }
   if (nat.bin !== undefined) {
     if (!binOk(nat.bin)) return null;
     return { cmd: nat.bin, args, ref: null };
   }
   return null;
+}
+
+// Which libdecor plugin a sandboxed app may load, and why it is worth saying.
+//
+// A toolkit that draws its own window frame does it through libdecor, which picks
+// the highest-priority plugin it can find - in the flatpak runtime, the GTK one.
+// That plugin costs **25 seconds** on this box before the app's first frame,
+// measured on a NES core: 25.2 s to the first GL frame with it, 0.4 s with the
+// cairo plugin, which does the same job. It is a D-Bus timeout inside GTK, and
+// nothing here can shorten it.
+//
+// So a sandboxed app is pointed at a directory holding only the cairo plugin. The
+// symlink resolves INSIDE the sandbox, where the runtime's own plugin lives; on
+// the host it dangles, which is exactly right - nothing out here should load it.
+//
+// The compositor also advertises xdg-decoration, so a toolkit that asks first
+// never reaches libdecor at all. RetroArch is not one of those: it uses libdecor
+// whenever it can load it.
+const LIBDECOR_DIR = path.join(os.homedir(), ".tvbox", "libdecor");
+const CAIRO_PLUGIN = "/usr/lib/aarch64-linux-gnu/libdecor/plugins-1/libdecor-cairo.so";
+function decorationArgs() {
+  const link = path.join(LIBDECOR_DIR, "libdecor-cairo.so");
+  try {
+    fs.mkdirSync(LIBDECOR_DIR, { recursive: true });
+    // lstat, not existsSync: the target does not exist out here, so a link that is
+    // already correct reads as missing and creating it again throws EEXIST.
+    let have = null;
+    try {
+      have = fs.readlinkSync(link);
+    } catch (e) {
+      /* not there, or not a link */
+    }
+    if (have !== CAIRO_PLUGIN) {
+      fs.rmSync(link, { force: true });
+      fs.symlinkSync(CAIRO_PLUGIN, link);
+    }
+  } catch (e) {
+    // Worth a line: without it an app still starts, just 25 seconds later.
+    console.warn("[native] no libdecor plugin dir, apps may start slowly:", e.message);
+    return [];
+  }
+  return ["--filesystem=" + LIBDECOR_DIR, "--env=LIBDECOR_PLUGIN_DIR=" + LIBDECOR_DIR];
 }
 
 // A per-app log next to the shell's own, opened truncating. Returns a raw fd for
