@@ -10,6 +10,26 @@
 # a missing interpreter here is a black screen.
 set -u
 
+# Tell the user's own service manager which display this session is on.
+#
+# Nothing here needs it; what needs it is everything systemd or D-Bus starts on
+# demand later, because those inherit the manager's environment and not ours. The
+# xdg-desktop-portal GTK backend is the one that bites: without WAYLAND_DISPLAY it
+# exits with "cannot open display", the portal then answers no Settings call, and
+# every app that asks one waits out the full 25-second D-Bus timeout before it
+# draws anything. Measured on the box: a game's first frame at 25.2 s, and 0.5 s
+# once this line existed. Qt apps (the Dolphin core) pay the same toll.
+#
+# XDG_SESSION_TYPE is exported first because logind calls a greetd session "tty" -
+# it is a Wayland session, and toolkits key off that.
+XDG_SESSION_TYPE=wayland
+export XDG_SESSION_TYPE
+if command -v dbus-update-activation-environment >/dev/null 2>&1; then
+	dbus-update-activation-environment --systemd WAYLAND_DISPLAY XDG_RUNTIME_DIR XDG_SESSION_TYPE >/dev/null 2>&1
+else
+	systemctl --user import-environment WAYLAND_DISPLAY XDG_RUNTIME_DIR XDG_SESSION_TYPE >/dev/null 2>&1
+fi
+
 # Route audio to HDMI. Honour the OTA `current` symlink (like run-shell.sh) so a
 # release's own copy wins over the dev tree.
 AUDIO_SH="$HOME/.tvbox/current/shell/audio-default.sh"

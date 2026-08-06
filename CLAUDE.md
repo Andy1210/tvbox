@@ -325,6 +325,15 @@ touched one file, `npx prettier --write <file>` is enough; when in doubt run
   `/dev/dri/card1` for a second or two, each attempt exits at once, and systemd's
   start limit trips after five - leaving greetd `failed` with no session at all.
   Stop greetd, kill the leftovers, wait, then start it once.
+- **The session has to tell systemd and D-Bus which display it is on.** Anything
+  the user manager starts on demand inherits ITS environment, not the session's,
+  so with no `WAYLAND_DISPLAY` there `xdg-desktop-portal-gtk` exits with "cannot
+  open display" and the portal then answers no `Settings.ReadAll` at all. Every
+  toolkit that asks one - GTK, Qt, RetroArch through libdecor - waits out the full
+  **25-second D-Bus timeout** before it draws its first frame, and no app log says
+  why: measured 25.2 s to RetroArch's first GL frame, 0.3 s once the environment
+  was exported. `deploy/session.sh` exports it into both for exactly this reason.
+  The labwc autostart used to do it, so a compositor swap loses it silently.
 - **mpv is a Wayland client in both modes**, fullscreen and PiP, sitting behind
   the transparent shell window. PiP used to need XWayland - a Wayland client
   cannot place itself - and the compositor does the placing now
