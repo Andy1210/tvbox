@@ -101,10 +101,12 @@ NOTES_EN="$NOTES_EN" NOTES_HU="$NOTES_HU" node -e "
   // says which version it is. The box refuses anything it cannot satisfy
   // (REQUIREMENTS in shell/updater.js), which is how an OTA-only box is kept off
   // a release that needs something only a re-flash can install.
-  const requires = JSON.parse(fs.readFileSync('shell/package.json', 'utf8')).tvboxRequires || [];
-  // The box refuses a feed whose requires is not a list, so writing one would ship a
-  // release no box can install. Fail here, where someone is watching.
-  if (!Array.isArray(requires) || requires.some((r) => typeof r !== 'string')) {
+  // Absent means no requirements; anything else has to be a list of names. An ||
+  // default would read false, 0 and the empty string as absent too, and the release
+  // would then be offered to a box that cannot satisfy what it silently dropped.
+  const pkg = JSON.parse(fs.readFileSync('shell/package.json', 'utf8'));
+  const requires = pkg.tvboxRequires === undefined || pkg.tvboxRequires === null ? [] : pkg.tvboxRequires;
+  if (!Array.isArray(requires) || requires.some((r) => typeof r !== 'string' || !r.trim())) {
     console.error('tvboxRequires must be a list of requirement names');
     process.exit(1);
   }
