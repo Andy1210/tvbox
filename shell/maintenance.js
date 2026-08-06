@@ -146,22 +146,31 @@ function startFlatpakUpdate(id, res) {
   installing.add(id);
   flatpakResult.delete(id);
   (async () => {
-    const before = flatpak.commitsSync(refs);
-    const ok = await spawnCli(["flatpak-update", id], id, "flatpak");
-    flatpak.invalidate();
-    const after = flatpak.commitsSync(refs);
-    const changed = refs.some((f) => before[f.ref] !== after[f.ref]);
-    // The bundle is a copy of the flatpak's files, so a moved flatpak means the
-    // copy is now behind: bring it level in the same action.
-    if (ok && changed && apps.bundleStale(m)) await spawnCli(["install", id, "--force"], id, "bundle");
-    const versions = await flatpak.list({ fresh: true });
-    flatpakResult.set(id, {
-      ok,
-      changed,
-      version: refs.map((f) => (versions.get(f.ref) || {}).version).filter(Boolean)[0] || null,
-    });
-    installing.delete(id);
-    setInstallPhase(id, null);
+    try {
+      const before = flatpak.commitsSync(refs);
+      const ok = await spawnCli(["flatpak-update", id], id, "flatpak");
+      flatpak.invalidate();
+      const after = flatpak.commitsSync(refs);
+      const changed = refs.some((f) => before[f.ref] !== after[f.ref]);
+      // The bundle is a copy of the flatpak's files, so a moved flatpak means the
+      // copy is now behind: bring it level in the same action.
+      if (ok && changed && apps.bundleStale(m)) await spawnCli(["install", id, "--force"], id, "bundle");
+      const versions = await flatpak.list({ fresh: true });
+      flatpakResult.set(id, {
+        ok,
+        changed,
+        version: refs.map((f) => (versions.get(f.ref) || {}).version).filter(Boolean)[0] || null,
+      });
+    } catch (e) {
+      // Whatever went wrong, the id has to leave `installing`: it is what busy()
+      // answers on, so one throw here would leave boxFree() false for the life of
+      // the shell and no nightly job would ever run again.
+      console.error("[maintenance] flatpak update failed for", id, e.message);
+      flatpakResult.set(id, { ok: false, changed: false, version: null, error: e.message });
+    } finally {
+      installing.delete(id);
+      setInstallPhase(id, null);
+    }
   })();
   return deps.jsonRes(res, { ok: true, updating: true });
 }

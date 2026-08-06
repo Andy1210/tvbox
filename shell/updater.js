@@ -236,7 +236,12 @@ const REQUIREMENTS = {
 };
 
 function unmetRequirements(feed) {
-  const wanted = Array.isArray(feed && feed.requires) ? feed.requires : [];
+  const declared = feed && feed.requires;
+  // A `requires` that is present but not a list is a broken feed, and reading it as
+  // "no requirements" would hand the release to exactly the box the field exists to
+  // protect. Unsatisfiable, so the update is offered to nobody until it is fixed.
+  if (declared != null && !Array.isArray(declared)) return ["malformed-requires"];
+  const wanted = Array.isArray(declared) ? declared : [];
   return wanted.filter((name) => {
     const met = REQUIREMENTS[name];
     if (!met) return true;

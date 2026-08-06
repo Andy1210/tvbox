@@ -64,22 +64,37 @@ test("the network list drops the hidden ones and puts the active first", async (
   // Real output: three of these have no SSID (hidden networks), and the one the
   // box is on is not at the top of what nmcli returns.
   withCommands({
-    "device wifi list": "no:77:WPA2 WPA3:DarkTL50\n" + "no:77:WPA2:\n" + "no:77:WPA2:\n" + "yes:69:WPA2:DarkTL24\n",
-    "-f NAME connection show": "DarkTL24\nlo\nFAHAZ\ntvbox-preseed\nWired connection 1\n",
+    "device wifi list":
+      "no:77:WPA2 WPA3:DarkTL50\n" +
+      "no:77:WPA2:\n" +
+      "no:70:WPA2:FAHAZ\n" +
+      "no:77:WPA2:\n" +
+      "yes:69:WPA2:DarkTL24\n",
+    // The real command asks for NAME,TYPE - a key that does not match it leaves the
+    // saved list empty, and the "known by name" branch below never runs.
+    "-f NAME,TYPE connection show":
+      "DarkTL24:802-11-wireless\n" +
+      "FAHAZ:802-11-wireless\n" +
+      "lo:loopback\n" +
+      "tvbox-preseed:802-11-wireless\n" +
+      "Wired connection 1:802-3-ethernet\n",
   });
   const nets = await new Promise((resolve) => system.wifiList(resolve));
 
   assert.deepStrictEqual(
     nets.map((n) => n.ssid),
-    ["DarkTL24", "DarkTL50"],
+    ["DarkTL24", "DarkTL50", "FAHAZ"],
   );
   assert.strictEqual(nets[0].active, true);
   assert.strictEqual(nets[0].signal, 69);
   assert.strictEqual(nets[0].secured, true);
-  // "known" is what the UI offers "forget" on: the active network always has a
-  // profile, and a saved one is matched by name.
-  assert.strictEqual(nets[0].known, true);
-  assert.strictEqual(nets[1].known, false);
+  // "known" is what the UI offers "forget" on, and it has three answers to give:
+  // the active network always has a profile, a saved one is matched by NAME
+  // (FAHAZ, in range and not joined), and DarkTL50 has never been joined at all.
+  assert.deepStrictEqual(
+    nets.map((n) => n.known),
+    [true, false, true],
+  );
 });
 
 test("a colon in an SSID survives the terse format", async () => {
@@ -87,7 +102,7 @@ test("a colon in an SSID survives the terse format", async () => {
   // contain one. Getting this wrong truncates the name the user has to pick.
   withCommands({
     "device wifi list": "no:60:WPA2:home\\:guest\n",
-    "-f NAME connection show": "",
+    "-f NAME,TYPE connection show": "",
   });
   const nets = await new Promise((resolve) => system.wifiList(resolve));
   assert.deepStrictEqual(
@@ -96,10 +111,20 @@ test("a colon in an SSID survives the terse format", async () => {
   );
 });
 
+test("About reports an SSID with a space in it, not one with colons", async () => {
+  // nmcli escapes ':' inside a value, so the field has to be tokenized - and the
+  // sentinel cannot be a space, or every SSID that contains one comes back with
+  // colons where its spaces were.
+  withCommands({ "-f ACTIVE,SIGNAL,SSID": "no:44:Neighbour\nyes:66:My Home\\:5G\n" });
+  const info = await new Promise((resolve) => system.systemInfo(resolve));
+  assert.strictEqual(info.wifi.ssid, "My Home:5G");
+  assert.strictEqual(info.wifi.signal, 66);
+});
+
 test("an open network is reported as open", async () => {
   withCommands({
     "device wifi list": "no:52:--:CoffeeShop\n",
-    "-f NAME connection show": "",
+    "-f NAME,TYPE connection show": "",
   });
   const nets = await new Promise((resolve) => system.wifiList(resolve));
   assert.strictEqual(nets[0].secured, false);

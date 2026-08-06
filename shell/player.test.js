@@ -68,27 +68,33 @@ test("a stop that keeps the mode does not release it", () => {
 test("the colour space is not assumed to be off at startup", async () => {
   // The shell restarts on its own while the compositor keeps running, so the output
   // may be in PQ from a film this process never played. Saying "no" has to go out.
+  //
+  // On a fresh instance, because the claim being tested is the FIRST one this
+  // process makes: the tests above already called stop(), and whether those reached
+  // a compositor is not what this is about.
   const seen = [];
   const server = await fakeCompositor(seen);
+  delete require.cache[require.resolve("./player")];
+  const fresh = require("./player");
 
-  await new Promise((resolve) => player.setHdr(false, resolve));
+  await new Promise((resolve) => fresh.setHdr(false, resolve));
   const first = seen.filter((r) => r.request === "set_hdr");
   assert.strictEqual(first.length, 1, "the first no must reach the compositor");
   assert.strictEqual(first[0].on, false);
 
   // Now it knows, so the same answer costs nothing.
   seen.length = 0;
-  await new Promise((resolve) => player.setHdr(false, resolve));
+  await new Promise((resolve) => fresh.setHdr(false, resolve));
   assert.deepStrictEqual(seen, []);
 
   // And the other way round still goes out.
-  await new Promise((resolve) => player.setHdr(true, resolve));
+  await new Promise((resolve) => fresh.setHdr(true, resolve));
   assert.deepStrictEqual(
     seen.filter((r) => r.request === "set_hdr").map((r) => r.on),
     [true],
   );
 
-  await new Promise((resolve) => player.setHdr(false, resolve));
+  await new Promise((resolve) => fresh.setHdr(false, resolve));
   server.close();
 });
 

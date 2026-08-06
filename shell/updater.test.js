@@ -134,6 +134,10 @@ test("a release that needs the compositor is not offered to a box without one", 
   assert.deepStrictEqual(fresh.unmetRequirements({ ...feed, requires: [] }), []);
   // Fail closed: a requirement this shell has never heard of is one it does not meet.
   assert.deepStrictEqual(fresh.unmetRequirements({ ...feed, requires: ["time-travel"] }), ["time-travel"]);
+  // And a `requires` that is not a list at all is a broken feed, not an empty one.
+  for (const bad of ["compositor", { compositor: true }, 1, true]) {
+    assert.deepStrictEqual(fresh.unmetRequirements({ ...feed, requires: bad }), ["malformed-requires"], String(bad));
+  }
 
   const server = net.createServer(() => {});
   server.listen(socketPath);

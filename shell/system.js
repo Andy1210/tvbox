@@ -303,10 +303,12 @@ function systemInfo(cb) {
     if (!e)
       for (const raw of (out || "").split("\n")) {
         if (!raw.startsWith("yes:")) continue; // the connected network
-        const m = /^yes:(\d*):(.*)$/.exec(raw.replace(/\\:/g, " ")); // nmcli -t escapes ':' in values
+        // The sentinel is NUL, not a space, for the same reason wifiList uses it: an
+        // SSID may contain a space, and putting the colons back would corrupt it.
+        const m = /^yes:(\d*):(.*)$/.exec(raw.replace(/\\:/g, "\0")); // nmcli -t escapes ':' in values
         if (m) {
           info.wifi.signal = m[1] ? Number(m[1]) : null;
-          info.wifi.ssid = m[2].replace(/ /g, ":");
+          info.wifi.ssid = m[2].replace(/\0/g, ":");
         }
         break;
       }

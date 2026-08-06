@@ -161,6 +161,19 @@ if (info.language) {
 // process, so this side never touches the field.
 (function () {
   var TEXTY = /^(|text|search|email|url|tel|number|password)$/i;
+  // Is this a text field at all? The question fieldInfo answers on the way in, with
+  // none of the "can we usefully open a keyboard for it" conditions.
+  function isField(el) {
+    if (!el) return false;
+    var tag = (el.tagName || "").toLowerCase();
+    if (tag === "textarea") return true;
+    if (tag !== "input") return !!el.isContentEditable;
+    try {
+      return TEXTY.test(el.getAttribute("type") || "");
+    } catch (e) {
+      return false;
+    }
+  }
   function fieldInfo(el) {
     if (!el || el.disabled || el.readOnly) return null;
     // Offscreen/hidden inputs are a common leanback trick for capturing keys; opening
@@ -223,7 +236,12 @@ if (info.language) {
     "focusout",
     function (ev) {
       var el = (ev.composedPath && ev.composedPath()[0]) || ev.target;
-      if (!fieldInfo(el)) return;
+      // Not fieldInfo: it rejects a field that is disabled, hidden or detached, and
+      // those are ordinary states at blur time - a page that removes the focused
+      // input on a step change fires focusout with exactly such an element. The
+      // main process only drops the page from `editingPages` on this message, so a
+      // missed blur leaves Backspace counting as editing and stops closing a popup.
+      if (!isField(el)) return;
       try {
         ipcRenderer.send("kbd:blur");
       } catch (e) {}
