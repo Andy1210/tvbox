@@ -310,9 +310,11 @@ touched one file, `npx prettier --write <file>` is enough; when in doubt run
   `/dev/dri/card1` for a second or two, each attempt exits at once, and systemd's
   start limit trips after five - leaving greetd `failed` with no session at all.
   Stop greetd, kill the leftovers, wait, then start it once.
-- mpv PiP runs under **XWayland** (`DISPLAY`, no `WAYLAND_DISPLAY`) because
-  Wayland clients can't self-position; fullscreen mpv is a Wayland client
-  behind the transparent window. The `raiseWindow` retry loop after launch is
+- **mpv is a Wayland client in both modes**, fullscreen and PiP, sitting behind
+  the transparent shell window. PiP used to need XWayland - a Wayland client
+  cannot place itself - and the compositor does the placing now
+  (`compositor.placeWindow`, set BEFORE mpv starts so the window is never
+  fullscreen for a frame first). The `raiseWindow` retry loop after launch is
   load-bearing (mpv steals focus late).
 - `~/.tvbox/apps/` user manifests: built-in ids win on clash; a manifest-only
   app is sandboxed/capability-scoped, but a user-app `plugin.js` is trusted
