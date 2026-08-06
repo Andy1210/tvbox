@@ -595,19 +595,26 @@ else
   bad "tvbox-session missing - greetd has nothing to start"
 fi
 
-# Retire the labwc session this box may have been provisioned with. Its packages
-# stay (removing them could take Chromium's dependencies with them), but nothing
-# starts them any more, and the patched build under /usr/local would otherwise sit
-# ahead of the distro one on PATH forever.
+# Retire the compositor this box may have been provisioned with, packages and all.
+# Leaving them installed is not neutral: greetd could be pointed back at labwc by
+# any later edit, the patched build under /usr/local sits ahead of the distro one
+# on PATH forever, and the box would carry two compositors' worth of attack
+# surface for one that runs. There is exactly one compositor here now.
+#
+# Purge is safe on this baseline (checked: the six are leaves, and libwlroots goes
+# with labwc as an orphan) and it is deliberately NOT fatal - an apt that cannot
+# reach the network must not fail a provision whose real work is already done.
+echo "==> retiring labwc (one compositor on this box, not two)"
 for stale in /usr/local/bin/labwc /usr/local/bin/tvbox-compositor \
     /usr/local/share/tvbox/labwc-planes.stamp; do
   [ -e "$stale" ] && rm -rf "$stale"
 done
-rm -rf /usr/local/lib/aarch64-linux-gnu/libwlroots* /etc/xdg/labwc/autostart
-if [ -f /etc/xdg/labwc/autostart.pre-tvbox ]; then
-  mv /etc/xdg/labwc/autostart.pre-tvbox /etc/xdg/labwc/autostart
-fi
-ok "labwc session retired"
+rm -rf /usr/local/lib/aarch64-linux-gnu/libwlroots* /etc/xdg/labwc
+DEBIAN_FRONTEND=noninteractive apt-get purge -y -qq \
+  labwc wlrctl wlr-randr kanshi swaybg grim >/dev/null 2>&1 \
+  && DEBIAN_FRONTEND=noninteractive apt-get autoremove -y --purge -qq >/dev/null 2>&1 \
+  && ok "labwc and its tools purged" \
+  || warn "could not purge the old compositor packages (offline?) - nothing starts them either way"
 
 echo
 if [ "$FAIL" = 0 ]; then

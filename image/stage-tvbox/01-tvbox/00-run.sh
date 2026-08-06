@@ -554,6 +554,14 @@ chown -R ${FIRST_USER_NAME}:${FIRST_USER_NAME} ${USER_HOME}/.tvbox
 # using the shim.
 sh ${USER_HOME}/.tvbox/install-libcec8.sh || echo "WARN: libcec 8 build failed - the CEC bridge will use the vendor shim"
 
+# The base image is Raspberry Pi OS Lite, so it should carry no compositor at all -
+# but a Lite that ever gained one, or a stage that pulls one in as a dependency,
+# would leave the box with two and greetd able to start either. Belt: purge them
+# by name. Harmless when they were never there.
+apt-get purge -y -qq labwc wlrctl wlr-randr kanshi swaybg grim >/dev/null 2>&1 || true
+apt-get autoremove -y --purge -qq >/dev/null 2>&1 || true
+rm -rf /etc/xdg/labwc
+
 # The compositor. A general one composites the whole screen into a single buffer,
 # which at 4K is a GPU pass the Pi cannot afford next to the player's own; tvbox-wc
 # puts the film on a display plane and the shell's translucent UI on an overlay
