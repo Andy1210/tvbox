@@ -334,6 +334,7 @@
     "checking": "Keresés…",
     "upToDate": "Naprakész",
     "available": "Új verzió érhető el: {version}",
+    "needsReprovision": "A(z) {version} verzióhoz a boxot újra kell telepíteni - flasheld újra, vagy deployolj rá gépről",
     "install": "Telepítés most",
     "installHint": "A végén a box újraindul (1-2 perc).",
     "downloading": "Letöltés…",

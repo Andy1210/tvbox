@@ -25,6 +25,7 @@ const path = require("path");
 const crypto = require("crypto");
 const { execFile } = require("child_process");
 const config = require("./config");
+const compositor = require("./compositor"); // a release may require it (see REQUIREMENTS)
 const { isLanUrl, isAllowedFetchUrl, guardedFetch } = require("./netguard"); // shared LAN/loopback trust rule (feed may be self-hosted http)
 const pkg = require("./package.json");
 
@@ -65,26 +66,16 @@ const INFRA_FILES = [
   "ir_protocols.py", // IR protocol encoders (NEC/RC5/RC6/SIRC/...) - irdb row -> raw timings
   "firetv_hid_probe.py", // diagnostic: map a Fire TV remote's vendor-HID app buttons to hwdb lines
   "firetv_tv_codes.example.json", // sample TV code set (LG NEC) for firetv_remote_ir.py
-  "cursor_idle_hide.py", // idle mouse-cursor hider (launched from labwc-autostart)
   "tvbox",
   "provision.sh",
   "install-libcec8.sh", // provision builds libcec >= 8 from it (no distro package yet)
-  // labwc + wlroots with display-plane offload. Provision builds them; an
-  // OTA-only box just carries the files until the next provision, and keeps
-  // compositing as before in the meantime.
-  "install-labwc-planes.sh",
-  "wlroots-0001-render-p030-is-opaque.patch",
-  "wlroots-0002-drm-colour-props-on-the-liftoff-interface.patch",
-  "wlroots-0003-backend-publish-output-layer-support.patch",
-  "wlroots-0004-scene-offload-the-top-surface-to-an-output-layer.patch",
-  "wlroots-0005-drm-give-libliftoff-a-deadline-it-can-finish-in.patch",
-  "wlroots-0006-drm-do-not-arm-the-composition-layer-when-offloading.patch",
-  "wlroots-0007-drm-a-modeset-is-not-a-failed-cursor-scan-out.patch",
-  "wlroots-0008-render-gles2-report-the-output-colour-transform.patch",
-  "wlroots-0009-scene-scan-out-onto-an-hdr-output.patch",
-  "labwc-0001-output-do-not-leave-a-failed-render-format.patch",
-  "labwc-0002-output-apply-hdr-on-reconfigure.patch",
-  "tvbox-compositor", // greetd starts this, not labwc directly
+  // The compositor: what installs it, the release it pins, and the wrapper greetd
+  // starts it with. Root-installed by provision.sh, so an OTA-only box carries the
+  // files until the next provision; session.sh below is the part OTA can update.
+  "install-compositor.sh",
+  "compositor.version",
+  "tvbox-session",
+  "session.sh", // what the compositor starts: audio, then the shell's respawn loop
   // Diagnostics + safe mode. Root-side, so a release only refreshes the copies in
   // ~/.tvbox/ - provision.sh is what installs them under /usr/local/sbin and /etc.
   "tvbox-diag.sh",
@@ -94,14 +85,22 @@ const INFRA_FILES = [
   "tvbox-safemode.service",
   "tvbox-safemode-screen.service",
   "greetd-tvbox-safemode.conf",
-  "labwc-autostart",
-  "labwc-environment", // wlroots render device (read by labwc before it starts)
   "tvbox-cec.service",
   "tvbox-remote.service",
   "tvbox-gamepad.service",
   "tvbox-flatpak-update.service",
   "tvbox-flatpak-update.timer",
 ];
+// Files an earlier release installed and this one does not: they are removed on
+// update rather than left to be found by something that still looks for them.
+const RETIRED = [
+  "install-labwc-planes.sh",
+  "labwc-autostart",
+  "labwc-environment",
+  "cursor_idle_hide.py",
+  "tvbox-compositor", // the wrapper that chose between two labwc builds
+];
+
 const USER_UNITS = [
   "tvbox-cec.service",
   "tvbox-remote.service",
@@ -109,7 +108,15 @@ const USER_UNITS = [
   "tvbox-flatpak-update.service",
   "tvbox-flatpak-update.timer",
 ];
-const EXECUTABLE = ["run-shell.sh", "tvbox", "tvbox-diag.sh", "tvbox-safemode.sh"];
+const EXECUTABLE = [
+  "run-shell.sh",
+  "session.sh", // the compositor exec's it
+  "tvbox",
+  "tvbox-diag.sh",
+  "tvbox-safemode.sh",
+  "tvbox-session",
+  "install-compositor.sh",
+];
 // Where each shipped user unit gets its "enable" symlink (its [Install]
 // WantedBy). syncInfra creates these directly - same trick as the image build:
 // a box that only ever updates via OTA must still START a newly shipped unit
@@ -213,15 +220,52 @@ function osStatus() {
   return { rebootRequired: required, packages };
 }
 
+// What a release can demand of the box before it may be installed. A release is
+// user-space, so it cannot bring anything root put there: the compositor, the
+// session greetd starts, an apt package. When a version needs one of those, an OTA
+// box has to be re-provisioned or re-flashed first, and this is how the release
+// says so instead of installing itself into a half-working box.
+//
+// Fail CLOSED on anything unrecognised: a requirement this shell has never heard of
+// is one it certainly does not meet.
+const REQUIREMENTS = {
+  // The shell drives modes, HDR, focus, window placement and typing over the
+  // compositor's control socket. Without it a box still boots, but the remote's
+  // Back key stops reaching an app and nothing controls the output.
+  compositor: () => compositor.available(),
+};
+
+function unmetRequirements(feed) {
+  const declared = feed && feed.requires;
+  // A `requires` that is present but not a list is a broken feed, and reading it as
+  // "no requirements" would hand the release to exactly the box the field exists to
+  // protect. Unsatisfiable, so the update is offered to nobody until it is fixed.
+  if (declared != null && !Array.isArray(declared)) return ["malformed-requires"];
+  const wanted = Array.isArray(declared) ? declared : [];
+  return wanted.filter((name) => {
+    const met = REQUIREMENTS[name];
+    if (!met) return true;
+    try {
+      return !met();
+    } catch (e) {
+      return true;
+    }
+  });
+}
+
 function status() {
   const current = pkg.version || "0";
+  const unmet = latest ? unmetRequirements(latest) : [];
   return {
     current,
     release: runningRelease(), // null = dev tree (deploy.sh)
     state,
     error,
     latest: latest ? { version: latest.version, notes: latest.notes || null } : null,
-    available: !!(latest && cmpVer(latest.version, current) > 0),
+    // What this box cannot satisfy, so the UI can say why an update it can see is
+    // not being installed.
+    unmet,
+    available: !!(latest && cmpVer(latest.version, current) > 0 && !unmet.length),
     lastCheckAt,
     auto: autoEnabled(),
     failed: readPair(FAILED),
@@ -254,6 +298,10 @@ async function check() {
       throw new Error("feed url must be https (or LAN http)");
     if (!/^[0-9a-f]{64}$/i.test(feed.sha256 || "")) throw new Error("feed needs a sha256");
     latest = feed;
+    const unmet = unmetRequirements(feed);
+    if (unmet.length) {
+      console.warn("[updater]", feed.version, "needs", unmet.join(", "), "- this box has to be re-provisioned first");
+    }
     lastCheckAt = Date.now();
     state = "idle";
   } catch (e) {
@@ -355,6 +403,16 @@ async function apply() {
   if (!latest) await check();
   const cur = pkg.version || "0";
   if (!latest || cmpVer(latest.version, cur) <= 0) return status();
+  // The same gate the offer runs on. `available` already folds this in, so the UI
+  // never shows the button - but a POST straight at /update/apply would otherwise
+  // install a release into a box that cannot run it.
+  const unmet = unmetRequirements(latest);
+  if (unmet.length) {
+    state = "error";
+    error = "apply: " + latest.version + " needs " + unmet.join(", ");
+    console.warn("[updater]", error);
+    return status();
+  }
   const v = latest.version;
   const stage = path.join(UPDATE_DIR, "stage");
   const tarball = path.join(UPDATE_DIR, "release.tar.gz");
@@ -465,36 +523,27 @@ function syncInfra(rel) {
     fs.copyFileSync(f, path.join(TVBOX, name));
     if (EXECUTABLE.includes(name)) fs.chmodSync(path.join(TVBOX, name), 0o755);
   }
-  // Copying does not retire. Every other infra file keeps its name for life, but
-  // the compositor patches carry their subject in theirs, so a renamed one leaves
-  // the old copy behind - and install-labwc-planes.sh applies whatever `*.patch`
-  // it finds beside itself. Two patches touching the same lines then refuse to
-  // apply, and the box silently keeps the compositor it had.
+  // Copying does not retire, and a box that has been through the labwc era carries
+  // that compositor's patch set and session files in ~/.tvbox. The build script
+  // applied every `*.patch` it found beside itself, so leaving them there is not
+  // inert - it is a provision that installs a compositor nobody ships any more.
   try {
     for (const name of fs.readdirSync(TVBOX)) {
-      if (name.endsWith(".patch") && !INFRA_FILES.includes(name)) {
+      if (name.endsWith(".patch") || RETIRED.includes(name)) {
         fs.rmSync(path.join(TVBOX, name), { force: true });
       }
     }
+    // ~/.config/labwc is the OLD session's only bootstrap - the autostart in it
+    // holds the shell's respawn loop. Removing it on a box that is still running
+    // that session leaves it with nothing to start at the next boot, so it goes
+    // only once this box is demonstrably on the compositor.
+    if (compositor.available()) {
+      fs.rmSync(path.join(os.homedir(), ".config", "labwc"), { recursive: true, force: true });
+    }
   } catch (e) {
-    console.warn("[update] could not retire stale patches:", e.message);
+    console.warn("[update] could not retire the old compositor's files:", e.message);
   }
-  // labwc session autostart + environment + systemd user units live outside ~/.tvbox
-  const auto = path.join(src, "labwc-autostart");
-  if (fs.existsSync(auto)) {
-    const dst = path.join(os.homedir(), ".config", "labwc", "autostart");
-    fs.mkdirSync(path.dirname(dst), { recursive: true });
-    fs.copyFileSync(auto, dst);
-    fs.chmodSync(dst, 0o755);
-  }
-  // Not executable: labwc parses it as KEY=VALUE lines. It only takes effect at
-  // the next session start, since wlroots reads it once when it comes up.
-  const env = path.join(src, "labwc-environment");
-  if (fs.existsSync(env)) {
-    const dst = path.join(os.homedir(), ".config", "labwc", "environment");
-    fs.mkdirSync(path.dirname(dst), { recursive: true });
-    fs.copyFileSync(env, dst);
-  }
+  // systemd user units live outside ~/.tvbox.
   const unitDir = path.join(os.homedir(), ".config", "systemd", "user");
   fs.mkdirSync(unitDir, { recursive: true });
   let units = false;
@@ -558,6 +607,7 @@ function startSchedulers() {
 }
 
 module.exports = {
+  unmetRequirements, // exported for the test: a release may demand what OTA cannot bring
   init,
   status,
   check,

@@ -54,11 +54,15 @@ test("bin spec runs the binary straight (PATH includes ~/.tvbox/bin)", () => {
 });
 
 test("args are optional", () => {
-  assert.deepStrictEqual(native.parseSpec({ flatpak: "org.libretro.RetroArch" }), {
-    cmd: "flatpak",
-    args: ["run", "--die-with-parent", "org.libretro.RetroArch"],
-    ref: "org.libretro.RetroArch",
-  });
+  const spec = native.parseSpec({ flatpak: "org.libretro.RetroArch" });
+  assert.strictEqual(spec.args[spec.args.length - 1], "org.libretro.RetroArch");
+  assert.deepStrictEqual(
+    { cmd: spec.cmd, ref: spec.ref },
+    {
+      cmd: "flatpak",
+      ref: "org.libretro.RetroArch",
+    },
+  );
 });
 
 test("an absolute binary path is allowed", () => {

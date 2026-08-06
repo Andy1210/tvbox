@@ -1,6 +1,12 @@
 # Upstreaming the plane-offload patches
 
-The eleven patches in [`scripts/patches/`](../scripts/patches/) — nine against
+> The box does not run these any more. It has its own compositor
+> ([tvbox-wc](https://github.com/Andy1210/tvbox-wc), built on Smithay), so labwc
+> and wlroots are gone from the image. The patches are kept because the bugs are
+> real and still upstream's: three of them affect every wlroots compositor,
+> whatever this box ended up doing.
+
+The eleven patches in [`upstream/patches/`](upstream/patches/) — nine against
 wlroots, two against labwc — are not tvbox quirks. Three are plain wlroots bugs
 that affect every compositor, one is a fix upstream already knows it needs, one
 fills a gap in the backend API, and the rest are the feature this box needed. This

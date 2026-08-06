@@ -177,7 +177,7 @@ RAW="$(
   elif [ -f "$SAFE_FLAG" ]; then
     echo "shell:        not running (safe mode - expected)"
   elif [ "$UPSEC" -lt 120 ]; then
-    # The boot-time run happens while the session is still coming up: greetd, labwc
+    # The boot-time run happens while the session is still coming up: greetd, the compositor
     # and Electron all have to start before the port is bound. The timer rewrites
     # this file two minutes in, and by then a working box is serving.
     echo "shell:        not up yet (the box is still starting)"
@@ -301,7 +301,7 @@ RAW="$(
     echo "cmdline.txt:  $(wc -c < "$CMDLINE" | tr -d ' ') bytes"
     grep -q 'root=' "$CMDLINE" || warn "$CMDLINE has no root= parameter."
     grep -q 'vc4.force_hotplug=1' "$CMDLINE" ||
-      warn "vc4.force_hotplug=1 is not on the kernel command line - with the TV off, labwc spins on a CPU core. Re-run provision.sh."
+      warn "vc4.force_hotplug=1 is not on the kernel command line - with the TV off, the session spins on a CPU core. Re-run provision.sh."
   fi
   # fsck.fat writes orphaned cluster chains here. One next to a truncated file is
   # that file's lost contents, so it is worth pointing at rather than ignoring.

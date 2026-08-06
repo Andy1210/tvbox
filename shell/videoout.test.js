@@ -1,6 +1,6 @@
 // Which renderer a stream gets. Every "false" here is a real failure on the box:
 // the zero-copy output shows nothing at all for a software-decoded stream, does
-// not exist under XWayland, and throws away tone mapping - so it has to stay
+// throws away tone mapping - so it has to stay
 // pinned to the one case that needs it.
 const test = require("node:test");
 const assert = require("node:assert");
@@ -26,7 +26,7 @@ test("under 1440p the GPU renderer keeps up, so its tone mapping is kept", () =>
   assert.equal(videoout.zeroCopyVideo({ ...uhd, width: 2560, height: 1440 }, false), true);
 });
 
-test("PiP never takes it - that window runs under XWayland", () => {
+test("PiP never takes it - a quarter-screen window is what the GPU renderer is for", () => {
   assert.equal(videoout.zeroCopyVideo(uhd, true), false);
 });
 

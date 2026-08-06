@@ -21,7 +21,7 @@ cp -r files/shell "${ROOTFS_DIR}${USER_HOME}/.tvbox/"
 # flashed images (the v1.1.0 drift class: dev deploy + OTA had the BT-remote
 # bridge, the image didn't). Exec bits mirror the old explicit lines: the two
 # direct executables + the python bridges/helpers 755, the rest (units,
-# labwc-autostart, provision.sh, cec_vendor_shim.c source) 644.
+# provision.sh, cec_vendor_shim.c source) 644.
 for f in files/*; do
   [ -d "$f" ] && continue # shell/ - copied above
   case "$(basename "$f")" in
@@ -87,8 +87,8 @@ if [ -f "$CMDLINE" ] && ! grep -q ieee80211_regdom "$CMDLINE"; then
   sed -i "1s|\$| cfg80211.ieee80211_regdom=${WIFI_COUNTRY}|" "$CMDLINE"
 fi
 # Always give the compositor an output, even with the TV off or unplugged.
-# labwc (0.9.8/wlroots 0.19) BUSY-LOOPS with zero outputs: measured on a Pi 5,
-# a session started with no sink burns ~65% of a core in labwc alone and ~200%
+# A session with zero outputs has nothing to pace it: measured on a Pi 5, one
+# started with no sink burns ~65% of a core in the compositor alone and ~200%
 # once Electron joins in (its main thread does ~35k Wayland roundtrips/s), which
 # is what a box plugged in while the TV is off used to sit at until the TV came
 # on. force_hotplug makes vc4 ignore HPD so an output always exists.
@@ -512,7 +512,7 @@ ln -sf ../tvbox-firstboot.service \
   "${ROOTFS_DIR}/etc/systemd/system/multi-user.target.wants/tvbox-firstboot.service"
 
 # 2d) Default keyboard layout = US (Raspberry Pi OS Lite defaults to gb). Written
-#     to /etc/default/keyboard, which labwc + the console read at login; the setup
+#     to /etc/default/keyboard, which the session + the console read at login; the setup
 #     wizard / Settings can change it later (localectl set-x11-keymap via the
 #     locale1 polkit grant above).
 cat > "${ROOTFS_DIR}/etc/default/keyboard" <<'EOF'
@@ -523,28 +523,17 @@ XKBOPTIONS=""
 BACKSPACE="guess"
 EOF
 
-# 3) boot straight into labwc as the box user (greetd autologin, kiosk - no
-#    desktop, no login prompt; the account password can stay locked)
+# 3) boot straight into the compositor as the box user (greetd autologin, kiosk -
+#    no desktop, no login prompt; the account password can stay locked). greetd
+#    starts tvbox-wc, which starts the session (tvbox-session -> session.sh).
 install -d "${ROOTFS_DIR}/etc/greetd"
 cat > "${ROOTFS_DIR}/etc/greetd/config.toml" <<EOF
 [terminal]
 vt = 7
 
 [default_session]
-command = "tvbox-compositor"
+command = "tvbox-wc -- /usr/local/bin/tvbox-session"
 user = "${FIRST_USER_NAME}"
-EOF
-
-# Kiosk labwc session: the tvbox shell owns the screen, so the Pi desktop (panel
-# wf-panel-pi + file-manager/wallpaper/icons pcmanfm-pi) must never start -
-# otherwise it flashes behind the shell on a restart. Replace the system labwc
-# autostart so those never launch (kept in sync with deploy/provision.sh); the
-# box user's ~/.config/labwc/autostart runs kanshi/audio/black-bg/the shell.
-install -d "${ROOTFS_DIR}/etc/xdg/labwc"
-cat > "${ROOTFS_DIR}/etc/xdg/labwc/autostart" <<'EOF'
-# tvbox kiosk - the Pi desktop is intentionally NOT started; the tvbox shell owns
-# the screen. See the box user's ~/.config/labwc/autostart.
-/usr/bin/lxsession-xdg-autostart
 EOF
 
 # 4) user lingering so the CEC bridge user unit starts at boot (loginctl
@@ -565,17 +554,24 @@ chown -R ${FIRST_USER_NAME}:${FIRST_USER_NAME} ${USER_HOME}/.tvbox
 # using the shim.
 sh ${USER_HOME}/.tvbox/install-libcec8.sh || echo "WARN: libcec 8 build failed - the CEC bridge will use the vendor shim"
 
-# The session wrapper greetd starts, and the compositor it prefers. labwc + wlroots
-# with five patches let the display hardware compose a fullscreen video with the
-# app's UI over it, instead of the GPU redrawing both at 4K every frame. Same
-# reasoning as libcec above: a flashed box never runs provision, and only this
-# channel can install a system library.
+# The base image is Raspberry Pi OS Lite, so it should carry no compositor at all -
+# but a Lite that ever gained one, or a stage that pulls one in as a dependency,
+# would leave the box with two and greetd able to start either. Belt: purge them
+# by name. Harmless when they were never there.
+apt-get purge -y -qq labwc wlrctl wlr-randr kanshi swaybg grim >/dev/null 2>&1 || true
+apt-get autoremove -y --purge -qq >/dev/null 2>&1 || true
+rm -rf /etc/xdg/labwc
+
+# The compositor. A general one composites the whole screen into a single buffer,
+# which at 4K is a GPU pass the Pi cannot afford next to the player's own; tvbox-wc
+# puts the film on a display plane and the shell's translucent UI on an overlay
+# above it. Same reasoning as libcec above: a flashed box never runs provision, and
+# only this channel can install under /usr/local.
 #
-# This is the slowest step in the build - two meson projects compiled under qemu -
-# and it is non-fatal on purpose. A box without it keeps the distro labwc, which
-# the wrapper falls back to on its own.
-install -m 755 ${USER_HOME}/.tvbox/tvbox-compositor /usr/local/bin/tvbox-compositor
-sh ${USER_HOME}/.tvbox/install-labwc-planes.sh || echo "WARN: plane-offload build failed - the box will composite with the distro labwc"
+# FATAL on purpose. There is no fallback compositor any more, so an image that
+# cannot install this one boots to nothing.
+install -m 755 ${USER_HOME}/.tvbox/tvbox-session /usr/local/bin/tvbox-session
+sh ${USER_HOME}/.tvbox/install-compositor.sh
 
 # NB: librespot (Spotify Connect) is NOT preinstalled - it's a per-app
 # requires.download binary the Spotify app installs from the UI, no root
@@ -631,11 +627,9 @@ su - ${FIRST_USER_NAME} -c '
   ln -sf ../tvbox-gamepad.service ~/.config/systemd/user/default.target.wants/tvbox-gamepad.service
   ln -sf ../tvbox-flatpak-update.timer ~/.config/systemd/user/timers.target.wants/tvbox-flatpak-update.timer'
 
-# session autostart + flathub user remote (network works in the chroot;
-# harmless to skip - the deploy path re-adds it too)
-su - ${FIRST_USER_NAME} -c 'mkdir -p ~/.config/labwc && cp ~/.tvbox/labwc-autostart ~/.config/labwc/autostart && chmod +x ~/.config/labwc/autostart'
-# The renderer device wlroots uses; labwc reads it before it starts (644, not exec).
-su - ${FIRST_USER_NAME} -c 'cp ~/.tvbox/labwc-environment ~/.config/labwc/environment'
+# flathub user remote (network works in the chroot; harmless to skip - the deploy
+# path re-adds it too). The session script itself needs nothing here: it ships as
+# an infra file and the copier above already made it executable.
 su - ${FIRST_USER_NAME} -c 'flatpak remote-add --user --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo || true'
 
 # kiosk session manager; graphical.target so greetd actually starts at boot

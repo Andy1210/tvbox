@@ -8,13 +8,7 @@ const textinput = require("./textinput");
 
 function harness(opts = {}) {
   const log = { shown: [], done: [], pairingStarts: 0, pairingStops: 0 };
-  const wc = {
-    isDestroyed: () => false,
-    sent: [],
-    sendInputEvent(ev) {
-      wc.sent.push(ev.type === "char" ? ev.keyCode : ev.type + ":" + ev.keyCode);
-    },
-  };
+  const wc = { isDestroyed: () => false, sent: [] };
   textinput.init({
     onShow: (st) => log.shown.push(st),
     onDone: (id) => log.done.push(id),
@@ -24,6 +18,7 @@ function harness(opts = {}) {
     },
     pairingStop: () => log.pairingStops++,
     isForeground: opts.isForeground || (() => true),
+    typeText: (text) => wc.sent.push(text),
   });
   return { log, wc };
 }
@@ -79,8 +74,7 @@ test("submitted text replaces the field and arrives as characters", async () => 
   const r = textinput.submit("a@b.hu");
   assert.deepStrictEqual(r, { ok: true, length: 6 });
   await new Promise((res) => setTimeout(res, 500)); // the delivery beat
-  assert.strictEqual(wc.sent[0], "keyDown:a"); // select-all first, so nothing is appended
-  assert.strictEqual(wc.sent.slice(2).join(""), "a@b.hu");
+  assert.deepStrictEqual(wc.sent, ["a@b.hu"]);
 });
 
 test("control characters never reach the app as keystrokes", async () => {
@@ -90,7 +84,7 @@ test("control characters never reach the app as keystrokes", async () => {
   textinput.submit("hi\nthere\t!");
   await new Promise((res) => setTimeout(res, 500));
   // A newline would have been a real Enter (submitting a form the user didn't choose).
-  assert.strictEqual(wc.sent.slice(2).join(""), "hithere!");
+  assert.deepStrictEqual(wc.sent, ["hithere!"]);
 });
 
 test("nothing is typed if the app left the foreground during the handshake", async () => {
@@ -116,7 +110,7 @@ test("a newer field on the same window cancels a pending delivery", async () => 
   assert.deepStrictEqual(wc.sent, []);
 });
 
-test("the same field re-focusing after a submit does not reopen the screen", () => {
+test("the same field re-focusing after a submit does not reopen the screen", async () => {
   reset();
   const { log, wc } = harness();
   textinput.focused("xcloud", wc, { kind: "email", label: "E-mail" });
@@ -128,6 +122,10 @@ test("the same field re-focusing after a submit does not reopen the screen", () 
   textinput.focused("xcloud", wc, { kind: "password", password: true, label: "Password" });
   assert.strictEqual(log.shown.length, 2);
   assert.strictEqual(log.shown[1].password, true);
+  // Wait out the delivery beat before leaving: the string is dropped here (a newer
+  // field took over), and a test that returns early would leak it into the next one.
+  await new Promise((res) => setTimeout(res, 500));
+  assert.deepStrictEqual(wc.sent, []);
 });
 
 test("a dropped session also blocks the immediate re-open (resuming the app must work)", () => {
@@ -167,5 +165,5 @@ test("MAX_TEXT is enforced", async () => {
   const r = textinput.submit("x".repeat(textinput.MAX_TEXT + 50));
   assert.strictEqual(r.length, textinput.MAX_TEXT);
   await new Promise((res) => setTimeout(res, 500));
-  assert.strictEqual(wc.sent.length, 2 + textinput.MAX_TEXT); // + the select-all pair
+  assert.strictEqual(wc.sent[0].length, textinput.MAX_TEXT);
 });

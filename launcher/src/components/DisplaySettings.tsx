@@ -53,7 +53,7 @@ export function DisplaySettings() {
             ) : st?.current ? (
               <span className="text-fg-dim">{label(st.current)}</span>
             ) : (
-              // no output at all (TV off / wlr-randr missing) vs the status not
+              // no output at all (TV off / no compositor) vs the status not
               // having loaded yet - don't claim "no modes" for a failed fetch
               <span className="text-fg-dim">{st ? t("display.none") : "-"}</span>
             )}

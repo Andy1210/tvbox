@@ -7,7 +7,7 @@
 # ONE root step (provision.sh - apt baseline, udev/polkit device access; you
 # may be prompted for the sudo password once), then finishes user-space: npm
 # install, the CEC bridge as a systemd USER service, the `tvbox` CLI in
-# ~/.local/bin, and a labwc session autostart so the Pi boots straight into
+# ~/.local/bin, and the session script the compositor starts, so the Pi boots into
 # the tvbox shell (no desktop panel / Kodi). Nothing runs as root after
 # provision. Apps are opt-in - see the README ("Enabling apps").
 set -euo pipefail
@@ -47,16 +47,12 @@ while IFS= read -r line || [ -n "$line" ]; do # || guard: keep a final untermina
   INFRA_SRCS+=("$TVBOX/$line")
 done < "$TVBOX/deploy/infra.list"
 rsync -az "${INFRA_SRCS[@]}" "$PI:.tvbox/"
-# rsync copies, it does not retire. Every other infra file keeps its name for
-# life, but the compositor patches carry their subject in theirs, so renaming one
-# leaves the old copy behind - and install-labwc-planes.sh applies whatever
-# `*.patch` it finds next to itself. Two patches that touch the same lines then
-# refuse to apply, and the box keeps the compositor it had with no clue why.
-SHIPPED_PATCHES=$(printf '%s\n' "${INFRA_SRCS[@]}" | sed -n 's|.*/||p' | grep '\.patch$' || true)
-ssh "$PI" "cd ~/.tvbox 2>/dev/null || exit 0; for f in *.patch; do
-  [ -e \"\$f\" ] || continue
-  printf '%s\n' '$SHIPPED_PATCHES' | grep -qxF \"\$f\" || { echo \"   retiring stale patch: \$f\"; rm -f \"\$f\"; }
-done"
+# rsync copies, it does not retire. Files that were shipped by an earlier version
+# and are gone now would otherwise sit in ~/.tvbox forever; the compositor patch
+# set is the one that mattered, since the build script applied every *.patch it
+# found next to itself.
+ssh "$PI" "cd ~/.tvbox 2>/dev/null || exit 0
+  rm -f ./*.patch install-labwc-planes.sh labwc-autostart labwc-environment cursor_idle_hide.py tvbox-compositor"
 
 # ---- the ONE root step: provision (apt baseline, udev/polkit, groups) ----
 # ssh -t gives sudo a TTY so it can prompt for the password; on a box with
@@ -154,14 +150,11 @@ else
   warn "gamepad shim not running yet (fresh group grant? fine after reboot)"
 fi
 
-echo "==> session autostart (tvbox shell; no panel / Kodi)"
-mkdir -p ~/.config/labwc
-if [ -f ~/.config/labwc/autostart ] && [ ! -f ~/.config/labwc/autostart.pre-tvbox ]; then
-  cp ~/.config/labwc/autostart ~/.config/labwc/autostart.pre-tvbox
-fi
-cp ~/.tvbox/labwc-autostart ~/.config/labwc/autostart && chmod +x ~/.config/labwc/autostart && ok "session autostart" || bad "autostart install failed"
-# The renderer device wlroots uses - read by labwc at session start, not now.
-cp ~/.tvbox/labwc-environment ~/.config/labwc/environment && ok "session environment" || bad "environment install failed"
+echo "==> session (tvbox shell; no panel / Kodi)"
+# The compositor starts ~/.tvbox/session.sh, which rsync has just put there. Only
+# the executable bit is ours to add.
+chmod +x ~/.tvbox/session.sh && ok "session script" || bad "session script missing"
+rm -rf ~/.config/labwc
 
 echo
 if [ "$FAIL" = 0 ]; then

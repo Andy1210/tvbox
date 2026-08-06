@@ -8,7 +8,6 @@
 const { app, BrowserWindow, ipcMain, screen, session } = require("electron");
 const { spawn, execFile } = require("child_process");
 const http = require("http");
-const net = require("net");
 const fs = require("fs");
 const path = require("path");
 const os = require("os");
@@ -16,10 +15,15 @@ const config = require("./config");
 const pairing = require("./pairing");
 const playeropts = require("./playeropts"); // app stream terms -> mpv args/commands + the settable-property allowlist
 const { redact } = require("./redact"); // an app's console line may carry ITS credentials; the shell's log is a file
-const display = require("./display"); // wlr-randr resolution/refresh control
+const display = require("./display"); // resolution/refresh selection
 const displaymode = require("./displaymode"); // adaptive mode: UI mode + per-video claims
-const videoout = require("./videoout"); // which mpv renderer a stream needs
+const httpserver = require("./httpserver"); // responses, static files, the origin gate
+const routes = require("./routes"); // the box's write API: every POST route and its validation
+const player = require("./player"); // the shared mpv, its display-mode and HDR claims
+const maintenance = require("./maintenance"); // installs, flatpak/bundle refresh, restore reconcile
+const system = require("./system"); // network, clock, keyboard, name, About numbers
 const hdrout = require("./hdr"); // whether the output should be in PQ for this film
+const compositor = require("./compositor"); // the compositor's control socket
 const wifiradio = require("./wifiradio"); // the wifi radio as a setting, not just a pairing dip
 const textinput = require("./textinput"); // typing into a keyboard-less app (OSK / phone)
 const lang = require("./lang"); // what language a remote web app is told it runs in
@@ -31,7 +35,6 @@ const mediastate = require("./mediastate"); // mpv + app now-playing + sink -> O
 const ir = require("./ir"); // IR blaster hub: TV volume/mute over ESPHome or Home Assistant
 const appwins = require("./appwindows"); // background-apps window registry + hidden-set policy (LRU/RAM guard)
 const nativeapp = require("./native"); // native (non-Electron) apps: RetroArch et al own the screen AND the input
-const flatpak = require("./flatpak"); // flatpak refs/versions/commits + updating one
 const fileserver = require("./fileserver"); // the box's folders over WebDAV (rclone, no root)
 const firetvir = require("./firetvir"); // Fire TV remote IR programming (venv deps + irdb codesets + BLE tool)
 const apps = require("./install"); // manifests + install-recipe runner (shared with the tvbox CLI)
@@ -50,8 +53,6 @@ const pkg = require("./package.json"); // shell version (About/diagnostics)
 
 const { PORT } = require("./constants");
 const BASE = "http://localhost:" + PORT;
-const IPC = "/tmp/tvbox-mpv.sock";
-const APP_ID = "tvbox-shell"; // Wayland app_id (== package.json name); used by wlrctl raise
 const LAUNCHER = path.join(__dirname, "launcher-dist"); // built React launcher (served under /tvbox/)
 // Inherit the session's Wayland env (run-shell.sh exports it); only fill gaps:
 // hardcoding uid 1000 breaks boxes whose first user isn't 1000 (Pi Imager custom user).
@@ -98,34 +99,17 @@ app.commandLine.appendSwitch("enable-features", "UseOzonePlatform");
 // unmapped level falls through to "?" at the call site.
 const CONSOLE_TAG = { debug: "log", info: "info", warning: "warn", error: "error" };
 
-const MIME = {
-  ".js": "application/javascript",
-  ".css": "text/css",
-  ".html": "text/html",
-  ".json": "application/json",
-  ".png": "image/png",
-  ".jpg": "image/jpeg",
-  ".jpeg": "image/jpeg",
-  ".gif": "image/gif",
-  ".svg": "image/svg+xml",
-  ".webp": "image/webp",
-  ".ttf": "font/ttf",
-  ".woff": "font/woff",
-  ".woff2": "font/woff2",
-  ".wav": "audio/wav",
-  ".mp3": "audio/mpeg",
-  ".map": "application/json",
-};
-
 let win = null;
-let mpv = null;
-let mpvPip = false; // mpv is in PiP (small top-right) mode, not fullscreen
-let playingUrl = null;
-let mpvOwnerId = null; // app id whose player broker call launched mpv (video-mode target)
-let mpvStartPending = false; // fullscreen mpv launched paused, waiting for the display-mode switch
-let mpvSeq = 0; // launch counter, so a stale start-gate timer can't touch a newer launch
-let mpvStartedSeq = 0; // the launch whose start handshake already ran
 let currentAppId = null; // which app is FOREGROUND (null = launcher); drives focus + video-mode targeting
+
+// The compositor cannot work out which of the launcher and an app owns the screen:
+// both are windows of this process. It needs to know, because the remote's Back
+// key is rewritten for an app (the app UIs only act on Backspace) and left alone
+// for the launcher, which handles the browser key itself.
+function setForegroundApp(id) {
+  currentAppId = id;
+  compositor.setFocus(id ? "app" : "launcher", id || null);
+}
 // A native app is MEANT to own the screen. Separate from nativeapp.running(): a
 // stop() only asks (SIGTERM), and the process can outlive the request by a moment,
 // so raising our own window must key off the intent, not the process. Cleared
@@ -163,22 +147,21 @@ const queued = { url: null, startPos: 0, streams: null };
 // to look at). HIDDEN app windows don't block idleness - they're muted/paused,
 // and the restart simply drops them (they reload on next launch).
 function boxIdle() {
-  return !mpv && !currentAppId && !(nowPlaying && nowPlaying.state === "playing");
+  return !player.running() && !currentAppId && !(nowPlaying && nowPlaying.state === "playing");
 }
 // Is the box free to start something substantial? Idle as above, no install in
 // flight, and none of the shell's OWN background maintenance running. The last
 // part is not redundant: the nightly app auto-update spends its registry download
-// with the `installing` set still empty (it only fills during provisionFull), so
-// idle+installing alone would call the box free while it is already saturating the
-// link. Everything that starts background work asks this - the OTA auto-apply, the
-// bundle refresh, the app auto-update, and a plugin through `host.idle()` - so the
-// answers cannot drift apart. The flags it reads are declared with the jobs they
-// guard, below; nothing calls this before those run.
+// before any app is marked installing, so "idle and nothing installing" would call
+// the box free while it is already saturating the link. maintenance.js owns those
+// flags and answers for all of them. Everything that starts background work asks
+// this - the OTA auto-apply, the bundle refresh, the app auto-update, and a plugin
+// through `host.idle()` - so the answers cannot drift apart.
 function boxFree() {
-  return boxIdle() && installing.size === 0 && !bundleRefreshBusy && !appsAutoBusy && !reconcile.busy();
+  return boxIdle() && !maintenance.busy();
 }
 // Restart the shell in-place: quit cleanly (localStorage flush, plugin stop);
-// the labwc respawn loop relaunches run-shell.sh, which follows the `current` symlink.
+// the session's respawn loop relaunches run-shell.sh, which follows the `current` symlink.
 function restartShell(why) {
   console.log("[main] restarting shell:", why || "");
   app.quit();
@@ -205,236 +188,7 @@ function emitConfigChange(sections) {
     }
   }
 }
-const installing = new Set(); // app ids whose bundle is being installed on-demand (UI)
-// Per-app install progress for the store UI: id -> { phase }. `phase` is a
-// coarse, reliable stage the launcher turns into "Downloading.../Installing..."
-// text (not a fragile parsed %), so an install shows a live stage instead of a
-// frozen screen. Every install step is also appended to ~/.tvbox/install.log so
-// a slow/stuck install can be diagnosed (there was no install log before).
-const installProgress = new Map(); // id -> { phase: "deps" | "bundle" | "finishing" }
-const INSTALL_LOG = path.join(os.homedir(), ".tvbox", "install.log");
-function setInstallPhase(id, phase) {
-  if (phase) installProgress.set(id, { phase });
-  else installProgress.delete(id);
-}
-function logInstall(id, line) {
-  try {
-    fs.appendFileSync(INSTALL_LOG, "[" + id + "] " + line + "\n");
-  } catch (e) {
-    /* best effort - a missing log must never fail an install */
-  }
-}
-// Run `cli.js <args>` for app <id> at stage <phase>, piping its output to the
-// install log (so flatpak/curl progress is inspectable) and resolving true on a
-// clean exit. Used for both the bundle fetch and the no-root binary-dep install.
-function spawnCli(args, id, phase) {
-  return new Promise((resolve) => {
-    setInstallPhase(id, phase);
-    logInstall(id, phase + " start: cli " + args.join(" "));
-    const child = spawn(process.execPath, [path.join(__dirname, "cli.js"), ...args], {
-      env: { ...process.env, ...WL_ENV, ELECTRON_RUN_AS_NODE: "1" },
-      stdio: ["ignore", "pipe", "pipe"],
-    });
-    const onData = (d) =>
-      String(d)
-        .split(/\r?\n/)
-        .forEach((l) => l.trim() && logInstall(id, l.trim()));
-    child.stdout.on("data", onData);
-    child.stderr.on("data", onData);
-    child.on("error", (e) => {
-      logInstall(id, phase + " spawn error: " + e.message);
-      resolve(false);
-    });
-    child.on("exit", (code) => {
-      logInstall(id, phase + " exit " + code);
-      resolve(code === 0);
-    });
-  });
-}
-// Full provision of a just-installed store app: fetch its no-root binary deps
-// AND its bundle (whichever it declares), in order, from ONE store action - so
-// the user never has to press the HOME tile to finish an install, and the app
-// only reaches HOME once it is actually launchable. A `service` app's plugin
-// still loads at boot, so it restarts once at the end (gated on idle); that is
-// the last step, after everything is in place (hot-loading without a restart is
-// a follow-up). Progress + the installing flag drive the store UI.
-async function provisionFull(id) {
-  const m = apps.manifestById(id);
-  if (!m || installing.has(id)) return;
-  installing.add(id);
-  let ok = true;
-  try {
-    const deps = apps.appDeps(m);
-    if (!deps.depsOk && deps.installable) ok = await spawnCli(["deps", id, "--download-only"], id, "deps");
-    if (ok && m.install && m.install.source && !apps.isInstalled(id))
-      ok = await spawnCli(["install", id], id, "bundle");
-  } catch (e) {
-    logInstall(id, "provision error: " + (e.message || e));
-    ok = false;
-  }
-  // Activate a service app's plugin WITHOUT a restart: hot-load registers its
-  // routes on the live server and starts its daemon. Only if hot-load fails do
-  // we fall back to a one-off restart (and only when idle, so nothing playing is
-  // interrupted); otherwise the plugin just loads on the next natural boot.
-  if (ok && m.service) {
-    setInstallPhase(id, "finishing");
-    if (hotLoadPlugin(id)) {
-      installing.delete(id);
-      setInstallPhase(id, null);
-      return;
-    }
-    if (boxIdle()) {
-      setTimeout(() => restartShell("service install (hot-load failed): " + id), 1200);
-      return; // keep installing/phase set until the restart
-    }
-  }
-  installing.delete(id);
-  setInstallPhase(id, null);
-}
-
-// Manual flatpak update for one app, the counterpart of the nightly
-// tvbox-flatpak-update timer: a flatpak-backed app (RetroArch runs one, Plex's
-// bundle is extracted from one) has a version the registry knows nothing about, so
-// the store needs a way to move it NOW rather than at 03:30.
-//
-// Out of process for the same reason an install is - a flatpak is hundreds of MB -
-// and it reuses `installing` + the progress phase, so the store shows the same
-// progress it does for an install. What actually changed is decided by the commit
-// before and after, since a rebuild can keep the version string.
-const flatpakResult = new Map(); // id -> { ok, changed, version } for the store's status line
-function startFlatpakUpdate(id, res) {
-  const m = apps.manifestById(id);
-  const refs = m ? flatpak.refsFor(m) : [];
-  if (!m || !refs.length) return jsonRes(res, { ok: false, error: "no flatpak" });
-  // Busy is a refusal, not a start. Reporting `installing` here would make the
-  // launcher wait for a flatpak result that a bundle install is never going to
-  // produce, and then read its absence as a failure.
-  if (installing.has(id)) return jsonRes(res, { ok: false, error: "busy" });
-  installing.add(id);
-  flatpakResult.delete(id);
-  (async () => {
-    const before = flatpak.commitsSync(refs);
-    const ok = await spawnCli(["flatpak-update", id], id, "flatpak");
-    flatpak.invalidate();
-    const after = flatpak.commitsSync(refs);
-    const changed = refs.some((f) => before[f.ref] !== after[f.ref]);
-    // The bundle is a copy of the flatpak's files, so a moved flatpak means the
-    // copy is now behind: bring it level in the same action.
-    if (ok && changed && apps.bundleStale(m)) await spawnCli(["install", id, "--force"], id, "bundle");
-    const versions = await flatpak.list({ fresh: true });
-    flatpakResult.set(id, {
-      ok,
-      changed,
-      version: refs.map((f) => (versions.get(f.ref) || {}).version).filter(Boolean)[0] || null,
-    });
-    installing.delete(id);
-    setInstallPhase(id, null);
-  })();
-  return jsonRes(res, { ok: true, updating: true });
-}
-
-// An extracted bundle stays behind when its flatpak moves, and the flatpak moves
-// on its own: the nightly timer updates it with the shell none the wiser. This is
-// what notices - out of process (a bundle can be large) and only when the box is
-// idle, since it replaces files an app may be serving from.
-let bundleRefreshBusy = false;
-async function bundleRefreshTick() {
-  if (!boxFree()) return;
-  // Behind its flatpak OR absent entirely. The second case is a settings restore:
-  // the manifest comes back, the bundle does not, and nothing else would ever pick
-  // that up (see bundleMissing in install.js).
-  const stale = apps.getManifests().filter((m) => apps.bundleStale(m) || apps.bundleMissing(m));
-  if (!stale.length) return;
-  bundleRefreshBusy = true;
-  try {
-    for (const m of stale) {
-      // a wake-up aborts the run; not boxFree(), whose flag this run itself holds
-      if (installing.size || !boxIdle()) break;
-      console.log(
-        apps.bundleMissing(m)
-          ? "[install] bundle missing, acquiring:"
-          : "[install] bundle behind its flatpak, refreshing:",
-        m.id,
-      );
-      installing.add(m.id);
-      await spawnCli(["install", m.id, "--force"], m.id, "bundle");
-      installing.delete(m.id);
-      setInstallPhase(m.id, null);
-    }
-  } finally {
-    bundleRefreshBusy = false;
-  }
-}
-
-// A restore brings the box's SETTINGS back; this brings back what sat behind
-// them. The desired state was recorded by the restore itself (reconcile.js), so
-// this only has to drive the acquisitions - out of process for the same reason
-// every other install is, and only while the box is free, since a restored box
-// is usually one someone is standing in front of.
-//
-// It runs on the boot AFTER the restore: the restart is what makes plugins re-read
-// the restored credentials, and doing this before it would race the very files the
-// restore just wrote.
-async function reconcileTick() {
-  // An app whose manifest was in the backup itself (the single-json form) is
-  // already here, so its own files can land before anything is downloaded.
-  backup.applyPendingAppFiles();
-  const desired = reconcile.pending();
-  if (!desired || !boxFree()) return;
-  console.log("[reconcile] re-acquiring", desired.apps.length, "app(s) after a", desired.reason);
-  await reconcile.run(desired, {
-    apps,
-    free: () => boxIdle() && installing.size === 0, // not boxFree(): this run holds that flag itself
-    installApp: (id) => store.install(config, id),
-    installDeps: (id) => withInstalling(id, () => spawnCli(["deps", id, "--download-only"], id, "deps")),
-    installBundle: (id) => withInstalling(id, () => spawnCli(["install", id], id, "bundle")),
-  });
-  const s = reconcile.state();
-  const retrying = reconcile.settle(desired);
-  console.log(
-    "[reconcile] done:",
-    s.done - s.failed.length,
-    "of",
-    s.total,
-    s.failed.length
-      ? "(" + s.failed.map((f) => f.id + "/" + f.kind).join(", ") + " failed" + (retrying ? ", will retry" : "") + ")"
-      : "",
-  );
-  // Every app that was going to arrive has arrived, so the files an app asked to
-  // have carried can be placed - and whatever still has no app to belong to is
-  // dropped rather than retried at every boot from here on.
-  backup.applyPendingAppFiles({ final: !retrying });
-  // Tiles come back on their own (manifests reload per /apps request), but a
-  // `service` app's plugin loads at boot only. Hot-load each one instead of
-  // restarting: the user is watching this happen on a box they just restored, and
-  // an unexplained restart at the end is exactly what a restore should not do.
-  //
-  // A `deps` step counts as much as an `app` one: loadOnePlugin is deps-gated, so an
-  // app whose package survived the restore but whose flatpak did not was SKIPPED at
-  // boot - installing the flatpak here is exactly what makes it loadable, and
-  // without this its routes and daemon would stay dead until some unrelated restart.
-  // hotLoadPlugin is idempotent (loadedPluginIds) and refuses anything still short
-  // of a dep, so calling it for every landed step is safe.
-  for (const step of s.steps) {
-    if ((step.kind === "app" || step.kind === "deps") && step.state === "done") hotLoadPlugin(step.id);
-  }
-}
-
-// Mark an app as installing for the duration of one step, so the store UI shows
-// the same progress it does for a manual install and nothing else starts work on
-// the same app underneath it.
-async function withInstalling(id, fn) {
-  installing.add(id);
-  try {
-    return await fn();
-  } finally {
-    installing.delete(id);
-    setInstallPhase(id, null);
-  }
-}
-
 // ---- LAN file server (WebDAV) ----
-//
 // Copying a screensaver image onto the box, or a console BIOS into the folder an
 // emulator reads, is not something a TV can do - and should not need ssh. The module
 // owns the decisions (which folders are offered, what gets served, refusing to serve
@@ -508,7 +262,11 @@ function appLaunchable(m) {
   const configured = rt.serve === "remote" && rt.urlConfig ? !!(config.appConfig(rt.urlConfig) || {}).baseUrl : true;
   const installable = !!(m.install && m.install.source);
   return (
-    m.status === "ready" && depsOk && configured && !installing.has(m.id) && (!installable || apps.isInstalled(m.id))
+    m.status === "ready" &&
+    depsOk &&
+    configured &&
+    !maintenance.isInstalling(m.id) &&
+    (!installable || apps.isInstalled(m.id))
   );
 }
 
@@ -549,10 +307,10 @@ function appTiles() {
       depsInstallable, // every missing binary is a no-root download dep -> UI-installable (no CLI)
       installable,
       installed: apps.isInstalled(m.id),
-      installing: installing.has(m.id),
+      installing: maintenance.isInstalling(m.id),
       configured,
       ready: appLaunchable(m), // see appLaunchable: the one definition HOME and HA share
-      progress: installProgress.get(m.id) || null,
+      progress: maintenance.progressFor(m.id) || null,
     };
   });
 }
@@ -613,417 +371,12 @@ function setVideoMode(on, w) {
       .executeJavaScript("document.documentElement.classList." + (on ? "add" : "remove") + "('tvbox-video')")
       .catch(() => {});
   };
-  if (on) flip(w || appWindow(mpvOwnerId) || win);
+  if (on) flip(w || appWindow(player.owner()) || win);
   else if (w) flip(w);
   else {
     flip(win);
     for (const [, aw] of appwins.all()) flip(aw);
   }
-}
-
-// ---- HTTP: launcher (/tvbox/), app manifests API, and the root web app (Plex) ----
-function serveStatic(res, root, p, spaFallback) {
-  const fp = path.join(root, p);
-  const base = root.endsWith(path.sep) ? root : root + path.sep; // boundary: don't match sibling dirs
-  if ((fp === root || fp.startsWith(base)) && fs.existsSync(fp) && fs.statSync(fp).isFile()) {
-    res.writeHead(200, { "Content-Type": MIME[path.extname(fp)] || "application/octet-stream" });
-    fs.createReadStream(fp).pipe(res);
-  } else if (spaFallback && fs.existsSync(spaFallback)) {
-    res.writeHead(200, { "Content-Type": "text/html" });
-    res.end(fs.readFileSync(spaFallback));
-  } else {
-    res.writeHead(404, { "Content-Type": "text/plain" });
-    res.end("not found");
-  }
-}
-function jsonRes(res, obj) {
-  res.writeHead(200, { "Content-Type": "application/json" });
-  res.end(JSON.stringify(obj));
-}
-
-function handlePost(p, data, res) {
-  if (p === "/tvbox/api/config") {
-    const changed = [];
-    if (data.iptv) {
-      config.setIptv(data.iptv);
-      changed.push("iptv");
-    }
-    if (data.parental) {
-      config.setParental(data.parental);
-      changed.push("parental");
-    }
-    if (data.spotify) {
-      config.setSpotify(data.spotify);
-      changed.push("spotify");
-    }
-    if (data.ambient) {
-      config.setAmbient(data.ambient);
-      changed.push("ambient");
-    }
-    if (data.update) {
-      // only the two toggles; the feed URL stays box-local. Partial saves must
-      // not clobber the other toggle, so pass through only what was sent.
-      const upd = {};
-      if (data.update.auto !== undefined) upd.auto = data.update.auto !== false;
-      if (data.update.appsAuto !== undefined) upd.appsAuto = data.update.appsAuto !== false;
-      config.setUpdate(upd);
-      changed.push("update");
-    }
-    if (data.ui) {
-      config.setUi(data.ui); // launcher prefs (clock format) - whitelisted in config.js
-      changed.push("ui");
-    }
-    if (data.player) {
-      config.setPlayer(data.player); // mpv track-language defaults - validated in config.js
-      changed.push("player");
-    }
-    if (data.wifi) {
-      config.setWifi(data.wifi); // regulatory country - applied by the root boot unit
-      changed.push("wifi");
-    }
-    if (data.bluetooth) {
-      config.setBluetooth(data.bluetooth); // ERTM off - applied by the root boot unit
-      changed.push("bluetooth");
-    }
-    if (data.mqtt) {
-      config.setMqtt(data.mqtt); // whitelisted/sanitized in config.js; empty host clears = integration off
-      applyMqttConfig(); // reconnect the bridge to the new broker right away
-      changed.push("mqtt");
-    }
-    if (data.remote) {
-      config.setRemote(data.remote); // per-device button remap (sanitized in config.js)
-      remoteBridgeCmd("reload"); // tell the bridge to re-read the keymap
-      changed.push("remote");
-    }
-    if (data.ir) {
-      config.setIr(data.ir); // IR blaster backend + action map (sanitized in config.js)
-      ir.applyConfig(); // reconnect the backend right away
-      remoteBridgeCmd("reload"); // the bridge re-reads whether volume keys go to IR
-      changed.push("ir");
-    }
-    if (data.apps) {
-      config.setApps(data.apps); // background-apps toggle (whitelisted in config.js)
-      changed.push("apps");
-    }
-    emitConfigChange(changed); // e.g. Live TV drops its channel/EPG cache on a new IPTV source
-    return jsonRes(res, { ok: true, config: config.publicConfig() });
-  }
-  if (p === "/tvbox/api/ui/locale") {
-    // The launcher owns the UI language (its i18n store is in the renderer); it
-    // mirrors it here so the shell can hand it to things the renderer can't reach:
-    // the phone pairing pages and every remote web app's language.
-    // Only write when it actually changed: the launcher mirrors on every page load,
-    // and showLauncher(hash) reloads it - so this would rewrite config.json each time
-    // the user entered Settings from an app.
-    const want = String(data.locale || "");
-    if (want && want !== config.uiLocale()) config.setUi({ locale: want });
-    return jsonRes(res, { ok: true, locale: config.uiLocale() });
-  }
-  if (p === "/tvbox/api/display/refresh") {
-    // "Re-detect": recompute the UI mode from the live output and go there. The
-    // user's escape hatch if a TV pushed the box somewhere odd - and the only
-    // display action left in the UI now that resolution is automatic. rearm() first:
-    // a person pressing OK means "try again", even if earlier attempts didn't stick.
-    dmode.rearm();
-    return dmode.refresh((ok, err) => jsonRes(res, ok ? { ok: true } : { ok: false, error: err || "failed" }));
-  }
-  if (p === "/tvbox/api/audio/default") {
-    // persist the override (empty string clears it -> back to auto), then re-apply
-    config.setAudio({ sink: String(data.sink || "") });
-    return ensureAudio(() => jsonRes(res, { ok: true, sink: audioSink }));
-  }
-  if (p === "/tvbox/api/audio/volume") {
-    return audio.setVolume({ ...process.env, ...WL_ENV }, Number(data.id), Number(data.volume), (ok) =>
-      jsonRes(res, { ok }),
-    );
-  }
-  if (p === "/tvbox/api/ir/send") {
-    // IR blaster: abstract TV command (volume_up/volume_down/mute), optionally
-    // repeated (steps). Callers: the remote bridge (BT volume keys) + the
-    // settings UI test buttons. A dead blaster answers ok:false, never a 500.
-    return ir.send(String(data.action || ""), data.steps).then(
-      (r) => jsonRes(res, r),
-      (e) => jsonRes(res, { ok: false, error: String((e && e.message) || e) }),
-    );
-  }
-  if (p === "/tvbox/api/nav") {
-    // Any navigation ends a typing session: with currentAppId === null (the typing
-    // screen backgrounds its app) the branches below wouldn't touch it, leaving a
-    // live session, a live pairing code, and an app whose next focused field would
-    // silently do nothing.
-    textinput.cancel();
-    // Launcher/app navigation from the remote bridge (remapped "settings" /
-    // "app:<id>" buttons). Settings: launcher already up -> in-page event (no
-    // reload); app fullscreen -> leave it and boot the launcher on the target
-    // view via the #hash. App launch: navTo (no-ops on unknown/not-ready ids).
-    const dest = String(data.dest || "");
-    if (dest === "app") {
-      const id = String(data.app || "");
-      if (!/^[a-z0-9_-]{1,32}$/.test(id)) return jsonRes(res, { ok: false, error: "invalid app id" });
-      navTo(id);
-      return jsonRes(res, { ok: true, dest, app: id });
-    }
-    if (dest === "switch") {
-      switchApp(); // cycle through running apps (the appswitcher remap action)
-      return jsonRes(res, { ok: true, dest, app: currentAppId });
-    }
-    if (dest !== "home" && dest !== "settings") return jsonRes(res, { ok: false, error: "unknown dest: " + dest });
-    if (currentAppId !== null) showLauncher(dest === "settings" ? "#settings" : "");
-    else if (win && !win.isDestroyed()) win.webContents.send("tvbox-nav", { dest });
-    return jsonRes(res, { ok: true, dest });
-  }
-  if (p === "/tvbox/api/apps/quit") {
-    // HOME's running-apps row: really exit an app (its window and page state are
-    // dropped; next launch is a fresh start). Same teardown an app's own "Exit?"
-    // dialog gets - one implementation, so both can't drift.
-    const id = String(data.id || "");
-    if (!appWindow(id)) return jsonRes(res, { ok: false, error: "not running" });
-    exitApp(id);
-    return jsonRes(res, { ok: true, id });
-  }
-  // Fire TV remote IR programming (Settings → Peripherals; shell/firetvir.js)
-  if (p === "/tvbox/api/firetvir/deps") {
-    return jsonRes(res, { ok: firetvir.installDeps() }); // progress is polled via /firetvir/status
-  }
-  // `plan` = { base, keys: { <key>: { path, second } } } (per-key brands + a
-  // second device on a key); a bare `path` is the single-codeset form.
-  if (p === "/tvbox/api/firetvir/test") {
-    firetvir.testKey(String(data.mac || ""), data.plan || String(data.path || ""), String(data.key || ""), (err, r) =>
-      jsonRes(res, err ? { ok: false, error: String(err.message || err).slice(0, 200) } : r),
-    );
-    return;
-  }
-  if (p === "/tvbox/api/firetvir/program") {
-    firetvir.program(String(data.mac || ""), data.plan || String(data.path || ""), String(data.label || ""), (err, r) =>
-      jsonRes(res, err ? { ok: false, error: String(err.message || err).slice(0, 200) } : r),
-    );
-    return;
-  }
-  if (p === "/tvbox/api/firetvir/erase") {
-    firetvir.erase(String(data.mac || ""), (err, r) =>
-      jsonRes(res, err ? { ok: false, error: String(err.message || err).slice(0, 200) } : r),
-    );
-    return;
-  }
-  if (p === "/tvbox/api/nowplaying") {
-    // launcher pushes the current now-playing (Spotify / Live TV); bridge it to
-    // MQTT (retained) for HA, and remember it for the auto-update idle gate.
-    nowPlaying = data;
-    if (mqttCtl) mqttCtl.publish("nowplaying", data, { retain: true });
-    publishMediaState({ force: true }); // the metadata changed: always news
-    return jsonRes(res, { ok: true });
-  }
-  if (p === "/tvbox/api/update/check") {
-    updater.check().then((s) => jsonRes(res, s));
-    return;
-  }
-  if (p === "/tvbox/api/update/apply") {
-    // async: download/npm ci can take minutes - respond now, the UI polls status
-    updater.apply();
-    return jsonRes(res, updater.status());
-  }
-  if (p === "/tvbox/api/update/clear-failed") {
-    return jsonRes(res, updater.clearFailed());
-  }
-  if (p === "/tvbox/api/backup/context") {
-    // launcher hands over its localStorage snapshot right before the backup QR
-    backupPairing.setContext(data);
-    return jsonRes(res, { ok: true });
-  }
-  if (p === "/tvbox/api/backup/pending-localstorage/clear") {
-    backup.clearPendingLocalStorage();
-    return jsonRes(res, { ok: true });
-  }
-  if (p === "/tvbox/api/power") {
-    return handlePower(String(data.action || ""), res);
-  }
-  if (p === "/tvbox/api/ambient/photos/clear") {
-    return jsonRes(res, { ok: true, removed: ambient.clearPhotos() });
-  }
-  if (p === "/tvbox/api/ambient/photos/delete") {
-    return jsonRes(res, { ok: ambient.deletePhoto(String(data.name || "")) });
-  }
-  if (p === "/tvbox/api/bt/scan") {
-    return bluetooth.scan({ ...process.env, ...WL_ENV }, Number(data.seconds) || 8, (devices) =>
-      jsonRes(res, { devices }),
-    );
-  }
-  if (p.startsWith("/tvbox/api/bt/")) {
-    const action = p.slice("/tvbox/api/bt/".length);
-    const fn = {
-      pair: bluetooth.pair,
-      // Same pairing with the wifi radio held down for the attempt - the escape
-      // hatch for a BLE remote that will not bond while the shared antenna is busy.
-      "pair-quiet": bluetooth.pairQuiet,
-      connect: bluetooth.connect,
-      disconnect: bluetooth.disconnect,
-      remove: bluetooth.remove,
-    }[action];
-    const mac = String(data.mac || "").toUpperCase();
-    if (!fn) {
-      res.writeHead(404, { "Content-Type": "text/plain" });
-      res.end("not found");
-      return;
-    }
-    if (!/^[0-9A-F]{2}(:[0-9A-F]{2}){5}$/.test(mac)) return jsonRes(res, { ok: false, error: "bad mac" });
-    return fn({ ...process.env, ...WL_ENV }, mac, (r) => jsonRes(res, r));
-  }
-  if (p === "/tvbox/api/remote/learn") {
-    // Enter learn mode for a device: the bridge captures & reports the next
-    // button pressed on it (id may contain spaces -> rest-of-line in the FIFO).
-    const id = String((data && data.id) || "").replace(/[\r\n]/g, "");
-    if (!id) return jsonRes(res, { ok: false, error: "no id" });
-    remoteBridgeCmd("learn " + id);
-    return jsonRes(res, { ok: true });
-  }
-  if (p === "/tvbox/api/remote/learn-off") {
-    remoteBridgeCmd("learn-off");
-    return jsonRes(res, { ok: true });
-  }
-  if (p === "/tvbox/api/remote/reset") {
-    // Clear one remote's remapping (id) or ALL (no id) and reload the bridge.
-    // Called by the UI "reset" button and by the bridge's panic gesture (a user
-    // who remapped nav away and can't reach this menu with that remote).
-    // irPassthrough survives a reset: it describes the remote's own programmed
-    // IR hardware, not a button mapping - dropping it would make the bridge
-    // divert volume AGAIN on top of the remote's own IR (double steps).
-    const id = String((data && data.id) || "").trim();
-    const cur = config.rawRemote() || {};
-    const devices = {};
-    for (const [k, v] of Object.entries(cur.devices || {})) {
-      if (id && k !== id) devices[k] = v;
-      else if (v && v.irPassthrough) devices[k] = { name: v.name, keymap: {}, irPassthrough: true };
-    }
-    config.setRemote({ devices });
-    remoteBridgeCmd("reload");
-    return jsonRes(res, { ok: true, cleared: id || "all" });
-  }
-  if (p === "/tvbox/api/parental/verify") {
-    return jsonRes(res, { ok: config.verifyPin(String(data.pin || "")) });
-  }
-  if (p === "/tvbox/api/pairing/start") {
-    return jsonRes(res, pairing.start(data.locale, data.kind)); // kind: "iptv" (default) | "spotify"
-  }
-  if (p === "/tvbox/api/pairing/stop") {
-    pairing.stop();
-    return jsonRes(res, { ok: true });
-  }
-  if (p === "/tvbox/api/apps/install") {
-    return startInstall(String(data.id || ""), res);
-  }
-  if (p === "/tvbox/api/apps/deps") {
-    return startDeps(String(data.id || ""), res);
-  }
-  if (p === "/tvbox/api/store/install") {
-    const id = String(data.id || "");
-    store
-      .install(config, id)
-      .then((r) => {
-        jsonRes(res, r);
-        // The manifest is on disk; now finish the install (no-root binary deps +
-        // bundle) in the SAME action, so the app reaches HOME only once it is
-        // actually launchable - no "press the tile to finish" step. provisionFull
-        // handles the final service-plugin restart itself, gated on idle.
-        if (r.ok) provisionFull(id);
-      })
-      .catch((e) => jsonRes(res, { ok: false, error: String(e.message || e).slice(0, 120) }));
-    return;
-  }
-  if (p === "/tvbox/api/store/flatpak-update") {
-    return startFlatpakUpdate(String(data.id || ""), res);
-  }
-  if (p === "/tvbox/api/store/uninstall") {
-    const id = String(data.id || "");
-    if (currentAppId === id) showLauncher();
-    destroyAppWindow(id); // a background window must not outlive its app
-    setWidget(id, null);
-    return jsonRes(res, store.uninstall(id));
-  }
-  if (p === "/tvbox/api/setup/done") {
-    // Onboarding state is the BOX's, not the browser's: localStorage can come up
-    // empty (see claimSingleInstance) and a configured box must not offer setup
-    // again because of that. The launcher still keeps its own copy for the fast path.
-    return jsonRes(res, { ok: config.setSetupDone() });
-  }
-  if (p === "/tvbox/api/fileserver") {
-    // One writer for the whole form: enable/disable, credentials, folders. Applying
-    // is immediate, because a setting nobody can see the effect of is a trap.
-    config.setFileserver({
-      enabled: data.enabled,
-      user: data.user,
-      port: data.port,
-      folders: data.folders,
-      pass: data.pass, // omitted keeps the stored one, "" clears it
-    });
-    const r = applyFileserver();
-    return jsonRes(res, {
-      ok: !!r.ok,
-      error: r.error || null,
-      status: fileserver.status(config.rawFileserver(), fileserverDeps),
-    });
-  }
-  if (p === "/tvbox/api/fileserver/install-rclone") {
-    return jsonRes(res, { ok: true, installing: installRclone() || rcloneInstalling });
-  }
-  if (p === "/tvbox/api/config/app") {
-    // Set a urlConfig app's address: { key, baseUrl } (http/https or empty to clear).
-    const key = String(data.key || "");
-    const baseUrl = String(data.baseUrl || "").trim();
-    if (baseUrl && !/^https?:\/\/\S+$/.test(baseUrl)) return jsonRes(res, { ok: false, error: "bad url" });
-    return jsonRes(res, { ok: config.setAppConfig(key, { baseUrl }) });
-  }
-  if (p === "/tvbox/api/apps/remove") {
-    // Drop an installed web-client bundle (apps-data/<id>). The manifest stays,
-    // so the tile reverts to its "installable" state - the UI mirror of
-    // `tvbox remove <id>`.
-    const id = String(data.id || "");
-    const m = apps.manifestById(id);
-    if (!m || m.type !== "webclient") return jsonRes(res, { ok: false, error: "not removable" });
-    if (installing.has(id)) return jsonRes(res, { ok: false, error: "install in progress" });
-    if (currentAppId === id) showLauncher(); // never yank the bundle out from under the running app
-    destroyAppWindow(id); // incl. a hidden background window
-    return jsonRes(res, { ok: true, removed: apps.removeApp(id) });
-  }
-  if (p === "/tvbox/api/wifi/connect") {
-    return wifiConnect(String(data.ssid || ""), String(data.password || ""), !!data.hidden, (r) => jsonRes(res, r));
-  }
-  if (p === "/tvbox/api/power/sleep-timer") {
-    return jsonRes(res, setSleepTimer(data.minutes)); // 0/absent = cancel
-  }
-  if (p === "/tvbox/api/wifi/forget") {
-    return wifiForget(String(data.ssid || ""), (r) => jsonRes(res, r));
-  }
-  // The radio as a lasting choice: on a box that lives on ethernet it only costs
-  // Bluetooth airtime, and the two share one antenna. Refuse to turn it off with
-  // no wired carrier - the box would leave the LAN and nothing here could undo it.
-  if (p === "/tvbox/api/wifi/radio") {
-    // A real boolean or nothing at all. `data.on === true` would read every
-    // malformed body - a missing field, the STRING "false", a JSON `null` body
-    // (which parses, leaving `data` null) - as a request to turn the radio OFF,
-    // which is the one direction that can take a box off the network.
-    if (!data || typeof data.on !== "boolean") return jsonRes(res, { ok: false, error: "bad-request" });
-    const on = data.on;
-    return ethernetStatus((eth) => {
-      if (!on && !wifiradio.canDisable(eth)) {
-        return jsonRes(res, { ok: false, error: "no-ethernet", ethernet: eth });
-      }
-      wifiradio.setRadio({ ...process.env, ...WL_ENV }, on, (ok) => {
-        if (ok) config.setWifi({ radio: on });
-        jsonRes(res, { ok, radio: on, ethernet: eth });
-      });
-    });
-  }
-  if (p === "/tvbox/api/system/timezone") {
-    return setTimezone(String(data.timezone || ""), (r) => jsonRes(res, r));
-  }
-  if (p === "/tvbox/api/system/keymap") {
-    return setKeymap(String(data.keymap || ""), (r) => jsonRes(res, r));
-  }
-  if (p === "/tvbox/api/system/hostname") {
-    return setHostname(String(data.hostname || ""), (r) => jsonRes(res, r));
-  }
-  res.writeHead(404, { "Content-Type": "text/plain" });
-  res.end("not found");
 }
 
 // Low-battery warning for connected BT remotes - a dead remote is a bricked
@@ -1043,404 +396,6 @@ function btBatteryTick() {
   });
 }
 
-// Nightly app auto-update (the Fire TV model): in the OTA updater's 03-06h
-// window, when the box is idle and update.appsAuto isn't turned off, install
-// every pending registry update through the EXACT same path as the store's
-// Update button (store.install + provisionFull) - provisionFull's own idle
-// gating handles any service-plugin restart. One app at a time; re-checked
-// between apps so a wake-up aborts the run.
-let appsAutoBusy = false;
-async function appsAutoTick() {
-  const u = config.rawUpdate() || {};
-  if (u.appsAuto === false) return;
-  const h = new Date().getHours();
-  if (h < 3 || h > 5) return;
-  if (!boxFree()) return;
-  appsAutoBusy = true;
-  try {
-    const l = await store.listForUi(config)(true);
-    for (const id of l.updates || []) {
-      // re-checked per app: a user install started during the awaited registry
-      // refresh (or a provisionFull that just scheduled a service restart)
-      // must stop the run - store.install would swap ~/.tvbox/apps/<id> under it.
-      // Not boxFree(), whose flag this run itself holds.
-      if (!boxIdle() || installing.size) break;
-      console.log("[store] nightly app auto-update:", id);
-      const r = await store.install(config, id);
-      if (r && r.ok) await provisionFull(id);
-    }
-  } catch (e) {
-    console.warn("[store] nightly app auto-update failed:", String(e.message || e).slice(0, 160));
-  } finally {
-    appsAutoBusy = false;
-  }
-}
-
-// On-demand bundle install (e.g. Plex's flatpak) triggered from the launcher.
-// Runs the recipe OUT OF PROCESS (`node cli.js install <id>`) so a multi-minute
-// flatpak download never blocks the Electron main process / UI; the launcher
-// polls /tvbox/api/apps and sees `installing` then `installed` flip. User-space
-// only (flatpak --user / curl / git) - never root; apt deps are the `tvbox deps`
-// CLI's job. Restricted to a ready app that declares an install recipe.
-function startInstall(id, res) {
-  const m = apps.manifestById(id);
-  if (!m || !(m.install && m.install.source) || m.status !== "ready")
-    return jsonRes(res, { ok: false, error: "not installable" });
-  if (apps.isInstalled(id)) return jsonRes(res, { ok: true, installed: true });
-  if (installing.has(id)) return jsonRes(res, { ok: true, installing: true });
-  installing.add(id);
-  console.log("[install] on-demand start:", id);
-  // Run cli.js as Node via Electron's own binary (ELECTRON_RUN_AS_NODE) so we
-  // don't depend on a separate `node` being on PATH in the shell's env.
-  const child = spawn(process.execPath, [path.join(__dirname, "cli.js"), "install", id], {
-    env: { ...process.env, ...WL_ENV, ELECTRON_RUN_AS_NODE: "1" },
-    stdio: "ignore",
-  });
-  child.on("error", (e) => {
-    console.warn("[install]", id, "spawn error:", e.message);
-    installing.delete(id);
-  });
-  child.on("exit", (code) => {
-    console.log("[install]", id, "exit", code);
-    installing.delete(id);
-  });
-  return jsonRes(res, { ok: true, installing: true });
-}
-
-// Install an app's no-root binary deps (requires.download) from the UI - the
-// "remote-only, no CLI" path. Runs `cli.js deps <id> --download-only` out of
-// process (curl/tar can take seconds; never block the main process) and reuses
-// the `installing` flag so the launcher's poll shows progress. apt-only deps
-// are NOT touched here (they need root / the image / `tvbox deps`).
-function startDeps(id, res) {
-  const m = apps.manifestById(id);
-  if (!m) return jsonRes(res, { ok: false, error: "unknown app" });
-  const deps = apps.appDeps(m);
-  if (deps.depsOk) return jsonRes(res, { ok: true, depsOk: true });
-  if (!deps.installable)
-    return jsonRes(res, { ok: false, error: "needs setup on the box: tvbox deps " + id, missing: deps.missing });
-  if (installing.has(id)) return jsonRes(res, { ok: true, installing: true });
-  installing.add(id);
-  console.log("[deps] on-demand start:", id);
-  const child = spawn(process.execPath, [path.join(__dirname, "cli.js"), "deps", id, "--download-only"], {
-    env: { ...process.env, ...WL_ENV, ELECTRON_RUN_AS_NODE: "1" },
-    stdio: "ignore",
-  });
-  child.on("error", (e) => {
-    console.warn("[deps]", id, "spawn error:", e.message);
-    installing.delete(id);
-  });
-  child.on("exit", (code) => {
-    console.log("[deps]", id, "exit", code);
-    installing.delete(id);
-    // A freshly downloaded binary is now on PATH; activate a `service` plugin
-    // by hot-load (no restart) - same as the store install path.
-    if (code === 0 && m.service) hotLoadPlugin(id);
-  });
-  return jsonRes(res, { ok: true, installing: true });
-}
-
-// ---- plugin route dispatch ----
-// Match a request against a plugin's registered route table. A plugin declares a
-// prefix (e.g. "/tvbox/api/spotify") and a table keyed "METHOD /subpath"; the
-// generic server tries these before its own built-in routes.
-function matchPluginRoute(method, pathname) {
-  for (const { prefix, table } of pluginRoutes) {
-    if (!pathname.startsWith(prefix)) continue;
-    const sub = pathname.slice(prefix.length);
-    if (sub && sub[0] !== "/") continue; // don't let "/spotify" match "/spotifyX"
-    const fn = table[method + " " + sub];
-    if (fn) return fn;
-  }
-  return null;
-}
-
-// ---- WiFi (device setting: HOME → Settings shows status + a network picker) ----
-// nmcli runs as the shell's (active-session) user; connect falls back to
-// passwordless sudo if polkit blocks it. execFile (no shell) - SSID/password are
-// literal argv, no injection.
-function wifiStatus(cb) {
-  execFile("nmcli", ["-t", "-f", "GENERAL.STATE,GENERAL.CONNECTION", "device", "show", "wlan0"], (e, out) => {
-    if (e) return cb({ connected: false, ssid: "" });
-    let state = "",
-      conn = "";
-    for (const l of (out || "").split("\n")) {
-      if (l.startsWith("GENERAL.STATE:")) state = l.slice(14);
-      else if (l.startsWith("GENERAL.CONNECTION:")) conn = l.slice(19).trim();
-    }
-    cb({ connected: /(^|\D)100(\D|$)/.test(state), ssid: conn && conn !== "--" ? conn : "" });
-  });
-}
-// Ethernet presence + IP (the robust alternative to WiFi on a fixed box). Finds
-// the first connected ethernet device (name is eth0/end0-dependent) via nmcli.
-function ethernetStatus(cb) {
-  execFile("nmcli", ["-t", "-f", "DEVICE,TYPE,STATE", "device"], { timeout: 8000 }, (e, out) => {
-    if (e) return cb({ connected: false, ip: "" });
-    let dev = "";
-    for (const l of (out || "").split("\n")) {
-      const p = l.split(":");
-      if (p[1] === "ethernet" && p[2] === "connected") {
-        dev = p[0];
-        break;
-      }
-    }
-    if (!dev) return cb({ connected: false, ip: "" });
-    execFile("nmcli", ["-t", "-f", "IP4.ADDRESS", "device", "show", dev], { timeout: 8000 }, (_e2, out2) => {
-      const m = /IP4\.ADDRESS\[1\]:([^/\n]+)/.exec(out2 || "");
-      cb({ connected: true, ip: m ? m[1].trim() : "", device: dev });
-    });
-  });
-}
-// System region for the first-boot wizard + Settings: current timezone + the
-// full zone list, and the current X11 keymap + the layout list. The launcher
-// groups timezones by region (Europe/Budapest -> Europe > Budapest). ASYNC
-// (never block the Electron main thread) and the big STATIC lists are cached
-// after the first read, so re-opening the picker doesn't re-spawn 4 processes
-// each time (that was blocking the UI). Only current tz/keymap is re-read.
-const lines = (s) =>
-  String(s || "")
-    .split("\n")
-    .map((x) => x.trim())
-    .filter(Boolean);
-let regionListCache = null; // { timezones, keymaps } - static lists, cached after a successful fetch
-function systemRegion(cb) {
-  const readCurrent = (lists) =>
-    execFile("timedatectl", ["show", "-p", "Timezone", "--value"], { timeout: 5000 }, (e, tzOut) => {
-      const timezone = e ? "" : String(tzOut).trim();
-      execFile("localectl", ["status"], { timeout: 5000 }, (e2, st) => {
-        const m = /X11 Layout:\s*(\S+)/.exec(String(st || ""));
-        cb({ timezone, keymap: m ? m[1] : "", timezones: lists.timezones, keymaps: lists.keymaps });
-      });
-    });
-  if (regionListCache) return readCurrent(regionListCache);
-  execFile("timedatectl", ["list-timezones"], { timeout: 8000 }, (e, tzs) => {
-    execFile("localectl", ["list-x11-keymap-layouts"], { timeout: 8000 }, (e2, kms) => {
-      const lists = { timezones: lines(tzs), keymaps: lines(kms) };
-      // Cache only a SUCCESSFUL, non-empty fetch. A transient failure (the wizard
-      // opens before systemd-localed/timedated is up, or the 8s timeout trips
-      // under first-boot load) must not poison the cache with empty lists - a
-      // truthy empty cache would blank the region picker for the life of the
-      // shell. On failure we serve this one call and re-fetch next time.
-      if (!e && !e2 && lists.timezones.length && lists.keymaps.length) regionListCache = lists;
-      readCurrent(lists);
-    });
-  });
-}
-// timedatectl set-timezone works from the box user's active session (polkit
-// allows timedate1.set-timezone). localectl set-x11-keymap needs the locale1
-// polkit grant provision installs (auth is required by default).
-function setTimezone(tz, cb) {
-  if (!/^[A-Za-z0-9_+/][A-Za-z0-9_+/-]{0,63}$/.test(tz)) return cb({ ok: false, error: "bad timezone" });
-  execFile("timedatectl", ["set-timezone", tz], { timeout: 8000 }, (e) =>
-    cb(e ? { ok: false, error: String(e.message || e).slice(0, 120) } : { ok: true }),
-  );
-}
-function setKeymap(layout, cb) {
-  if (!/^[a-z0-9][a-z0-9,_-]{0,31}$/.test(layout)) return cb({ ok: false, error: "bad layout" });
-  execFile("localectl", ["set-x11-keymap", layout], { timeout: 8000 }, (e) =>
-    cb(e ? { ok: false, error: String(e.message || e).slice(0, 120) } : { ok: true }),
-  );
-}
-// hostnamectl set-hostname needs the hostname1 polkit grant provision installs
-// (set-hostname / set-static-hostname require admin auth by default). Sets the
-// static + transient name; /etc/hosts is left to tvbox-firstboot (root) - a
-// stale 127.0.1.1 line only costs a cosmetic sudo warning. Name = one RFC-1123
-// label (letters/digits/hyphen, 1-63, no leading/trailing hyphen).
-function setHostname(name, cb) {
-  if (!/^[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?$/.test(name)) return cb({ ok: false, error: "bad hostname" });
-  execFile("hostnamectl", ["set-hostname", name], { timeout: 8000 }, (e) => {
-    if (e) return cb({ ok: false, error: String(e.message || e).slice(0, 120) });
-    // The MQTT device id is DERIVED from the hostname when unset (identity.js), so a
-    // rename changes which topics the box belongs on. Reconnect now rather than at
-    // the next start, or Settings would report one id while the bridge published
-    // under another.
-    applyMqttConfig();
-    cb({ ok: true });
-  });
-}
-function wifiList(cb) {
-  execFile(
-    "nmcli",
-    ["-t", "-f", "ACTIVE,SIGNAL,SECURITY,SSID", "device", "wifi", "list", "--rescan", "auto"],
-    { timeout: 20000 },
-    (e, out) => {
-      if (e) return cb([]);
-      const seen = new Set(),
-        nets = [];
-      for (const raw of (out || "").split("\n")) {
-        if (!raw) continue;
-        // nmcli -t escapes ':' inside values as '\:'. SSID is last (may contain ':').
-        const line = raw.replace(/\\:/g, "\0");
-        const m = /^(yes|no):(\d*):([^:]*):(.*)$/.exec(line);
-        if (!m) continue;
-        const ssid = m[4].replace(/\0/g, ":");
-        if (!ssid || seen.has(ssid)) continue;
-        seen.add(ssid);
-        nets.push({ ssid, signal: Number(m[2]) || 0, secured: !!(m[3] && m[3] !== "--"), active: m[1] === "yes" });
-      }
-      nets.sort((a, b) => (b.active ? 1 : 0) - (a.active ? 1 : 0) || b.signal - a.signal);
-      const top = nets.slice(0, 30);
-      // Mark networks with a saved profile so the UI can offer "forget". Name
-      // match covers profiles our own connect created; the active network always
-      // has a profile regardless of its name.
-      wifiSavedConnections((names) => {
-        const saved = new Set(names);
-        for (const n of top) n.known = n.active || saved.has(n.ssid);
-        cb(top);
-      });
-    },
-  );
-}
-function wifiConnect(ssid, password, hidden, cb) {
-  if (!ssid) return cb({ ok: false, error: "no ssid" });
-  const args = ["device", "wifi", "connect", ssid];
-  if (password) args.push("password", password);
-  // Hidden networks aren't in the scan list, so nmcli must be told to probe for
-  // the SSID instead of matching a scan result.
-  if (hidden) args.push("hidden", "yes");
-  execFile("nmcli", args, { timeout: 35000 }, (e, _o, err) => {
-    if (!e) return cb({ ok: true });
-    execFile("sudo", ["-n", "nmcli", ...args], { timeout: 35000 }, (e2, _o2, err2) => {
-      if (!e2) return cb({ ok: true });
-      cb({
-        ok: false,
-        error: String(err2 || err || e.message || "")
-          .trim()
-          .slice(0, 160),
-      });
-    });
-  });
-}
-// Saved (known) WiFi connection profile names. `nmcli device wifi connect` names
-// the profile after the SSID, so name==ssid is the common case; renamed or
-// NM-suffixed ("MyNet 1") profiles are handled by the SSID lookup in wifiForget.
-function wifiSavedConnections(cb) {
-  execFile("nmcli", ["-t", "-f", "NAME,TYPE", "connection", "show"], { timeout: 8000 }, (e, out) => {
-    if (e) return cb([]);
-    const names = [];
-    for (const raw of (out || "").split("\n")) {
-      if (!raw) continue;
-      // nmcli -t escapes BOTH '\' and ':' inside values ('\\' and '\:');
-      // tokenize both so a name containing a backslash still parses (a lone
-      // '\:'-only pass would eat the field separator after a trailing '\').
-      const line = raw.replace(/\\\\/g, "\u0001").replace(/\\:/g, "\u0000");
-      const m = /^(.*):([^:]*)$/.exec(line);
-      if (!m) continue;
-      if (m[2] !== "802-11-wireless" && m[2] !== "wifi") continue;
-      names.push(m[1].replace(/\u0000/g, ":").replace(/\u0001/g, "\\"));
-    }
-    cb(names);
-  });
-}
-// Forget a saved network: delete every NM profile stored for the SSID - the
-// profile named exactly like the SSID (what our own connect creates) plus any
-// profile whose 802-11-wireless.ssid matches (renamed/suffixed duplicates).
-// Same user-then-passwordless-sudo ladder as wifiConnect.
-function nmcliDeleteConnection(name, cb) {
-  const args = ["connection", "delete", "id", name];
-  execFile("nmcli", args, { timeout: 15000 }, (e) => {
-    if (!e) return cb(true);
-    execFile("sudo", ["-n", "nmcli", ...args], { timeout: 15000 }, (e2) => cb(!e2));
-  });
-}
-function wifiForget(ssid, cb) {
-  if (!ssid) return cb({ ok: false, error: "no ssid" });
-  wifiSavedConnections((names) => {
-    const direct = names.filter((n) => n === ssid);
-    const rest = names.filter((n) => n !== ssid);
-    const delAll = (targets) => {
-      if (!targets.length) return cb({ ok: false, error: "no saved network: " + ssid.slice(0, 64) });
-      let okAny = false,
-        i = 0;
-      const step = () => {
-        if (i >= targets.length) return cb(okAny ? { ok: true } : { ok: false, error: "delete failed" });
-        nmcliDeleteConnection(targets[i++], (ok) => {
-          okAny = okAny || ok;
-          step();
-        });
-      };
-      step();
-    };
-    // Check the differently-named profiles' stored SSID one by one (sequential:
-    // a box has a handful of profiles at most).
-    const matchRest = (i, acc) => {
-      if (i >= rest.length) return delAll(direct.concat(acc));
-      execFile("nmcli", ["-g", "802-11-wireless.ssid", "connection", "show", rest[i]], { timeout: 8000 }, (e, out) => {
-        const v = String(out || "")
-          .trim()
-          .replace(/\\:/g, ":");
-        matchRest(i + 1, !e && v === ssid ? acc.concat(rest[i]) : acc);
-      });
-    };
-    matchRest(0, []);
-  });
-}
-
-// ---- system info (read-only diagnostics for HOME → Settings → About) ----
-function cpuTempC() {
-  try {
-    const n = parseInt(fs.readFileSync("/sys/class/thermal/thermal_zone0/temp", "utf8"), 10);
-    return isFinite(n) ? Math.round(n / 100) / 10 : null;
-  } catch (e) {
-    return null;
-  } // millidegrees -> °C, 0.1 res
-}
-function memInfo() {
-  try {
-    const m = fs.readFileSync("/proc/meminfo", "utf8");
-    const kb = (k) => {
-      const r = new RegExp("^" + k + ":\\s+(\\d+)", "m").exec(m);
-      return r ? Number(r[1]) : null;
-    };
-    return { totalKb: kb("MemTotal"), availableKb: kb("MemAvailable") }; // MemAvailable = the "free" that matters
-  } catch (e) {
-    return { totalKb: null, availableKb: null };
-  }
-}
-function deviceModel() {
-  try {
-    return fs.readFileSync("/proc/device-tree/model", "utf8").replace(/\0/g, "").trim();
-  } catch (e) {
-    return "";
-  }
-}
-// SD-card space for About - installs/OTA fail invisibly on a full disk otherwise.
-function diskInfo() {
-  try {
-    const s = fs.statfsSync(os.homedir());
-    return { freeBytes: s.bavail * s.bsize, totalBytes: s.blocks * s.bsize };
-  } catch (e) {
-    return null;
-  }
-}
-
-function systemInfo(cb) {
-  const info = {
-    version: pkg.version || "",
-    hostname: os.hostname(),
-    model: deviceModel(),
-    ip: netguard.lanIp(),
-    uptimeSec: Math.round(os.uptime()),
-    cpuTempC: cpuTempC(),
-    mem: memInfo(),
-    disk: diskInfo(),
-    wifi: { ssid: "", signal: null }, // empty on Ethernet
-  };
-  execFile("nmcli", ["-t", "-f", "ACTIVE,SIGNAL,SSID", "device", "wifi"], { timeout: 8000 }, (e, out) => {
-    if (!e)
-      for (const raw of (out || "").split("\n")) {
-        if (!raw.startsWith("yes:")) continue; // the connected network
-        const m = /^yes:(\d*):(.*)$/.exec(raw.replace(/\\:/g, " ")); // nmcli -t escapes ':' in values
-        if (m) {
-          info.wifi.signal = m[1] ? Number(m[1]) : null;
-          info.wifi.ssid = m[2].replace(/ /g, ":");
-        }
-        break;
-      }
-    cb(info);
-  });
-}
-
 // Adaptive display mode. The UI draws at the panel's own resolution capped to
 // 1080p (a 4K launcher costs bandwidth and heat for nothing), and video claims a
 // mode that suits the content - refresh first, so 24p film stops juddering - then
@@ -1451,24 +406,28 @@ function systemInfo(cb) {
 // What the panel can show. Read as a side effect of the mode reads the arbiter
 // already does - at startup and on every output change - so nothing extra runs.
 let panelResolution = null;
+// What the output is CURRENTLY at, which is not the panel's own resolution: the UI
+// runs at 1080p on a 4K set. Window rectangles are in these pixels.
+let outputSize = null;
 let panelHdr = false; // the panel accepts BT2020 + PQ (EDID, read once at startup)
 const dmode = displaymode.create({
   getModes: (cb) =>
-    display.list({ ...process.env, ...WL_ENV }, (info) => {
+    display.list((info) => {
       const panel = display.panelResolution(info && info.modes);
       if (panel) panelResolution = panel;
+      const current = ((info && info.modes) || []).find((m) => m.current);
+      if (current) outputSize = { width: current.width, height: current.height };
       cb(info);
     }),
-  applyMode: (output, mode, cb) => display.apply({ ...process.env, ...WL_ENV }, output, mode, cb),
+  applyMode: (output, mode, cb) => display.apply(output, mode, cb),
   log: (m) => console.log("[display]", m),
 });
-const MPV_CLAIM = "shell:mpv"; // claim id for the shell's own player
 const appClaimId = (id) => "app:" + (id || "launcher"); // an app's own claim id
 const displayClaiming = new Set(); // app ids with a claim in flight (one at a time)
 
 // A TV power cycle re-adds the output at the EDID PREFERRED mode (4K on a 4K set),
 // undoing whatever we chose, so re-assert on every output change. The event
-// payload is stale while labwc settles: debounce, then let the service re-read
+// payload is stale while the compositor settles: debounce, then let the service re-read
 // the live mode - that comparison also stops our own apply from re-triggering us.
 function watchDisplayMode() {
   let timer = null;
@@ -1526,18 +485,18 @@ function handlePower(action, res) {
     // (Spotify Connect streams with the launcher sitting idle on Home, so
     // "screensaver is up" does NOT imply "nothing is playing"). The power
     // menu's manual Sleep stays unconditional.
-    if (action === "sleep_if_idle" && !boxIdle()) return jsonRes(res, { ok: true, slept: false });
+    if (action === "sleep_if_idle" && !boxIdle()) return httpserver.jsonRes(res, { ok: true, slept: false });
     showLauncher(); // stop playback / leave any remote app, back to Home
     cecPower(false); // TV off via CEC
-    return jsonRes(res, { ok: true, slept: true });
+    return httpserver.jsonRes(res, { ok: true, slept: true });
   }
   const sub = action === "reboot" || action === "poweroff" ? action : null;
-  if (!sub) return jsonRes(res, { ok: false, error: "bad action" });
+  if (!sub) return httpserver.jsonRes(res, { ok: false, error: "bad action" });
   console.log("[power]", sub);
   execFile("systemctl", [sub], { timeout: 8000 }, (e, _o, err) => {
-    if (!e) return jsonRes(res, { ok: true });
+    if (!e) return httpserver.jsonRes(res, { ok: true });
     execFile("sudo", ["-n", "systemctl", sub], { timeout: 8000 }, (e2, _o2, err2) => {
-      jsonRes(
+      httpserver.jsonRes(
         res,
         e2
           ? {
@@ -1552,21 +511,56 @@ function handlePower(action, res) {
   });
 }
 
-// Origins allowed to issue state-changing requests: only our own pages (the
-// launcher and local app bundles are all served by this same server, loaded
-// via BASE=localhost). Browsers attach an Origin header to every cross-origin
-// POST, so a foreign Origin here is some LAN page - e.g. a plain-http remote
-// app (remoteProtoOk allows those) - blind-firing at the control API through
-// the TV's own renderer. Requests WITHOUT an Origin (curl, the CEC bridge, the
-// tvbox CLI, the shell's own Node code) are local tools, not browsers - they
-// stay allowed; the server only listens on 127.0.0.1 anyway.
-const OWN_ORIGINS = new Set(["http://127.0.0.1:" + PORT, "http://localhost:" + PORT]);
-function foreignOrigin(req) {
-  const o = req.headers.origin;
-  return !!o && !OWN_ORIGINS.has(String(o).toLowerCase());
-}
+// Only our own pages may issue a state-changing request; httpserver.js says why a
+// request with no Origin at all is not one of them.
+const OWN_ORIGINS = httpserver.ownOrigins(PORT);
 
 function serve() {
+  // What the write API is allowed to reach into. Everything here is the shell's own
+  // state or its windows; anything that is a module of its own, routes.js requires
+  // directly.
+  //
+  // Built HERE rather than at module level: half of what it names is declared
+  // further down the file, and a module-level literal captures those bindings while
+  // they are still in their temporal dead zone - the shell then dies at load with
+  // "Cannot access X before initialization", which no unit test sees because none
+  // of them can load this file.
+  const routeCtx = {
+    appIsRunning: (id) => !!appWindow(id),
+    applyFileserver,
+    applyMqttConfig,
+    audioSink: () => audioSink,
+    childEnv: () => ({ ...process.env, ...WL_ENV }),
+    destroyAppWindow,
+    dmode,
+    emitConfigChange,
+    // The audio route re-runs the sink detection and answers with what it picked,
+    // so it needs both halves.
+    ensureAudio,
+    exitApp,
+    fileserverStatus: () => fileserver.status(config.rawFileserver(), fileserverDeps),
+    foregroundApp: () => currentAppId,
+    handlePower,
+    installRclone: () => installRclone() || rcloneInstalling,
+    navTo,
+    // The launcher's own navigation, for the destinations navTo does not own.
+    navToLauncher: (dest) => {
+      if (win && !win.isDestroyed()) win.webContents.send("tvbox-nav", { dest });
+    },
+    publishMediaState,
+    publishNowPlaying: (data) => {
+      if (mqttCtl) mqttCtl.publish("nowplaying", data, { retain: true });
+    },
+    remoteBridgeCmd,
+    setNowPlaying: (data) => {
+      nowPlaying = data;
+    },
+    setSleepTimer,
+    setWidget,
+    showLauncher,
+    switchApp,
+  };
+
   const server = http.createServer((req, res) => {
     let p;
     try {
@@ -1587,7 +581,7 @@ function serve() {
     // stay open - they leak nothing actionable and blocking them would break
     // <img>/no-CORS uses.
     const guardedGet = p === "/tvbox/api/tv/standby" || p.startsWith("/tvbox/api/firetvir/");
-    if ((req.method !== "GET" || guardedGet) && foreignOrigin(req)) {
+    if ((req.method !== "GET" || guardedGet) && httpserver.foreignOrigin(req, OWN_ORIGINS)) {
       console.warn("[main] rejected cross-origin", req.method, p, "from", req.headers.origin);
       res.writeHead(403, { "Content-Type": "text/plain" });
       res.end("cross-origin request rejected");
@@ -1606,7 +600,7 @@ function serve() {
         try {
           d = JSON.parse(body || "{}");
         } catch (e) {}
-        const route = matchPluginRoute("POST", p);
+        const route = httpserver.matchPluginRoute(pluginRoutes, "POST", p);
         if (route) {
           try {
             route(req, res, { body: d });
@@ -1616,12 +610,12 @@ function serve() {
           }
           return;
         }
-        handlePost(p, d, res);
+        routes.post(p, d, res, routeCtx);
       });
       return;
     }
     // plugin-registered GET routes (e.g. all of Spotify's) take precedence
-    const gRoute = matchPluginRoute("GET", p);
+    const gRoute = httpserver.matchPluginRoute(pluginRoutes, "GET", p);
     if (gRoute) {
       try {
         gRoute(req, res, {});
@@ -1635,66 +629,66 @@ function serve() {
     }
     // secret-free config view for the launcher
     if (p === "/tvbox/api/config") {
-      jsonRes(res, config.publicConfig());
+      httpserver.jsonRes(res, config.publicConfig());
       return;
     }
     if (p === "/tvbox/api/pairing/status") {
-      jsonRes(res, { phoneConnected: pairing.phoneConnected() });
+      httpserver.jsonRes(res, { phoneConnected: pairing.phoneConnected() });
       return;
     }
     // IR blaster backend health for the settings card (connected/lastError)
     if (p === "/tvbox/api/ir/status") {
-      jsonRes(res, ir.status());
+      httpserver.jsonRes(res, ir.status());
       return;
     }
     if (p === "/tvbox/api/wifi/status") {
       // The radio state comes from nmcli, not from the config: what the UI shows
       // has to be what the box IS, so a radio something else turned back on does
       // not read as off just because the setting says so.
-      wifiStatus((s) =>
-        ethernetStatus((eth) =>
+      system.wifiStatus((s) =>
+        system.ethernetStatus((eth) =>
           wifiradio.state({ ...process.env, ...WL_ENV }, (radio) =>
-            jsonRes(res, { ...s, ethernet: eth, radio: radio === null ? null : radio === "enabled" }),
+            httpserver.jsonRes(res, { ...s, ethernet: eth, radio: radio === null ? null : radio === "enabled" }),
           ),
         ),
       );
       return;
     }
     if (p === "/tvbox/api/system/region") {
-      systemRegion((r) => jsonRes(res, r));
+      system.systemRegion((r) => httpserver.jsonRes(res, r));
       return;
     }
     if (p === "/tvbox/api/wifi/list") {
-      wifiList((n) => jsonRes(res, { networks: n }));
+      system.wifiList((n) => httpserver.jsonRes(res, { networks: n }));
       return;
     }
     if (p === "/tvbox/api/system/info") {
-      systemInfo((i) => jsonRes(res, i));
+      system.systemInfo((i) => httpserver.jsonRes(res, i));
       return;
     }
     if (p === "/tvbox/api/update/status") {
-      jsonRes(res, updater.status());
+      httpserver.jsonRes(res, updater.status());
       return;
     }
     if (p === "/tvbox/api/backup/status") {
-      jsonRes(res, { restoredAt });
+      httpserver.jsonRes(res, { restoredAt });
       return;
     }
     if (p === "/tvbox/api/reconcile/status") {
-      jsonRes(res, reconcile.state());
+      httpserver.jsonRes(res, reconcile.state());
       return;
     }
     if (p === "/tvbox/api/backup/pending-localstorage") {
-      jsonRes(res, backup.pendingLocalStorage());
+      httpserver.jsonRes(res, backup.pendingLocalStorage());
       return;
     }
     if (p === "/tvbox/api/display/status") {
       // Read-only: what the output is at now, what the UI mode should be, and who
       // (if anyone) currently holds a video claim. Resolution is automatic, so
       // there is nothing to pick - the only action is /display/refresh below.
-      display.list({ ...process.env, ...WL_ENV }, (info) => {
+      display.list((info) => {
         const cur = info && info.modes.find((m) => m.current);
-        jsonRes(res, {
+        httpserver.jsonRes(res, {
           output: info ? info.output : "",
           current: cur ? { key: cur.key, width: cur.width, height: cur.height, refresh: cur.refreshExact } : null,
           ...dmode.state(),
@@ -1704,16 +698,16 @@ function serve() {
     }
     if (p === "/tvbox/api/audio/sinks") {
       audio.listSinks({ ...process.env, ...WL_ENV }, (sinks) =>
-        jsonRes(res, { sinks, override: (config.rawAudio() || {}).sink || null }),
+        httpserver.jsonRes(res, { sinks, override: (config.rawAudio() || {}).sink || null }),
       );
       return;
     }
     if (p === "/tvbox/api/bt/status") {
-      bluetooth.status({ ...process.env, ...WL_ENV }, (s) => jsonRes(res, s));
+      bluetooth.status({ ...process.env, ...WL_ENV }, (s) => httpserver.jsonRes(res, s));
       return;
     }
     if (p === "/tvbox/api/bt/devices") {
-      bluetooth.list({ ...process.env, ...WL_ENV }, (d) => jsonRes(res, { devices: d }));
+      bluetooth.list({ ...process.env, ...WL_ENV }, (d) => httpserver.jsonRes(res, { devices: d }));
       return;
     }
     if (p === "/tvbox/api/remote/devices") {
@@ -1721,45 +715,50 @@ function serve() {
       // keymap per device so the UI shows what's already bound.
       const list = (readBridgeJson("remote-devices.json", { devices: [] }).devices || []).slice(0, 20);
       const saved = (config.rawRemote() || {}).devices || {};
-      jsonRes(res, { devices: list.map((d) => ({ ...d, keymap: (saved[d.id] && saved[d.id].keymap) || {} })) });
+      httpserver.jsonRes(res, {
+        devices: list.map((d) => ({ ...d, keymap: (saved[d.id] && saved[d.id].keymap) || {} })),
+      });
       return;
     }
     if (p === "/tvbox/api/remote/learned") {
-      jsonRes(res, { learned: readBridgeJson("remote-learned.json", null) });
+      httpserver.jsonRes(res, { learned: readBridgeJson("remote-learned.json", null) });
       return;
     }
     if (p === "/tvbox/api/ambient/weather") {
-      ambient.weather((config.rawAmbient() || {}).city, (w) => jsonRes(res, w || {}));
+      ambient.weather((config.rawAmbient() || {}).city, (w) => httpserver.jsonRes(res, w || {}));
       return;
     }
     if (p === "/tvbox/api/ambient/photos") {
-      jsonRes(res, { photos: ambient.photos() });
+      httpserver.jsonRes(res, { photos: ambient.photos() });
       return;
     }
     if (p === "/tvbox/api/ambient/photo") {
       const name = (req.url || "").split("?")[1] ? new URLSearchParams(req.url.split("?")[1]).get("name") : "";
-      return serveStatic(res, ambient.PHOTO_DIR, name || "", null); // serveStatic guards the root boundary (no traversal)
+      return httpserver.serveStatic(res, ambient.PHOTO_DIR, name || "", null); // serveStatic guards the root boundary (no traversal)
     }
     // TV powered off (from the CEC bridge) -> stop playback
     if (p === "/tvbox/api/tv/standby") {
-      onTvStandby();
-      jsonRes(res, { ok: true });
+      player.onTvStandby();
+      httpserver.jsonRes(res, { ok: true });
       return;
     }
     // Fire TV remote IR programming (Settings → Peripherals; shell/firetvir.js)
     if (p === "/tvbox/api/firetvir/status") {
-      firetvir.status((s) => jsonRes(res, s));
+      firetvir.status((s) => httpserver.jsonRes(res, s));
       return;
     }
     // Which connected remotes are Fire TV / Alexa remotes we can program (expose
     // the keymap GATT service). The remap UI shows the IR feature ONLY for these.
     if (p === "/tvbox/api/firetvir/programmable") {
-      firetvir.programmableRemotes((macs) => jsonRes(res, { macs }));
+      firetvir.programmableRemotes((macs) => httpserver.jsonRes(res, { macs }));
       return;
     }
     if (p === "/tvbox/api/firetvir/brands") {
       firetvir.fetchBrands((err, brands) =>
-        jsonRes(res, err ? { ok: false, error: String(err.message || err).slice(0, 200) } : { ok: true, brands }),
+        httpserver.jsonRes(
+          res,
+          err ? { ok: false, error: String(err.message || err).slice(0, 200) } : { ok: true, brands },
+        ),
       );
       return;
     }
@@ -1767,18 +766,18 @@ function serve() {
       const q = (req.url || "").split("?")[1];
       const csPath = q ? new URLSearchParams(q).get("path") || "" : "";
       firetvir.fetchCodeset(csPath, (err, cs) => {
-        if (err) return jsonRes(res, { ok: false, error: String(err.message || err).slice(0, 200) });
+        if (err) return httpserver.jsonRes(res, { ok: false, error: String(err.message || err).slice(0, 200) });
         firetvir.checkProtocols(cs.protocols, (perr, supported) =>
-          jsonRes(res, { ok: true, ...cs, supported: perr ? null : supported }),
+          httpserver.jsonRes(res, { ok: true, ...cs, supported: perr ? null : supported }),
         );
       });
       return;
     }
-    // App-store registry (Settings → Store). ?refresh=1 bypasses the 5-min cache.
     if (p === "/tvbox/api/fileserver") {
       const st = fileserver.status(config.rawFileserver(), fileserverDeps);
-      return jsonRes(res, { ...st, installing: rcloneInstalling });
+      return httpserver.jsonRes(res, { ...st, installing: rcloneInstalling });
     }
+    // App-store registry (Settings → Store). ?refresh=1 bypasses the 5-min cache.
     if (p === "/tvbox/api/store/list") {
       const refresh = (req.url || "").includes("refresh=1");
       store
@@ -1788,24 +787,24 @@ function serve() {
         .then((d) => {
           const apps2 = (d.apps || []).map((e) => ({
             ...e,
-            installing: installing.has(e.id),
-            progress: installProgress.get(e.id) || null,
-            flatpakStatus: flatpakResult.get(e.id) || null, // result of the last manual flatpak update
+            installing: maintenance.isInstalling(e.id),
+            progress: maintenance.progressFor(e.id) || null,
+            flatpakStatus: maintenance.flatpakStatusFor(e.id), // result of the last manual flatpak update
           }));
-          jsonRes(res, { ...d, apps: apps2, installing: [...installing] });
+          httpserver.jsonRes(res, { ...d, apps: apps2, installing: maintenance.installingIds() });
         })
-        .catch((e) => jsonRes(res, { apps: [], error: String(e.message || e).slice(0, 120) }));
+        .catch((e) => httpserver.jsonRes(res, { apps: [], error: String(e.message || e).slice(0, 120) }));
       return;
     }
     // launcher's app list. Manifests are re-read on every call (a handful of
     // small JSON files) so a dropped-in ~/.tvbox/apps manifest appears as a
     // tile live - no shell restart. Plugins/services still load at boot only.
     if (p === "/tvbox/api/power/sleep-timer") {
-      jsonRes(res, { at: sleepTimerAt });
+      httpserver.jsonRes(res, { at: sleepTimerAt });
       return;
     }
     if (p === "/tvbox/api/widgets") {
-      jsonRes(res, { widgets: widgetList() });
+      httpserver.jsonRes(res, { widgets: widgetList() });
       return;
     }
     if (p === "/tvbox/api/apps") {
@@ -1818,7 +817,7 @@ function serve() {
     // HOME launcher (our React app) under /tvbox/, relative assets
     if (p === "/tvbox" || p === "/tvbox/") p = "/tvbox/index.html";
     if (p.startsWith("/tvbox/")) {
-      serveStatic(res, LAUNCHER, p.slice("/tvbox/".length), null);
+      httpserver.serveStatic(res, LAUNCHER, p.slice("/tvbox/".length), null);
       return;
     }
     // An installed PACKAGE app serves its own web/ bundle at /<id>/... . Package
@@ -1837,7 +836,7 @@ function serve() {
         if (fs.existsSync(webRoot)) {
           const entry = path.join(webRoot, "index.html");
           const sub = p.slice(1 + seg.length + 1) || "index.html"; // strip "/<seg>/"
-          serveStatic(res, webRoot, sub, entry);
+          httpserver.serveStatic(res, webRoot, sub, entry);
           return;
         }
       }
@@ -1852,9 +851,9 @@ function serve() {
     const root = apps.appDataDir(a.id);
     const entry = (a.runtime && a.runtime.entry) || "index.html";
     if (p === "/") p = "/" + entry;
-    serveStatic(res, root, p, path.join(root, entry));
+    httpserver.serveStatic(res, root, p, path.join(root, entry));
   });
-  // A restart races the dying instance for the port (the labwc respawn loop
+  // A restart races the dying instance for the port (the session's respawn loop
   // restarts us within ~1s; the old process may not have released :PORT yet). Without a handler
   // EADDRINUSE is an uncaught exception and the shell limps on WITHOUT its
   // server (black launcher, dead API) - so retry until the port frees up.
@@ -1867,517 +866,11 @@ function serve() {
   server.listen(PORT, "127.0.0.1", () => console.log("[main] server on :" + PORT));
 }
 
-// scheme://host of a URL, for logging: a media URL is made of credentials as
-// often as not, and nothing downstream of a log line needs the rest of it.
-function originOf(url) {
-  try {
-    return new URL(String(url)).origin;
-  } catch (e) {
-    return "(unparseable url)";
-  }
-}
-
-// ---- mpv control ----
-// Player events go to every live window: the driving app (own window now) needs
-// them for its UI, the launcher for now-playing state. Listeners that don't
-// care simply have no handler registered.
-// Player events go to the launcher (now-playing state) and the FOREGROUND app
-// only - never a backgrounded app. A hidden app receiving "finished" and
-// auto-advancing would start mpv behind an opaque foreground (invisible video +
-// phantom audio) and keep the box from ever reporting idle.
-function emit(ev) {
-  const fg = currentAppId && appWindow(currentAppId);
-  for (const w of new Set([win, fg])) {
-    if (w && !w.isDestroyed()) {
-      try {
-        w.webContents.send("player-event", ev);
-      } catch (e) {}
-    }
-  }
-}
-// One request/response round-trip on the mpv IPC socket (mpvCmd is fire-and-
-// forget). Resolves null on any failure - callers treat that as "no tracks".
-function mpvQuery(command) {
-  return new Promise((resolve) => {
-    const s = net.connect(IPC);
-    const to = setTimeout(() => {
-      try {
-        s.destroy();
-      } catch (e) {}
-      resolve(null);
-    }, 2500);
-    s.on("error", () => {
-      clearTimeout(to);
-      resolve(null);
-    });
-    let buf = "";
-    s.on("connect", () => {
-      try {
-        s.write(JSON.stringify({ command, request_id: 77 }) + "\n");
-      } catch (e) {}
-    });
-    s.on("data", (d) => {
-      buf += d;
-      let nl;
-      while ((nl = buf.indexOf("\n")) >= 0) {
-        const line = buf.slice(0, nl);
-        buf = buf.slice(nl + 1);
-        let m;
-        try {
-          m = JSON.parse(line);
-        } catch (e) {
-          continue;
-        }
-        if (m.request_id === 77) {
-          clearTimeout(to);
-          try {
-            s.end();
-          } catch (e) {}
-          return resolve(m.error === "success" ? m.data : null);
-        }
-      }
-    });
-  });
-}
-
-function mpvCmd(obj) {
-  const s = net.connect(IPC);
-  s.on("error", () => {});
-  s.on("connect", () => {
-    try {
-      s.write(JSON.stringify(obj) + "\n");
-    } catch (e) {}
-    s.end();
-  });
-}
-// keepMode: launchMpv's own pre-launch stop, where releasing the display claim
-// would put the UI mode back for a second only for the new file to claim again.
-function stopMpv(keepMode) {
-  // (mpvOwnerId is NOT cleared here: launchMpv calls this on relaunch right
-  // after "play" set the owner. Every play re-assigns it, and without a running
-  // mpv no first-frame reveal can consume a stale value.)
-  if (!keepMode) {
-    setHdr(false);
-    dmode.release(MPV_CLAIM);
-  }
-  clearMpvMedia(); // the clock stops with the process (see clearMpvMedia)
-  mpvStartPending = false; // no paused-start handshake outlives the process
-  if (mpv) {
-    const pid = mpv.pid;
-    mpv.removeAllListeners("exit"); // our own kill must NOT signal "finished" to the app
-    try {
-      process.kill(-pid, "SIGTERM");
-    } catch (e) {
-      try {
-        mpv.kill("SIGTERM");
-      } catch (e2) {}
-    }
-    console.log("[player] stopMpv pid", pid);
-    mpv = null;
-  }
-  try {
-    fs.unlinkSync(IPC);
-  } catch (e) {}
-}
-// mpv logs its own COMMAND LINE, and the file it plays is on it - so this file
-// gets the media URL with whatever credentials it carries, and nothing here can
-// stop that: it is mpv writing, not us. What can be done is who may read it, so
-// the file is created 0600 first (mpv truncates an existing file and keeps its
-// mode). It is deliberately NOT one of the logs tvbox-diag copies to the boot
-// partition.
-function mpvLogPath() {
-  const p = path.join(os.homedir(), ".tvbox", "mpv.log");
-  try {
-    // O_NOFOLLOW, so a SYMLINK at this path is refused by the kernel rather than
-    // followed - checking with lstat first would leave the gap between the check
-    // and the open. It matters because mpv writes wherever this path leads and we
-    // would have chmodded that target on the way: ~/.tvbox is reachable through
-    // the file server, so "nobody can put a link there" is not a given.
-    const fd = fs.openSync(
-      p,
-      fs.constants.O_CREAT | fs.constants.O_WRONLY | fs.constants.O_APPEND | fs.constants.O_NOFOLLOW,
-      0o600,
-    );
-    try {
-      // A fifo or a device would take mpv's writes somewhere of its own too.
-      if (!fs.fstatSync(fd).isFile()) return null;
-      fs.fchmodSync(fd, 0o600);
-    } finally {
-      fs.closeSync(fd);
-    }
-  } catch (e) {
-    return null; // no log rather than a log we are not sure of; playback is unaffected
-  }
-  return p;
-}
-
-function launchMpv(url, startPos, pip, rect, streams) {
-  // Fullscreen relaunch keeps the claim (the next file re-claims immediately, and
-  // releasing in between would blank the TV twice); going to PiP gives it back,
-  // because there the browse UI is what's on screen.
-  stopMpv(!pip);
-  const seq = ++mpvSeq; // this launch's identity for every async gate below
-  mpvPip = !!pip;
-  // mpv is a shared, dep-gated player service - spawned lazily only when a
-  // player-capable app actually plays, and only if the binary is present. A box
-  // that never opted into an mpv app (fresh install) has no mpv; degrade with a
-  // clear event instead of an ENOENT spawn. (Tiles are already greyed via the
-  // manifest's requires.bin, so this is the belt-and-suspenders path.)
-  if (!apps.onPath("mpv")) {
-    console.warn("[player] mpv not installed - cannot play (run: tvbox deps <app>)");
-    emit({ type: "error" });
-    emit({ type: "finished" });
-    return;
-  }
-  emit({ type: "buffering", on: true });
-  const args = [
-    "--no-config",
-    "--no-osc",
-    "--no-input-default-bindings",
-    // The renderer that works for anything, including software-decoded streams.
-    // adaptMpvMode swaps it for the zero-copy output where that one cannot keep
-    // up (videoout.js) - the property is settable, so no relaunch.
-    "--vo=gpu",
-    "--gpu-api=opengl",
-    "--hwdec=auto-safe",
-    "--input-ipc-server=" + IPC,
-    "--start=" + startPos,
-    // (the log file is appended below, when there is one we trust)
-    "--msg-level=all=error",
-  ];
-  // PiP (Live TV "browse while watching"): a small always-on-top window. Wayland
-  // clients can't self-position, so run mpv under XWayland (DISPLAY, no
-  // WAYLAND_DISPLAY) where --geometry works. `rect` (device px, measured by the
-  // launcher from the on-screen placeholder) makes it match exactly at any
-  // resolution/layout; fall back to a top-right percentage. Fullscreen otherwise.
-  if (pip) {
-    const geo =
-      rect && rect.w > 0
-        ? Math.round(rect.w) + "x" + Math.round(rect.h) + "+" + Math.round(rect.x) + "+" + Math.round(rect.y)
-        : "26%+99%+3%";
-    // NOT ontop: mpv sits BEHIND the (transparent) Electron window and shows
-    // through a box-shadow "hole" the browse UI punches, so the launcher keeps
-    // keyboard focus (D-pad works) while the video is visible in the hole.
-    args.push("--no-border", "--ontop=no", "--geometry=" + geo);
-  } else {
-    args.push("--window-maximized=yes", "--no-border", "--ontop=no");
-    // Fullscreen starts PAUSED so the output can be switched to match the video
-    // BEFORE it plays (adaptMpvMode -> startMpvPlayback below): a mode change
-    // blanks HDMI for a second or two, which belongs before the first frame, not
-    // three seconds into the film. PiP never switches - the UI owns the screen there.
-    args.push("--pause=yes");
-    mpvStartPending = true;
-  }
-  const logFile = mpvLogPath();
-  if (logFile) args.push("--log-file=" + logFile);
-  if (audioSink) args.push("--audio-device=pipewire/" + audioSink);
-  // Track selection, per axis: what the app decided for itself (Plex resolves
-  // audio/subtitle server-side and ships the choice with the item) wins, and
-  // Settings > Picture & sound fills in the rest. The app's choice has to be
-  // spelled out because mpv's default `sid=auto` turns on any subtitle track
-  // carrying the container's default flag, which is how a film played with "no
-  // subtitles" in Plex came up with Hungarian subs anyway.
-  args.push(...playeropts.streamArgs(streams, config.rawPlayer()));
-  // "--" ends option parsing: a URL starting with "-" (or a crafted playlist
-  // entry) must always be argv's file position, never an mpv option.
-  args.push("--", url);
-  const env = { ...process.env, ...WL_ENV };
-  if (pip) {
-    env.DISPLAY = env.DISPLAY || ":0";
-    delete env.WAYLAND_DISPLAY;
-  }
-  mpv = spawn("mpv", args, { env, detached: true, stdio: "ignore" });
-  const child = mpv;
-  console.log("[player] mpv launched pid", mpv.pid, pip ? "(pip)" : "");
-  // A spawn that never got off the ground (EACCES, fork failure - ENOENT is already
-  // guarded above) emits "error" and no usable "exit". Unhandled it would take the
-  // shell down, and it must not leave a paused-start flag or a claim behind either.
-  child.on("error", (e) => {
-    console.error("[player] mpv spawn failed:", e.message);
-    child.removeAllListeners("exit"); // don't report "finished" twice
-    if (mpv === child) mpv = null;
-    playingUrl = null;
-    mpvStartPending = false;
-    setVideoMode(false);
-    setHdr(false);
-    dmode.release(MPV_CLAIM);
-    emit({ type: "error" });
-    emit({ type: "finished" });
-  });
-  // One-touch wake: video starting while the TV sleeps should light it up
-  // (voice/HA "play X" with the TV off). "on 0" is a no-op on a TV that's
-  // already on. The one exception: right after the USER put the TV on standby -
-  // the stop we emit as "finished" can make an app auto-play the next item
-  // (Plex on-deck), which must not switch the TV back on.
-  if (Date.now() - lastTvStandbyAt > 30 * 1000) cecPower(true);
-  // Never leave a paused-start film stuck: if the file hasn't loaded (or the IPC
-  // observer never came up) within 8s, do the mode handshake anyway. Tied to this
-  // launch's sequence number so a stale timer can't shortcut the NEXT film.
-  if (!pip) {
-    setTimeout(() => {
-      if (mpvSeq === seq && mpvStartPending) {
-        // The file hasn't loaded (a slow Plex/HLS start) or the IPC observer never
-        // came up: play rather than sit on a black screen. Deliberately NOT running
-        // the handshake here - it would claim a mode from a stream mpv hasn't opened
-        // yet. If the file does load later, the first-frame path still switches.
-        console.warn("[player] start gate timed out - playing anyway");
-        mpvStartPending = false;
-        mpvCmd({ command: ["set_property", "pause", false] });
-      }
-    }, 8000);
-  }
-  mpv.on("exit", (code, sig) => {
-    console.log("[player] mpv exited code", code, "sig", sig);
-    emit({ type: "finished" });
-    mpv = null;
-    playingUrl = null;
-    setVideoMode(false);
-    mpvStartPending = false;
-    setHdr(false);
-    dmode.release(MPV_CLAIM); // film over -> UI mode back (stopMpv covers our own kills)
-    // The END of a film is an exit, not a stopMpv - mpv runs without --keep-open.
-    // Without this the retained state topic keeps saying "playing" with a frozen
-    // position, so Home Assistant shows a film nobody is watching until the next
-    // playback, and `seek` would still be aimed at a dead socket.
-    clearMpvMedia();
-  });
-  // mpv grabs keyboard focus when its window maps (and can do so late), which
-  // would break D-pad nav - so keep pulling the launcher back to the front +
-  // focus for a few seconds. This works for both modes: fullscreen mpv is behind
-  // the transparent overlay, and PiP mpv is behind the transparent window showing
-  // through the browse UI's hole, so raising the launcher never hides the video.
-  [500, 1200, 2000, 3000, 4000].forEach((ms) => setTimeout(raiseWindow, ms));
-  setTimeout(() => observeMpv(seq, 0), 900);
-}
-// What the video actually is, per mpv. `container-fps` is the stream's declared
-// rate (not the drifting measured one); dwidth/dheight are the display size after
-// aspect correction, with the decoded size as fallback - on the box dwidth came
-// back "property unavailable" at the very moment dheight was already readable.
-function readVideoProps() {
-  const props = ["container-fps", "dwidth", "dheight", "width", "height", "hwdec-current", "video-params/gamma"];
-  return Promise.all(props.map((p) => mpvQuery(["get_property", p]))).then(([fps, dw, dh, w, h, hwdec, gamma]) => ({
-    fps: Number(fps) || 0,
-    width: Number(dw) || Number(w) || 0,
-    height: Number(dh) || Number(h) || 0,
-    hwdec: typeof hwdec === "string" ? hwdec : "",
-    // The transfer function the file was mastered with; "pq" is HDR10/DV.
-    gamma: typeof gamma === "string" ? gamma : "",
-  }));
-}
-
-// The output's colour space rides with the display mode: claimed for a PQ film
-// that reaches the plane, released when it ends. The compositor's scan-out path
-// trusts that pairing (scripts/patches/wlroots-0009), so releasing matters as much
-// as claiming - an SDR film left on a PQ output would lose the plane, and 4K with
-// it.
-function setHdr(on, cb) {
-  const next = cb || (() => {});
-  try {
-    // Nothing to apply if the value did not change - and then nothing to wait for.
-    if (!hdrout.writeConfig(on)) return next();
-    return hdrout.reload(next);
-  } catch (e) {
-    console.warn("[player] hdr toggle failed:", (e && e.message) || e);
-  }
-  next();
-}
-
-// Match the output to the video, then hand control back to the caller (which
-// unpauses). A stream with no declared fps (some live HLS) leaves the mode alone.
-// `seq` is the launch this belongs to: reading mpv's properties can take seconds,
-// and a claim landing after that film was stopped would leave the launcher (or the
-// NEXT film) at the dead one's mode with nothing left to release it.
-function adaptMpvMode(seq, done) {
-  const claim = (content) => {
-    if (mpvSeq !== seq || !mpv) return done(); // stopped or superseded while we read
-    const zeroCopy = videoout.zeroCopyVideo(content, mpvPip);
-    if (zeroCopy) {
-      // `vo` is settable while paused, so this costs nothing visible - it lands in
-      // the same paused window as the mode switch, before the first frame.
-      mpvCmd({ command: ["set_property", "vo", videoout.ZERO_COPY_VO] });
-    }
-    // And the output's colour space, before the claim below: labwc re-reads the
-    // config on SIGHUP but only an output reconfiguration puts it on the
-    // connector, and the mode claim IS that reconfiguration.
-    // Wait for the signal to be delivered before the mode change: labwc applies
-    // the colour space when it reconfigures, and the mode change is the next
-    // reconfiguration. The caller unpauses in done(), so both land before the
-    // first frame.
-    setHdr(hdrout.wants(content, zeroCopy, panelHdr), () => {
-      if (!(content.fps > 0)) {
-        console.log("[player] no container-fps - leaving the display mode alone");
-        return done();
-      }
-      dmode.claim(MPV_CLAIM, content, (r) => {
-        // Nothing on this panel divides into the content's rate (a 60Hz-only set and
-        // a 24p film): resample instead of juddering. This is what the old manual
-        // "match content framerate" toggle did, decided per file now.
-        if (r && r.reason === "no-matching-mode") {
-          mpvCmd({ command: ["set_property", "video-sync", "display-resample"] });
-        }
-        done();
-      });
-    });
-  };
-  // Nothing in this chain rejects today (mpvQuery resolves null on every failure),
-  // but playback must not hang on that staying true: anything thrown in here starts
-  // the film immediately instead of waiting for the failsafe.
-  const failed = (e) => {
-    console.warn("[player] display mode adapt failed:", (e && e.message) || e);
-    // We never learned what this file is, and a relaunch keeps the previous
-    // claim - so without this an SDR film following an HDR one would play on a
-    // PQ output. SDR is the safe answer to a question that got no answer.
-    setHdr(false);
-    done();
-  };
-  // Properties that settle late get a few more goes, keeping whatever each read
-  // already learned: dwidth/fps come back "property unavailable" for the first
-  // second or so after a paused start, and hwdec-current stays unavailable until
-  // the decoder has actually run - which is what decides the renderer. Re-read
-  // only while something we act on is still missing, so an ordinary file is not
-  // held up: below 4K the hwdec answer changes nothing, so it is not waited for.
-  const settle = (prev, tries) =>
-    readVideoProps().then((c) => {
-      const merged = {
-        fps: c.fps || prev.fps,
-        width: c.width || prev.width,
-        height: c.height || prev.height,
-        hwdec: c.hwdec || prev.hwdec,
-        gamma: c.gamma || prev.gamma,
-      };
-      // Height counts as missing too: the renderer is chosen from it, and the two
-      // axes settle independently (dwidth has come back unavailable at the very
-      // moment dheight was already readable, so the reverse can happen as well).
-      const missing =
-        !(merged.fps > 0 && merged.width > 0 && merged.height > 0) ||
-        videoout.hwdecPending(merged, mpvPip) ||
-        hdrout.gammaPending(merged, videoout.zeroCopyCandidate(merged, mpvPip));
-      if (!missing || tries <= 0) return merged;
-      return new Promise((r) => setTimeout(() => r(settle(merged, tries - 1)), 250));
-    });
-  settle({ fps: 0, width: 0, height: 0, hwdec: "" }, 6).then(claim).catch(failed);
-}
-
-// Paused-start handshake: switch the mode, then play. The 6s failsafe is
-// load-bearing - if wlr-randr wedges or the claim never answers, the film must
-// still start. (launchMpv arms a second one for "the observer never connected".)
-function startMpvPlayback(seq) {
-  if (mpvStartedSeq === seq) return; // exactly one handshake per launch
-  mpvStartedSeq = seq;
-  const go = () => {
-    if (mpvSeq !== seq || !mpvStartPending) return; // newer launch, or already playing
-    mpvStartPending = false;
-    mpvCmd({ command: ["set_property", "pause", false] });
-    // A mode switch remaps windows, so pull the app UI back over mpv again.
-    [200, 700, 1500].forEach((ms) => setTimeout(raiseWindow, ms));
-  };
-  setTimeout(go, 6000);
-  adaptMpvMode(seq, go);
-}
-
-function observeMpv(seq, tries) {
-  const s = net.connect(IPC);
-  let connected = false;
-  let firstPos = false;
-  s.on("error", (e) => {
-    console.log("[player] observer error", e.code);
-    // The observer is what starts playback now (paused launch), so an IPC socket
-    // that isn't up yet must be retried rather than dropped - but only for the
-    // launch it was started for, or a dead launch's retry chain would attach a
-    // second observer to the NEXT mpv.
-    if (!connected && mpv && mpvSeq === seq && (tries || 0) < 5)
-      setTimeout(() => observeMpv(seq, (tries || 0) + 1), 400);
-  });
-  s.on("connect", () => {
-    connected = true;
-    console.log("[player] observer connected");
-    // `paused-for-cache`, NOT `core-idle`: core-idle is also true while the USER
-    // has it paused, so reporting it as buffering told a client the player was
-    // stuck loading for as long as the film sat paused. Plex then spun its loader
-    // over the frozen frame and killed the session on its own 120 s
-    // BufferingTimeout ("Playback error"), measured on the box.
-    ["time-pos", "duration", "pause", "eof-reached", "paused-for-cache"].forEach((p, i) =>
-      s.write(JSON.stringify({ command: ["observe_property", i + 1, p] }) + "\n"),
-    );
-  });
-  let buf = "";
-  s.on("data", (d) => {
-    buf += d;
-    let nl;
-    while ((nl = buf.indexOf("\n")) >= 0) {
-      const line = buf.slice(0, nl);
-      buf = buf.slice(nl + 1);
-      let m;
-      try {
-        m = JSON.parse(line);
-      } catch (e) {
-        continue;
-      }
-      if (m.event !== "property-change") continue;
-      if (m.name === "time-pos" && m.data != null) {
-        // reveal the video (make the Electron window transparent) only in
-        // fullscreen; in PiP the browse UI stays opaque and mpv floats on top.
-        if (!firstPos) {
-          firstPos = true;
-          if (!mpvPip) {
-            console.log("[player] first frame -> reveal video");
-            setVideoMode(true);
-          }
-          // mpv maps its window and grabs keyboard focus exactly when playback
-          // actually starts. For a slow-to-buffer source (a Plex movie can take
-          // well over 5s to start) that happens AFTER the fixed post-launch raise
-          // retries ended, leaving mpv focused so the remote stops reaching the
-          // app UI. Re-raise on the real playback-start event (and a short burst
-          // after, since the focus grab can trail the first frame) - this covers
-          // any buffer delay, unlike the fixed launch-time window.
-          [0, 250, 700, 1500].forEach((ms) => setTimeout(raiseWindow, ms));
-          // The file is loaded now (that's what a time-pos means), so its real
-          // fps/size are readable: pick a mode for it, then let it play.
-          if (!mpvPip) startMpvPlayback(seq);
-        }
-        emit({ type: "playing" });
-        emit({ type: "position", ms: Math.round(m.data * 1000) });
-        mpvMedia.active = true;
-        mpvMedia.position = m.data;
-        publishMediaState();
-      } else if (m.name === "duration" && m.data != null) {
-        emit({ type: "duration", ms: Math.round(m.data * 1000) });
-        mpvMedia.duration = m.data;
-        publishMediaState();
-      } else if (m.name === "pause") {
-        // Observed for the media state only - the renderer learns about pausing
-        // from its own player calls.
-        mpvMedia.paused = !!m.data;
-        publishMediaState({ force: true });
-      } else if (m.name === "paused-for-cache") emit({ type: "buffering", on: !!m.data });
-      else if (m.name === "eof-reached" && m.data) {
-        console.log("[player] eof-reached");
-        emit({ type: "finished" });
-      }
-    }
-  });
-}
-
-// ---- IPC ----
-// TV turned off (signalled by the CEC bridge): stop active playback so a stream
-// doesn't keep running after the screen is off. Only the playback is stopped,
-// nothing is killed; the app's UI updates via the "finished" event.
-let lastTvStandbyAt = 0; // launchMpv suppresses its CEC wake right after this
-function onTvStandby() {
-  lastTvStandbyAt = Date.now();
-  if (!mpv) return;
-  console.log("[tv] standby -> stop playback");
-  playingUrl = null;
-  stopMpv();
-  setVideoMode(false);
-  emit({ type: "finished" });
-}
-
 // Bring the FOREGROUND shell window (the active app's own window, or the
-// launcher) to the front and hand it focus (also via wlrctl, so the compositor
-// raises us above a just-exited mpv). Shared by playback start and by
-// showLauncher. All our windows share the Wayland app_id, and only one is
-// visible at a time, so the wlrctl focus lands on the right toplevel.
+// launcher) to the front and hand it focus. Shared by playback start and by
+// showLauncher. Nothing has to be said about mpv: the compositor keeps every
+// window of ours in front of anything else, which is what the transparent UI over
+// a playing film depends on.
 function raiseWindow() {
   // A native app is the visible toplevel and holds keyboard focus; raising a
   // window of ours over it would both hide the app and steal its input.
@@ -2391,7 +884,6 @@ function raiseWindow() {
       w.focus();
       w.moveTop();
     } catch (e) {}
-    execFile("wlrctl", ["toplevel", "focus", "app_id:" + APP_ID], { env: { ...process.env, ...WL_ENV } }, () => {});
     return;
   }
   if (!win || win.isDestroyed()) return;
@@ -2401,7 +893,6 @@ function raiseWindow() {
     win.show();
     win.focus();
     win.moveTop();
-    execFile("wlrctl", ["toplevel", "focus", "app_id:" + APP_ID], { env: { ...process.env, ...WL_ENV } }, () => {});
   } catch (e) {}
 }
 // Stop any other playback and bring the launcher forward, optionally at a hash
@@ -2417,9 +908,9 @@ function showLauncher(hash) {
   // (focused() sees the same app+window and only refreshes its label), i.e. the
   // keyboard would never come up again.
   textinput.dropFor(null);
-  currentAppId = null;
-  playingUrl = null;
-  stopMpv();
+  setForegroundApp(null);
+  player.setPlaying(null);
+  player.stop();
   setVideoMode(false);
   // A native app owns the screen, so Home has to END it, not hide it. Drop the
   // intent first: the process outlives the SIGTERM by a moment and raiseWindow
@@ -2502,7 +993,7 @@ function foregroundApp(id) {
   if (!w) return false;
   applyAppLanguage(id); // the UI language may have changed while this app was away
   if (currentAppId && currentAppId !== id) leftForeground(currentAppId);
-  currentAppId = id;
+  setForegroundApp(id);
   appwins.touch(id);
   try {
     w.webContents.setAudioMuted(false);
@@ -2535,8 +1026,9 @@ function foregroundApp(id) {
 // raiseWindow() stands down until the app exits.
 //
 // The hide is DELAYED, not immediate: the app needs a couple of seconds to map its
-// window, and hiding first would show the bare desktop in the gap. A freshly mapped
-// toplevel stacks above ours on labwc, so the launcher can stay up until then.
+// window, and hiding first would leave the screen black in the gap. The compositor
+// keeps our windows above every other client, so what covers the gap is the
+// launcher itself, until the delay is up.
 const NATIVE_HIDE_DELAY_MS = 2500;
 function openNativeApp(m, extraArgs) {
   const deps = apps.appDeps(m);
@@ -2547,8 +1039,8 @@ function openNativeApp(m, extraArgs) {
     return false;
   }
   textinput.dropFor(null); // a typing session cannot survive into an app we don't own
-  playingUrl = null;
-  stopMpv(); // the shared player must not hold the GPU, audio, or a mode claim
+  player.setPlaying(null);
+  player.stop(); // the shared player must not hold the GPU, audio, or a mode claim
   setVideoMode(false);
   if (!nativeapp.start(m, extraArgs)) return false;
   // Where the screen goes when the program exits: this app's own window if it has one
@@ -2556,7 +1048,7 @@ function openNativeApp(m, extraArgs) {
   // running and in the one place both callers pass through, so a launch that failed
   // cannot leave a return target behind for whatever exits next.
   nativeHostApp = m.type === "native" ? null : m.id;
-  currentAppId = m.id; // makes boxIdle() false too: no OTA restart mid-game
+  setForegroundApp(m.id); // makes boxIdle() false too: no OTA restart mid-game
   nativeForeground = true;
   setTimeout(() => {
     if (!nativeapp.running() || nativeapp.id() !== m.id) return; // exited (or replaced) already
@@ -2696,9 +1188,9 @@ function openRemoteApp(m, url) {
       return false;
     }
   };
-  stopMpv();
+  player.stop();
   setVideoMode(false); // no mpv behind a remote app; drop any prior session
-  currentAppId = m.id; // identity is per-window (windowAppId); this global only tracks foreground
+  setForegroundApp(m.id); // identity is per-window (windowAppId); this global only tracks foreground
   // Every remote window gets the sandbox-safe preload now: a capability app needs
   // it for its granted brokers (fetch/storage), and EVERY remote app needs the
   // text-input bridge (a focused field must be able to raise the on-screen
@@ -2809,7 +1301,12 @@ function openRemoteApp(m, url) {
         showLauncher();
         return;
       }
-      if (input.key === "BrowserBack" || input.key === "GoBack" || input.key === "Escape") {
+      // Backspace, not BrowserBack: while an app owns the screen the compositor has
+      // already rewritten the remote's Back key, and this popup belongs to an app.
+      // Which means a typed Backspace is indistinguishable from the remote's Back -
+      // so while a field is focused (this window is a sign-in page, that is most of
+      // the time) the key belongs to the field, and only Escape closes the popup.
+      if (input.key === "Escape" || (input.key === "Backspace" && !editingPages.has(cwc.id))) {
         // Never let a key handler throw: Back would die with it and the popup would
         // be inescapable.
         let canBack;
@@ -2868,19 +1365,13 @@ function openRemoteApp(m, url) {
     wc.executeJavaScript(NO_WEBAUTHN_JS).catch(() => {});
   });
   // Remote Home key (CEC double-tap Back -> BrowserHome) returns to the launcher.
-  // BrowserBack/GoBack (a BT remote's Back button) -> re-injected as Backspace,
-  // same translation as the main window: a remote site (YouTube leanback) only
-  // handles the key the CEC remote would send, not the browser navigation keys.
+  // The BT remote's Back key needs no translation here any more: the compositor
+  // rewrites it while an app owns the screen, so this window already sees the key
+  // a remote site (YouTube leanback) knows.
   wc.on("before-input-event", (e, input) => {
     if (input.type === "keyDown" && input.key === "BrowserHome") {
       e.preventDefault();
       showLauncher();
-      return;
-    }
-    if (input.key === "BrowserBack" || input.key === "GoBack") {
-      e.preventDefault();
-      if (input.type !== "keyDown" && input.type !== "keyUp") return;
-      wc.sendInputEvent({ type: input.type === "keyDown" ? "keyDown" : "keyUp", keyCode: "Backspace" });
     }
   });
   // If this window goes away for ANY reason while it's still the active app
@@ -2924,7 +1415,7 @@ function openRemoteApp(m, url) {
 function openLocalApp(m) {
   const rt = m.runtime || {};
   textinput.dropFor(null);
-  currentAppId = m.id;
+  setForegroundApp(m.id);
   const w = new BrowserWindow({
     fullscreen: true,
     frame: false,
@@ -2949,20 +1440,14 @@ function openLocalApp(m) {
       ev.sourceId ? "(" + ev.sourceId + ":" + ev.lineNumber + ")" : "",
     );
   });
-  // Same BT-remote Back translation the main window did while an app owned it
-  // (BrowserBack/GoBack -> trusted Backspace; the app UIs only know the CEC form).
-  // Home is ALSO caught main-side here (not only in the renderer) so a hung app
-  // can't trap the box - the renderer's own Home handler still works normally.
+  // Home is caught main-side here (not only in the renderer) so a hung app can't
+  // trap the box - the renderer's own Home handler still works normally. Back needs
+  // nothing: the compositor rewrites it while an app owns the screen.
   w.webContents.on("before-input-event", (e, input) => {
     if (input.type === "keyDown" && input.key === "BrowserHome") {
       e.preventDefault();
       showLauncher();
-      return;
     }
-    if (input.key !== "BrowserBack" && input.key !== "GoBack") return;
-    e.preventDefault();
-    if (input.type !== "keyDown" && input.type !== "keyUp") return;
-    w.webContents.sendInputEvent({ type: input.type === "keyDown" ? "keyDown" : "keyUp", keyCode: "Backspace" });
   });
   // A crashed/gone renderer doesn't emit "closed", so recover to the launcher
   // explicitly - never leave the box stuck on a dead app window (the launcher
@@ -3115,22 +1600,6 @@ const TV_COMMANDS = [
   "tv_on",
   "tv_off",
 ];
-// What mpv is doing right now. Kept here rather than read on demand: the observer
-// already streams it (observeMpv), and asking mpv over its socket per publish would
-// turn a state topic into a round trip.
-const mpvMedia = { active: false, paused: false, position: null, duration: null };
-// The clock stops with the process. Both ways mpv can go away have to come through
-// here - our own stopMpv AND mpv exiting on its own, which is what the end of a
-// film is - or a retained state topic keeps reporting a position for something
-// nobody is watching.
-function clearMpvMedia() {
-  if (!mpvMedia.active) return;
-  mpvMedia.active = false;
-  mpvMedia.paused = false;
-  mpvMedia.position = null;
-  mpvMedia.duration = null;
-  publishMediaState({ force: true });
-}
 let sinkState = { volume: null, muted: false };
 let lastMediaState = null;
 let mediaPublishTimer = null;
@@ -3154,7 +1623,7 @@ function publishMediaState(opts) {
     if (!mqttCtl) return;
     const next = mediastate.compose({
       nowPlaying,
-      mpv: mpvMedia,
+      mpv: player.media,
       volume: sinkState.volume,
       muted: sinkState.muted,
       currentApp: currentAppId,
@@ -3270,19 +1739,19 @@ function handleTvCommand(cmd) {
       showLauncher();
       break;
     case "pause":
-      mpvCmd({ command: ["set_property", "pause", true] });
+      player.cmd({ command: ["set_property", "pause", true] });
       forwardCommand(cmd);
       break;
     case "play":
     case "resume":
-      mpvCmd({ command: ["set_property", "pause", false] });
+      player.cmd({ command: ["set_property", "pause", false] });
       forwardCommand(cmd);
       break;
     case "stop":
-      playingUrl = null;
-      stopMpv();
+      player.setPlaying(null);
+      player.stop();
       setVideoMode(false);
-      emit({ type: "finished" });
+      player.emit({ type: "finished" });
       forwardCommand(cmd);
       break;
     case "next":
@@ -3318,7 +1787,7 @@ function handleTvCommand(cmd) {
       // so it is rejected here rather than sent. A real number, not a coercion:
       // Number(null) and Number("") are both 0, i.e. a silent seek to the start.
       const pos = cmd && typeof cmd.position === "number" ? cmd.position : NaN;
-      if (mpvMedia.active && Number.isFinite(pos) && pos >= 0) mpvCmd({ command: ["seek", pos, "absolute"] });
+      if (player.media.active && Number.isFinite(pos) && pos >= 0) player.cmd({ command: ["seek", pos, "absolute"] });
       else if (!Number.isFinite(pos)) console.warn("[mqtt] seek: bad position", cmd && cmd.position);
       break;
     }
@@ -3441,11 +1910,11 @@ function navTo(dest) {
   // that WILL navigate - an unconfigured remote app must not cost the current
   // stream (review F3).
   const stopPrevPlayback = () => {
-    if (mpv && currentAppId !== m.id) {
-      playingUrl = null;
-      stopMpv();
+    if (player.running() && currentAppId !== m.id) {
+      player.setPlaying(null);
+      player.stop();
       setVideoMode(false);
-      emit({ type: "finished" });
+      player.emit({ type: "finished" });
     }
     // Leaving a native app for another app ends its process: it has no background
     // state to keep, and letting it live would leave it holding the GPU and audio
@@ -3570,11 +2039,18 @@ ipcMain.handle("textinput", (e, action, payload) => {
 
 // A field took focus in a remote app. Only the FOREGROUND app may raise the typing
 // screen - a background page moving its own focus must not take over the TV.
+// Which pages have a text field focused right now. Only one thing reads it, and it
+// is not the typing screen: the remote's Back key reaches a page as a Backspace
+// (the compositor rewrites it while an app owns the screen), so a page that is
+// editing must not have that read as "go back".
+const editingPages = new Set();
 ipcMain.on("kbd:focus", (e, field) => {
+  editingPages.add(e.sender.id);
   const id = windowAppId(e.sender) || popupAppId(e.sender);
   if (!id || id !== currentAppId) return;
   textinput.focused(id, e.sender, field || {});
 });
+ipcMain.on("kbd:blur", (e) => editingPages.delete(e.sender.id));
 
 ipcMain.on("nav", (e, dest) => {
   // "exit" is app-initiated teardown, so it targets the SENDER's app rather than
@@ -3670,7 +2146,7 @@ ipcMain.handle("player", (e, action, payload) => {
   // password as PATH segments - right after the host, inside any slice - and this
   // log is what `tvbox-diag --logs` copies onto the boot partition, which any
   // laptop can read. The origin is what a diagnosis actually needs.
-  console.log("[player] action", action, payload && payload.url ? originOf(payload.url) : "");
+  console.log("[player] action", action, payload && payload.url ? httpserver.originOf(payload.url) : "");
   if (action === "queue") {
     queued.url = payload.url;
     queued.startPos = payload.startPos || 0;
@@ -3678,31 +2154,31 @@ ipcMain.handle("player", (e, action, payload) => {
   } else if (action === "play") {
     // remember whose window the video belongs to: the first-frame reveal
     // (setVideoMode(true) in observeMpv) must hit THAT window, not the launcher
-    mpvOwnerId = appIdForSender(e.sender);
-    if (mpv && playingUrl === queued.url && !mpvPip) {
-      if (mpvStartPending) {
+    player.setOwner(appIdForSender(e.sender));
+    if (player.running() && player.playing() === queued.url && !player.isPip()) {
+      if (player.startPending()) {
         // Still in the paused-start handshake: the mode switch starts it in a
         // moment. Unpausing here would put the switch INSIDE playback.
         console.log("[player] play during the start handshake - letting it finish");
       } else {
         console.log("[player] resume (already loaded)");
-        mpvCmd({ command: ["set_property", "pause", false] });
+        player.cmd({ command: ["set_property", "pause", false] });
       }
     } else if (queued.url) {
-      playingUrl = queued.url;
+      player.setPlaying(queued.url);
       setVideoMode(false);
-      ensureAudio(() => launchMpv(queued.url, queued.startPos, false, null, queued.streams));
+      ensureAudio(() => player.launch(queued.url, queued.startPos, false, null, queued.streams));
     } // fullscreen (also un-PiPs)
-  } else if (action === "pause") mpvCmd({ command: ["set_property", "pause", true] });
-  else if (action === "resume") mpvCmd({ command: ["set_property", "pause", false] });
+  } else if (action === "pause") player.cmd({ command: ["set_property", "pause", true] });
+  else if (action === "resume") player.cmd({ command: ["set_property", "pause", false] });
   else if (action === "stop") {
-    playingUrl = null;
-    stopMpv();
+    player.setPlaying(null);
+    player.stop();
     setVideoMode(false);
-  } else if (action === "seek") mpvCmd({ command: ["seek", payload.posSec || 0, "absolute"] });
+  } else if (action === "seek") player.cmd({ command: ["seek", payload.posSec || 0, "absolute"] });
   else if (action === "tracks") {
     // audio/subtitle tracks of the playing stream, for an in-playback picker
-    return mpvQuery(["get_property", "track-list"]).then((list) => ({
+    return player.query(["get_property", "track-list"]).then((list) => ({
       ok: Array.isArray(list),
       tracks: (Array.isArray(list) ? list : [])
         .filter((t) => t && (t.type === "audio" || t.type === "sub"))
@@ -3718,7 +2194,7 @@ ipcMain.handle("player", (e, action, payload) => {
     // { type: "audio"|"sub", id: <track id> | "no" | "auto" } - aid/sid switch
     const prop = payload.type === "sub" ? "sid" : "aid";
     const v = payload.id === "no" || payload.id === "auto" ? payload.id : Number(payload.id);
-    if (typeof v === "string" || Number.isFinite(v)) mpvCmd({ command: ["set_property", prop, v] });
+    if (typeof v === "string" || Number.isFinite(v)) player.cmd({ command: ["set_property", prop, v] });
   } else if (action === "select") {
     // Mid-playback version of the queue's `streams`, in the SAME ordinal terms
     // (`track` above speaks mpv track ids, which an app that never saw the track
@@ -3726,7 +2202,7 @@ ipcMain.handle("player", (e, action, payload) => {
     // RELAUNCHES mpv from `queued.streams`, so a selection only sent to the live
     // player would be quietly undone by the next toggle. Merged per axis - a
     // call that changes only the subtitle must not clear the audio choice.
-    for (const command of playeropts.streamCommands(payload)) mpvCmd({ command });
+    for (const command of playeropts.streamCommands(payload)) player.cmd({ command });
     queued.streams = playeropts.mergeStreams(queued.streams, payload);
   } else if (action === "prop") {
     // One allowlisted playback property (subtitle/audio sync, speed, volume,
@@ -3734,14 +2210,14 @@ ipcMain.handle("player", (e, action, payload) => {
     // "ok" for a setting that never landed has no way to notice.
     const v = playeropts.propValue(payload.name, payload.value);
     if (v === null) return { ok: false, error: "property not allowed or value out of range" };
-    mpvCmd({ command: ["set_property", payload.name, v] });
+    player.cmd({ command: ["set_property", payload.name, v] });
   } else if (action === "pip") {
     // Toggle the current channel between a PiP (at the launcher-measured rect) and
     // fullscreen. PiP needs the window transparent (so mpv behind shows through the
     // hole); fullscreen starts opaque and observeMpv reveals on the first frame.
-    if (playingUrl) {
+    if (player.playing()) {
       setVideoMode(!!payload.on);
-      ensureAudio(() => launchMpv(playingUrl, 0, !!payload.on, payload.rect, queued.streams));
+      ensureAudio(() => player.launch(player.playing(), 0, !!payload.on, payload.rect, queued.streams));
     }
   }
   return { ok: true };
@@ -3779,7 +2255,7 @@ const host = {
   config, // config store (rawSpotify / setSpotify / publicConfig)
   pairing: { register: pairing.register }, // let a plugin register its own pairing page(s) (kind -> provider)
   BrowserWindow, // for a plugin that needs its own window (Spotify OAuth)
-  json: jsonRes, // (res, obj) -> JSON response
+  json: httpserver.jsonRes, // (res, obj) -> JSON response
   log: (...a) => console.log("[plugin]", ...a),
   childEnv: () => ({ ...process.env, ...WL_ENV }), // spawn env with the session's Wayland vars
   // Is the box free? The very predicate every background job in here waits for
@@ -3942,7 +2418,7 @@ app.whenReady().then(async () => {
       // DESTROYS the window (the documented rollback lever), which would kill the page
       // we are about to type into - and the session with it.
       hideForTyping(id);
-      currentAppId = null; // the launcher is the foreground surface while typing
+      setForegroundApp(null); // the launcher is the foreground surface while typing
       win.show();
       try {
         win.webContents.send("tvbox-nav", { dest: "typing" });
@@ -3955,7 +2431,7 @@ app.whenReady().then(async () => {
           win.webContents.send("tvbox-nav", { dest: "home" }); // drop the typing view
         } catch (e) {}
       }
-      currentAppId = appId;
+      setForegroundApp(appId);
       if (unhideForTyping(appId)) {
         appwins.touch(appId);
         for (const p of popupsOf(appId)) {
@@ -3968,7 +2444,7 @@ app.whenReady().then(async () => {
         }
         if (win && !win.isDestroyed()) win.hide(); // exactly one visible toplevel again
       } else {
-        currentAppId = null;
+        setForegroundApp(null);
         showLauncher(); // the app window died while we were typing
       }
     },
@@ -3978,6 +2454,9 @@ app.whenReady().then(async () => {
     },
     pairingStop: () => pairing.stop(),
     isForeground: (id) => currentAppId === id,
+    // The compositor types into whatever holds the keyboard, which by now is the
+    // app window this session belongs to - onDone put it back in front.
+    typeText: (text) => compositor.typeText(text, { selectAll: true }),
   });
   // A restore replaced config.json + user apps - plugins only read credentials
   // at boot, so restart the shell shortly after (the phone page + TV UI get a
@@ -3988,7 +2467,7 @@ app.whenReady().then(async () => {
   backupPairing.onHostname(
     (name) =>
       new Promise((resolve, reject) =>
-        setHostname(name, (r) => (r.ok ? resolve(r) : reject(new Error(r.error || "rename refused")))),
+        system.setHostname(name, (r) => (r.ok ? resolve(r) : reject(new Error(r.error || "rename refused")))),
       ),
   );
   backupPairing.onRestored(() => {
@@ -4009,7 +2488,7 @@ app.whenReady().then(async () => {
   // honour what the owner asked for. Only ever ENFORCES off, and only with a wired
   // carrier: a box whose ethernet went away keeps its wifi.
   if (config.publicConfig().wifi.radio === false) {
-    ethernetStatus((eth) => {
+    system.ethernetStatus((eth) => {
       if (!wifiradio.canDisable(eth)) {
         console.warn("[wifi] radio is set off but there is no ethernet - leaving it on");
         return;
@@ -4022,7 +2501,7 @@ app.whenReady().then(async () => {
   // A colour space outlives the shell: a compositor left in PQ by a film that
   // was playing when the shell went down would keep the launcher in it. Say no
   // before the first mode change, which is what applies it.
-  setHdr(false);
+  player.setHdr(false);
   // Put the output at the UI mode: the compositor boots at the EDID preferred
   // mode, which on a 4K set means drawing the launcher at 8.3 Mpixels.
   dmode.refresh();
@@ -4030,7 +2509,7 @@ app.whenReady().then(async () => {
   // an app's preload reads the panel resolution exactly once, when its window is
   // created. Losing that race means the app spends its whole life believing the
   // screen is whatever the UI happens to be running at.
-  panelResolution = display.panelResolution((display.listSync({ ...process.env, ...WL_ENV }) || {}).modes);
+  panelResolution = display.panelResolution((display.listSync() || {}).modes);
   // Whether the set can be asked for PQ at all. Read from the EDID once: a TV
   // does not grow the capability while it is plugged in, and a box whose panel
   // cannot do it never touches the compositor's colour space.
@@ -4063,21 +2542,6 @@ app.whenReady().then(async () => {
       ev.sourceId ? "(" + ev.sourceId + ":" + ev.lineNumber + ")" : "",
     );
   });
-  // BT remotes (e.g. Fire TV) send Back as KEY_BACK -> DOM BrowserBack/GoBack.
-  // The launcher/sdk accept those directly, but a webclient app's own UI (the
-  // Plex HTPC client) only understands the CEC remote's form (Backspace). While
-  // an app owns this window, swallow the browser key and re-inject a real
-  // Backspace through the input pipeline (a trusted event - synthetic DOM
-  // events are not guaranteed to be honored). Never while the launcher is
-  // showing (currentAppId null) - it handles BrowserBack itself. The injected
-  // Backspace re-enters this handler but doesn't match, so no loop.
-  win.webContents.on("before-input-event", (e, input) => {
-    if (!currentAppId || (input.key !== "BrowserBack" && input.key !== "GoBack")) return;
-    e.preventDefault();
-    if (input.type !== "keyDown" && input.type !== "keyUp") return;
-    if (input.type === "keyDown") console.log("[input] " + input.key + " -> Backspace (app " + currentAppId + ")");
-    win.webContents.sendInputEvent({ type: input.type === "keyDown" ? "keyDown" : "keyUp", keyCode: "Backspace" });
-  });
   win.loadURL(BASE + "/tvbox/"); // boot into the HOME launcher
   win.focus();
   // Keep a black backdrop behind the page by default (only removed during active
@@ -4100,7 +2564,7 @@ app.whenReady().then(async () => {
       const a = config.rawApps();
       return !(a && a.background === false);
     },
-    memInfo,
+    memInfo: system.memInfo,
     foregroundId: () => currentAppId,
   });
   setInterval(() => appwins.ramGuardTick(), 60 * 1000); // evict hidden apps under memory pressure
@@ -4136,17 +2600,17 @@ app.whenReady().then(async () => {
   });
   updater.startSchedulers(); // boot check + 6h re-check + nightly idle auto-apply
   if (config.rawFileserver().enabled) applyFileserver(); // the LAN share survives a restart
-  setInterval(appsAutoTick, 30 * 60 * 1000); // nightly registry app auto-update (same window)
+  setInterval(maintenance.appsAutoTick, 30 * 60 * 1000); // nightly registry app auto-update (same window)
   // Not gated to the small hours like the registry check: a bundle whose flatpak
   // moved is BROKEN-ish now (the copy is older than the app it talks to), and the
   // work is a local file copy, not a download.
-  setTimeout(bundleRefreshTick, 2 * 60 * 1000);
-  setInterval(bundleRefreshTick, 6 * 60 * 60 * 1000);
+  setTimeout(maintenance.bundleRefreshTick, 2 * 60 * 1000);
+  setInterval(maintenance.bundleRefreshTick, 6 * 60 * 60 * 1000);
   // Sooner than the bundle refresh: this is the boot right after a restore, the
   // user is watching an empty HOME, and every tile they expect is behind it. The
   // re-check covers a box that was busy (or offline) at the first attempt.
-  setTimeout(reconcileTick, 20 * 1000);
-  setInterval(reconcileTick, 15 * 60 * 1000);
+  setTimeout(maintenance.reconcileTick, 20 * 1000);
+  setInterval(maintenance.reconcileTick, 15 * 60 * 1000);
   setTimeout(btBatteryTick, 5 * 60 * 1000); // early check after boot, then half-hourly
   setInterval(btBatteryTick, 30 * 60 * 1000);
   // Start plugin daemons once the HDMI sink is the default (librespot needs it).
@@ -4154,6 +2618,50 @@ app.whenReady().then(async () => {
   // MQTT bridge (now-playing publish + HA integration); no-op if not provisioned.
   // (The command handler is added by the voice-control work.)
   applyMqttConfig();
+  // A rename changes which MQTT topics the box belongs on, so the bridge has to
+  // reconnect with it.
+  system.init({ onHostnameChanged: applyMqttConfig });
+  // Say who owns the screen, before anything else can. The compositor outlives the
+  // shell - the session's respawn loop restarts only this process - so it can still
+  // be holding "an app is in front" from before the restart, and would go on
+  // rewriting the remote's Back key for a launcher that handles the browser key
+  // itself. Same reason player.js starts its HDR claim as "nothing said yet".
+  setForegroundApp(currentAppId);
+  // The player is a service, not a window: the shell hands it the four things it
+  // cannot know by itself - which windows hear a player event, how to reveal the
+  // video, the display-mode arbiter, and what the panel answered.
+  player.init({
+    sendEvent: (ev) => {
+      const fg = currentAppId && appWindow(currentAppId);
+      for (const w of new Set([win, fg])) {
+        if (w && !w.isDestroyed()) {
+          try {
+            w.webContents.send("player-event", ev);
+          } catch (e) {}
+        }
+      }
+    },
+    setVideoMode,
+    raiseWindow,
+    cecPower,
+    publishMediaState,
+    dmode,
+    panelHdr: () => panelHdr,
+    outputSize: () => outputSize,
+    audioSink: () => audioSink,
+    childEnv: () => ({ ...process.env, ...WL_ENV }),
+  });
+  // The background jobs need to know whether the box is free and how to reach the
+  // shell; nothing in them draws anything.
+  maintenance.init({
+    boxIdle,
+    boxFree,
+    restartShell,
+    hotLoadPlugin,
+    applyPendingAppFiles: (opts) => backup.applyPendingAppFiles(opts),
+    jsonRes: httpserver.jsonRes,
+    childEnv: () => ({ ...process.env, ...WL_ENV }),
+  });
   ir.applyConfig(); // IR blaster hub; no-op if not configured
   // Keep the media state topic honest about which app is in front and how loud the
   // box is; both are cheap and neither is urgent (see MEDIA_TICK_MS).
@@ -4175,7 +2683,7 @@ app.whenReady().then(async () => {
 // rather than waiting them out and leaving the app behind.
 const NATIVE_SHUTDOWN_WAIT_MS = 2500;
 function shutdown() {
-  stopMpv();
+  player.stop();
   if (!nativeapp.running()) return finishShutdown();
   // The app was just asked to exit. Quitting immediately would take away the
   // process that owns it before it has written its files, and the escalation

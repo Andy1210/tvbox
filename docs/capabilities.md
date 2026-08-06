@@ -78,8 +78,8 @@ Rules the broker enforces, so a misbehaving app can't own the screen:
   the shell's own mpv path switches to `video-sync=display-resample` there;
 - switches are rate-limited: each one blanks HDMI for a second or two.
 
-Needs `wlr-randr` on the box (in the image + provision apt lists). On an
-OTA-updated box that never got it, every claim answers `no output` and the
+Needs the compositor's control socket, which is where mode setting happens now.
+On a box whose session is down, every claim answers `no output` and the
 resolution simply stays where the TV put it.
 
 ### `fetch` - the data-proxy capability
