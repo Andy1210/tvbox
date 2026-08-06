@@ -139,7 +139,7 @@ function LangPicker({
         className="fixed inset-0 z-[55] bg-black/90 flex flex-col items-center justify-center gap-[1.6vh] px-[6vw]"
       >
         <div className="text-[2.8vh] font-bold">{title}</div>
-        <div className="flex flex-col gap-[0.8vh] w-[32.3vw] max-h-[68vh] overflow-y-auto no-scrollbar">
+        <div className="flex flex-col gap-[0.8vh] w-[32.3vw] max-h-[68vh] overflow-y-auto no-scrollbar px-[1.5vw] -mx-[1.5vw]">
           {TRACK_LANGS.map((code) => (
             <FocusButton
               key={code || "auto"}

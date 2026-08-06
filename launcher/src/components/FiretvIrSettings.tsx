@@ -352,7 +352,7 @@ export function FiretvIrSettings({ device }: { device?: { id: string; name: stri
                     {filter ? t("firetvir.filterIs", { q: filter }) : t("firetvir.filterBrand")}
                   </FocusButton>
                   {!brand ? (
-                    <div className="flex flex-wrap gap-[0.7vh] max-w-[66vw] max-h-[30vh] overflow-y-auto no-scrollbar">
+                    <div className="flex flex-wrap gap-[0.7vh] max-w-[66vw] max-h-[30vh] overflow-y-auto no-scrollbar px-[1.5vw] -mx-[1.5vw]">
                       {filteredBrands.slice(0, 60).map((b) => (
                         <FocusButton
                           key={b.brand}

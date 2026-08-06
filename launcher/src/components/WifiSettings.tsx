@@ -77,7 +77,7 @@ function CountryPicker({
         className="fixed inset-0 z-[55] bg-black/90 flex flex-col items-center justify-center gap-[1.6vh] px-[6vw]"
       >
         <div className="text-[2.8vh] font-bold">{t("wifi.country")}</div>
-        <div className="flex flex-col gap-[0.8vh] w-[32.3vw] max-h-[68vh] overflow-y-auto no-scrollbar">
+        <div className="flex flex-col gap-[0.8vh] w-[32.3vw] max-h-[68vh] overflow-y-auto no-scrollbar px-[1.5vw] -mx-[1.5vw]">
           {WIFI_COUNTRIES.map((code) => (
             <FocusButton
               key={code || "auto"}
@@ -142,7 +142,10 @@ export function WifiSettings() {
     setTimeout(() => setFocus("wifi-rescan"), 0);
     const r = await wifiConnect(ssid, password, hidden);
     setConnecting(null);
-    setMsg(r.ok ? t("wifi.connected", { ssid }) : t("wifi.failed", { ssid }));
+    // What NetworkManager said, not just that it said no. It is the difference
+    // between a wrong password and a network that never answered, and there is no
+    // log to read from the couch.
+    setMsg(r.ok ? t("wifi.connected", { ssid }) : t("wifi.failed", { ssid }) + (r.error ? " - " + r.error : ""));
     if (r.ok) refresh();
   };
   const onPick = (net: WifiNet) => {
@@ -270,7 +273,7 @@ export function WifiSettings() {
           <span className="text-[1.9vh] text-fg-dim">{msg}</span>
         ) : null}
       </div>
-      <div className="flex flex-col gap-[0.8vh] max-w-[70vw] max-h-[40vh] overflow-y-auto no-scrollbar">
+      <div className="flex flex-col gap-[0.8vh] max-w-[70vw] max-h-[40vh] overflow-y-auto no-scrollbar px-[1.5vw] -mx-[1.5vw]">
         {nets.map((n, i) => (
           <div key={n.ssid} className="flex items-center gap-[1vw]">
             <FocusButton

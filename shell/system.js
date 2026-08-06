@@ -166,27 +166,49 @@ function wifiList(cb) {
 }
 function wifiConnect(ssid, password, hidden, cb) {
   if (!ssid) return cb({ ok: false, error: "no ssid" });
-  const args = ["device", "wifi", "connect", ssid];
+  // `--wait` is a GLOBAL option and only parses before the subcommand; nmcli
+  // answers "invalid extra argument" for one at the end. It is here so nmcli
+  // bounds itself rather than being killed: its own default is 90s, longer than
+  // anyone waits at a TV, and a process we kill reports nothing.
+  const args = ["--wait", String(NM_WAIT_S), "device", "wifi", "connect", ssid];
   if (password) args.push("password", password);
   // Hidden networks aren't in the scan list, so nmcli must be told to probe for
   // the SSID instead of matching a scan result.
   if (hidden) args.push("hidden", "yes");
-  execFile("nmcli", args, { timeout: 35000 }, (e, _o, err) => {
-    if (!e) return cb({ ok: true });
-    execFile("sudo", ["-n", "nmcli", ...args], { timeout: 35000 }, (e2, _o2, err2) => {
-      if (!e2) return cb({ ok: true });
-      cb({
-        ok: false,
-        error: String(err2 || err || e.message || "")
+  const run = () =>
+    execFile("nmcli", args, { timeout: (NM_WAIT_S + 5) * 1000 }, (e, _o, err) => {
+      if (!e) return cb({ ok: true });
+      execFile("sudo", ["-n", "nmcli", ...args], { timeout: (NM_WAIT_S + 5) * 1000 }, (e2, _o2, err2) => {
+        if (!e2) return cb({ ok: true });
+        const error = String(err2 || err || e.message || "")
           .trim()
-          .slice(0, 160),
+          .slice(0, 160);
+        console.warn("[wifi] connect to", ssid, "failed:", error);
+        cb({ ok: false, error });
       });
+    });
+  // `nmcli device wifi connect` FINDS A MATCHING PROFILE or creates one, and a
+  // profile that exists brings its own stored secret: the password just typed is
+  // then never tried, and a network whose password changed fails at once with
+  // "Secrets were required, but not provided". Typing one is the answer to that,
+  // so the stale profile goes first. Only when a password was given, and never
+  // for a profile that is not this network's.
+  if (!password) return run();
+  wifiSavedConnections((names) => {
+    if (!names.includes(ssid)) return run();
+    execFile("nmcli", ["connection", "delete", "id", ssid], { timeout: 8000 }, (e) => {
+      if (e) execFile("sudo", ["-n", "nmcli", "connection", "delete", "id", ssid], { timeout: 8000 }, run);
+      else run();
     });
   });
 }
 // Saved (known) WiFi connection profile names. `nmcli device wifi connect` names
 // the profile after the SSID, so name==ssid is the common case; renamed or
 // NM-suffixed ("MyNet 1") profiles are handled by the SSID lookup in wifiForget.
+// How long nmcli may spend on a connect. Long enough for a DHCP lease on a slow
+// AP, short enough that a wrong password is an answer and not a hang.
+const NM_WAIT_S = 30;
+
 function wifiSavedConnections(cb) {
   execFile("nmcli", ["-t", "-f", "NAME,TYPE", "connection", "show"], { timeout: 8000 }, (e, out) => {
     if (e) return cb([]);

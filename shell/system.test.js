@@ -111,6 +111,41 @@ test("a colon in an SSID survives the terse format", async () => {
   );
 });
 
+test("a password the user typed replaces the one a saved profile carries", async () => {
+  // nmcli reuses a matching profile, secret and all, so the new password would
+  // never be tried: the network whose password changed is exactly the case where
+  // someone is standing at the TV typing one.
+  const seen = withCommands({
+    "-f NAME,TYPE connection show": "DarkTL50:802-11-wireless\n",
+    "connection delete": "",
+    "device wifi connect": "",
+  });
+  const r = await new Promise((resolve) => system.wifiConnect("DarkTL50", "hunter2", false, resolve));
+  assert.deepStrictEqual(r, { ok: true });
+  assert.ok(
+    seen.some((c) => c.includes("connection delete id DarkTL50")),
+    "the stale profile is dropped first",
+  );
+  const connect = seen.find((c) => c.includes("device wifi connect"));
+  assert.ok(connect.includes("password hunter2"), connect);
+  // Before the subcommand, where nmcli parses it: at the end it answers "invalid
+  // extra argument" and nothing connects at all.
+  assert.match(connect, /^nmcli --wait \d+ device wifi connect /, connect);
+});
+
+test("a network with no saved profile is joined without deleting anything", async () => {
+  const seen = withCommands({
+    "-f NAME,TYPE connection show": "DarkTL24:802-11-wireless\n",
+    "device wifi connect": "",
+  });
+  const r = await new Promise((resolve) => system.wifiConnect("CoffeeShop", "", false, resolve));
+  assert.deepStrictEqual(r, { ok: true });
+  assert.strictEqual(
+    seen.some((c) => c.includes("connection delete")),
+    false,
+  );
+});
+
 test("About reports an SSID with a space in it, not one with colons", async () => {
   // nmcli escapes ':' inside a value, so the field has to be tokenized - and the
   // sentinel cannot be a space, or every SSID that contains one comes back with

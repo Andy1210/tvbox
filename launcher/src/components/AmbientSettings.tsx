@@ -186,7 +186,7 @@ export function AmbientSettings() {
         {photos.length > 0 && (
           <>
             <div className="text-[1.7vh] text-fg-dim mt-[0.4vh]">{t("ambient.photosManage")}</div>
-            <div className="flex flex-wrap gap-[1vh] max-h-[34vh] overflow-y-auto no-scrollbar">
+            <div className="flex flex-wrap gap-[1vh] max-h-[34vh] overflow-y-auto no-scrollbar px-[1.5vw] -mx-[1.5vw]">
               {photos.map((name, i) => (
                 <FocusButton
                   key={name}
