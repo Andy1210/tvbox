@@ -5,6 +5,41 @@ updates). `scripts/make-release.sh` lifts the current version's `hu`/`en`
 blocks into the OTA feed's `notes` - keep both languages, keep it short, and
 write for the person on the couch (what changes for THEM), not for developers.
 
+## 2.0.1
+
+### hu
+
+- **A wifi-jelszó, amit begépelsz, tényleg az érvényes.** Egy már ismert hálózatnál
+  eddig a régen mentett jelszó ment ki helyette, és a csatlakozás azonnal elhasalt.
+  Ha a hálózat titkosítása közben változott meg, a doboz újraépíti a beállítást - és
+  ha így sem megy, most kiírja, mit mondott a rendszer, nem csak azt, hogy nem
+  sikerült.
+- **A kikapcsolt TV nem nézi végig helyetted a sorozatot.** A film közben
+  kikapcsolt TV eddig úgy állította le a lejátszást, mintha a rész véget ért volna,
+  amire a Plex pár másodperc múlva elindította a következőt - sötét szobában, végig.
+  Ugyanez vonatkozik a telefonról küldött megállításra és az appváltásra is. (A
+  Plexhez ehhez az app 1.2.1-es változata is kell; a doboz éjszaka magától
+  frissíti.)
+- **A beállításokban a kijelölt wifi-hálózat két széle nem vágódik le.**
+- A távirányító túl gyors gombismétlése is megszűnt, de az a compositorral érkezik,
+  nem ezzel a frissítéssel: ahhoz újraflashelés vagy provision kell.
+
+### en
+
+- **The wifi password you type is the one that gets used.** On a network the box
+  already knew, the saved password went out instead and the attempt failed at once.
+  If the network's security changed underneath, the box rebuilds its settings for
+  it - and when it still cannot join, it now says what the system said rather than
+  only that it failed.
+- **A TV switched off no longer watches the series for you.** Turning the TV off
+  during a film used to end playback as if the episode had finished, so Plex
+  started the next one a few seconds later, and kept going in a dark room. The same
+  now goes for a stop sent from a phone and for switching to another app. (Plex
+  needs its own 1.2.1 package for this; the box picks that up overnight.)
+- **The selected wifi network is no longer clipped at both edges in Settings.**
+- Remote buttons no longer repeat far too fast, but that fix arrives with the
+  compositor rather than with this update: it needs a re-flash or a provision.
+
 ## 2.0.0
 
 ### hu
