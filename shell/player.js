@@ -580,6 +580,12 @@ function observeMpv(seq, tries) {
 // TV turned off (signalled by the CEC bridge): stop active playback so a stream
 // doesn't keep running after the screen is off. Only the playback is stopped,
 // nothing is killed; the app's UI updates via the "finished" event.
+//
+// The event carries a REASON, because "the film ended" and "something stopped it"
+// are different things to the app on top: Plex answers the end of an item with its
+// post-play screen, which on a series starts the next episode a few seconds later.
+// With the screen off that is a box working its way through a season. An app that
+// does not read the reason behaves as it did.
 let lastTvStandbyAt = 0; // launchMpv suppresses its CEC wake right after this
 function onTvStandby() {
   lastTvStandbyAt = Date.now();
@@ -588,7 +594,7 @@ function onTvStandby() {
   playingUrl = null;
   stopMpv();
   deps.setVideoMode(false);
-  emit({ type: "finished" });
+  emit({ type: "finished", reason: "tv-standby" });
 }
 
 // What the shell asks about a running film.
