@@ -5,5 +5,5 @@
 #
 # To move to a new release: change both lines. The sha256 is published next to
 # the binary (tvbox-wc-aarch64.sha256) by the release build.
-TAG="v0.1.4"
-SHA256="34f04287e3b3bb0d24292c9f791f74c06e099d7a5a61fca58555373d73b0fa23"
+TAG="v0.1.5"
+SHA256="a36d9e6506baf40c6fa44f9166648feaa9da27820c8608be3c469ffa445e4ebe"
