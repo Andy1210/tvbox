@@ -10,9 +10,12 @@ const net = require("net");
 const os = require("os");
 const path = require("path");
 
-// The compositor client reads its socket path once, at require time.
+// The compositor client reads its socket path once, at require time. The previous
+// value is put back at the end: this file is run in its own process today, but a
+// path pointing into a deleted temp dir is a poor thing to leave behind either way.
 const dir = fs.mkdtempSync(path.join(os.tmpdir(), "tvbox-player-"));
 const socketPath = path.join(dir, "tvbox-wc.sock");
+const REAL_SOCKET = process.env.TVBOX_WC_SOCKET;
 process.env.TVBOX_WC_SOCKET = socketPath;
 
 const player = require("./player");
@@ -114,4 +117,8 @@ test("the fallback rectangle is a quarter of whatever the output is at", () => {
   assert.strictEqual(player.pipFallbackRect(), null);
 });
 
-test.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+test.after(() => {
+  fs.rmSync(dir, { recursive: true, force: true });
+  if (REAL_SOCKET === undefined) delete process.env.TVBOX_WC_SOCKET;
+  else process.env.TVBOX_WC_SOCKET = REAL_SOCKET;
+});
