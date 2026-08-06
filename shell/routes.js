@@ -27,6 +27,11 @@ const updater = require("./updater");
 const wifiradio = require("./wifiradio");
 
 function post(p, data, res, ctx) {
+  // The body is whatever the caller sent, and a literal `null` is valid JSON. Every
+  // route below reads a field off `data` straight away, so one such request would
+  // throw a TypeError with nothing above it to catch: no try/catch around the
+  // handler, no `uncaughtException` behind it, and the shell dies. Normalize once.
+  if (!data || typeof data !== "object") data = {};
   if (p === "/tvbox/api/config") {
     const changed = [];
     if (data.iptv) {
@@ -202,7 +207,12 @@ function post(p, data, res, ctx) {
     return httpserver.jsonRes(res, { ok: true });
   }
   if (p === "/tvbox/api/update/check") {
-    updater.check().then((s) => httpserver.jsonRes(res, s));
+    updater.check().then(
+      (s) => httpserver.jsonRes(res, s),
+      // A feed that cannot be reached must answer the Settings screen, not leave
+      // the request open until the client gives up.
+      (e) => httpserver.jsonRes(res, { ...updater.status(), error: String((e && e.message) || e) }),
+    );
     return;
   }
   if (p === "/tvbox/api/update/apply") {
@@ -236,7 +246,7 @@ function post(p, data, res, ctx) {
   }
   if (p.startsWith("/tvbox/api/bt/")) {
     const action = p.slice("/tvbox/api/bt/".length);
-    const fn = {
+    const actions = {
       pair: bluetooth.pair,
       // Same pairing with the wifi radio held down for the attempt - the escape
       // hatch for a BLE remote that will not bond while the shared antenna is busy.
@@ -244,7 +254,11 @@ function post(p, data, res, ctx) {
       connect: bluetooth.connect,
       disconnect: bluetooth.disconnect,
       remove: bluetooth.remove,
-    }[action];
+    };
+    // `action` is a path segment, so the lookup must not reach what every object
+    // inherits: `__proto__` answers with a truthy value that cannot be called, and
+    // `constructor` with one that can. Own properties only.
+    const fn = Object.hasOwn(actions, action) ? actions[action] : null;
     const mac = String(data.mac || "").toUpperCase();
     if (!fn) {
       res.writeHead(404, { "Content-Type": "text/plain" });

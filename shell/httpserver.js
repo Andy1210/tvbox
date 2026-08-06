@@ -35,13 +35,12 @@ function jsonRes(res, obj) {
 
 // Serve a file from under `root`, or the SPA's index for a path that is not one.
 //
-// The boundary check is a string comparison against root + separator, not a
-// startsWith on root alone: `/apps/plexi` starts with `/apps/plex` and is a
-// different app's directory.
+// The boundary is root + separator rather than a startsWith on root alone
+// (`/apps/plexi` starts with `/apps/plex` and is a different app's directory), and
+// it is checked on the resolved path - see underRoot.
 function serveStatic(res, root, p, spaFallback) {
   const fp = path.join(root, p);
-  const base = root.endsWith(path.sep) ? root : root + path.sep;
-  if ((fp === root || fp.startsWith(base)) && isFile(fp)) {
+  if (underRoot(root, fp) && isFile(fp)) {
     res.writeHead(200, { "Content-Type": MIME[path.extname(fp)] || "application/octet-stream" });
     // A read that fails halfway (the file went away, an I/O error, a permission
     // change) emits `error` on the stream, and an unhandled one takes the whole
@@ -65,6 +64,25 @@ function serveStatic(res, root, p, spaFallback) {
   } else {
     res.writeHead(404, { "Content-Type": "text/plain" });
     res.end("not found");
+  }
+}
+
+// Is `fp` inside `root`, following symlinks?
+//
+// The string comparison alone answers for the path the request asked for, not for
+// the file it lands on. An app's `web/` comes out of a tarball nobody here wrote
+// (install.js extracts a flatpak's files), so a link named `web/logo.png` pointing
+// at `~/.tvbox/config.json` would pass the prefix test and be served - with the
+// IPTV password and the parental PIN hash in it - to any page on our origin.
+// Resolving both sides is what makes the boundary the real file's.
+function underRoot(root, fp) {
+  try {
+    const realRoot = fs.realpathSync(root);
+    const real = fs.realpathSync(fp);
+    const base = realRoot.endsWith(path.sep) ? realRoot : realRoot + path.sep;
+    return real === realRoot || real.startsWith(base);
+  } catch (e) {
+    return false; // a path that does not resolve is not inside anything
   }
 }
 
