@@ -142,7 +142,14 @@ function submit(text) {
     // Replacing, not appending: the field usually already holds something (a
     // prefilled email, the last search, or the typo being corrected), and appending
     // produced concatenated garbage the user couldn't even see in a password field.
-    deps.typeText(chars);
+    // The compositor outlives the shell, so its socket can be gone while this
+    // process runs. A failure here is one feature not working, and it must not be
+    // more than that: a throw inside a timer has nothing above it to catch it.
+    try {
+      deps.typeText(chars);
+    } catch (e) {
+      console.warn("[textinput] typing failed:", e.message);
+    }
   }, 400);
   console.log("[textinput] typed", chars.length, "chars into", s.appId);
   return { ok: true, length: chars.length };

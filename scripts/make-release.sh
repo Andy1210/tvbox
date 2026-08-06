@@ -102,6 +102,12 @@ NOTES_EN="$NOTES_EN" NOTES_HU="$NOTES_HU" node -e "
   // (REQUIREMENTS in shell/updater.js), which is how an OTA-only box is kept off
   // a release that needs something only a re-flash can install.
   const requires = JSON.parse(fs.readFileSync('shell/package.json', 'utf8')).tvboxRequires || [];
+  // The box refuses a feed whose requires is not a list, so writing one would ship a
+  // release no box can install. Fail here, where someone is watching.
+  if (!Array.isArray(requires) || requires.some((r) => typeof r !== 'string')) {
+    console.error('tvboxRequires must be a list of requirement names');
+    process.exit(1);
+  }
   fs.writeFileSync('$OUT/update.json', JSON.stringify({
     feedVersion: 1,
     version: '$VERSION',

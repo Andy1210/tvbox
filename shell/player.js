@@ -32,7 +32,12 @@ const hdrout = require("./hdr"); // whether the output should be in PQ for this 
 const playeropts = require("./playeropts"); // app stream terms -> mpv args
 const videoout = require("./videoout"); // which mpv renderer a stream needs
 
-const IPC = "/tmp/tvbox-mpv.sock";
+// One IPC socket per launch, named for the launch counter. With a single fixed
+// path an mpv that was still shutting down removed the socket the NEXT launch had
+// just created: that film's observer never connected, so no position reached the
+// app and the paused start waited out its failsafe instead of the handshake.
+const ipcFor = (seq) => "/tmp/tvbox-mpv-" + seq + ".sock";
+let ipc = ipcFor(0);
 const MPV_CLAIM = "shell:mpv"; // claim id for the shell's own player
 
 // What the shell owns and the player has to reach: its windows, the display-mode
@@ -91,7 +96,7 @@ function emit(ev) {
 // forget). Resolves null on any failure - callers treat that as "no tracks".
 function mpvQuery(command) {
   return new Promise((resolve) => {
-    const s = net.connect(IPC);
+    const s = net.connect(ipc);
     const to = setTimeout(() => {
       try {
         s.destroy();
@@ -133,7 +138,7 @@ function mpvQuery(command) {
 }
 
 function mpvCmd(obj) {
-  const s = net.connect(IPC);
+  const s = net.connect(ipc);
   s.on("error", () => {});
   s.on("connect", () => {
     try {
@@ -168,7 +173,7 @@ function stopMpv(keepMode) {
     mpv = null;
   }
   try {
-    fs.unlinkSync(IPC);
+    fs.unlinkSync(ipc);
   } catch (e) {}
 }
 // mpv logs its own COMMAND LINE, and the file it plays is on it - so this file
@@ -222,6 +227,12 @@ function launchMpv(url, startPos, pip, rect, streams) {
   // because there the browse UI is what's on screen.
   stopMpv(!pip);
   const seq = ++mpvSeq; // this launch's identity for every async gate below
+  ipc = ipcFor(seq);
+  // An mpv that was killed hard leaves its socket file behind, and mpv will not
+  // bind over an existing one - that launch would then have no IPC at all.
+  try {
+    fs.unlinkSync(ipc);
+  } catch (e) {}
   mpvPip = !!pip;
   // mpv is a shared, dep-gated player service - spawned lazily only when a
   // player-capable app actually plays, and only if the binary is present. A box
@@ -245,7 +256,7 @@ function launchMpv(url, startPos, pip, rect, streams) {
     "--vo=gpu",
     "--gpu-api=opengl",
     "--hwdec=auto-safe",
-    "--input-ipc-server=" + IPC,
+    "--input-ipc-server=" + ipc,
     "--start=" + startPos,
     // (the log file is appended below, when there is one we trust)
     "--msg-level=all=error",
@@ -391,7 +402,11 @@ function setHdr(on, cb) {
 // NEXT film) at the dead one's mode with nothing left to release it.
 function adaptMpvMode(seq, done) {
   const claim = (content) => {
-    if (mpvSeq !== seq || !mpv) return done(); // stopped or superseded while we read
+    // Stopped, superseded, or already playing: reading mpv's properties can take
+    // longer than the 6 s failsafe that starts the film without us, and a mode
+    // change blanks HDMI for a second or two. That belongs before the first frame
+    // or not at all.
+    if (mpvSeq !== seq || !mpv || !mpvStartPending) return done();
     const zeroCopy = videoout.zeroCopyVideo(content, mpvPip);
     if (zeroCopy) {
       // `vo` is settable while paused, so this costs nothing visible - it lands in
@@ -475,7 +490,9 @@ function startMpvPlayback(seq) {
 }
 
 function observeMpv(seq, tries) {
-  const s = net.connect(IPC);
+  // Its own launch's socket: a retry chain from a dead launch then cannot attach to
+  // the next mpv and emit a second stream of playing/position/duration events.
+  const s = net.connect(ipcFor(seq));
   let connected = false;
   let firstPos = false;
   s.on("error", (e) => {
@@ -550,8 +567,11 @@ function observeMpv(seq, tries) {
         deps.publishMediaState({ force: true });
       } else if (m.name === "paused-for-cache") emit({ type: "buffering", on: !!m.data });
       else if (m.name === "eof-reached" && m.data) {
+        // Logged, not emitted: mpv runs without --keep-open, so the end of a file is
+        // also the end of the process, and the exit handler is what reports it. Two
+        // "finished" events milliseconds apart make an app auto-advancing on the
+        // event (Plex on-deck) skip the item after this one.
         console.log("[player] eof-reached");
-        emit({ type: "finished" });
       }
     }
   });
@@ -591,7 +611,6 @@ module.exports = {
   setHdr,
   pipFallbackRect,
   startPending,
-  IPC,
   MPV_CLAIM,
   launch: launchMpv,
   stop: stopMpv,
