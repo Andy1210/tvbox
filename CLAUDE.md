@@ -426,6 +426,13 @@ message, line, src)` signature.
   key rounds on purpose, so 23.976 and 24 collide there and are told apart by
   `refreshExact`; the pair is not interchangeable for a film. Protocol:
   [tvbox-wc docs/ipc.md](https://github.com/Andy1210/tvbox-wc/blob/main/docs/ipc.md).
+- **A release can refuse to install itself.** The feed takes an optional
+  `requires: ["compositor"]`; a box that cannot satisfy it is never offered the
+  update and Settings says why, instead of showing "up to date" for a version it
+  will never take. Unknown names count as unmet (fail closed). This is what keeps
+  a compositor-era release off a box still running the old session - the shell
+  would come up, but the remote's Back key would stop reaching apps and nothing
+  would control the output.
 - **OTA can NEVER install apt packages** (user-space by design, root lives only
   in provision/image). A release that adds a new system-package dependency
   reaches OTA-only boxes as code WITHOUT its dependency and there is no SSH on

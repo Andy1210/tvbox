@@ -73,7 +73,9 @@ export function UpdateSettings() {
               ? t("update.error")
               : st.available && st.latest
                 ? t("update.available", { version: st.latest.version })
-                : t("update.upToDate");
+                : st.unmet?.length && st.latest
+                  ? t("update.needsReprovision", { version: st.latest.version })
+                  : t("update.upToDate");
 
   const notes =
     st?.available && st.latest?.notes

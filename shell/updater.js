@@ -25,6 +25,7 @@ const path = require("path");
 const crypto = require("crypto");
 const { execFile } = require("child_process");
 const config = require("./config");
+const compositor = require("./compositor"); // a release may require it (see REQUIREMENTS)
 const { isLanUrl, isAllowedFetchUrl, guardedFetch } = require("./netguard"); // shared LAN/loopback trust rule (feed may be self-hosted http)
 const pkg = require("./package.json");
 
@@ -213,15 +214,47 @@ function osStatus() {
   return { rebootRequired: required, packages };
 }
 
+// What a release can demand of the box before it may be installed. A release is
+// user-space, so it cannot bring anything root put there: the compositor, the
+// session greetd starts, an apt package. When a version needs one of those, an OTA
+// box has to be re-provisioned or re-flashed first, and this is how the release
+// says so instead of installing itself into a half-working box.
+//
+// Fail CLOSED on anything unrecognised: a requirement this shell has never heard of
+// is one it certainly does not meet.
+const REQUIREMENTS = {
+  // The shell drives modes, HDR, focus, window placement and typing over the
+  // compositor's control socket. Without it a box still boots, but the remote's
+  // Back key stops reaching an app and nothing controls the output.
+  compositor: () => compositor.available(),
+};
+
+function unmetRequirements(feed) {
+  const wanted = Array.isArray(feed && feed.requires) ? feed.requires : [];
+  return wanted.filter((name) => {
+    const met = REQUIREMENTS[name];
+    if (!met) return true;
+    try {
+      return !met();
+    } catch (e) {
+      return true;
+    }
+  });
+}
+
 function status() {
   const current = pkg.version || "0";
+  const unmet = latest ? unmetRequirements(latest) : [];
   return {
     current,
     release: runningRelease(), // null = dev tree (deploy.sh)
     state,
     error,
     latest: latest ? { version: latest.version, notes: latest.notes || null } : null,
-    available: !!(latest && cmpVer(latest.version, current) > 0),
+    // What this box cannot satisfy, so the UI can say why an update it can see is
+    // not being installed.
+    unmet,
+    available: !!(latest && cmpVer(latest.version, current) > 0 && !unmet.length),
     lastCheckAt,
     auto: autoEnabled(),
     failed: readPair(FAILED),
@@ -254,6 +287,10 @@ async function check() {
       throw new Error("feed url must be https (or LAN http)");
     if (!/^[0-9a-f]{64}$/i.test(feed.sha256 || "")) throw new Error("feed needs a sha256");
     latest = feed;
+    const unmet = unmetRequirements(feed);
+    if (unmet.length) {
+      console.warn("[updater]", feed.version, "needs", unmet.join(", "), "- this box has to be re-provisioned first");
+    }
     lastCheckAt = Date.now();
     state = "idle";
   } catch (e) {
@@ -543,6 +580,7 @@ function startSchedulers() {
 }
 
 module.exports = {
+  unmetRequirements, // exported for the test: a release may demand what OTA cannot bring
   init,
   status,
   check,
