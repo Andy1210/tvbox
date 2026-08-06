@@ -325,6 +325,10 @@ touched one file, `npx prettier --write <file>` is enough; when in doubt run
   `/dev/dri/card1` for a second or two, each attempt exits at once, and systemd's
   start limit trips after five - leaving greetd `failed` with no session at all.
   Stop greetd, kill the leftovers, wait, then start it once.
+  When a key goes somewhere unexpected, ask the compositor what it has:
+  `get_state` lists the windows back to front with their app id and marks the one
+  holding the keyboard. The screen cannot answer that question - a UI that is in
+  front and transparent looks exactly like one that is behind a film.
 - **The session has to tell systemd and D-Bus which display it is on.** Anything
   the user manager starts on demand inherits ITS environment, not the session's,
   so with no `WAYLAND_DISPLAY` there `xdg-desktop-portal-gtk` exits with "cannot
