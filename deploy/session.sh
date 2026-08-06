@@ -24,11 +24,12 @@ set -u
 # it is a Wayland session, and toolkits key off that.
 XDG_SESSION_TYPE=wayland
 export XDG_SESSION_TYPE
-if command -v dbus-update-activation-environment >/dev/null 2>&1; then
-	dbus-update-activation-environment --systemd WAYLAND_DISPLAY XDG_RUNTIME_DIR XDG_SESSION_TYPE >/dev/null 2>&1
-else
-	systemctl --user import-environment WAYLAND_DISPLAY XDG_RUNTIME_DIR XDG_SESSION_TYPE >/dev/null 2>&1
-fi
+# Both ways, because the first can fail for reasons its presence does not cover (no
+# session bus yet, a manager that refuses the set), and a silent skip here is a
+# 25-second stall in every app later.
+dbus-update-activation-environment --systemd WAYLAND_DISPLAY XDG_RUNTIME_DIR XDG_SESSION_TYPE >/dev/null 2>&1 ||
+	systemctl --user import-environment WAYLAND_DISPLAY XDG_RUNTIME_DIR XDG_SESSION_TYPE >/dev/null 2>&1 ||
+	echo "tvbox-session: could not export the session environment; portal-backed apps will be slow to start" >&2
 
 # Route audio to HDMI. Honour the OTA `current` symlink (like run-shell.sh) so a
 # release's own copy wins over the dev tree.

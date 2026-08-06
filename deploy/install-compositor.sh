@@ -39,8 +39,33 @@ installed_version() {
 # 1) The pinned release.
 TAG=""
 SHA256=""
-# shellcheck source=/dev/null
-[ -f "$HERE/compositor.version" ] && . "$HERE/compositor.version"
+# Read as data, never sourced: this script runs as root and the file ships into the
+# box user's home, where a user-space update (or a compromised app plugin, which
+# runs as that user) could rewrite it. Sourcing would make it root's shell script.
+if [ -f "$HERE/compositor.version" ]; then
+	TAG=$(sed -n 's/^TAG="\([^"]*\)".*/\1/p' "$HERE/compositor.version" | head -1)
+	SHA256=$(sed -n 's/^SHA256="\([^"]*\)".*/\1/p' "$HERE/compositor.version" | head -1)
+fi
+case "$TAG" in
+	"") ;;
+	*[!A-Za-z0-9._+-]*)
+		echo "  compositor.version: not a tag: $TAG" >&2
+		exit 1
+		;;
+	v[0-9]*) ;;
+	*)
+		echo "  compositor.version: not a tag: $TAG" >&2
+		exit 1
+		;;
+esac
+case "$SHA256" in
+	"" | *[!0-9a-f]*)
+		if [ -n "$SHA256" ]; then
+			echo "  compositor.version: not a sha256" >&2
+			exit 1
+		fi
+		;;
+esac
 
 if [ -n "$TAG" ] && [ -n "$SHA256" ]; then
 	have=$(installed_version || true)

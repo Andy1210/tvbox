@@ -306,6 +306,7 @@ done
 check "greetd starts the compositor" sh -c \
   "grep -q '^command = \"tvbox-wc -- /usr/local/bin/tvbox-session\"' '$ROOTMNT/etc/greetd/config.toml'"
 check "the compositor is executable" test -x "$ROOTMNT/usr/local/bin/tvbox-wc"
+check "the session wrapper is executable" test -x "$ROOTMNT/usr/local/bin/tvbox-session"
 check "the session script is executable" test -x "$ROOTMNT/home/tv/.tvbox/session.sh"
 check "the launcher bundle's assets are there too" sh -c "ls '$ROOTMNT'/home/tv/.tvbox/shell/launcher-dist/assets/*.js >/dev/null 2>&1"
 
