@@ -418,8 +418,6 @@ export function RemoteRemap() {
 
   return (
     <div className="mt-[4vh]">
-      <div className="text-[2.4vh] font-semibold mb-[0.6vh]">{t("remote.title")}</div>
-      <div className="text-[1.8vh] text-fg-dim mb-[1.4vh] max-w-[64vw]">{t("remote.hint")}</div>
       {devices !== null && !devices.length && <div className="text-[1.9vh] text-fg-dim">{t("remote.none")}</div>}
       <div className="flex flex-col gap-[0.8vh] max-w-[70vw]">
         {(devices ?? []).map((d) => {

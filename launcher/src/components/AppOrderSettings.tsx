@@ -112,9 +112,6 @@ export function AppOrderSettings() {
 
   return (
     <div className="mt-[3vh]">
-      <div className="text-[2.4vh] font-semibold mb-[0.8vh]">{t("appsettings.title")}</div>
-      <div className="text-fg-dim text-[1.8vh] mb-[1.4vh] max-w-[70vw]">{t("appsettings.hint")}</div>
-
       {/* the "Get more apps" HOME tile - shown by default, hideable here */}
       <div className="flex items-center gap-[1.5vw] px-[1.5vw] py-[1.2vh] rounded-[1.1vh] bg-white/5 mb-[1.4vh] max-w-[70vw]">
         <span className="text-[2.1vh] flex-1 min-w-0">{t("appsettings.getMore")}</span>

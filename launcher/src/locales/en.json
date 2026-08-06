@@ -228,7 +228,6 @@
     "devicesCount": "{n} remotes"
   },
   "appsettings": {
-    "title": "Apps",
     "hint": "Reorder or hide apps on the home screen.",
     "hide": "Hide",
     "show": "Show",

@@ -112,7 +112,6 @@ export function BackupSettings() {
 
   return (
     <div className="mt-[3vh]">
-      <div className="text-[2.4vh] font-semibold mb-[1.4vh]">{t("backup.title")}</div>
       <div className="max-w-[70vw]">
         <div className="text-[1.8vh] text-fg-dim max-w-[60vw] mb-[1.2vh]">{t("backup.hint")}</div>
         <FocusButton

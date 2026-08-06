@@ -228,7 +228,6 @@
     "devicesCount": "{n} távirányító"
   },
   "appsettings": {
-    "title": "Alkalmazások",
     "hint": "Rendezd át vagy rejtsd el az alkalmazásokat a főképernyőn.",
     "hide": "Elrejtés",
     "show": "Megjelenítés",
