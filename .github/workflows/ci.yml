@@ -86,7 +86,8 @@ jobs:
           # -S error: the scripts use intentional word-splitting (apt lists);
           # gate CI on real errors, not style
           shellcheck -S error \
-            deploy/deploy.sh deploy/provision.sh deploy/run-shell.sh deploy/labwc-autostart deploy/tvbox \
+            deploy/deploy.sh deploy/provision.sh deploy/run-shell.sh deploy/tvbox \
+            deploy/session.sh deploy/tvbox-session deploy/install-compositor.sh \
             deploy/tvbox-diag.sh deploy/tvbox-safemode.sh \
             scripts/copy-infra.sh scripts/make-release.sh scripts/build-image.sh \
             scripts/install-libcec8.sh scripts/image-smoke.sh \
@@ -105,7 +106,7 @@ jobs:
           fi
       - name: python syntax (input bridges + helpers)
         run: |
-          python3 -m py_compile cec/cec_uinput_bridge.py remote/remote_input_bridge.py deploy/cursor_idle_hide.py
+          python3 -m py_compile cec/cec_uinput_bridge.py remote/remote_input_bridge.py
           python3 -m py_compile gamepad/gamepad_shim.py
           python3 -m py_compile remote/firetv_remote_ir.py remote/keymap_compile.py remote/ir_protocols.py remote/firetv_hid_probe.py
           # The Home Assistant custom integration. Only a syntax check: importing it

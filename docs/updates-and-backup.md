@@ -37,6 +37,16 @@ update (markers cleared, infra files synced, old versions pruned - the
 previous one is kept). Three failed boots flip `current` back and record
 `update/failed`.
 
+**A release can demand what an update cannot install.** OTA is user-space by
+design, so a version that needs something root put there - the compositor, the
+session greetd starts, an apt package - must not install itself into a box that
+has not been re-provisioned. The feed says so with an optional
+`requires: ["compositor"]`, and a box that cannot satisfy it never offers the
+update: Settings shows "needs the box to be set up again" instead of pretending
+to be up to date. Unknown requirement names count as unmet, so an older shell
+that has never heard of a requirement refuses rather than guesses. Requirements
+live in `REQUIREMENTS` in [shell/updater.js](../shell/updater.js).
+
 **Auto-update** is ON by default (Settings toggle): applies between 03:00 and
 06:00, only when nothing is playing (no mpv, no remote app, last now-playing
 isn't `playing`) and never a version that already rolled back once.

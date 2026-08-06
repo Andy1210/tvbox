@@ -21,7 +21,8 @@ stage0 → stage1 → stage2 (Raspberry Pi OS Lite)
 ```
 
 We intentionally build on top of **Lite + our own Wayland session** rather
-than the full desktop image: the box needs labwc + the shell, not a desktop.
+than the full desktop image: the box needs its own compositor and the shell, not
+a desktop.
 
 ## The custom stage (`image/stage-tvbox/`)
 
@@ -36,8 +37,9 @@ image/
     EXPORT_IMAGE              # marks this stage as the one pi-gen exports
     prerun.sh                 # standard pi-gen boilerplate (copy prev stage rootfs)
     00-packages/
-      00-packages             # apt baseline (provision.sh's list + labwc/seatd/
-                              # greetd session + unattended-upgrades)
+      00-packages             # apt baseline (provision.sh's list + the libs the
+                              # compositor links against, seatd/greetd session,
+                              # unattended-upgrades)
     01-tvbox/
       00-run.sh               # the install script (mirrors deploy.sh+provision.sh)
       conf/                   # committed system config - KEEP IN SYNC with the
@@ -46,7 +48,7 @@ image/
                               #   20auto-upgrades 52tvbox-unattended-upgrades
       files/                  # NOT committed - populated by the workflow (or you):
         shell/                #   rsync of shell/ WITH launcher-dist already built
-        cec_uinput_bridge.py run-shell.sh labwc-autostart tvbox
+        cec_uinput_bridge.py run-shell.sh session.sh tvbox
         tvbox-cec.service tvbox-flatpak-update.{service,timer} provision.sh
 ```
 
@@ -59,8 +61,10 @@ and `${FIRST_USER_NAME}` are provided by pi-gen). The committed
    `launcher-dist`, built host-side - arch-independent);
 2. installs the `conf/` system config: udev uinput/cec rules, the polkit
    NetworkManager grant, and unattended-upgrades (install-yes/reboot-never);
-3. writes the **greetd autologin** config (labwc session on vt7, kiosk - the
-   account password can stay locked, autologin doesn't need one);
+3. writes the **greetd autologin** config (vt7, kiosk - the account password can
+   stay locked, autologin doesn't need one). greetd starts
+   `tvbox-wc -- /usr/local/bin/tvbox-session`: the compositor, which starts the
+   session;
 4. creates the **linger flag file** for the user;
 5. installs the **diagnostics + safe-mode** pair from `~/.tvbox/` into
    `/usr/local/sbin` with their system units and the greetd condition drop-in.
@@ -70,9 +74,10 @@ and `${FIRST_USER_NAME}` are provided by pi-gen). The committed
 6. in the chroot: group membership, `chown` of the tree, **`npm ci`
    INSIDE the arm64 chroot** (host-side would fetch the x86 Electron), the
    `tvbox` CLI symlink, user units "enabled" via hand-made
-   `*.target.wants` symlinks (CEC bridge + nightly flatpak-update timer),
-   labwc session autostart, the flathub user remote, `systemctl enable
-greetd` + `set-default graphical.target`.
+   `*.target.wants` symlinks (CEC bridge + nightly flatpak-update timer), the
+   compositor (`install-compositor.sh` - fatal, there is no fallback session),
+   the flathub user remote, `systemctl enable greetd` + `set-default
+graphical.target`.
 
 ## `image/config` (pi-gen's own config)
 
@@ -243,7 +248,8 @@ Doing it by hand (what the script automates):
 F=image/stage-tvbox/01-tvbox/files
 mkdir -p "$F"
 rsync -a --delete --exclude node_modules --exclude apps-data --exclude '*.log' shell "$F/"
-cp cec/cec_uinput_bridge.py deploy/run-shell.sh deploy/labwc-autostart \
+cp cec/cec_uinput_bridge.py deploy/run-shell.sh deploy/session.sh \
+   deploy/tvbox-session deploy/install-compositor.sh deploy/compositor.version \
    deploy/tvbox deploy/tvbox-cec.service deploy/provision.sh \
    deploy/tvbox-flatpak-update.service deploy/tvbox-flatpak-update.timer "$F/"
 
@@ -328,14 +334,15 @@ asserts they fail. A check that cannot fail is not a check.
   in sync when provision changes.
 - pi-gen is picky about **host distro/Docker versions**; the Docker build path
   (`build-docker.sh`) is far more reproducible than the bare `build.sh`.
-- **Black screen with only a cursor** almost always means labwc started but
-  nothing launched the shell - and the classic causes on a Lite-based image are
-  **desktop-only bits Lite doesn't ship**. The box user autostart used to call
+- **A black screen** almost always means the compositor started but nothing
+  launched the shell - and the classic causes on a Lite-based image are
+  **desktop-only bits Lite doesn't ship**. The session script used to call
   `/usr/bin/lwrespawn` (a Raspberry Pi _desktop-session_ helper, ABSENT on Lite);
   a fresh flash sat at a black screen because that line silently failed. Fixed by
-  a self-contained POSIX respawn loop in [`deploy/labwc-autostart`](../deploy/labwc-autostart)
+  a self-contained POSIX respawn loop in [`deploy/session.sh`](../deploy/session.sh)
   (no external dependency). Likewise install a **system font** (`fonts-dejavu-core`,
   in `00-packages`): the launcher font stack ends in `sans-serif`, and with no
   font present Chromium renders the UI blank/black even when the shell IS running.
-- Otherwise check `greetd`/labwc actually started (`journalctl -u greetd`), and
-  that the user is in `video` (GPU access for the compositor).
+- Otherwise check that greetd and the compositor actually started
+  (`journalctl -u greetd`), and that the user is in `video` (GPU access for the
+  compositor).

@@ -1,47 +1,9 @@
-// tvbox display control (Wayland/wlroots via wlr-randr): lists the connected
+// tvbox display control, over the compositor's own control socket: lists the connected
 // output's modes, picks which one to be at, and switches. Who wants what and when
-// lives in displaymode.js; this file is the wlr-randr surface plus the pure
-// selection rules. labwc tracks the output size for fullscreen surfaces, so the
-// shell window follows a mode change with no extra work. Callers pass the session's
-// Wayland env (main's childEnv) - wlr-randr needs WAYLAND_DISPLAY / XDG_RUNTIME_DIR.
-const { execFile, execFileSync } = require("child_process");
-
-// Parse `wlr-randr` text into { output, modes:[{ key,width,height,refresh,refreshExact,current,preferred }] }.
-// `refresh` is rounded to whole Hz for a stable id ("WxH@60"); `refreshExact` is
-// the real value we hand back to wlr-randr - a rounded "@60Hz" can miss a mode
-// whose real refresh is 60.015Hz.
-//
-// EVERY mode is kept, including ones that share a rounded key. 23.976 and 24.000
-// both round to "@24" but are NOT interchangeable: 23.976 content on a 24.000 Hz
-// output drifts 0.1% (a repeated frame every ~41s), and 29.97 on 60.000 likewise.
-// Dropping one of them is why asking for "1920x1080@24" used to hand back 24.000.
-// wlr-randr prints no interlace flag, so a 1080i/1080p pair at the same rate is
-// indistinguishable here (and to `--mode`); nothing downstream can prefer one.
-function parse(stdout) {
-  let output = null;
-  const modes = [];
-  for (const line of (stdout || "").split("\n")) {
-    const oh = /^(\S+) "/.exec(line); // e.g.  HDMI-A-1 "LG Electronics ..."
-    if (oh) {
-      if (!output) output = oh[1];
-      continue;
-    }
-    const mm = /^\s+(\d+)x(\d+)\s+px,\s+([\d.]+)\s+Hz(.*)$/.exec(line);
-    if (!mm) continue;
-    const width = Number(mm[1]),
-      height = Number(mm[2]);
-    const refreshExact = parseFloat(mm[3]);
-    const refresh = Math.round(refreshExact);
-    const current = /current/.test(mm[4] || "");
-    const preferred = /preferred/.test(mm[4] || "");
-    const key = width + "x" + height + "@" + refresh;
-    modes.push({ key, width, height, refresh, refreshExact, current, preferred });
-  }
-  return output ? { output, modes } : null;
-}
-
-// ---- mode selection -------------------------------------------------------------
-// Pure, so shell/display.test.js can pin the behaviour without an output.
+// lives in displaymode.js; this file is the compositor surface plus the pure
+// selection rules. The compositor tracks the output size for fullscreen surfaces, so the
+// shell window follows a mode change with no extra work.
+const compositor = require("./compositor");
 
 const UI_MAX_HEIGHT = 1080; // a 4K panel still draws the UI at 1080p
 const UI_MAX_REFRESH = 60.5; // 60 Hz plus rounding slack (59.94 and 60 both qualify)
@@ -109,11 +71,28 @@ function pickUiMode(modes, maxHeight = UI_MAX_HEIGHT) {
 // mode that still covers the video (never below 720p, never above the panel).
 // Returns null when the panel has no matching refresh at all; the caller then
 // stays put and lets mpv resample.
+// How far a mode is from the picture, as the factor the player would resize by -
+// symmetric, so a 6% shrink counts as small and a 1.9x blow-up counts as large.
+//
+// The mode does NOT have to cover the content, and that is the point. A DCI-2K
+// broadcast is 2048x1080, six percent wider than 1080p and ordinary on IPTV, and
+// no mode below 4K is wider than it: "the smallest mode that covers it" put such a
+// stream on a 3840x2160 output, where mpv upscales and renders every frame at 8.3
+// Mpixels. Measured on the box with a live channel: 1318 dropped frames with the
+// decoder keeping up. Six percent of horizontal detail is the cheaper half of that
+// trade by a wide margin - and the same rule keeps a DCI-4K film (4096x2160) on a
+// 3840-wide panel at 4K instead of dropping it to 1080p, which is what "covers"
+// did when nothing covered it.
+function scaleDistance(mode, w, h) {
+  const fit = Math.min(mode.width / w, mode.height / h); // how the player fits the picture
+  return Math.abs(Math.log(fit));
+}
+
 function pickContentMode(modes, content) {
   if (!modes || !modes.length || !content || !(content.fps > 0)) return null;
   // An unknown (or nonsense) size means "assume the floor": mpv can report the
-  // framerate before dwidth/dheight are available, and the smallest-that-fits rule
-  // would otherwise happily drop a film to 640x480 because nothing said not to.
+  // framerate before dwidth/dheight are available, and a nearest-size rule would
+  // otherwise happily drop a film to 640x480 because nothing said not to.
   const w = content.width > 0 ? content.width : 1280;
   const h = content.height > 0 ? content.height : 720;
   const cands = [];
@@ -121,54 +100,37 @@ function pickContentMode(modes, content) {
     const rank = cadenceRank(m.refreshExact, content.fps);
     if (rank === null) continue;
     if (m.height < 720) continue; // 720p floor, whatever the content claims to be
-    cands.push({ m, rank, covers: m.width >= w && m.height >= h });
+    cands.push({ m, rank, distance: scaleDistance(m, w, h) });
   }
   if (!cands.length) return null;
-  const covering = cands.filter((c) => c.covers);
-  const pool = covering.length ? covering : cands; // nothing covers it -> best effort
-  pool.sort(
+  cands.sort(
     (a, b) =>
       a.rank - b.rank || // exact cadence beats a drifting one
-      a.m.width * a.m.height - b.m.width * b.m.height || // then the smallest that fits
-      a.m.refreshExact - b.m.refreshExact, // then the least work
+      a.distance - b.distance || // then the mode the picture has to be resized least for
+      a.m.width * a.m.height - b.m.width * b.m.height || // then the least work
+      a.m.refreshExact - b.m.refreshExact,
   );
-  return pool[0].m;
+  return cands[0].m;
 }
 
-function list(env, cb) {
-  execFile("wlr-randr", [], { env, timeout: 8000 }, (e, out) => cb(e ? null : parse(out)));
+function list(cb) {
+  compositor.list(cb);
 }
 
 // The same read, blocking. Only for startup, and only because of what needs it:
 // an app window is told the panel's resolution at preload time and never asks
 // again, so an answer that arrives a few milliseconds later is no answer at all.
-// One wlr-randr before the first window is a fair price for not having to race.
-function listSync(env) {
-  try {
-    return parse(execFileSync("wlr-randr", [], { env, timeout: 8000, encoding: "utf8" }));
-  } catch (e) {
-    return null;
-  }
+function listSync() {
+  return compositor.listSync();
 }
 
-// Apply a parsed mode object, using its EXACT refresh so wlr-randr matches.
-function apply(env, output, mode, cb) {
-  if (!output || !mode) return cb(false, "bad mode");
-  const spec = mode.width + "x" + mode.height + "@" + mode.refreshExact.toFixed(3) + "Hz";
-  execFile("wlr-randr", ["--output", output, "--mode", spec], { env, timeout: 12000 }, (e, _o, err) =>
-    cb(
-      !e,
-      e
-        ? String(err || e.message || "")
-            .trim()
-            .slice(0, 160)
-        : "",
-    ),
-  );
+// Apply a mode object as this module reports them, using its EXACT refresh: a
+// rounded 60 picks the wrong mode out of a 59.94/60 pair.
+function apply(output, mode, cb) {
+  compositor.apply(output, mode, cb);
 }
 
 module.exports = {
-  parse,
   list,
   listSync,
   apply,

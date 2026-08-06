@@ -5,7 +5,7 @@ On this Pi 5 (vc4_hdmi) the kernel CEC->rc->input path does NOT deliver remote
 keys to Wayland/Chromium, but libcec receives them as raw 'User Control Pressed'
 messages (opcode 0x44). So we bridge:
 
-    TV remote --CEC--> libcec (cec-client) --parse--> uinput key --> labwc --> Chromium
+    TV remote --CEC--> libcec (cec-client) --parse--> uinput key --> compositor --> Chromium
 
 The TV forwards keys only to the *active source*, so we assert active-source on
 startup and periodically (keep_active_source) - but ONLY while the TV is powered

@@ -11,6 +11,8 @@ const test = require("node:test");
 const assert = require("node:assert");
 const fs = require("node:fs");
 const path = require("node:path");
+const os = require("node:os");
+const net = require("node:net");
 const updater = require("./updater");
 
 // infra.list carries repo-relative paths; basenames land flat in ~/.tvbox and
@@ -105,4 +107,47 @@ test("UNIT_WANTS mirrors each user unit's [Install] WantedBy", () => {
       );
     }
   }
+});
+
+// A release can demand something an OTA cannot bring - the compositor, the session
+// greetd starts, an apt package - and the point of the gate is that a box which
+// cannot satisfy it is never offered the update rather than being half-broken by
+// it. The check runs against a real socket path, so this drives it through
+// compositor.available().
+test("a release that needs the compositor is not offered to a box without one", async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "tvbox-updater-"));
+  const socketPath = path.join(dir, "tvbox-wc.sock");
+  process.env.TVBOX_WC_SOCKET = socketPath;
+  delete require.cache[require.resolve("./compositor")];
+  delete require.cache[require.resolve("./updater")];
+  const fresh = require("./updater");
+
+  const feed = {
+    feedVersion: 1,
+    version: "99.0.0",
+    url: "https://x/y.tgz",
+    sha256: "a".repeat(64),
+    requires: ["compositor"],
+  };
+
+  assert.deepStrictEqual(fresh.unmetRequirements(feed), ["compositor"]);
+  assert.deepStrictEqual(fresh.unmetRequirements({ ...feed, requires: [] }), []);
+  // Fail closed: a requirement this shell has never heard of is one it does not meet.
+  assert.deepStrictEqual(fresh.unmetRequirements({ ...feed, requires: ["time-travel"] }), ["time-travel"]);
+  // And a `requires` that is not a list at all is a broken feed, not an empty one.
+  for (const bad of ["compositor", { compositor: true }, 1, true]) {
+    assert.deepStrictEqual(fresh.unmetRequirements({ ...feed, requires: bad }), ["malformed-requires"], String(bad));
+  }
+
+  // listen() creates the socket file asynchronously, and the check that follows is a
+  // stat: without waiting, this passes or fails on timing rather than on the code.
+  const server = net.createServer(() => {});
+  await new Promise((resolve) => server.listen(socketPath, resolve));
+  assert.deepStrictEqual(fresh.unmetRequirements(feed), [], "a box with the socket meets it");
+
+  server.close();
+  fs.rmSync(dir, { recursive: true, force: true });
+  delete process.env.TVBOX_WC_SOCKET;
+  delete require.cache[require.resolve("./compositor")];
+  delete require.cache[require.resolve("./updater")];
 });

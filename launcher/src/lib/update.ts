@@ -10,6 +10,10 @@ export interface UpdateStatus {
   error: string | null;
   latest: { version: string; notes: { en?: string; hu?: string } | null } | null;
   available: boolean;
+  // What this box cannot satisfy for the release it can see: a version may need
+  // something an update is not allowed to install (the compositor, an apt
+  // package), and then the box has to be re-provisioned or re-flashed first.
+  unmet?: string[];
   lastCheckAt: number | null;
   auto: boolean;
   failed: { from: string; to: string } | null; // an update rolled back

@@ -7,12 +7,13 @@
 // for short things, plus a QR + code so a phone can type the long/secret ones),
 // and whatever comes back is delivered to the page as REAL key events.
 //
-// Why key events and not DOM writes: sendInputEvent goes through the browser's
-// input pipeline, so a React-controlled field sees exactly what a USB keyboard
-// would, and it reaches the focused element wherever it is - including inside a
-// cross-origin iframe the preload can't touch. (DELIVERY reaches an iframe; the
-// TRIGGER does not - the preload runs in the main frame only, so a field inside an
-// iframe never reports focus and the screen has to be opened from a top-level one.)
+// Why key events and not DOM writes: they go through the browser's input pipeline,
+// so a React-controlled field sees exactly what a USB keyboard would, and they
+// reach the focused element wherever it is - including inside a cross-origin iframe
+// the preload can't touch. (DELIVERY reaches an iframe; the TRIGGER does not - the
+// preload runs in the main frame only, so a field inside an iframe never reports
+// focus and the screen has to be opened from a top-level one.) The compositor sends
+// them, which is also what lets a native program be typed into.
 //
 // One session at a time, owned by the app window that asked for it. If that
 // window stops being the foreground app (Home, a switch, a crash), the session is
@@ -30,6 +31,7 @@ let deps = {
   pairingStart: () => null, // start the phone-typing pairing session -> { url, code }
   pairingStop: () => {},
   isForeground: () => true, // is this app still the one on screen?
+  typeText: () => {}, // deliver the string to whatever holds the keyboard
 };
 
 function init(d) {
@@ -137,19 +139,16 @@ function submit(text) {
       console.log("[textinput] dropped", chars.length, "chars - the app left the foreground");
       return;
     }
-    // Select-all first: the field usually already holds something (a prefilled email,
-    // the last search, or the typo being corrected), and appending to it produced
-    // concatenated garbage the user couldn't even see in a password field.
+    // Replacing, not appending: the field usually already holds something (a
+    // prefilled email, the last search, or the typo being corrected), and appending
+    // produced concatenated garbage the user couldn't even see in a password field.
+    // The compositor outlives the shell, so its socket can be gone while this
+    // process runs. A failure here is one feature not working, and it must not be
+    // more than that: a throw inside a timer has nothing above it to catch it.
     try {
-      s.wc.sendInputEvent({ type: "keyDown", keyCode: "a", modifiers: ["control"] });
-      s.wc.sendInputEvent({ type: "keyUp", keyCode: "a", modifiers: ["control"] });
-    } catch (e) {}
-    for (const ch of chars) {
-      try {
-        s.wc.sendInputEvent({ type: "char", keyCode: ch });
-      } catch (e) {
-        // One character the platform can't express must not swallow the rest.
-      }
+      deps.typeText(chars);
+    } catch (e) {
+      console.warn("[textinput] typing failed:", e.message);
     }
   }, 400);
   console.log("[textinput] typed", chars.length, "chars into", s.appId);

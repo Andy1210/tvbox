@@ -3,7 +3,28 @@
 // Mode SELECTION is tested in display.test.js; this file fakes a sink instead.
 const test = require("node:test");
 const assert = require("node:assert");
-const display = require("./display");
+const compositor = require("./compositor");
+
+// The mode lists below are REAL, captured from the two TVs this was developed on,
+// and that is the point of pinning them. The compositor answers
+// the same lists in its own shape, so they are converted here and go through the
+// production path (compositor.toDisplayInfo) rather than a parser of their own.
+function modesFrom(text) {
+  const outputs = [{ name: text.trim().split(/\s/)[0], modes: [], connected: true }];
+  for (const line of text.split("\n")) {
+    const m = line.match(/^\s+(\d+)x(\d+) px, ([\d.]+) Hz(.*)$/);
+    if (!m) continue;
+    const mode = {
+      w: Number(m[1]),
+      h: Number(m[2]),
+      refresh: Math.round(Number(m[3]) * 1000),
+      preferred: /preferred/.test(m[4]),
+    };
+    if (/current/.test(m[4])) outputs[0].current = mode;
+    outputs[0].modes.push(mode);
+  }
+  return compositor.toDisplayInfo({ outputs }).modes;
+}
 const displaymode = require("./displaymode");
 
 // Real `wlr-randr` output from the 4K LG the box is developed against, trimmed to
@@ -32,7 +53,7 @@ const id = (m) => `${m.width}x${m.height}@${m.refreshExact}`;
 // tick like the real thing - display.list/apply are execFile calls, and a
 // synchronous fake cannot expose the races that live in those gaps.
 function sink(text, opts = {}) {
-  const modes = display.parse(text).modes;
+  const modes = modesFrom(text);
   let cur = modes.find((m) => m.current);
   const later = (fn) => (opts.async ? setTimeout(fn, 5) : fn());
   const s = {
