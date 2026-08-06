@@ -11,6 +11,9 @@ const system = require("./system");
 
 // A fake execFile that answers by command line. Anything not listed errors,
 // which is how a test says "this must not be run".
+// An answer is the command's stdout, or `{ stdout, stderr, fail }` when a test
+// cares about a failure: the shell decides what to report from a failing command's
+// stderr, so a fake that can only succeed cannot pin that.
 function withCommands(answers) {
   const seen = [];
   system.init({
@@ -19,7 +22,13 @@ function withCommands(answers) {
       const line = [cmd].concat(args).join(" ");
       seen.push(line);
       const key = Object.keys(answers).find((k) => line.includes(k));
-      setImmediate(() => (key ? done(null, answers[key], "") : done(new Error("no answer for " + line), "", "")));
+      const answer = key === undefined ? null : answers[key];
+      setImmediate(() => {
+        if (answer === null) return done(new Error("Command failed: " + line), "", "");
+        if (typeof answer === "string") return done(null, answer, "");
+        if (answer.fail) return done(new Error("Command failed: " + line), answer.stdout || "", answer.stderr || "");
+        done(null, answer.stdout || "", answer.stderr || "");
+      });
     },
   });
   return seen;
@@ -111,102 +120,175 @@ test("a colon in an SSID survives the terse format", async () => {
   );
 });
 
-test("a password the user typed replaces the one a saved profile carries", async () => {
-  // nmcli reuses a matching profile, secret and all, so the new password would
-  // never be tried: the network whose password changed is exactly the case where
-  // someone is standing at the TV typing one. The profile is kept, because it is
-  // what knows how this network is secured.
+// The box ships with a profile called `tvbox-preseed` carrying the house network's
+// ssid, so a profile's name is not its network's - and nmcli matches by ssid.
+const SAVED = {
+  "-f NAME,TYPE connection show": "tvbox-preseed:802-11-wireless\n",
+  "802-11-wireless.ssid connection show id tvbox-preseed": "DarkTL50",
+};
+
+test("the password just typed goes into the profile nmcli would use", () => {
+  // nmcli reuses a matching profile, secret and all, so a new password typed at the
+  // TV would never be tried. The profile is what knows how the network is secured,
+  // so the password goes into it rather than around it.
   const seen = withCommands({
-    "-f NAME,TYPE connection show": "tvbox-preseed:802-11-wireless\n",
-    // The profile's NAME is not the network's: this is the shape the box ships with.
-    "802-11-wireless.ssid connection show tvbox-preseed": "DarkTL50",
+    ...SAVED,
+    "802-11-wireless-security.psk connection show id tvbox-preseed": "oldsecret",
     "connection modify": "",
     "connection up": "",
   });
-  const r = await new Promise((resolve) => system.wifiConnect("DarkTL50", "hunter2", false, resolve));
-  assert.deepStrictEqual(r, { ok: true });
-  assert.ok(
-    seen.some((c) => c.includes("connection modify id tvbox-preseed wifi-sec.psk hunter2")),
-    seen.join(" | "),
-  );
-  // Before the subcommand, where nmcli parses it: at the end it answers "invalid
-  // extra argument" and nothing connects at all.
-  assert.match(
-    seen.find((c) => c.includes("connection up")),
-    /^nmcli --wait \d+ connection up id tvbox-preseed$/,
-  );
-  assert.strictEqual(
-    seen.some((c) => c.includes("connection delete")),
-    false,
-    "the profile is kept",
-  );
-});
-
-test("a saved profile that will not take the password is joined from scratch", async () => {
-  // An enterprise or WPA3 profile whose name happens to match, or a name that is
-  // not a profile at all: the modify fails and the ordinary connect still runs.
-  const seen = withCommands({
-    "-f NAME,TYPE connection show": "tvbox-preseed:802-11-wireless\n",
-    "802-11-wireless.ssid connection show tvbox-preseed": "DarkTL50",
-    "device wifi connect": "",
+  return new Promise((resolve) => {
+    system.wifiConnect("DarkTL50", "hunter2", false, (r) => {
+      assert.deepStrictEqual(r, { ok: true });
+      assert.ok(
+        seen.some((c) => c === "nmcli connection modify id tvbox-preseed wifi-sec.psk hunter2"),
+        seen.join(" | "),
+      );
+      // Before the subcommand, where nmcli parses it: at the end it answers
+      // "invalid extra argument" and nothing connects at all.
+      assert.match(
+        seen.find((c) => c.includes("connection up")),
+        /^nmcli --wait \d+ connection up id tvbox-preseed$/,
+      );
+      assert.strictEqual(
+        seen.some((c) => c.includes("connection delete")),
+        false,
+        "nothing is deleted",
+      );
+      resolve();
+    });
   });
-  const r = await new Promise((resolve) => system.wifiConnect("DarkTL50", "hunter2", false, resolve));
-  assert.deepStrictEqual(r, { ok: true });
-  assert.match(
-    seen.find((c) => c.includes("device wifi connect")),
-    /^nmcli --wait \d+ device wifi connect DarkTL50 password hunter2$/,
-  );
 });
 
-test("a profile whose security no longer matches is rebuilt, not retried", async () => {
-  // The AP moved to WPA3 under a WPA2 profile: the secret goes in fine and the
-  // activation is what fails. Reusing the profile again would fail the same way,
-  // so it is dropped and nmcli builds one from a fresh scan of what the AP says.
+test("a password that does not bring the network up is put back", () => {
+  // The single most likely input on that screen is a typo, and this box may have no
+  // way onto the network except the profile being edited. So the old secret is read
+  // first and restored, and the profile is left where it was: a wifi-only box that
+  // loses its profile cannot be fixed from anywhere.
   const seen = withCommands({
-    "-f NAME,TYPE connection show": "tvbox-preseed:802-11-wireless\n",
-    "802-11-wireless.ssid connection show tvbox-preseed": "DarkTL50",
+    ...SAVED,
+    "802-11-wireless-security.psk connection show id tvbox-preseed": "oldsecret",
     "connection modify": "",
-    "connection delete": "",
-    "--rescan yes": "",
-    "device wifi connect": "",
-    // no answer for "connection up" - the fake reports failure for it
+    "connection up": { fail: true, stderr: "Error: Connection activation failed: (7) Secrets were required." },
   });
-  const r = await new Promise((resolve) => system.wifiConnect("DarkTL50", "hunter2", false, resolve));
-  assert.deepStrictEqual(r, { ok: true });
-  // Every failing call is tried again with sudo before it counts as failed, which
-  // is why the activation appears twice.
-  const order = seen
-    .filter((c) => !c.includes("NAME,TYPE") && !c.includes("802-11-wireless.ssid"))
-    .map((c) =>
-      c
-        .replace(/^sudo -n /, "")
-        .replace(/^nmcli (--wait \d+ )?/, "")
-        .split(" ")
-        .slice(0, 2)
-        .join(" "),
-    );
-  assert.deepStrictEqual(order, [
-    "connection modify",
-    "connection up",
-    "connection up",
-    "connection delete",
-    "device wifi",
-    "device wifi",
-  ]);
+  return new Promise((resolve) => {
+    system.wifiConnect("DarkTL50", "typo", false, (r) => {
+      assert.strictEqual(r.ok, false);
+      assert.match(r.error, /Secrets were required/);
+      // Classified, so the TV can say it in the user's own language rather than
+      // quoting NetworkManager at them.
+      assert.strictEqual(r.code, "bad-password");
+      const writes = seen.filter((c) => c.includes("wifi-sec.psk")).map((c) => c.split(" ").pop());
+      assert.deepStrictEqual(writes, ["typo", "oldsecret"], "the last write puts the old secret back");
+      assert.strictEqual(
+        seen.some((c) => c.includes("connection delete")),
+        false,
+        "the profile survives a wrong password",
+      );
+      resolve();
+    });
+  });
 });
 
-test("a network with no saved profile is joined without deleting anything", async () => {
+test("the failure a user is shown is NetworkManager's, not sudo's", () => {
+  // Every call is retried with sudo, and a box only has passwordless sudo if
+  // someone asked for it in tvbox.conf. Reporting the sudo attempt's stderr makes
+  // every failure on an ordinary box read "sudo: a password is required".
   const seen = withCommands({
-    "-f NAME,TYPE connection show": "DarkTL24:802-11-wireless\n",
-    "802-11-wireless.ssid connection show DarkTL24": "DarkTL24",
+    ...SAVED,
+    "802-11-wireless-security.psk connection show id tvbox-preseed": "oldsecret",
+    "connection modify": { fail: true, stderr: "Error: property is invalid." },
+    "sudo -n nmcli connection modify": { fail: true, stderr: "sudo: a password is required" },
+  });
+  return new Promise((resolve) => {
+    system.wifiConnect("DarkTL50", "short", false, (r) => {
+      assert.strictEqual(r.error, "Error: property is invalid.");
+      assert.ok(
+        seen.some((c) => c.startsWith("sudo -n nmcli connection modify")),
+        "sudo was still tried",
+      );
+      resolve();
+    });
+  });
+});
+
+test("the password is never part of what is reported or logged", () => {
+  // node builds a failed exec's message as "Command failed: <the whole argv>", and
+  // one of these command lines carries the password. That string reaches the TV and
+  // ~/.tvbox/shell.log, which the diagnostics report copies to the boot partition.
+  const seen = withCommands({ ...SAVED, "802-11-wireless-security.psk connection show id tvbox-preseed": "old" });
+  return new Promise((resolve) => {
+    system.wifiConnect("DarkTL50", "hunter2secret", false, (r) => {
+      assert.strictEqual(r.ok, false);
+      assert.strictEqual(r.error.includes("hunter2secret"), false, r.error);
+      assert.ok(
+        seen.some((c) => c.includes("hunter2secret")),
+        "it did reach nmcli, just not the report",
+      );
+      resolve();
+    });
+  });
+});
+
+test("a network name that nmcli would read as an option is refused", () => {
+  // An SSID is chosen by whoever runs the access point. nmcli parses options in the
+  // position the SSID goes to, so "-a" becomes --ask: every later argument shifts
+  // along and the password is quoted back in the error. There is no `--` to hide
+  // behind, so this network cannot be joined by this path at all.
+  const seen = withCommands({ "device wifi connect": "" });
+  return new Promise((resolve) => {
+    system.wifiConnect("-a", "hunter2", false, (r) => {
+      assert.deepStrictEqual(r, { ok: false, error: "unsupported network name", code: "bad-ssid" });
+      assert.deepStrictEqual(seen, [], "nothing was run");
+      resolve();
+    });
+  });
+});
+
+test("an SSID with a colon in it still finds its profile", () => {
+  // nmcli's terse output escapes a colon inside a value, and an SSID may contain
+  // one. Unescaped, the lookup misses and the typed password goes nowhere near the
+  // profile - the original bug, for exactly the SSIDs this file already protects.
+  const seen = withCommands({
+    "-f NAME,TYPE connection show": "guest:802-11-wireless\n",
+    "802-11-wireless.ssid connection show id guest": "home\\:guest",
+    "802-11-wireless-security.psk connection show id guest": "old",
+    "connection modify": "",
+    "connection up": "",
+  });
+  return new Promise((resolve) => {
+    system.wifiConnect("home:guest", "hunter2", false, (r) => {
+      assert.deepStrictEqual(r, { ok: true });
+      assert.ok(
+        seen.some((c) => c === "nmcli connection modify id guest wifi-sec.psk hunter2"),
+        seen.join(" | "),
+      );
+      resolve();
+    });
+  });
+});
+
+test("a network with no profile of its own is joined from scratch", () => {
+  // A saved profile exists, for a DIFFERENT network: the lookup has to miss it and
+  // the ordinary connect has to run, password and all.
+  const seen = withCommands({
+    ...SAVED,
     "device wifi connect": "",
   });
-  const r = await new Promise((resolve) => system.wifiConnect("CoffeeShop", "", false, resolve));
-  assert.deepStrictEqual(r, { ok: true });
-  assert.strictEqual(
-    seen.some((c) => c.includes("connection delete")),
-    false,
-  );
+  return new Promise((resolve) => {
+    system.wifiConnect("CoffeeShop", "beans", false, (r) => {
+      assert.deepStrictEqual(r, { ok: true });
+      assert.match(
+        seen.find((c) => c.includes("device wifi connect")),
+        /^nmcli --wait \d+ device wifi connect CoffeeShop password beans$/,
+      );
+      assert.strictEqual(
+        seen.some((c) => c.includes("connection modify")),
+        false,
+      );
+      resolve();
+    });
+  });
 });
 
 test("About reports an SSID with a space in it, not one with colons", async () => {

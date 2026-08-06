@@ -177,8 +177,19 @@ function wifiSavedProfiles(cb) {
     const out = [];
     let left = names.length;
     for (const name of names)
-      execFile("nmcli", ["-g", "802-11-wireless.ssid", "connection", "show", name], { timeout: 8000 }, (e, o) => {
-        if (!e) out.push({ name, ssid: String(o || "").trim() });
+      // `id` matters: `connection show <name>` reads its argument through nmcli's
+      // option parser, so a profile called "-a" is swallowed and the lookup that
+      // decides which profile gets the password silently misses it.
+      execFile("nmcli", ["-g", "802-11-wireless.ssid", "connection", "show", "id", name], { timeout: 8000 }, (e, o) => {
+        // -g is terse output, which escapes a colon inside a value - and an SSID may
+        // contain one. wifiList and wifiForget unescape for the same reason.
+        if (!e)
+          out.push({
+            name,
+            ssid: String(o || "")
+              .replace(/\\:/g, ":")
+              .trim(),
+          });
         if (--left === 0) cb(out);
       });
   });
@@ -190,24 +201,48 @@ const NM_WAIT_S = 30;
 
 function wifiConnect(ssid, password, hidden, cb) {
   if (!ssid) return cb({ ok: false, error: "no ssid" });
-  // Every nmcli call here goes through the same two attempts: as us, then with
-  // sudo, and the error that comes back is the one the user is shown.
+  // An SSID is 32 arbitrary bytes chosen by whoever runs the access point, and it
+  // goes to nmcli in an argument position that nmcli still parses OPTIONS in: a
+  // network called "-a" is read as `--ask`, every later argument shifts along, and
+  // the password ends up quoted back in "invalid extra argument 'hunter2'" - on the
+  // TV and in the log. nmcli honours no `--` end-of-options here, so the only
+  // answer is not to send it. Refusing is safe: a network named this way cannot be
+  // joined by this path, and saying so is better than leaking the password for it.
+  if (ssid.startsWith("-")) return cb({ ok: false, error: "unsupported network name", code: "bad-ssid" });
+  // Every nmcli call is tried as us and then with sudo. WHICH error is reported
+  // matters: a box only has passwordless sudo when someone asked for it in
+  // tvbox.conf, so on an ordinary box the sudo half always fails with "sudo: a
+  // password is required" - report that and every failure looks the same. The
+  // unprivileged attempt is the one that spoke to NetworkManager.
+  //
+  // The message never falls back to the exception: node builds that as "Command
+  // failed: <the whole command line>", and one of these command lines carries the
+  // wifi password. It would be on the TV and in ~/.tvbox/shell.log, which backups
+  // and the diagnostics report both pick up.
   const nm = (args, done) =>
     execFile("nmcli", args, { timeout: (NM_WAIT_S + 5) * 1000 }, (e, _o, err) => {
       if (!e) return done(null);
       execFile("sudo", ["-n", "nmcli", ...args], { timeout: (NM_WAIT_S + 5) * 1000 }, (e2, _o2, err2) =>
         done(
           e2
-            ? String(err2 || err || e.message || "")
+            ? String(err || err2 || "nmcli failed")
                 .trim()
-                .slice(0, 160)
+                .slice(0, 160) || "nmcli failed"
             : null,
         ),
       );
     });
-  const answer = (error) => {
+  // What went wrong, in a form the launcher can say in the user's own language. The
+  // raw text still goes back with it: on a TV there is no log to open, and the two
+  // that matter are the two anyone can act on.
+  const classify = (error) => {
+    if (/secret|password|psk|key-mgmt|not accepted|authentication/i.test(error)) return "bad-password";
+    if (/no network with ssid|not found|no suitable|timeout|timed out/i.test(error)) return "not-found";
+    return "other";
+  };
+  const answer = (error, code) => {
     if (error) console.warn("[wifi] connect to", ssid, "failed:", error);
-    cb(error ? { ok: false, error } : { ok: true });
+    cb(error ? { ok: false, error, code: code || classify(error) } : { ok: true });
   };
   // `--wait` is a GLOBAL option and only parses before the subcommand; nmcli
   // answers "invalid extra argument" for one at the end. It is here so nmcli
@@ -219,33 +254,47 @@ function wifiConnect(ssid, password, hidden, cb) {
     // Hidden networks aren't in the scan list, so nmcli must be told to probe for
     // the SSID instead of matching a scan result.
     if (hidden) args.push("hidden", "yes");
-    nm(args, answer);
-  };
-  // The saved profile cannot carry this network: its security changed under it (a
-  // WPA2 profile against an AP that now speaks WPA3-SAE), or the name was never
-  // this network's. Drop it and let nmcli build one from what the AP is actually
-  // broadcasting - after a rescan, because a profile built from a stale scan comes
-  // out with no key-mgmt at all and nmcli refuses it.
-  const rebuild = (name, why) => {
-    console.warn("[wifi] the saved profile", name, "for", ssid, "did not take:", why);
-    nm(["connection", "delete", "id", name], () => nm(["device", "wifi", "list", "--rescan", "yes"], () => fresh()));
+    nm(args, (error) => answer(error));
   };
   if (!password) return fresh();
   // `nmcli device wifi connect` FINDS A MATCHING PROFILE or creates one, and a
   // profile brings its own stored secret: the password just typed is never tried,
   // so a network whose password changed fails at once with "Secrets were required,
-  // but not provided". Replacing the secret is tried first because the profile is
-  // what knows how this network is secured; rebuilding is the answer when that
-  // knowledge is what has gone stale.
+  // but not provided". The profile is also what knows how its network is secured,
+  // so the password goes INTO it rather than around it.
+  //
+  // Nothing here destroys anything. The old secret is read first and put back when
+  // the new one does not bring the network up, because a typo must not cost a
+  // wifi-only box the profile it lives on - there is no way back onto the network
+  // to fix that, and the box IS the television. A profile that genuinely cannot
+  // carry its network any more is the user's call: Settings offers Forget, and the
+  // answer below says so.
   wifiSavedProfiles((profiles) => {
-    const saved = profiles.find((p) => p.ssid === ssid);
+    // Two profiles can carry one SSID (nmcli names the second "<ssid> 1"), and the
+    // lookups answer in whatever order they finish. Pick by name so the same box
+    // makes the same choice twice, and activate BY NAME below so it is the one that
+    // was given the password.
+    const saved = profiles.filter((p) => p.ssid === ssid).sort((a, b) => a.name.localeCompare(b.name))[0];
     if (!saved) return fresh();
-    nm(["connection", "modify", "id", saved.name, "wifi-sec.psk", password], (error) => {
-      if (error) return rebuild(saved.name, error);
-      nm(["--wait", String(NM_WAIT_S), "connection", "up", "id", saved.name], (upError) =>
-        upError ? rebuild(saved.name, upError) : answer(null),
-      );
-    });
+    execFile(
+      "nmcli",
+      ["-s", "-g", "802-11-wireless-security.psk", "connection", "show", "id", saved.name],
+      { timeout: 8000 },
+      (readErr, previous) => {
+        const restore = (error) => {
+          const before = readErr ? "" : String(previous || "").trim();
+          const done = () => answer(error, classify(error));
+          if (!before) return done(); // nothing to put back
+          nm(["connection", "modify", "id", saved.name, "wifi-sec.psk", before], done);
+        };
+        nm(["connection", "modify", "id", saved.name, "wifi-sec.psk", password], (error) => {
+          if (error) return answer(error, classify(error));
+          nm(["--wait", String(NM_WAIT_S), "connection", "up", "id", saved.name], (upError) =>
+            upError ? restore(upError) : answer(null),
+          );
+        });
+      },
+    );
   });
 }
 
@@ -300,12 +349,19 @@ function wifiForget(ssid, cb) {
     // a box has a handful of profiles at most).
     const matchRest = (i, acc) => {
       if (i >= rest.length) return delAll(direct.concat(acc));
-      execFile("nmcli", ["-g", "802-11-wireless.ssid", "connection", "show", rest[i]], { timeout: 8000 }, (e, out) => {
-        const v = String(out || "")
-          .trim()
-          .replace(/\\:/g, ":");
-        matchRest(i + 1, !e && v === ssid ? acc.concat(rest[i]) : acc);
-      });
+      // `id`, for the same reason wifiSavedProfiles uses it: without the selector
+      // nmcli parses the profile name as an option and the lookup misses.
+      execFile(
+        "nmcli",
+        ["-g", "802-11-wireless.ssid", "connection", "show", "id", rest[i]],
+        { timeout: 8000 },
+        (e, out) => {
+          const v = String(out || "")
+            .trim()
+            .replace(/\\:/g, ":");
+          matchRest(i + 1, !e && v === ssid ? acc.concat(rest[i]) : acc);
+        },
+      );
     };
     matchRest(0, []);
   });
