@@ -28,7 +28,7 @@ Everything is user-space (hard rule #1 - no root at runtime):
 ```
 
 **Flow:** the shell checks a static feed (`update.json`) daily and on demand
-(Settings → System & updates). Install = download tarball → sha256 verify →
+(Settings → System → Software update). Install = download tarball → sha256 verify →
 extract to `versions/<v>` → reuse `node_modules` via hardlinks when the
 lockfile is unchanged (else `npm ci`) → write `update/pending` → flip
 `current` → restart the shell. `run-shell.sh` counts boot attempts while
@@ -105,7 +105,7 @@ Three things move them:
 - **`tvbox-flatpak-update.timer`** (nightly, 03:30 + jitter) runs
   `flatpak update --user` for every ref. This is the normal path and needs no
   interaction.
-- **The store's update button.** Settings → Store → the app: alongside the
+- **The store's update button.** Settings → Apps → App Store → the app: alongside the
   registry version it shows the flatpak's own version and offers to update it now.
   That runs `tvbox flatpak-update <id>` out of process (a flatpak is hundreds of
   MB) and reports whether anything actually changed - decided by the ref's commit
@@ -125,14 +125,14 @@ equivalents of the last two.
 `provision.sh` configures `unattended-upgrades` with Debian security + the
 Raspberry Pi OS archive as origins and **`Automatic-Reboot "false"`** - a TV
 box must never restart itself mid-movie. When an update wants a reboot
-(`/var/run/reboot-required`), Settings → System & updates shows a hint and a
+(`/var/run/reboot-required`), Settings → System → Software update shows a hint and a
 "Restart now" button (logind polkit, no root); the timing is always the
 user's. Major OS jumps (Debian release upgrades) are intentionally NOT
 in-place: back up to your phone, re-flash the SD image, restore.
 
 ## Backup & restore (phone, QR)
 
-Settings → System & updates → "Backup / restore on phone (QR)". Same pairing
+Settings → System → Backup. Same pairing
 infrastructure as the IPTV/wallpaper phone pages (code-gated LAN server on
 :8099, 5-min TTL). The phone page does both directions:
 

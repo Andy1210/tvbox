@@ -27,18 +27,15 @@
     "wifi": "Wi-Fi"
   },
   "settingsCat": {
-    "general": "General",
-    "av": "Video & audio",
+    "av": "Picture & sound",
     "network": "Network",
-    "peripherals": "Peripherals",
+    "peripherals": "Remotes & accessories",
     "apps": "Apps",
-    "ambient": "Ambient",
-    "store": "App Store",
-    "system": "System & updates",
+    "ambient": "Screen saver",
+    "system": "System",
     "about": "About"
   },
   "wifi": {
-    "connectedTo": "connected · {ssid}",
     "notConnected": "not connected",
     "rescan": "Rescan",
     "scanning": "Scanning…",
@@ -54,32 +51,39 @@
     "ethernet": "Ethernet",
     "ethConnected": "connected",
     "forget": "Forget",
-    "forgotten": "{ssid} forgotten",
     "forgetFailed": "Couldn't forget {ssid}",
     "hidden": "Join a hidden network…",
     "hiddenSsid": "Hidden network name (SSID)",
     "country": "Wi-Fi country",
     "countryHint": "Regulatory region, applies at the next restart.",
     "countryAuto": "Default",
-    "radioTurnOff": "Turn the wifi radio off",
-    "radioTurnOn": "Turn the wifi radio on",
     "radioOnHint": "On ethernet the wifi only disturbs Bluetooth",
     "radioOffHint": "The radio is off",
     "radioTurningOff": "Turning off…",
     "radioTurningOn": "Turning on…",
     "radioNeedsEthernet": "Needs a wired connection, or the box would leave the network",
-    "radioFailed": "Could not change the radio"
+    "radioFailed": "Could not change the radio",
+    "groupConnection": "Connection",
+    "groupNetworks": "Networks",
+    "groupRegion": "Region",
+    "radio": "Wi-Fi radio",
+    "savedNetwork": "saved",
+    "signal": "Signal",
+    "security": "Security",
+    "securedYes": "password protected",
+    "securedNo": "open",
+    "forgetHint": "The box stops joining it on its own",
+    "connect": "Connect"
   },
   "display": {
     "title": "Display",
     "resolution": "Resolution",
     "autoHint": "Automatic: the UI runs at up to 1080p, video switches the output to match. Press OK to re-detect.",
-    "active": "active",
     "none": "No modes available",
     "applying": "Applying…",
     "failed": "Couldn't switch mode",
-    "on": "On",
-    "off": "Off"
+    "redetect": "Re-detect the output",
+    "redetectHint": "Ask the TV again, for when something moved the output elsewhere"
   },
   "typing": {
     "title": "Type here",
@@ -108,7 +112,6 @@
     "sleepTimerHint": "Turns the TV off after the set time (the box stays on)."
   },
   "ambient": {
-    "title": "Ambient screen",
     "enable": "Turn on when idle",
     "idle": "Idle (minutes)",
     "city": "City (weather)",
@@ -136,7 +139,9 @@
     "sleepNever": "Never",
     "sleepAfter": "{min} min",
     "bing": "Bing daily pictures",
-    "bingHint": "Mix Bing's daily wallpapers into the slideshow"
+    "bingHint": "Mix Bing's daily wallpapers into the slideshow",
+    "groupContent": "What it shows",
+    "minutes": "{n} min"
   },
   "bt": {
     "title": "Bluetooth",
@@ -157,7 +162,17 @@
     "lowBattery": "Remote battery low",
     "lowBatteryMsg": "{name}: {pct}%. Charge it or replace the batteries soon.",
     "ertm": "Disable ERTM (troubleshooting)",
-    "ertmHint": "Turn this on only if a controller's buttons stick or register twice. Some controllers - Xbox ones especially - handle Bluetooth ERTM retransmission badly and behave better without it. It applies to EVERY Bluetooth device though, and removes L2CAP's own error recovery, which can upset audio devices. Takes effect after a restart."
+    "ertmHint": "Turn this on only if a controller's buttons stick or register twice. Some controllers - Xbox ones especially - handle Bluetooth ERTM retransmission badly and behave better without it. It applies to EVERY Bluetooth device though, and removes L2CAP's own error recovery, which can upset audio devices. Takes effect after a restart.",
+    "groupDevices": "Devices",
+    "groupTroubleshooting": "Troubleshooting",
+    "connect": "Connect",
+    "disconnect": "Disconnect",
+    "state": "State",
+    "battery": "Battery",
+    "batteryAt": "battery {pct}%",
+    "connectedN": "{n} connected",
+    "noneConnected": "nothing connected",
+    "removeHint": "The box forgets this device"
   },
   "remote": {
     "title": "Remote buttons",
@@ -252,11 +267,13 @@
     "trackLangHint": "Streams pick this audio track when available (mpv).",
     "subLang": "Preferred subtitle language",
     "subLangHint": "Subtitles turn on when a matching track exists (mpv).",
-    "langAuto": "Stream default"
+    "langAuto": "Stream default",
+    "output": "Output",
+    "outputHint": "Where the sound goes",
+    "tracksTitle": "Playback languages",
+    "tracksHint": "Which audio and subtitle track a film should prefer"
   },
   "about": {
-    "title": "Diagnostics",
-    "refresh": "Refresh",
     "version": "Version",
     "device": "Device",
     "ip": "IP address",
@@ -270,7 +287,10 @@
     "storage": "Storage (free/total)",
     "creditsTitle": "Open source",
     "creditsIntro": "tvbox is MIT-licensed and built on these projects:",
-    "trademarks": "Not affiliated with or endorsed by Amazon. Fire TV and Alexa are trademarks of Amazon; used only to describe compatibility. The Fire TV remote feature interoperates with hardware you own and is experimental - use at your own risk."
+    "trademarks": "Not affiliated with or endorsed by Amazon. Fire TV and Alexa are trademarks of Amazon; used only to describe compatibility. The Fire TV remote feature interoperates with hardware you own and is experimental - use at your own risk.",
+    "groupDevice": "Device",
+    "groupNetwork": "Network",
+    "groupHealth": "Health"
   },
   "aboutCredits": {
     "electron": "app shell",
@@ -353,12 +373,13 @@
     "rebootNow": "Restart now",
     "rebootNone": "No restart pending.",
     "appsAuto": "Update apps automatically",
-    "appsAutoHint": "Installs app updates from the store overnight, only while the box is idle."
+    "appsAutoHint": "Installs app updates from the store overnight, only while the box is idle.",
+    "groupAuto": "Automatic",
+    "availableShort": "update available"
   },
   "hostname": {
     "title": "Device name",
     "hint": "Name this box so several boxes are easy to tell apart on your network.",
-    "name": "Name",
     "later": "Saved - the new name applies after the next box update."
   },
   "region": {
@@ -380,7 +401,9 @@
     "hourFormat": "Time format",
     "hourFormat_auto": "Automatic",
     "hourFormat_12": "12-hour",
-    "hourFormat_24": "24-hour"
+    "hourFormat_24": "24-hour",
+    "regionTitle": "Time & region",
+    "regionHint": "Time zone, keyboard layout, clock"
   },
   "keymap": {
     "gb": "English (UK)",
@@ -454,7 +477,9 @@
     "enterPin": "Enter the PIN",
     "wrongPin": "Wrong PIN",
     "require": "Require PIN for sensitive actions",
-    "requireHint": "Installing and uninstalling apps asks for the PIN."
+    "requireHint": "Installing and uninstalling apps asks for the PIN.",
+    "pinSet": "PIN set",
+    "pinNotSet": "no PIN"
   },
   "mqtt": {
     "title": "MQTT / Home Assistant",
@@ -467,7 +492,12 @@
     "username": "Username",
     "password": "Password",
     "deviceId": "Device ID",
-    "saveFailed": "Couldn't save the settings."
+    "saveFailed": "Couldn't save the settings.",
+    "groupBroker": "Broker",
+    "groupAuth": "Sign-in",
+    "groupIdentity": "Identity",
+    "deviceIdHint": "The topic segment this box publishes under. Two boxes must never share one.",
+    "portDefault": "1883"
   },
   "ir": {
     "title": "IR blaster (TV volume)",
@@ -500,7 +530,10 @@
     "test": "Test",
     "testOk": "Sent.",
     "testFailed": "Send failed: {error}",
-    "disconnected": "Blaster not reachable: {error}"
+    "disconnected": "Blaster not reachable: {error}",
+    "groupDevice": "Blaster",
+    "groupTest": "Try it",
+    "portDefault": "default"
   },
   "firetvir": {
     "title": "Fire TV remote → TV IR",
@@ -579,6 +612,37 @@
       "share_failed": "Could not prepare the share (write error)."
     },
     "passClear": "Clear password",
-    "passClearHint": "this stops the server"
+    "passClearHint": "this stops the server",
+    "address": "Address",
+    "groupAccess": "Sign-in"
+  },
+  "common": {
+    "on": "On",
+    "off": "Off",
+    "notSet": "not set",
+    "selected": "selected",
+    "working": "working…"
+  },
+  "network": {
+    "wifiHint": "The network this box is on",
+    "fileserverHint": "Reach the box's folders from a computer",
+    "mqttHint": "Now-playing, commands and notifications over MQTT"
+  },
+  "av": {
+    "displayHint": "Resolution and refresh rate",
+    "soundHint": "Output and volume"
+  },
+  "peripherals": {
+    "btHint": "Speakers, remotes, controllers",
+    "remoteHint": "Teach a remote one of its other buttons",
+    "irHint": "TV volume for a TV that takes none over CEC"
+  },
+  "apps": {
+    "orderTitle": "Home screen order",
+    "orderHint": "Which apps show, and in what order"
+  },
+  "system": {
+    "updateHint": "Version and automatic updates",
+    "backupHint": "Copy the settings to your phone, or put them back"
   }
 }
