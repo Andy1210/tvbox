@@ -19,6 +19,7 @@ const { redact } = require("./redact"); // an app's console line may carry ITS c
 const display = require("./display"); // resolution/refresh selection
 const displaymode = require("./displaymode"); // adaptive mode: UI mode + per-video claims
 const videoout = require("./videoout"); // which mpv renderer a stream needs
+const httpserver = require("./httpserver"); // the transport under the API: responses, static files, the origin gate
 const maintenance = require("./maintenance"); // installs, flatpak/bundle refresh, restore reconcile
 const system = require("./system"); // network, clock, keyboard, name, About numbers
 const hdrout = require("./hdr"); // whether the output should be in PQ for this film
@@ -98,25 +99,6 @@ app.commandLine.appendSwitch("enable-features", "UseOzonePlatform");
 // the shell log always used - "debug" takes the old verbose "log" slot, and any
 // unmapped level falls through to "?" at the call site.
 const CONSOLE_TAG = { debug: "log", info: "info", warning: "warn", error: "error" };
-
-const MIME = {
-  ".js": "application/javascript",
-  ".css": "text/css",
-  ".html": "text/html",
-  ".json": "application/json",
-  ".png": "image/png",
-  ".jpg": "image/jpeg",
-  ".jpeg": "image/jpeg",
-  ".gif": "image/gif",
-  ".svg": "image/svg+xml",
-  ".webp": "image/webp",
-  ".ttf": "font/ttf",
-  ".woff": "font/woff",
-  ".woff2": "font/woff2",
-  ".wav": "audio/wav",
-  ".mp3": "audio/mpeg",
-  ".map": "application/json",
-};
 
 let win = null;
 let mpv = null;
@@ -405,25 +387,6 @@ function setVideoMode(on, w) {
 }
 
 // ---- HTTP: launcher (/tvbox/), app manifests API, and the root web app (Plex) ----
-function serveStatic(res, root, p, spaFallback) {
-  const fp = path.join(root, p);
-  const base = root.endsWith(path.sep) ? root : root + path.sep; // boundary: don't match sibling dirs
-  if ((fp === root || fp.startsWith(base)) && fs.existsSync(fp) && fs.statSync(fp).isFile()) {
-    res.writeHead(200, { "Content-Type": MIME[path.extname(fp)] || "application/octet-stream" });
-    fs.createReadStream(fp).pipe(res);
-  } else if (spaFallback && fs.existsSync(spaFallback)) {
-    res.writeHead(200, { "Content-Type": "text/html" });
-    res.end(fs.readFileSync(spaFallback));
-  } else {
-    res.writeHead(404, { "Content-Type": "text/plain" });
-    res.end("not found");
-  }
-}
-function jsonRes(res, obj) {
-  res.writeHead(200, { "Content-Type": "application/json" });
-  res.end(JSON.stringify(obj));
-}
-
 function handlePost(p, data, res) {
   if (p === "/tvbox/api/config") {
     const changed = [];
@@ -489,7 +452,7 @@ function handlePost(p, data, res) {
       changed.push("apps");
     }
     emitConfigChange(changed); // e.g. Live TV drops its channel/EPG cache on a new IPTV source
-    return jsonRes(res, { ok: true, config: config.publicConfig() });
+    return httpserver.jsonRes(res, { ok: true, config: config.publicConfig() });
   }
   if (p === "/tvbox/api/ui/locale") {
     // The launcher owns the UI language (its i18n store is in the renderer); it
@@ -500,7 +463,7 @@ function handlePost(p, data, res) {
     // the user entered Settings from an app.
     const want = String(data.locale || "");
     if (want && want !== config.uiLocale()) config.setUi({ locale: want });
-    return jsonRes(res, { ok: true, locale: config.uiLocale() });
+    return httpserver.jsonRes(res, { ok: true, locale: config.uiLocale() });
   }
   if (p === "/tvbox/api/display/refresh") {
     // "Re-detect": recompute the UI mode from the live output and go there. The
@@ -508,16 +471,18 @@ function handlePost(p, data, res) {
     // display action left in the UI now that resolution is automatic. rearm() first:
     // a person pressing OK means "try again", even if earlier attempts didn't stick.
     dmode.rearm();
-    return dmode.refresh((ok, err) => jsonRes(res, ok ? { ok: true } : { ok: false, error: err || "failed" }));
+    return dmode.refresh((ok, err) =>
+      httpserver.jsonRes(res, ok ? { ok: true } : { ok: false, error: err || "failed" }),
+    );
   }
   if (p === "/tvbox/api/audio/default") {
     // persist the override (empty string clears it -> back to auto), then re-apply
     config.setAudio({ sink: String(data.sink || "") });
-    return ensureAudio(() => jsonRes(res, { ok: true, sink: audioSink }));
+    return ensureAudio(() => httpserver.jsonRes(res, { ok: true, sink: audioSink }));
   }
   if (p === "/tvbox/api/audio/volume") {
     return audio.setVolume({ ...process.env, ...WL_ENV }, Number(data.id), Number(data.volume), (ok) =>
-      jsonRes(res, { ok }),
+      httpserver.jsonRes(res, { ok }),
     );
   }
   if (p === "/tvbox/api/ir/send") {
@@ -525,8 +490,8 @@ function handlePost(p, data, res) {
     // repeated (steps). Callers: the remote bridge (BT volume keys) + the
     // settings UI test buttons. A dead blaster answers ok:false, never a 500.
     return ir.send(String(data.action || ""), data.steps).then(
-      (r) => jsonRes(res, r),
-      (e) => jsonRes(res, { ok: false, error: String((e && e.message) || e) }),
+      (r) => httpserver.jsonRes(res, r),
+      (e) => httpserver.jsonRes(res, { ok: false, error: String((e && e.message) || e) }),
     );
   }
   if (p === "/tvbox/api/nav") {
@@ -542,49 +507,50 @@ function handlePost(p, data, res) {
     const dest = String(data.dest || "");
     if (dest === "app") {
       const id = String(data.app || "");
-      if (!/^[a-z0-9_-]{1,32}$/.test(id)) return jsonRes(res, { ok: false, error: "invalid app id" });
+      if (!/^[a-z0-9_-]{1,32}$/.test(id)) return httpserver.jsonRes(res, { ok: false, error: "invalid app id" });
       navTo(id);
-      return jsonRes(res, { ok: true, dest, app: id });
+      return httpserver.jsonRes(res, { ok: true, dest, app: id });
     }
     if (dest === "switch") {
       switchApp(); // cycle through running apps (the appswitcher remap action)
-      return jsonRes(res, { ok: true, dest, app: currentAppId });
+      return httpserver.jsonRes(res, { ok: true, dest, app: currentAppId });
     }
-    if (dest !== "home" && dest !== "settings") return jsonRes(res, { ok: false, error: "unknown dest: " + dest });
+    if (dest !== "home" && dest !== "settings")
+      return httpserver.jsonRes(res, { ok: false, error: "unknown dest: " + dest });
     if (currentAppId !== null) showLauncher(dest === "settings" ? "#settings" : "");
     else if (win && !win.isDestroyed()) win.webContents.send("tvbox-nav", { dest });
-    return jsonRes(res, { ok: true, dest });
+    return httpserver.jsonRes(res, { ok: true, dest });
   }
   if (p === "/tvbox/api/apps/quit") {
     // HOME's running-apps row: really exit an app (its window and page state are
     // dropped; next launch is a fresh start). Same teardown an app's own "Exit?"
     // dialog gets - one implementation, so both can't drift.
     const id = String(data.id || "");
-    if (!appWindow(id)) return jsonRes(res, { ok: false, error: "not running" });
+    if (!appWindow(id)) return httpserver.jsonRes(res, { ok: false, error: "not running" });
     exitApp(id);
-    return jsonRes(res, { ok: true, id });
+    return httpserver.jsonRes(res, { ok: true, id });
   }
   // Fire TV remote IR programming (Settings → Peripherals; shell/firetvir.js)
   if (p === "/tvbox/api/firetvir/deps") {
-    return jsonRes(res, { ok: firetvir.installDeps() }); // progress is polled via /firetvir/status
+    return httpserver.jsonRes(res, { ok: firetvir.installDeps() }); // progress is polled via /firetvir/status
   }
   // `plan` = { base, keys: { <key>: { path, second } } } (per-key brands + a
   // second device on a key); a bare `path` is the single-codeset form.
   if (p === "/tvbox/api/firetvir/test") {
     firetvir.testKey(String(data.mac || ""), data.plan || String(data.path || ""), String(data.key || ""), (err, r) =>
-      jsonRes(res, err ? { ok: false, error: String(err.message || err).slice(0, 200) } : r),
+      httpserver.jsonRes(res, err ? { ok: false, error: String(err.message || err).slice(0, 200) } : r),
     );
     return;
   }
   if (p === "/tvbox/api/firetvir/program") {
     firetvir.program(String(data.mac || ""), data.plan || String(data.path || ""), String(data.label || ""), (err, r) =>
-      jsonRes(res, err ? { ok: false, error: String(err.message || err).slice(0, 200) } : r),
+      httpserver.jsonRes(res, err ? { ok: false, error: String(err.message || err).slice(0, 200) } : r),
     );
     return;
   }
   if (p === "/tvbox/api/firetvir/erase") {
     firetvir.erase(String(data.mac || ""), (err, r) =>
-      jsonRes(res, err ? { ok: false, error: String(err.message || err).slice(0, 200) } : r),
+      httpserver.jsonRes(res, err ? { ok: false, error: String(err.message || err).slice(0, 200) } : r),
     );
     return;
   }
@@ -594,41 +560,41 @@ function handlePost(p, data, res) {
     nowPlaying = data;
     if (mqttCtl) mqttCtl.publish("nowplaying", data, { retain: true });
     publishMediaState({ force: true }); // the metadata changed: always news
-    return jsonRes(res, { ok: true });
+    return httpserver.jsonRes(res, { ok: true });
   }
   if (p === "/tvbox/api/update/check") {
-    updater.check().then((s) => jsonRes(res, s));
+    updater.check().then((s) => httpserver.jsonRes(res, s));
     return;
   }
   if (p === "/tvbox/api/update/apply") {
     // async: download/npm ci can take minutes - respond now, the UI polls status
     updater.apply();
-    return jsonRes(res, updater.status());
+    return httpserver.jsonRes(res, updater.status());
   }
   if (p === "/tvbox/api/update/clear-failed") {
-    return jsonRes(res, updater.clearFailed());
+    return httpserver.jsonRes(res, updater.clearFailed());
   }
   if (p === "/tvbox/api/backup/context") {
     // launcher hands over its localStorage snapshot right before the backup QR
     backupPairing.setContext(data);
-    return jsonRes(res, { ok: true });
+    return httpserver.jsonRes(res, { ok: true });
   }
   if (p === "/tvbox/api/backup/pending-localstorage/clear") {
     backup.clearPendingLocalStorage();
-    return jsonRes(res, { ok: true });
+    return httpserver.jsonRes(res, { ok: true });
   }
   if (p === "/tvbox/api/power") {
     return handlePower(String(data.action || ""), res);
   }
   if (p === "/tvbox/api/ambient/photos/clear") {
-    return jsonRes(res, { ok: true, removed: ambient.clearPhotos() });
+    return httpserver.jsonRes(res, { ok: true, removed: ambient.clearPhotos() });
   }
   if (p === "/tvbox/api/ambient/photos/delete") {
-    return jsonRes(res, { ok: ambient.deletePhoto(String(data.name || "")) });
+    return httpserver.jsonRes(res, { ok: ambient.deletePhoto(String(data.name || "")) });
   }
   if (p === "/tvbox/api/bt/scan") {
     return bluetooth.scan({ ...process.env, ...WL_ENV }, Number(data.seconds) || 8, (devices) =>
-      jsonRes(res, { devices }),
+      httpserver.jsonRes(res, { devices }),
     );
   }
   if (p.startsWith("/tvbox/api/bt/")) {
@@ -648,20 +614,20 @@ function handlePost(p, data, res) {
       res.end("not found");
       return;
     }
-    if (!/^[0-9A-F]{2}(:[0-9A-F]{2}){5}$/.test(mac)) return jsonRes(res, { ok: false, error: "bad mac" });
-    return fn({ ...process.env, ...WL_ENV }, mac, (r) => jsonRes(res, r));
+    if (!/^[0-9A-F]{2}(:[0-9A-F]{2}){5}$/.test(mac)) return httpserver.jsonRes(res, { ok: false, error: "bad mac" });
+    return fn({ ...process.env, ...WL_ENV }, mac, (r) => httpserver.jsonRes(res, r));
   }
   if (p === "/tvbox/api/remote/learn") {
     // Enter learn mode for a device: the bridge captures & reports the next
     // button pressed on it (id may contain spaces -> rest-of-line in the FIFO).
     const id = String((data && data.id) || "").replace(/[\r\n]/g, "");
-    if (!id) return jsonRes(res, { ok: false, error: "no id" });
+    if (!id) return httpserver.jsonRes(res, { ok: false, error: "no id" });
     remoteBridgeCmd("learn " + id);
-    return jsonRes(res, { ok: true });
+    return httpserver.jsonRes(res, { ok: true });
   }
   if (p === "/tvbox/api/remote/learn-off") {
     remoteBridgeCmd("learn-off");
-    return jsonRes(res, { ok: true });
+    return httpserver.jsonRes(res, { ok: true });
   }
   if (p === "/tvbox/api/remote/reset") {
     // Clear one remote's remapping (id) or ALL (no id) and reload the bridge.
@@ -679,17 +645,17 @@ function handlePost(p, data, res) {
     }
     config.setRemote({ devices });
     remoteBridgeCmd("reload");
-    return jsonRes(res, { ok: true, cleared: id || "all" });
+    return httpserver.jsonRes(res, { ok: true, cleared: id || "all" });
   }
   if (p === "/tvbox/api/parental/verify") {
-    return jsonRes(res, { ok: config.verifyPin(String(data.pin || "")) });
+    return httpserver.jsonRes(res, { ok: config.verifyPin(String(data.pin || "")) });
   }
   if (p === "/tvbox/api/pairing/start") {
-    return jsonRes(res, pairing.start(data.locale, data.kind)); // kind: "iptv" (default) | "spotify"
+    return httpserver.jsonRes(res, pairing.start(data.locale, data.kind)); // kind: "iptv" (default) | "spotify"
   }
   if (p === "/tvbox/api/pairing/stop") {
     pairing.stop();
-    return jsonRes(res, { ok: true });
+    return httpserver.jsonRes(res, { ok: true });
   }
   if (p === "/tvbox/api/apps/install") {
     return maintenance.startInstall(String(data.id || ""), res);
@@ -702,14 +668,14 @@ function handlePost(p, data, res) {
     store
       .install(config, id)
       .then((r) => {
-        jsonRes(res, r);
+        httpserver.jsonRes(res, r);
         // The manifest is on disk; now finish the install (no-root binary deps +
         // bundle) in the SAME action, so the app reaches HOME only once it is
         // actually launchable - no "press the tile to finish" step. provisionFull
         // handles the final service-plugin restart itself, gated on idle.
         if (r.ok) maintenance.provisionFull(id);
       })
-      .catch((e) => jsonRes(res, { ok: false, error: String(e.message || e).slice(0, 120) }));
+      .catch((e) => httpserver.jsonRes(res, { ok: false, error: String(e.message || e).slice(0, 120) }));
     return;
   }
   if (p === "/tvbox/api/store/flatpak-update") {
@@ -720,13 +686,13 @@ function handlePost(p, data, res) {
     if (currentAppId === id) showLauncher();
     destroyAppWindow(id); // a background window must not outlive its app
     setWidget(id, null);
-    return jsonRes(res, store.uninstall(id));
+    return httpserver.jsonRes(res, store.uninstall(id));
   }
   if (p === "/tvbox/api/setup/done") {
     // Onboarding state is the BOX's, not the browser's: localStorage can come up
     // empty (see claimSingleInstance) and a configured box must not offer setup
     // again because of that. The launcher still keeps its own copy for the fast path.
-    return jsonRes(res, { ok: config.setSetupDone() });
+    return httpserver.jsonRes(res, { ok: config.setSetupDone() });
   }
   if (p === "/tvbox/api/fileserver") {
     // One writer for the whole form: enable/disable, credentials, folders. Applying
@@ -739,21 +705,21 @@ function handlePost(p, data, res) {
       pass: data.pass, // omitted keeps the stored one, "" clears it
     });
     const r = applyFileserver();
-    return jsonRes(res, {
+    return httpserver.jsonRes(res, {
       ok: !!r.ok,
       error: r.error || null,
       status: fileserver.status(config.rawFileserver(), fileserverDeps),
     });
   }
   if (p === "/tvbox/api/fileserver/install-rclone") {
-    return jsonRes(res, { ok: true, installing: installRclone() || rcloneInstalling });
+    return httpserver.jsonRes(res, { ok: true, installing: installRclone() || rcloneInstalling });
   }
   if (p === "/tvbox/api/config/app") {
     // Set a urlConfig app's address: { key, baseUrl } (http/https or empty to clear).
     const key = String(data.key || "");
     const baseUrl = String(data.baseUrl || "").trim();
-    if (baseUrl && !/^https?:\/\/\S+$/.test(baseUrl)) return jsonRes(res, { ok: false, error: "bad url" });
-    return jsonRes(res, { ok: config.setAppConfig(key, { baseUrl }) });
+    if (baseUrl && !/^https?:\/\/\S+$/.test(baseUrl)) return httpserver.jsonRes(res, { ok: false, error: "bad url" });
+    return httpserver.jsonRes(res, { ok: config.setAppConfig(key, { baseUrl }) });
   }
   if (p === "/tvbox/api/apps/remove") {
     // Drop an installed web-client bundle (apps-data/<id>). The manifest stays,
@@ -761,22 +727,22 @@ function handlePost(p, data, res) {
     // `tvbox remove <id>`.
     const id = String(data.id || "");
     const m = apps.manifestById(id);
-    if (!m || m.type !== "webclient") return jsonRes(res, { ok: false, error: "not removable" });
-    if (maintenance.isInstalling(id)) return jsonRes(res, { ok: false, error: "install in progress" });
+    if (!m || m.type !== "webclient") return httpserver.jsonRes(res, { ok: false, error: "not removable" });
+    if (maintenance.isInstalling(id)) return httpserver.jsonRes(res, { ok: false, error: "install in progress" });
     if (currentAppId === id) showLauncher(); // never yank the bundle out from under the running app
     destroyAppWindow(id); // incl. a hidden background window
-    return jsonRes(res, { ok: true, removed: apps.removeApp(id) });
+    return httpserver.jsonRes(res, { ok: true, removed: apps.removeApp(id) });
   }
   if (p === "/tvbox/api/wifi/connect") {
     return system.wifiConnect(String(data.ssid || ""), String(data.password || ""), !!data.hidden, (r) =>
-      jsonRes(res, r),
+      httpserver.jsonRes(res, r),
     );
   }
   if (p === "/tvbox/api/power/sleep-timer") {
-    return jsonRes(res, setSleepTimer(data.minutes)); // 0/absent = cancel
+    return httpserver.jsonRes(res, setSleepTimer(data.minutes)); // 0/absent = cancel
   }
   if (p === "/tvbox/api/wifi/forget") {
-    return system.wifiForget(String(data.ssid || ""), (r) => jsonRes(res, r));
+    return system.wifiForget(String(data.ssid || ""), (r) => httpserver.jsonRes(res, r));
   }
   // The radio as a lasting choice: on a box that lives on ethernet it only costs
   // Bluetooth airtime, and the two share one antenna. Refuse to turn it off with
@@ -786,26 +752,26 @@ function handlePost(p, data, res) {
     // malformed body - a missing field, the STRING "false", a JSON `null` body
     // (which parses, leaving `data` null) - as a request to turn the radio OFF,
     // which is the one direction that can take a box off the network.
-    if (!data || typeof data.on !== "boolean") return jsonRes(res, { ok: false, error: "bad-request" });
+    if (!data || typeof data.on !== "boolean") return httpserver.jsonRes(res, { ok: false, error: "bad-request" });
     const on = data.on;
     return system.ethernetStatus((eth) => {
       if (!on && !wifiradio.canDisable(eth)) {
-        return jsonRes(res, { ok: false, error: "no-ethernet", ethernet: eth });
+        return httpserver.jsonRes(res, { ok: false, error: "no-ethernet", ethernet: eth });
       }
       wifiradio.setRadio({ ...process.env, ...WL_ENV }, on, (ok) => {
         if (ok) config.setWifi({ radio: on });
-        jsonRes(res, { ok, radio: on, ethernet: eth });
+        httpserver.jsonRes(res, { ok, radio: on, ethernet: eth });
       });
     });
   }
   if (p === "/tvbox/api/system/timezone") {
-    return system.setTimezone(String(data.timezone || ""), (r) => jsonRes(res, r));
+    return system.setTimezone(String(data.timezone || ""), (r) => httpserver.jsonRes(res, r));
   }
   if (p === "/tvbox/api/system/keymap") {
-    return system.setKeymap(String(data.keymap || ""), (r) => jsonRes(res, r));
+    return system.setKeymap(String(data.keymap || ""), (r) => httpserver.jsonRes(res, r));
   }
   if (p === "/tvbox/api/system/hostname") {
-    return system.setHostname(String(data.hostname || ""), (r) => jsonRes(res, r));
+    return system.setHostname(String(data.hostname || ""), (r) => httpserver.jsonRes(res, r));
   }
   res.writeHead(404, { "Content-Type": "text/plain" });
   res.end("not found");
@@ -826,21 +792,6 @@ function btBatteryTick() {
       handleTvNotify({ kind: "lowBattery", name: d.name, battery: d.battery });
     }
   });
-}
-
-// ---- plugin route dispatch ----
-// Match a request against a plugin's registered route table. A plugin declares a
-// prefix (e.g. "/tvbox/api/spotify") and a table keyed "METHOD /subpath"; the
-// generic server tries these before its own built-in routes.
-function matchPluginRoute(method, pathname) {
-  for (const { prefix, table } of pluginRoutes) {
-    if (!pathname.startsWith(prefix)) continue;
-    const sub = pathname.slice(prefix.length);
-    if (sub && sub[0] !== "/") continue; // don't let "/spotify" match "/spotifyX"
-    const fn = table[method + " " + sub];
-    if (fn) return fn;
-  }
-  return null;
 }
 
 // Adaptive display mode. The UI draws at the panel's own resolution capped to
@@ -933,18 +884,18 @@ function handlePower(action, res) {
     // (Spotify Connect streams with the launcher sitting idle on Home, so
     // "screensaver is up" does NOT imply "nothing is playing"). The power
     // menu's manual Sleep stays unconditional.
-    if (action === "sleep_if_idle" && !boxIdle()) return jsonRes(res, { ok: true, slept: false });
+    if (action === "sleep_if_idle" && !boxIdle()) return httpserver.jsonRes(res, { ok: true, slept: false });
     showLauncher(); // stop playback / leave any remote app, back to Home
     cecPower(false); // TV off via CEC
-    return jsonRes(res, { ok: true, slept: true });
+    return httpserver.jsonRes(res, { ok: true, slept: true });
   }
   const sub = action === "reboot" || action === "poweroff" ? action : null;
-  if (!sub) return jsonRes(res, { ok: false, error: "bad action" });
+  if (!sub) return httpserver.jsonRes(res, { ok: false, error: "bad action" });
   console.log("[power]", sub);
   execFile("systemctl", [sub], { timeout: 8000 }, (e, _o, err) => {
-    if (!e) return jsonRes(res, { ok: true });
+    if (!e) return httpserver.jsonRes(res, { ok: true });
     execFile("sudo", ["-n", "systemctl", sub], { timeout: 8000 }, (e2, _o2, err2) => {
-      jsonRes(
+      httpserver.jsonRes(
         res,
         e2
           ? {
@@ -959,19 +910,9 @@ function handlePower(action, res) {
   });
 }
 
-// Origins allowed to issue state-changing requests: only our own pages (the
-// launcher and local app bundles are all served by this same server, loaded
-// via BASE=localhost). Browsers attach an Origin header to every cross-origin
-// POST, so a foreign Origin here is some LAN page - e.g. a plain-http remote
-// app (remoteProtoOk allows those) - blind-firing at the control API through
-// the TV's own renderer. Requests WITHOUT an Origin (curl, the CEC bridge, the
-// tvbox CLI, the shell's own Node code) are local tools, not browsers - they
-// stay allowed; the server only listens on 127.0.0.1 anyway.
-const OWN_ORIGINS = new Set(["http://127.0.0.1:" + PORT, "http://localhost:" + PORT]);
-function foreignOrigin(req) {
-  const o = req.headers.origin;
-  return !!o && !OWN_ORIGINS.has(String(o).toLowerCase());
-}
+// Only our own pages may issue a state-changing request; httpserver.js says why a
+// request with no Origin at all is not one of them.
+const OWN_ORIGINS = httpserver.ownOrigins(PORT);
 
 function serve() {
   const server = http.createServer((req, res) => {
@@ -994,7 +935,7 @@ function serve() {
     // stay open - they leak nothing actionable and blocking them would break
     // <img>/no-CORS uses.
     const guardedGet = p === "/tvbox/api/tv/standby" || p.startsWith("/tvbox/api/firetvir/");
-    if ((req.method !== "GET" || guardedGet) && foreignOrigin(req)) {
+    if ((req.method !== "GET" || guardedGet) && httpserver.foreignOrigin(req, OWN_ORIGINS)) {
       console.warn("[main] rejected cross-origin", req.method, p, "from", req.headers.origin);
       res.writeHead(403, { "Content-Type": "text/plain" });
       res.end("cross-origin request rejected");
@@ -1013,7 +954,7 @@ function serve() {
         try {
           d = JSON.parse(body || "{}");
         } catch (e) {}
-        const route = matchPluginRoute("POST", p);
+        const route = httpserver.matchPluginRoute(pluginRoutes, "POST", p);
         if (route) {
           try {
             route(req, res, { body: d });
@@ -1028,7 +969,7 @@ function serve() {
       return;
     }
     // plugin-registered GET routes (e.g. all of Spotify's) take precedence
-    const gRoute = matchPluginRoute("GET", p);
+    const gRoute = httpserver.matchPluginRoute(pluginRoutes, "GET", p);
     if (gRoute) {
       try {
         gRoute(req, res, {});
@@ -1042,16 +983,16 @@ function serve() {
     }
     // secret-free config view for the launcher
     if (p === "/tvbox/api/config") {
-      jsonRes(res, config.publicConfig());
+      httpserver.jsonRes(res, config.publicConfig());
       return;
     }
     if (p === "/tvbox/api/pairing/status") {
-      jsonRes(res, { phoneConnected: pairing.phoneConnected() });
+      httpserver.jsonRes(res, { phoneConnected: pairing.phoneConnected() });
       return;
     }
     // IR blaster backend health for the settings card (connected/lastError)
     if (p === "/tvbox/api/ir/status") {
-      jsonRes(res, ir.status());
+      httpserver.jsonRes(res, ir.status());
       return;
     }
     if (p === "/tvbox/api/wifi/status") {
@@ -1061,38 +1002,38 @@ function serve() {
       system.wifiStatus((s) =>
         system.ethernetStatus((eth) =>
           wifiradio.state({ ...process.env, ...WL_ENV }, (radio) =>
-            jsonRes(res, { ...s, ethernet: eth, radio: radio === null ? null : radio === "enabled" }),
+            httpserver.jsonRes(res, { ...s, ethernet: eth, radio: radio === null ? null : radio === "enabled" }),
           ),
         ),
       );
       return;
     }
     if (p === "/tvbox/api/system/region") {
-      system.systemRegion((r) => jsonRes(res, r));
+      system.systemRegion((r) => httpserver.jsonRes(res, r));
       return;
     }
     if (p === "/tvbox/api/wifi/list") {
-      system.wifiList((n) => jsonRes(res, { networks: n }));
+      system.wifiList((n) => httpserver.jsonRes(res, { networks: n }));
       return;
     }
     if (p === "/tvbox/api/system/info") {
-      system.systemInfo((i) => jsonRes(res, i));
+      system.systemInfo((i) => httpserver.jsonRes(res, i));
       return;
     }
     if (p === "/tvbox/api/update/status") {
-      jsonRes(res, updater.status());
+      httpserver.jsonRes(res, updater.status());
       return;
     }
     if (p === "/tvbox/api/backup/status") {
-      jsonRes(res, { restoredAt });
+      httpserver.jsonRes(res, { restoredAt });
       return;
     }
     if (p === "/tvbox/api/reconcile/status") {
-      jsonRes(res, reconcile.state());
+      httpserver.jsonRes(res, reconcile.state());
       return;
     }
     if (p === "/tvbox/api/backup/pending-localstorage") {
-      jsonRes(res, backup.pendingLocalStorage());
+      httpserver.jsonRes(res, backup.pendingLocalStorage());
       return;
     }
     if (p === "/tvbox/api/display/status") {
@@ -1101,7 +1042,7 @@ function serve() {
       // there is nothing to pick - the only action is /display/refresh below.
       display.list((info) => {
         const cur = info && info.modes.find((m) => m.current);
-        jsonRes(res, {
+        httpserver.jsonRes(res, {
           output: info ? info.output : "",
           current: cur ? { key: cur.key, width: cur.width, height: cur.height, refresh: cur.refreshExact } : null,
           ...dmode.state(),
@@ -1111,16 +1052,16 @@ function serve() {
     }
     if (p === "/tvbox/api/audio/sinks") {
       audio.listSinks({ ...process.env, ...WL_ENV }, (sinks) =>
-        jsonRes(res, { sinks, override: (config.rawAudio() || {}).sink || null }),
+        httpserver.jsonRes(res, { sinks, override: (config.rawAudio() || {}).sink || null }),
       );
       return;
     }
     if (p === "/tvbox/api/bt/status") {
-      bluetooth.status({ ...process.env, ...WL_ENV }, (s) => jsonRes(res, s));
+      bluetooth.status({ ...process.env, ...WL_ENV }, (s) => httpserver.jsonRes(res, s));
       return;
     }
     if (p === "/tvbox/api/bt/devices") {
-      bluetooth.list({ ...process.env, ...WL_ENV }, (d) => jsonRes(res, { devices: d }));
+      bluetooth.list({ ...process.env, ...WL_ENV }, (d) => httpserver.jsonRes(res, { devices: d }));
       return;
     }
     if (p === "/tvbox/api/remote/devices") {
@@ -1128,45 +1069,50 @@ function serve() {
       // keymap per device so the UI shows what's already bound.
       const list = (readBridgeJson("remote-devices.json", { devices: [] }).devices || []).slice(0, 20);
       const saved = (config.rawRemote() || {}).devices || {};
-      jsonRes(res, { devices: list.map((d) => ({ ...d, keymap: (saved[d.id] && saved[d.id].keymap) || {} })) });
+      httpserver.jsonRes(res, {
+        devices: list.map((d) => ({ ...d, keymap: (saved[d.id] && saved[d.id].keymap) || {} })),
+      });
       return;
     }
     if (p === "/tvbox/api/remote/learned") {
-      jsonRes(res, { learned: readBridgeJson("remote-learned.json", null) });
+      httpserver.jsonRes(res, { learned: readBridgeJson("remote-learned.json", null) });
       return;
     }
     if (p === "/tvbox/api/ambient/weather") {
-      ambient.weather((config.rawAmbient() || {}).city, (w) => jsonRes(res, w || {}));
+      ambient.weather((config.rawAmbient() || {}).city, (w) => httpserver.jsonRes(res, w || {}));
       return;
     }
     if (p === "/tvbox/api/ambient/photos") {
-      jsonRes(res, { photos: ambient.photos() });
+      httpserver.jsonRes(res, { photos: ambient.photos() });
       return;
     }
     if (p === "/tvbox/api/ambient/photo") {
       const name = (req.url || "").split("?")[1] ? new URLSearchParams(req.url.split("?")[1]).get("name") : "";
-      return serveStatic(res, ambient.PHOTO_DIR, name || "", null); // serveStatic guards the root boundary (no traversal)
+      return httpserver.serveStatic(res, ambient.PHOTO_DIR, name || "", null); // serveStatic guards the root boundary (no traversal)
     }
     // TV powered off (from the CEC bridge) -> stop playback
     if (p === "/tvbox/api/tv/standby") {
       onTvStandby();
-      jsonRes(res, { ok: true });
+      httpserver.jsonRes(res, { ok: true });
       return;
     }
     // Fire TV remote IR programming (Settings → Peripherals; shell/firetvir.js)
     if (p === "/tvbox/api/firetvir/status") {
-      firetvir.status((s) => jsonRes(res, s));
+      firetvir.status((s) => httpserver.jsonRes(res, s));
       return;
     }
     // Which connected remotes are Fire TV / Alexa remotes we can program (expose
     // the keymap GATT service). The remap UI shows the IR feature ONLY for these.
     if (p === "/tvbox/api/firetvir/programmable") {
-      firetvir.programmableRemotes((macs) => jsonRes(res, { macs }));
+      firetvir.programmableRemotes((macs) => httpserver.jsonRes(res, { macs }));
       return;
     }
     if (p === "/tvbox/api/firetvir/brands") {
       firetvir.fetchBrands((err, brands) =>
-        jsonRes(res, err ? { ok: false, error: String(err.message || err).slice(0, 200) } : { ok: true, brands }),
+        httpserver.jsonRes(
+          res,
+          err ? { ok: false, error: String(err.message || err).slice(0, 200) } : { ok: true, brands },
+        ),
       );
       return;
     }
@@ -1174,16 +1120,16 @@ function serve() {
       const q = (req.url || "").split("?")[1];
       const csPath = q ? new URLSearchParams(q).get("path") || "" : "";
       firetvir.fetchCodeset(csPath, (err, cs) => {
-        if (err) return jsonRes(res, { ok: false, error: String(err.message || err).slice(0, 200) });
+        if (err) return httpserver.jsonRes(res, { ok: false, error: String(err.message || err).slice(0, 200) });
         firetvir.checkProtocols(cs.protocols, (perr, supported) =>
-          jsonRes(res, { ok: true, ...cs, supported: perr ? null : supported }),
+          httpserver.jsonRes(res, { ok: true, ...cs, supported: perr ? null : supported }),
         );
       });
       return;
     }
     if (p === "/tvbox/api/fileserver") {
       const st = fileserver.status(config.rawFileserver(), fileserverDeps);
-      return jsonRes(res, { ...st, installing: rcloneInstalling });
+      return httpserver.jsonRes(res, { ...st, installing: rcloneInstalling });
     }
     // App-store registry (Settings → Store). ?refresh=1 bypasses the 5-min cache.
     if (p === "/tvbox/api/store/list") {
@@ -1199,20 +1145,20 @@ function serve() {
             progress: maintenance.progressFor(e.id) || null,
             flatpakStatus: maintenance.flatpakStatusFor(e.id), // result of the last manual flatpak update
           }));
-          jsonRes(res, { ...d, apps: apps2, installing: maintenance.installingIds() });
+          httpserver.jsonRes(res, { ...d, apps: apps2, installing: maintenance.installingIds() });
         })
-        .catch((e) => jsonRes(res, { apps: [], error: String(e.message || e).slice(0, 120) }));
+        .catch((e) => httpserver.jsonRes(res, { apps: [], error: String(e.message || e).slice(0, 120) }));
       return;
     }
     // launcher's app list. Manifests are re-read on every call (a handful of
     // small JSON files) so a dropped-in ~/.tvbox/apps manifest appears as a
     // tile live - no shell restart. Plugins/services still load at boot only.
     if (p === "/tvbox/api/power/sleep-timer") {
-      jsonRes(res, { at: sleepTimerAt });
+      httpserver.jsonRes(res, { at: sleepTimerAt });
       return;
     }
     if (p === "/tvbox/api/widgets") {
-      jsonRes(res, { widgets: widgetList() });
+      httpserver.jsonRes(res, { widgets: widgetList() });
       return;
     }
     if (p === "/tvbox/api/apps") {
@@ -1225,7 +1171,7 @@ function serve() {
     // HOME launcher (our React app) under /tvbox/, relative assets
     if (p === "/tvbox" || p === "/tvbox/") p = "/tvbox/index.html";
     if (p.startsWith("/tvbox/")) {
-      serveStatic(res, LAUNCHER, p.slice("/tvbox/".length), null);
+      httpserver.serveStatic(res, LAUNCHER, p.slice("/tvbox/".length), null);
       return;
     }
     // An installed PACKAGE app serves its own web/ bundle at /<id>/... . Package
@@ -1244,7 +1190,7 @@ function serve() {
         if (fs.existsSync(webRoot)) {
           const entry = path.join(webRoot, "index.html");
           const sub = p.slice(1 + seg.length + 1) || "index.html"; // strip "/<seg>/"
-          serveStatic(res, webRoot, sub, entry);
+          httpserver.serveStatic(res, webRoot, sub, entry);
           return;
         }
       }
@@ -1259,7 +1205,7 @@ function serve() {
     const root = apps.appDataDir(a.id);
     const entry = (a.runtime && a.runtime.entry) || "index.html";
     if (p === "/") p = "/" + entry;
-    serveStatic(res, root, p, path.join(root, entry));
+    httpserver.serveStatic(res, root, p, path.join(root, entry));
   });
   // A restart races the dying instance for the port (the session's respawn loop
   // restarts us within ~1s; the old process may not have released :PORT yet). Without a handler
@@ -1272,16 +1218,6 @@ function serve() {
     } else console.warn("[main] server error:", e.message);
   });
   server.listen(PORT, "127.0.0.1", () => console.log("[main] server on :" + PORT));
-}
-
-// scheme://host of a URL, for logging: a media URL is made of credentials as
-// often as not, and nothing downstream of a log line needs the rest of it.
-function originOf(url) {
-  try {
-    return new URL(String(url)).origin;
-  } catch (e) {
-    return "(unparseable url)";
-  }
 }
 
 // ---- mpv control ----
@@ -3068,7 +3004,7 @@ ipcMain.handle("player", (e, action, payload) => {
   // password as PATH segments - right after the host, inside any slice - and this
   // log is what `tvbox-diag --logs` copies onto the boot partition, which any
   // laptop can read. The origin is what a diagnosis actually needs.
-  console.log("[player] action", action, payload && payload.url ? originOf(payload.url) : "");
+  console.log("[player] action", action, payload && payload.url ? httpserver.originOf(payload.url) : "");
   if (action === "queue") {
     queued.url = payload.url;
     queued.startPos = payload.startPos || 0;
@@ -3177,7 +3113,7 @@ const host = {
   config, // config store (rawSpotify / setSpotify / publicConfig)
   pairing: { register: pairing.register }, // let a plugin register its own pairing page(s) (kind -> provider)
   BrowserWindow, // for a plugin that needs its own window (Spotify OAuth)
-  json: jsonRes, // (res, obj) -> JSON response
+  json: httpserver.jsonRes, // (res, obj) -> JSON response
   log: (...a) => console.log("[plugin]", ...a),
   childEnv: () => ({ ...process.env, ...WL_ENV }), // spawn env with the session's Wayland vars
   // Is the box free? The very predicate every background job in here waits for
@@ -3551,7 +3487,7 @@ app.whenReady().then(async () => {
     restartShell,
     hotLoadPlugin,
     applyPendingAppFiles: (opts) => backup.applyPendingAppFiles(opts),
-    jsonRes,
+    jsonRes: httpserver.jsonRes,
     childEnv: () => ({ ...process.env, ...WL_ENV }),
   });
   ir.applyConfig(); // IR blaster hub; no-op if not configured
