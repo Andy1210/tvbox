@@ -157,6 +157,23 @@ function setFocus(owner, app, cb) {
   request({ request: "set_focus", owner, app: app || undefined }, (e) => cb && cb(!e));
 }
 
+// Where a client's windows go. A Wayland client cannot place itself, which is why
+// the player used to run under XWayland for picture-in-picture; the compositor can.
+// A null rect puts the client back on the whole output.
+//
+// Set it BEFORE the client starts: a window is placed as it maps, so a player
+// launched into a rectangle never appears fullscreen first.
+function placeWindow(appId, rect, cb) {
+  const payload = { request: "place_window", app_id: appId };
+  if (rect && rect.w > 0 && rect.h > 0) {
+    payload.x = Math.round(rect.x);
+    payload.y = Math.round(rect.y);
+    payload.w = Math.round(rect.w);
+    payload.h = Math.round(rect.h);
+  }
+  request(payload, (e) => cb && cb(!e, e ? String(e.message || e) : ""));
+}
+
 // Type a string into whatever holds the keyboard, as real key events. `selectAll`
 // replaces what the field already holds rather than appending to it.
 function typeText(text, opts, cb) {
@@ -165,4 +182,16 @@ function typeText(text, opts, cb) {
   });
 }
 
-module.exports = { available, request, list, listSync, apply, setHdr, setFocus, typeText, toDisplayInfo, SOCKET };
+module.exports = {
+  available,
+  request,
+  list,
+  listSync,
+  apply,
+  setHdr,
+  setFocus,
+  placeWindow,
+  typeText,
+  toDisplayInfo,
+  SOCKET,
+};
