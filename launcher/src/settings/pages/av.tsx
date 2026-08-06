@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useI18n } from "../../lib/i18n";
 import { fetchDisplayStatus, refreshDisplayMode, type DisplayModeInfo, type DisplayStatus } from "../../lib/display";
 import { fetchSinks, setDefaultSink, setSinkVolume, type AudioState } from "../../lib/audio";
@@ -55,12 +55,19 @@ function DisplayPage() {
   const [st, setSt] = useState<DisplayStatus | null>(null);
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState("");
+  const alive = useRef(true);
 
   const load = useCallback(() => {
     invalidateSummary("display");
-    void fetchDisplayStatus().then((d) => d && setSt(d));
+    void fetchDisplayStatus().then((d) => d && alive.current && setSt(d));
   }, []);
-  useEffect(load, [load]);
+  useEffect(() => {
+    alive.current = true;
+    load();
+    return () => {
+      alive.current = false;
+    };
+  }, [load]);
 
   return (
     <SettingsPage id="display" title={t("display.title")} onBack={nav.pop} animate="push">
@@ -86,6 +93,7 @@ function DisplayPage() {
             setBusy(true);
             setMsg("");
             const r = await refreshDisplayMode();
+            if (!alive.current) return;
             setBusy(false);
             if (!r.ok) setMsg(t("display.failed"));
             load();
@@ -128,11 +136,18 @@ function SoundPage() {
   const navSounds = useConfigStore((s) => s.config?.ui.navSounds ?? true);
   const setUi = useConfigStore((s) => s.setUi);
 
+  const alive = useRef(true);
   const load = useCallback(() => {
     invalidateSummary("audio");
-    void fetchSinks().then((s) => s && setState(s));
+    void fetchSinks().then((s) => s && alive.current && setState(s));
   }, []);
-  useEffect(load, [load]);
+  useEffect(() => {
+    alive.current = true;
+    load();
+    return () => {
+      alive.current = false;
+    };
+  }, [load]);
 
   const def = state?.sinks.find((s) => s.isDefault) || null;
   const bump = async (steps: number) => {

@@ -96,12 +96,13 @@ export function IrPage() {
         <ChoicePage
           id="ir-backend"
           title={t("ir.backendTitle")}
+          failLabel={t("ir.saveFailed")}
           options={(["esphome", "homeassistant"] as IrBackend[]).map((b) => ({ id: b, label: t("ir.backend." + b) }))}
           value={backend}
-          onPick={(b) => {
-            setFailed(false);
-            setIr({ backend: b as IrBackend }).catch(() => setFailed(true));
-          }}
+          // Deliberately not caught: the page below is unmounted while this is open, so
+          // reporting a rejected write there would report it to nobody. ChoicePage
+          // stays put and says so instead.
+          onPick={(b) => setIr({ backend: b as IrBackend }).then(() => undefined)}
         />
       ),
     });
@@ -109,7 +110,7 @@ export function IrPage() {
   return (
     <SettingsPage id="ir" title={t("ir.title")} subtitle={t("ir.hint")} onBack={nav.pop} animate="push">
       {failed && <Note tone="warn">{t("ir.saveFailed")}</Note>}
-      {status && status.connected === false && status.lastError ? (
+      {status?.configured && status.connected === false && status.lastError ? (
         <Note tone="warn">{t("ir.disconnected", { error: status.lastError })}</Note>
       ) : null}
       {tested ? (

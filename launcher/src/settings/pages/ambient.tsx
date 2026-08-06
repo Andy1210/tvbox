@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useI18n } from "../../lib/i18n";
 import { useConfigStore } from "../../stores/config";
 import { fetchPhotos, clearPhotos, deletePhoto, photoUrl } from "../../lib/ambient";
@@ -6,7 +6,7 @@ import { AmbientPhotos } from "../../components/AmbientPhotos";
 import { useFocusableItem } from "../../lib/useFocusableItem";
 import { SettingsPage } from "../SettingsPage";
 import { ChoicePage } from "../ChoicePage";
-import { Group, Note, Row, StepperRow, TextRow, ToggleRow } from "../Rows";
+import { Group, Note, Row, StepperRow, TextRow, ToggleRow, usePageId } from "../Rows";
 import { useSettingsNav } from "../nav";
 
 // Settings -> Screen saver. What shows when the box is idle, and when it turns the
@@ -18,14 +18,15 @@ import { useSettingsNav } from "../nav";
 const SLEEP_STEPS = [0, 15, 30, 60, 120];
 
 function PhotoTile({ name, onDelete }: { name: string; onDelete: () => void }) {
-  const { ref, focused } = useFocusableItem(
-    { focusKey: "photo:" + name, onEnterPress: onDelete },
-    { block: "nearest" },
-  );
+  // Page-scoped like every other focusable here: the page's focus watchdog decides
+  // whether the focus is still on one of ITS rows by the key's prefix, and an
+  // unscoped key reads as somebody else's.
+  const key = usePageId() + ":photo-" + name;
+  const { ref, focused } = useFocusableItem({ focusKey: key, onEnterPress: onDelete }, { block: "nearest" });
   return (
     <div
       ref={ref}
-      data-sfocus={"photo:" + name}
+      data-sfocus={key}
       onClick={onDelete}
       className={[
         "relative w-[15vw] h-[14vh] rounded-[1.2vh] overflow-hidden bg-black/40",
@@ -61,12 +62,17 @@ function WallpapersPage() {
 
   // Only the user's own uploads: cached Bing wallpapers come back as "bing/<file>",
   // are not deletable through the photo API and prune themselves shell-side.
+  const alive = useRef(true);
   const refresh = useCallback(
-    () => fetchPhotos().then((list) => setPhotos(list.filter((n) => !n.startsWith("bing/")))),
+    () => fetchPhotos().then((list) => alive.current && setPhotos(list.filter((n) => !n.startsWith("bing/")))),
     [],
   );
   useEffect(() => {
+    alive.current = true;
     void refresh();
+    return () => {
+      alive.current = false;
+    };
   }, [refresh]);
 
   if (uploading)

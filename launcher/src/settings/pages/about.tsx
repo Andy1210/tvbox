@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useI18n } from "../../lib/i18n";
 import { fetchSystemInfo, type SystemInfo } from "../../lib/system";
 import { SettingsPage } from "../SettingsPage";
@@ -71,15 +71,20 @@ export function AboutPane() {
   const { t } = useI18n();
   const nav = useSettingsNav();
   const [info, setInfo] = useState<SystemInfo | null>(null);
+  const alive = useRef(true);
+  const refresh = useCallback(() => void fetchSystemInfo().then((i) => i && alive.current && setInfo(i)), []);
 
   useEffect(() => {
-    const refresh = () => void fetchSystemInfo().then((i) => i && setInfo(i));
+    alive.current = true;
     refresh();
     // Temperature, memory and uptime drift while the screen is open. Only while it
     // is open: this pane is not mounted anywhere else.
     const iv = setInterval(refresh, INFO_REFRESH_MS);
-    return () => clearInterval(iv);
-  }, []);
+    return () => {
+      alive.current = false;
+      clearInterval(iv);
+    };
+  }, [refresh]);
 
   const units = { d: t("about.unitD"), h: t("about.unitH"), m: t("about.unitM") };
   const device = info ? [info.model, info.hostname].filter(Boolean).join(" · ") : DASH;
@@ -93,6 +98,10 @@ export function AboutPane() {
   return (
     <SettingsPage id="about" focusPolicy="rail">
       <Group title={t("about.groupDevice")}>
+        {/* It refreshes itself every few seconds, but a row to press is also the one
+            focusable near the TOP of this page - without it the D-pad's only target is
+            the credits row at the very bottom. */}
+        <Row id="refresh" label={t("about.refresh")} trailing="none" onEnter={refresh} />
         <InfoRow label={t("about.version")} value={info?.version || DASH} />
         <InfoRow label={t("about.device")} value={device} />
         <InfoRow label={t("about.uptime")} value={info ? fmtUptime(info.uptimeSec, units) : DASH} />

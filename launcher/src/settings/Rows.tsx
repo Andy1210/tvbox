@@ -61,6 +61,11 @@ function RowShell({
     { focusKey: key, onEnterPress: () => !disabled && onEnter(), focusable: !disabled },
     { block: "nearest" },
   );
+  // A row that becomes disabled WHILE it is focused keeps spatial navigation's focus
+  // (turning `focusable` off does not move it), so without this it would go on
+  // wearing the bright focus fill while silently ignoring every press. Showing it as
+  // unfocused is the honest half; the page's focus watchdog moves the focus on.
+  const lit = focused && !disabled;
   return (
     <div
       ref={ref}
@@ -69,11 +74,11 @@ function RowShell({
       data-sautofocus={autoFocus && !disabled ? "" : undefined}
       className={[
         "flex items-center gap-[1.6vw] px-[2vw] py-[1.9vh] min-h-[7.4vh]",
-        focused ? "bg-white text-[#06090d]" : "",
+        lit ? "bg-white text-[#06090d]" : "",
         disabled ? "opacity-40" : "",
       ].join(" ")}
     >
-      {children(focused)}
+      {children(lit)}
     </div>
   );
 }
@@ -111,6 +116,7 @@ export function Row({
   label,
   hint,
   value,
+  leading,
   trailing = "chevron",
   onEnter,
   autoFocus,
@@ -120,6 +126,11 @@ export function Row({
   label: string;
   hint?: string;
   value?: ReactNode;
+  // A glyph before the label, for the one thing a row cannot say in words without
+  // taking a line for it: a network is password protected, a Bluetooth device is a
+  // speaker rather than a keyboard. It inherits the row's colour, so it survives the
+  // focus flip like everything else.
+  leading?: ReactNode;
   trailing?: "chevron" | "none";
   onEnter: () => void;
   autoFocus?: boolean;
@@ -129,6 +140,7 @@ export function Row({
     <RowShell id={id} onEnter={onEnter} autoFocus={autoFocus} disabled={disabled}>
       {() => (
         <>
+          {leading && <span className="w-[2.8vh] h-[2.8vh] shrink-0 opacity-70">{leading}</span>}
           <Labels label={label} hint={hint} />
           {value != null && value !== "" && (
             <span className="text-[1.9vh] opacity-70 shrink-0 max-w-[20vw] truncate text-right">{value}</span>

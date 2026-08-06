@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { useI18n } from "../lib/i18n";
 import { SettingsPage } from "./SettingsPage";
 import { Group, Note, Row } from "./Rows";
@@ -25,6 +26,7 @@ export function ChoicePage({
   title,
   subtitle,
   note,
+  failLabel,
   options,
   value,
   onPick,
@@ -33,14 +35,33 @@ export function ChoicePage({
   title: string;
   subtitle?: string;
   note?: string;
+  // What to say if the pick could not be saved. Without it a rejected write is
+  // invisible: the page pops, the old value is still there, and the caller cannot
+  // report it either because this page unmounted it.
+  failLabel?: string;
   options: Choice[];
   value: string;
-  onPick: (id: string) => void;
+  // May be async, and may throw - a throw keeps the page open and shows `failLabel`.
+  onPick: (id: string) => void | Promise<void>;
 }) {
   const { t } = useI18n();
   const nav = useSettingsNav();
+  const [failed, setFailed] = useState(false);
+
+  const pick = async (choice: string) => {
+    setFailed(false);
+    try {
+      await onPick(choice);
+    } catch {
+      setFailed(true);
+      return; // stay put: popping would hide the only place this can be reported
+    }
+    nav.pop();
+  };
+
   return (
     <SettingsPage id={id} title={title} subtitle={subtitle} onBack={nav.pop} animate="push">
+      {failed && <Note tone="warn">{failLabel || t("common.saveFailed")}</Note>}
       {note && <Note>{note}</Note>}
       <Group>
         {options.map((o) => (
@@ -52,10 +73,7 @@ export function ChoicePage({
             value={o.id === value ? t("common.selected") : undefined}
             trailing="none"
             autoFocus={o.id === value}
-            onEnter={() => {
-              onPick(o.id);
-              nav.pop();
-            }}
+            onEnter={() => void pick(o.id)}
           />
         ))}
       </Group>

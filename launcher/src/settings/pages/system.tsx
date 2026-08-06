@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useI18n, AVAILABLE_LOCALES } from "../../lib/i18n";
 import { useConfigStore } from "../../stores/config";
 import { fetchSystemInfo, setHostname } from "../../lib/system";
@@ -21,6 +21,12 @@ import { useSummary, invalidateSummary } from "../summary";
 // they are all things about the BOX rather than about what it is showing.
 const UPDATE_POLL_MS = 3000;
 const DASH = "-";
+
+// Survive the pane remounting when the rail moves: what the box was renamed to, and
+// whether it refused to apply it until the next update. Both are about THIS box for
+// the rest of the session, not about this mount.
+let renamedTo: string | null = null;
+let hostnameDeferred = false;
 
 // One RFC-1123 label: letters, digits, hyphen, no leading or trailing hyphen, <=63.
 // Hyphens are trimmed AFTER truncating (like the firstboot sanitiser), so a cut at
@@ -96,7 +102,9 @@ function RegionPage() {
               title: t("region.timezone"),
               render: () => (
                 <PickerPage id="tz" title={t("region.timezone")}>
-                  <TimezonePicker autoFocus onChange={() => load()} />
+                  {/* No onChange: this page is unmounted while the picker is up, so the
+                      callback would write to nothing. The value is re-read on remount. */}
+                  <TimezonePicker autoFocus />
                 </PickerPage>
               ),
             })
@@ -112,7 +120,7 @@ function RegionPage() {
               title: t("region.keyboard"),
               render: () => (
                 <PickerPage id="km" title={t("region.keyboard")}>
-                  <KeymapPicker autoFocus onChange={() => load()} />
+                  <KeymapPicker autoFocus />
                 </PickerPage>
               ),
             })
@@ -256,17 +264,22 @@ function UpdatePage() {
   const setUpdate = useConfigStore((s) => s.setUpdate);
   const [st, setSt] = useState<UpdateStatus | null>(null);
   const [busy, setBusy] = useState(false);
+  const alive = useRef(true);
 
   useEffect(() => {
+    alive.current = true;
     const refresh = () => {
       invalidateSummary("update");
-      void fetchUpdateStatus().then((s) => s && setSt(s));
+      void fetchUpdateStatus().then((s) => s && alive.current && setSt(s));
     };
     refresh();
     // Live while a download or install runs, and only while this page is open - it
     // used to tick for as long as anyone was anywhere in the System category.
     const iv = setInterval(refresh, UPDATE_POLL_MS);
-    return () => clearInterval(iv);
+    return () => {
+      alive.current = false;
+      clearInterval(iv);
+    };
   }, []);
 
   const working = !!st && st.state !== "idle" && st.state !== "error";
@@ -305,7 +318,13 @@ function UpdatePage() {
       <Note tone={st?.state === "error" ? "warn" : st?.available ? "accent" : "dim"}>{statusLine}</Note>
       {st?.state === "error" && st.error ? <Note>{st.error}</Note> : null}
       {st?.failed && <Note tone="warn">{t("update.failedRollback", { version: st.failed.to })}</Note>}
-      {notes && <Note>{notes}</Note>}
+      {notes && (
+        // Release notes are written as lines and can be long: without pre-line they
+        // collapse into a paragraph, and without a cap they push the rows off screen.
+        <p className="text-[1.8vh] text-fg-dim leading-snug mb-[1.6vh] px-[0.4vw] max-w-[52vw] whitespace-pre-line max-h-[24vh] overflow-y-auto no-scrollbar">
+          {notes}
+        </p>
+      )}
 
       <Group>
         <InfoRow label={t("update.current")} value={st ? st.current + (st.release ? "" : " (dev)") : DASH} />
@@ -319,6 +338,7 @@ function UpdatePage() {
           onEnter={async () => {
             setBusy(true);
             const s = await checkUpdate();
+            if (!alive.current) return;
             if (s) setSt(s);
             setBusy(false);
           }}
@@ -333,6 +353,7 @@ function UpdatePage() {
             onEnter={async () => {
               setBusy(true);
               const s = await applyUpdate();
+              if (!alive.current) return;
               if (s) setSt(s);
               setBusy(false);
             }}
@@ -363,11 +384,17 @@ function UpdatePage() {
 
       {/* The OS patches itself and NEVER reboots on its own; a restart is offered
           when the kernel asks for one, and it stays the user's call. */}
+      {st?.os.rebootRequired && st.os.packages.length ? <Note>{st.os.packages.join(", ")}</Note> : null}
       <Group title={t("update.osTitle")} hint={t("update.osAuto")}>
         {st?.os.rebootRequired ? (
           <>
-            <InfoRow label={t("update.rebootNeeded")} value={st.os.packages.length ? st.os.packages.join(", ") : ""} />
-            <Row id="reboot" label={t("update.rebootNow")} trailing="none" onEnter={() => void power("reboot")} />
+            <Row
+              id="reboot"
+              label={t("update.rebootNow")}
+              hint={t("update.rebootNeeded")}
+              trailing="none"
+              onEnter={() => void power("reboot")}
+            />
           </>
         ) : (
           <InfoRow label={t("update.rebootNone")} value="" />
@@ -394,10 +421,11 @@ export function SystemPane() {
   const region = useSummary("region", fetchRegion);
   const update = useSummary("update", fetchUpdateStatus);
   const pinSet = useConfigStore((s) => !!s.config?.parental.pinSet);
-  const [name, setName] = useState<string | null>(null);
-  const [deferred, setDeferred] = useState(false);
-
-  const hostname = name ?? info?.hostname ?? "";
+  // Module-level, NOT state: this pane remounts on every move of the rail (selection
+  // follows focus), and a warning that vanishes because someone pressed Down is a
+  // warning nobody reads.
+  const [deferred, setDeferred] = useState(hostnameDeferred);
+  const hostname = renamedTo ?? info?.hostname ?? "";
   const langLabel = AVAILABLE_LOCALES.find((l) => l.id === locale)?.name || locale || DASH;
 
   return (
@@ -414,9 +442,13 @@ export function SystemPane() {
           onSubmit={async (v) => {
             const next = cleanHostname(v);
             if (!next || next === hostname) return;
-            setName(next); // reflect immediately, even if the box refuses the write
+            renamedTo = next; // reflect immediately, even if the box refuses the write
+            const ok = await setHostname(next);
+            hostnameDeferred = !ok;
+            setDeferred(!ok);
+            // Only after the write: invalidating first lets a remount in the gap
+            // re-read the OLD name and put it back on screen.
             invalidateSummary("sysinfo");
-            setDeferred(!(await setHostname(next)));
           }}
         />
         <Row
@@ -449,7 +481,17 @@ export function SystemPane() {
           id="update"
           label={t("update.title")}
           hint={t("system.updateHint")}
-          value={update ? (update.available ? t("update.availableShort") : t("update.upToDate")) : undefined}
+          // `available` is false for a release whose requirements the box cannot meet,
+          // so "up to date" would be wrong exactly when there IS something waiting.
+          value={
+            !update
+              ? undefined
+              : update.available
+                ? t("update.availableShort")
+                : update.unmet?.length
+                  ? t("update.needsSetup")
+                  : t("update.upToDate")
+          }
           onEnter={() => nav.push({ id: "update", title: t("update.title"), render: () => <UpdatePage /> })}
         />
         <Row

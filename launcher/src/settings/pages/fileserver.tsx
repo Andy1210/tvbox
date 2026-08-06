@@ -149,18 +149,31 @@ export function FileServerPage() {
       </SettingsPage>
     );
 
-  const on = !!st?.enabled;
-  const needsRclone = !!st && !st.rclone;
-  const folders = st?.folders || [];
+  // Nothing is drawn from a status we do not have yet: a form built out of nulls
+  // claims the switch is off and the share count is zero, and the first row to ask for
+  // the focus wins it - which would be the toggle, not the "install rclone" row that
+  // appears a moment later.
+  if (!st)
+    return (
+      <SettingsPage
+        id="fs"
+        title={t("fileserver.title")}
+        subtitle={t("fileserver.hint")}
+        onBack={nav.pop}
+        animate="push"
+      />
+    );
+
+  const on = st.enabled;
+  const needsRclone = !st.rclone;
+  const folders = st.folders;
 
   return (
     <SettingsPage id="fs" title={t("fileserver.title")} subtitle={t("fileserver.hint")} onBack={nav.pop} animate="push">
-      <Note tone={st?.running ? "accent" : "dim"}>
-        {st?.running ? t("fileserver.running") : t("fileserver.stopped")}
-      </Note>
+      <Note tone={st.running ? "accent" : "dim"}>{st.running ? t("fileserver.running") : t("fileserver.stopped")}</Note>
       {error && <Note tone="warn">{t("fileserver.err." + error)}</Note>}
 
-      {st && !st.rclone && (
+      {!st.rclone && (
         <Group>
           <Row
             id="rclone"
@@ -189,16 +202,16 @@ export function FileServerPage() {
           autoFocus={!needsRclone}
         />
         {/* The address to type on a computer - the whole point of the feature. */}
-        {st?.running && st.url && <InfoRow label={t("fileserver.address")} value={st.url} />}
+        {st.running && st.url && <InfoRow label={t("fileserver.address")} value={st.url} />}
       </Group>
-      {st?.running && st.url && <Note>{t("fileserver.urlHint", { user: st.user })}</Note>}
+      {st.running && st.url && <Note>{t("fileserver.urlHint", { user: st.user })}</Note>}
 
       <Group title={t("fileserver.groupAccess")}>
         <TextRow
           id="user"
           label={t("fileserver.user")}
           title={t("fileserver.user")}
-          value={st?.user}
+          value={st.user}
           emptyLabel="-"
           onSubmit={(v) => void apply({ user: v.trim() || undefined })}
         />
@@ -207,11 +220,11 @@ export function FileServerPage() {
           label={t("fileserver.pass")}
           title={t("fileserver.pass")}
           secret
-          hasSecret={!!st?.hasPass}
-          emptyLabel={t("fileserver.passMissing", { n: st?.minPassword ?? 8 })}
+          hasSecret={st.hasPass}
+          emptyLabel={t("fileserver.passMissing", { n: st.minPassword })}
           onSubmit={(v) => v.trim() && void apply({ pass: v.trim() })}
         />
-        {st?.hasPass && (
+        {st.hasPass && (
           <Row
             id="pass-clear"
             label={t("fileserver.passClear")}

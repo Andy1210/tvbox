@@ -219,7 +219,7 @@ export function SettingsPage({
     const schedule = () => {
       if (tryFocus() || retry) return;
       retry = setInterval(() => tryFocus() && stopRetry(), FOCUS_RETRY_MS);
-      deadline = setTimeout(stopRetry, FOCUS_RETRY_FOR_MS);
+      deadline = setTimeout(stopRetry, FOCUS_RETRY_FOR_MS); // cleared by stopRetry, incl. on unmount
     };
     scheduleRef.current = schedule;
 

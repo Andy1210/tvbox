@@ -58,9 +58,13 @@ export function MqttPage() {
           title={t("mqtt.port")}
           value={mqtt?.port ? String(mqtt.port) : ""}
           emptyLabel={t("mqtt.portDefault")}
-          // An empty entry means "the default", which the shell represents as null -
+          // Digits only and in range: Number() would take "0x1f" and "1e3". An empty or
+          // unusable entry means "the default", which the shell represents as null -
           // not as the number 1883, so a future default change reaches old boxes.
-          onSubmit={(v) => void save({ port: v.trim() ? Number(v.trim()) : null })}
+          onSubmit={(v) => {
+            const n = /^\d{1,5}$/.test(v.trim()) ? Number(v.trim()) : NaN;
+            void save({ port: n >= 1 && n <= 65535 ? n : null });
+          }}
         />
       </Group>
       <Group title={t("mqtt.groupAuth")}>
