@@ -32,15 +32,11 @@ async function launchUnderTempHome(id) {
 
 test("flatpak spec becomes a `flatpak run <ref>` command line", () => {
   const spec = native.parseSpec({ flatpak: "org.libretro.RetroArch", args: ["--fullscreen"] });
-  assert.strictEqual(spec.cmd, "flatpak");
-  assert.strictEqual(spec.ref, "org.libretro.RetroArch");
-  // The app's own arguments come after the ref; flatpak's own options before it.
-  const ref = spec.args.indexOf("org.libretro.RetroArch");
-  assert.deepStrictEqual(spec.args.slice(0, 2), ["run", "--die-with-parent"]);
-  assert.deepStrictEqual(spec.args.slice(ref), ["org.libretro.RetroArch", "--fullscreen"]);
-  // And in between, the libdecor plugin directory - 25 seconds of startup, measured.
-  assert.ok(spec.args.some((a) => a.startsWith("--env=LIBDECOR_PLUGIN_DIR=")));
-  assert.ok(spec.args.some((a) => a.startsWith("--filesystem=")));
+  assert.deepStrictEqual(spec, {
+    cmd: "flatpak",
+    args: ["run", "--die-with-parent", "org.libretro.RetroArch", "--fullscreen"],
+    ref: "org.libretro.RetroArch",
+  });
 });
 
 test("--die-with-parent is always passed: an orphaned sandbox would own the TV", () => {
