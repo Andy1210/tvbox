@@ -117,21 +117,23 @@ test("a password the user typed replaces the one a saved profile carries", async
   // someone is standing at the TV typing one. The profile is kept, because it is
   // what knows how this network is secured.
   const seen = withCommands({
-    "-f NAME,TYPE connection show": "DarkTL50:802-11-wireless\n",
+    "-f NAME,TYPE connection show": "tvbox-preseed:802-11-wireless\n",
+    // The profile's NAME is not the network's: this is the shape the box ships with.
+    "802-11-wireless.ssid connection show tvbox-preseed": "DarkTL50",
     "connection modify": "",
     "connection up": "",
   });
   const r = await new Promise((resolve) => system.wifiConnect("DarkTL50", "hunter2", false, resolve));
   assert.deepStrictEqual(r, { ok: true });
   assert.ok(
-    seen.some((c) => c.includes("connection modify id DarkTL50 wifi-sec.psk hunter2")),
+    seen.some((c) => c.includes("connection modify id tvbox-preseed wifi-sec.psk hunter2")),
     seen.join(" | "),
   );
   // Before the subcommand, where nmcli parses it: at the end it answers "invalid
   // extra argument" and nothing connects at all.
   assert.match(
     seen.find((c) => c.includes("connection up")),
-    /^nmcli --wait \d+ connection up id DarkTL50$/,
+    /^nmcli --wait \d+ connection up id tvbox-preseed$/,
   );
   assert.strictEqual(
     seen.some((c) => c.includes("connection delete")),
@@ -144,7 +146,8 @@ test("a saved profile that will not take the password is joined from scratch", a
   // An enterprise or WPA3 profile whose name happens to match, or a name that is
   // not a profile at all: the modify fails and the ordinary connect still runs.
   const seen = withCommands({
-    "-f NAME,TYPE connection show": "DarkTL50:802-11-wireless\n",
+    "-f NAME,TYPE connection show": "tvbox-preseed:802-11-wireless\n",
+    "802-11-wireless.ssid connection show tvbox-preseed": "DarkTL50",
     "device wifi connect": "",
   });
   const r = await new Promise((resolve) => system.wifiConnect("DarkTL50", "hunter2", false, resolve));
@@ -160,7 +163,8 @@ test("a profile whose security no longer matches is rebuilt, not retried", async
   // activation is what fails. Reusing the profile again would fail the same way,
   // so it is dropped and nmcli builds one from a fresh scan of what the AP says.
   const seen = withCommands({
-    "-f NAME,TYPE connection show": "DarkTL50:802-11-wireless\n",
+    "-f NAME,TYPE connection show": "tvbox-preseed:802-11-wireless\n",
+    "802-11-wireless.ssid connection show tvbox-preseed": "DarkTL50",
     "connection modify": "",
     "connection delete": "",
     "--rescan yes": "",
@@ -172,7 +176,7 @@ test("a profile whose security no longer matches is rebuilt, not retried", async
   // Every failing call is tried again with sudo before it counts as failed, which
   // is why the activation appears twice.
   const order = seen
-    .filter((c) => !c.includes("NAME,TYPE"))
+    .filter((c) => !c.includes("NAME,TYPE") && !c.includes("802-11-wireless.ssid"))
     .map((c) =>
       c
         .replace(/^sudo -n /, "")
@@ -194,6 +198,7 @@ test("a profile whose security no longer matches is rebuilt, not retried", async
 test("a network with no saved profile is joined without deleting anything", async () => {
   const seen = withCommands({
     "-f NAME,TYPE connection show": "DarkTL24:802-11-wireless\n",
+    "802-11-wireless.ssid connection show DarkTL24": "DarkTL24",
     "device wifi connect": "",
   });
   const r = await new Promise((resolve) => system.wifiConnect("CoffeeShop", "", false, resolve));
