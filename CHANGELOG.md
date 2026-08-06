@@ -5,6 +5,66 @@ updates). `scripts/make-release.sh` lifts the current version's `hu`/`en`
 blocks into the OTA feed's `notes` - keep both languages, keep it short, and
 write for the person on the couch (what changes for THEM), not for developers.
 
+## 2.0.0
+
+### hu
+
+- **A box saját compositoron fut.** Ez a réteg dönti el, mi kerül a képernyőre és
+  hogyan: a film egyenesen a képernyő hardveres rétegére megy, a kezelőfelület
+  külön rétegre fölé. Ami ebből látszik: a 4K HDR film nem akadozik, a kép azonnal
+  ott van, és a doboz közben hűvösebb marad.
+- **A HDR most tényleg bekapcsol.** A TV a filmhez átvált HDR-be, és a film végén
+  vissza - és a kép 10 bites, nem 8.
+- **Az élő adás nem ugrál feleslegesen 4K-ra.** Egy szélesvásznú csatorna eddig 4K
+  módba kapcsolta a TV-t, amitől a kép szaggatott; most a hozzá illő felbontáson
+  marad.
+- **Ez a verzió nem érkezik meg magától.** A doboz alaprendszere is változott,
+  amit egy szokásos frissítés nem tud elhozni: újraflashelés vagy provision kell
+  hozzá. A Beállítások meg is írja, ha ez a helyzet.
+
+### en
+
+- **The box runs its own compositor.** That layer decides what reaches the screen
+  and how: the film goes straight to the display's own hardware layer, with the
+  interface on a separate layer above it. What you see of that: a 4K HDR film that
+  does not stutter, a picture that is there immediately, and a cooler box.
+- **HDR actually engages now.** The TV switches into HDR for the film and back
+  afterwards, and the picture is 10-bit rather than 8.
+- **Live TV stops jumping to 4K for no reason.** A widescreen channel used to
+  switch the set into 4K and judder; it stays at the resolution that suits it.
+- **This version does not arrive on its own.** The system underneath changed in a
+  way an ordinary update cannot deliver, so the box needs a re-flash or a
+  provision. Settings says so when that is the case.
+
+### notes
+
+Not release notes for the TV - for whoever runs the boxes:
+
+**What changed underneath.** labwc and wlroots are gone, along with the eleven
+local patches that made a fullscreen film reach a display plane. The box runs
+[tvbox-wc](https://github.com/Andy1210/tvbox-wc), a compositor built on Smithay for
+this hardware, installed from a pinned release by sha256
+(`deploy/compositor.version`). greetd starts `tvbox-wc -- /usr/local/bin/tvbox-session`
+and the compositor starts the session, so the shell is one of its clients.
+
+**What the shell hands to it**, over `$XDG_RUNTIME_DIR/tvbox-wc.sock` (one JSON
+object per line): output modes, the HDR claim, which of the launcher and an app owns
+the screen - the compositor rewrites the remote's Back key for an app, so three
+`sendInputEvent` copies went - window placement (picture-in-picture no longer needs
+XWayland), typing into a focused field, and screenshots.
+
+**Measured on the 4K set**, a real HDR10 film through the whole chain: P030 on the
+primary plane, the UI on an overlay, 0 dropped frames, and the compositor at 0 ms of
+GPU per 10 s of playback. The colour space goes to BT.2020 with a PQ metadata block
+and the link to 10 bits, and all three come back on release.
+
+**Two things to know before rolling this out.** A release now declares what the box
+must already have (`requires: ["compositor"]` in the feed); a box that cannot
+satisfy it is never offered the update, which is what keeps this release off a box
+still running the old session. And a main.js change is not verified until the shell
+has restarted on a box and answered a request - nothing in the test suite can load
+that file.
+
 ## 1.24.7
 
 ### hu
