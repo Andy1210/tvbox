@@ -853,12 +853,17 @@ function matchPluginRoute(method, pathname) {
 // What the panel can show. Read as a side effect of the mode reads the arbiter
 // already does - at startup and on every output change - so nothing extra runs.
 let panelResolution = null;
+// What the output is CURRENTLY at, which is not the panel's own resolution: the UI
+// runs at 1080p on a 4K set. Window rectangles are in these pixels.
+let outputSize = null;
 let panelHdr = false; // the panel accepts BT2020 + PQ (EDID, read once at startup)
 const dmode = displaymode.create({
   getModes: (cb) =>
     display.list((info) => {
       const panel = display.panelResolution(info && info.modes);
       if (panel) panelResolution = panel;
+      const current = ((info && info.modes) || []).find((m) => m.current);
+      if (current) outputSize = { width: current.width, height: current.height };
       cb(info);
     }),
   applyMode: (output, mode, cb) => display.apply(output, mode, cb),
@@ -1413,6 +1418,18 @@ function mpvLogPath() {
   return p;
 }
 
+// Where a small player goes when the caller measured no placeholder: the top-right
+// quarter, inset. Only a caller that skipped the rect lands here - the Live TV app
+// measures its own hole - so this is a shape that looks deliberate rather than one
+// anybody depends on.
+function pipFallbackRect() {
+  if (!outputSize) return null; // no mode read yet: fullscreen is better than a guess
+  const w = Math.round(outputSize.width * 0.26);
+  const h = Math.round((w * 9) / 16);
+  const margin = Math.round(outputSize.width * 0.03);
+  return { x: outputSize.width - w - margin, y: margin, w, h };
+}
+
 function launchMpv(url, startPos, pip, rect, streams) {
   // Fullscreen relaunch keeps the claim (the next file re-claims immediately, and
   // releasing in between would blank the TV twice); going to PiP gives it back,
@@ -1447,22 +1464,22 @@ function launchMpv(url, startPos, pip, rect, streams) {
     // (the log file is appended below, when there is one we trust)
     "--msg-level=all=error",
   ];
-  // PiP (Live TV "browse while watching"): a small always-on-top window. Wayland
-  // clients can't self-position, so run mpv under XWayland (DISPLAY, no
-  // WAYLAND_DISPLAY) where --geometry works. `rect` (device px, measured by the
-  // launcher from the on-screen placeholder) makes it match exactly at any
-  // resolution/layout; fall back to a top-right percentage. Fullscreen otherwise.
+  // PiP (Live TV "browse while watching"): a small window. A Wayland client cannot
+  // place itself, so the COMPOSITOR places it - `rect` (device px, measured by the
+  // launcher from the on-screen placeholder) makes it match the placeholder exactly
+  // at any resolution, and a top-right quarter is the fallback when a caller sends
+  // none. It is set before mpv starts, so the window is never fullscreen first.
+  //
+  // mpv sits BEHIND the (transparent) Electron window and shows through a
+  // box-shadow "hole" the browse UI punches, so the launcher keeps keyboard focus
+  // (D-pad works) while the video is visible in the hole. The compositor keeps our
+  // windows in front for the same reason.
   if (pip) {
-    const geo =
-      rect && rect.w > 0
-        ? Math.round(rect.w) + "x" + Math.round(rect.h) + "+" + Math.round(rect.x) + "+" + Math.round(rect.y)
-        : "26%+99%+3%";
-    // NOT ontop: mpv sits BEHIND the (transparent) Electron window and shows
-    // through a box-shadow "hole" the browse UI punches, so the launcher keeps
-    // keyboard focus (D-pad works) while the video is visible in the hole.
-    args.push("--no-border", "--ontop=no", "--geometry=" + geo);
+    compositor.placeWindow("mpv", rect && rect.w > 0 ? rect : pipFallbackRect());
+    args.push("--no-border");
   } else {
-    args.push("--window-maximized=yes", "--no-border", "--ontop=no");
+    compositor.placeWindow("mpv", null);
+    args.push("--no-border");
     // Fullscreen starts PAUSED so the output can be switched to match the video
     // BEFORE it plays (adaptMpvMode -> startMpvPlayback below): a mode change
     // blanks HDMI for a second or two, which belongs before the first frame, not
@@ -1483,12 +1500,7 @@ function launchMpv(url, startPos, pip, rect, streams) {
   // "--" ends option parsing: a URL starting with "-" (or a crafted playlist
   // entry) must always be argv's file position, never an mpv option.
   args.push("--", url);
-  const env = { ...process.env, ...WL_ENV };
-  if (pip) {
-    env.DISPLAY = env.DISPLAY || ":0";
-    delete env.WAYLAND_DISPLAY;
-  }
-  mpv = spawn("mpv", args, { env, detached: true, stdio: "ignore" });
+  mpv = spawn("mpv", args, { env: { ...process.env, ...WL_ENV }, detached: true, stdio: "ignore" });
   const child = mpv;
   console.log("[player] mpv launched pid", mpv.pid, pip ? "(pip)" : "");
   // A spawn that never got off the ground (EACCES, fork failure - ENOENT is already

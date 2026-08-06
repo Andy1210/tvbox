@@ -156,6 +156,41 @@ test("focus goes out as the owner, and the app id only when there is one", async
   delete require.cache[require.resolve("./compositor")];
 });
 
+test("a placement goes out as pixels, and a null one puts the window back", async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "tvbox-wc-test-"));
+  const socketPath = path.join(dir, "tvbox-wc.sock");
+  process.env.TVBOX_WC_SOCKET = socketPath;
+  delete require.cache[require.resolve("./compositor")];
+  const client = require("./compositor");
+
+  const seen = [];
+  const server = net.createServer((connection) => {
+    connection.on("data", (chunk) => {
+      seen.push(JSON.parse(String(chunk).trim()));
+      connection.write(JSON.stringify({ id: 1, ok: null }) + "\n");
+    });
+  });
+  await new Promise((resolve) => server.listen(socketPath, resolve));
+
+  // The launcher measures its placeholder in CSS pixels, so the numbers arrive
+  // fractional; the compositor works in whole pixels.
+  await new Promise((resolve) => client.placeWindow("mpv", { x: 1417.6, y: 32.4, w: 499.2, h: 280.8 }, resolve));
+  await new Promise((resolve) => client.placeWindow("mpv", null, resolve));
+
+  assert.deepEqual(
+    { request: seen[0].request, app_id: seen[0].app_id, x: seen[0].x, y: seen[0].y, w: seen[0].w, h: seen[0].h },
+    { request: "place_window", app_id: "mpv", x: 1418, y: 32, w: 499, h: 281 },
+  );
+  // No rectangle at all, rather than a zero one: the compositor reads the absence
+  // as "the whole output".
+  assert.deepEqual(seen[1], { id: seen[1].id, request: "place_window", app_id: "mpv" });
+
+  server.close();
+  fs.rmSync(dir, { recursive: true, force: true });
+  delete process.env.TVBOX_WC_SOCKET;
+  delete require.cache[require.resolve("./compositor")];
+});
+
 test("no socket means no compositor, and callers fall back", () => {
   process.env.TVBOX_WC_SOCKET = path.join(os.tmpdir(), "tvbox-wc-does-not-exist.sock");
   delete require.cache[require.resolve("./compositor")];
