@@ -1,6 +1,6 @@
 import { useI18n } from "../../lib/i18n";
 import { wifiStatus } from "../../lib/wifi";
-import { fetchFileServer, fetchShares } from "../../lib/api";
+import { fetchFileServer, fetchShares, fetchMirroring } from "../../lib/api";
 import { useConfigStore } from "../../stores/config";
 import { SettingsPage } from "../SettingsPage";
 import { Group, Row } from "../Rows";
@@ -10,6 +10,7 @@ import { WifiPage } from "./wifi";
 import { FileServerPage } from "./fileserver";
 import { SharesPage } from "./shares";
 import { MqttPage } from "./mqtt";
+import { MirroringPage } from "./mirroring";
 
 // The category that used to be the worst of the dump: three unrelated screens -
 // the Wi-Fi scanner, the WebDAV file server and the MQTT bridge - stacked in one
@@ -21,6 +22,7 @@ export function NetworkPane() {
   const wifi = useSummary("wifi", wifiStatus);
   const fs = useSummary("fileserver", fetchFileServer);
   const shares = useSummary("shares", fetchShares);
+  const mirror = useSummary("mirroring", fetchMirroring);
   const mqtt = useConfigStore((s) => s.config?.mqtt);
 
   const wifiValue = !wifi
@@ -54,6 +56,21 @@ export function NetworkPane() {
           hint={t("network.sharesHint")}
           value={shares?.shares ? (shares.shares.length ? String(shares.shares.length) : t("shares.none")) : undefined}
           onEnter={() => nav.push({ id: "shares", title: t("shares.title"), render: () => <SharesPage /> })}
+        />
+        <Row
+          id="mirroring"
+          label={t("mirroring.title")}
+          hint={t("network.mirroringHint")}
+          value={
+            mirror
+              ? mirror.streaming
+                ? t("mirroring.streaming")
+                : mirror.armed
+                  ? t("mirroring.waiting")
+                  : t("mirroring.off")
+              : undefined
+          }
+          onEnter={() => nav.push({ id: "mirroring", title: t("mirroring.title"), render: () => <MirroringPage /> })}
         />
         <Row
           id="mqtt"

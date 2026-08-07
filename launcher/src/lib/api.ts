@@ -210,6 +210,41 @@ export async function saveFileServer(patch: {
 }
 export const installRclone = () => post("/tvbox/api/fileserver/install-rclone", {});
 
+// Screen mirroring (Wi-Fi Display). There is no stored setting to read: the box
+// is either mirroring right now or it is not, because a group owner holds the
+// radio and opens a pairing button that anyone in range could press. So this
+// reports live state and the two actions that change it.
+export interface MirrorStatus {
+  armed: boolean;
+  streaming: boolean;
+  name: string; // what to look for in the phone's cast list
+  ssid: string;
+  channel: string;
+}
+export async function fetchMirroring(): Promise<MirrorStatus | null> {
+  try {
+    const res = await fetch("/tvbox/api/miracast", { cache: "no-store" });
+    if (!res.ok) throw new Error("HTTP " + res.status);
+    return (await res.json()) as MirrorStatus;
+  } catch (e) {
+    console.warn("[launcher] mirroring status failed:", e);
+    return null;
+  }
+}
+// Not the plain `post` helper: arming fails for one reason worth reading - the
+// radio is carrying the box's own network - and the sentence has to survive as
+// far as the screen, because someone holding a remote cannot go and read a log.
+async function mirrorAction(path: string): Promise<{ ok: boolean; error?: string }> {
+  try {
+    const res = await fetch(path, { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" });
+    return (await res.json()) as { ok: boolean; error?: string };
+  } catch {
+    return { ok: false };
+  }
+}
+export const startMirroring = () => mirrorAction("/tvbox/api/miracast/start");
+export const stopMirroring = () => mirrorAction("/tvbox/api/miracast/stop");
+
 // Network shares (SMB): the other direction of the file server - someone else's
 // folders brought IN, so a film can live on a NAS. The password is never returned,
 // only whether one is stored.

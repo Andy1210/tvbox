@@ -630,7 +630,25 @@
     "wifiHint": "A hálózat, amin a box van",
     "fileserverHint": "A box mappái számítógépről",
     "mqttHint": "Most játszott tartalom, parancsok és értesítések MQTT-n",
-    "sharesHint": "NAS mint forrás, hogy a filmek a hálózaton lehessenek"
+    "sharesHint": "NAS mint forrás, hogy a filmek a hálózaton lehessenek",
+    "mirroringHint": "A telefon képernyője a TV-n"
+  },
+  "mirroring": {
+    "title": "Képernyőtükrözés",
+    "start": "Tükrözés indítása",
+    "stop": "Tükrözés leállítása",
+    "startHint": "Utána válaszd ki ezt a dobozt a telefonon",
+    "stopHint": "Visszaadja a wifi rádiót",
+    "off": "Ki",
+    "waiting": "Várakozás telefonra",
+    "streaming": "Tükrözés",
+    "lookFor": "Ezt keresd",
+    "retry": "Újra",
+    "note": "A wifi rádiót vevővé alakítja, amíg használod. A telefon közvetlenül a dobozhoz csatlakozik, ezért szabad rádió kell hozzá - egy wifin lévő doboz erre nem képes.",
+    "armedNote": "Nyisd meg a telefonon a tükrözés vagy Smart View menüt, és válaszd ezt a dobozt. PIN nem kell. Ha két percen belül senki nem csatlakozik, a doboz magától leáll.",
+    "err": {
+      "unknown": "Nem sikerült elindítani a tükrözést."
+    }
   },
   "av": {
     "displayHint": "Felbontás és képfrissítés",
