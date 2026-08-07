@@ -74,8 +74,16 @@ export function App() {
 
   // Ambient/screensaver: only on Home, only when enabled - suppressed elsewhere so
   // it never covers playback or an app view. Hooks run before any early return.
+  //
+  // A typing session counts as elsewhere without changing the view, and nothing it
+  // does reaches this window, so an idle Home is exactly what the timer sees while
+  // the user types. The overlay reports it (see TypingOverlay).
   const ambientEnabled = config?.ambient.enabled ?? false;
-  const [idle, wake] = useIdle((config?.ambient.idleMinutes ?? 5) * 60000, view !== "home" || !ambientEnabled);
+  const [typing, setTyping] = useState(false);
+  const [idle, wake] = useIdle(
+    (config?.ambient.idleMinutes ?? 5) * 60000,
+    view !== "home" || !ambientEnabled || typing,
+  );
 
   useEffect(() => {
     loadConfig();
@@ -170,7 +178,7 @@ export function App() {
       <Backdrop />
       {content}
       <NotificationToast />
-      <TypingOverlay />
+      <TypingOverlay onActiveChange={setTyping} />
       <InstallWatcher />
       <RestoreWatcher />
     </>
