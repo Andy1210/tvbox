@@ -88,15 +88,40 @@ const { ipcRenderer } = require("electron");
     // here. What it leaves out falls back to the box's language preference
     // (Settings > Picture & sound), per axis - so omitting the argument entirely
     // is the same as having no opinion about either.
-    window.tvbox.play = function (url, streams) {
+    // `startPos` (optional, seconds) is where to begin - what a film resumed from
+    // last night needs. It reaches mpv as `--start=`, i.e. before the first frame,
+    // rather than as a jump three seconds into playback.
+    window.tvbox.play = function (url, streams, startPos) {
       try {
-        ipcRenderer.invoke("player", "queue", { url: url, streams: streams || null });
+        ipcRenderer.invoke("player", "queue", {
+          url: url,
+          streams: streams || null,
+          startPos: Number(startPos) > 0 ? Number(startPos) : 0,
+        });
         ipcRenderer.invoke("player", "play");
       } catch (e) {}
     };
     window.tvbox.stop = function () {
       try {
         ipcRenderer.invoke("player", "stop");
+      } catch (e) {}
+    };
+    // A recording is not a live stream: it can be held and jumped around in. The
+    // main process has always taken these three - Live TV, the first app to drive
+    // the player, simply had nothing to do with them.
+    window.tvbox.pause = function () {
+      try {
+        ipcRenderer.invoke("player", "pause");
+      } catch (e) {}
+    };
+    window.tvbox.resume = function () {
+      try {
+        ipcRenderer.invoke("player", "resume");
+      } catch (e) {}
+    };
+    window.tvbox.seek = function (posSec) {
+      try {
+        ipcRenderer.invoke("player", "seek", { posSec: Number(posSec) || 0 });
       } catch (e) {}
     };
     // Live TV "browse while watching": shrink the current channel to a PiP at the

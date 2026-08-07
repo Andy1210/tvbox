@@ -76,11 +76,29 @@ export interface StorageBridge {
   remove(key: string): Promise<unknown>;
 }
 
+// One audio or subtitle track of what is playing (window.tvbox.tracks()).
+export interface PlayerTrack {
+  type: "audio" | "sub";
+  id: number;
+  lang: string;
+  title: string;
+  selected: boolean;
+}
+
 export interface TvboxBridge {
   launch(id: string): void;
   home(): void;
-  play?(url: string): void;
+  /** `streams` is the app's own track decision in 0-based ordinals per type;
+   * `startPos` (seconds) is where to begin, e.g. a film being resumed. */
+  play?(url: string, streams?: { audio?: number; sub?: number; subFile?: string }, startPos?: number): void;
   stop?(): void;
+  pause?(): void;
+  resume?(): void;
+  /** Absolute position, in seconds. */
+  seek?(posSec: number): void;
+  tracks?(): Promise<PlayerTrack[]>;
+  /** `id` is a track id from tracks(), or "no" / "auto". */
+  setTrack?(type: "audio" | "sub", id: number | string): void;
   pip?(on: boolean, rect?: PipRect): void;
   onPlayer?(cb: (ev: PlayerEvent) => void): () => void;
   onCommand?(cb: (c: TvCommand) => void): () => void;
