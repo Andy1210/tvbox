@@ -1751,7 +1751,10 @@ function handleTvCommand(cmd) {
       player.setPlaying(null);
       player.stop();
       setVideoMode(false);
-      player.emit({ type: "finished" });
+      // With a reason, because this is a stop and not the end of the item: an app
+      // that auto-advances on `finished` (Plex on-deck) would otherwise start the
+      // next episode for someone who just pressed stop on their phone.
+      player.emit({ type: "finished", reason: "stopped" });
       forwardCommand(cmd);
       break;
     case "next":
@@ -1914,7 +1917,9 @@ function navTo(dest) {
       player.setPlaying(null);
       player.stop();
       setVideoMode(false);
-      player.emit({ type: "finished" });
+      // Leaving an app mid-film stops it; it did not finish. Without the reason the
+      // app it belonged to advances to the next item in the background.
+      player.emit({ type: "finished", reason: "stopped" });
     }
     // Leaving a native app for another app ends its process: it has no background
     // state to keep, and letting it live would leave it holding the GPU and audio

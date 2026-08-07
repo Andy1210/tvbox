@@ -3,7 +3,16 @@ import { setFocus } from "@noriginmedia/norigin-spatial-navigation";
 import { useI18n } from "../lib/i18n";
 import { FocusButton } from "./FocusButton";
 import { Osk } from "./Osk";
-import { wifiStatus, wifiList, wifiConnect, wifiForget, wifiRadio, type WifiNet, type WifiStatus } from "../lib/wifi";
+import {
+  wifiStatus,
+  wifiList,
+  wifiConnect,
+  wifiForget,
+  wifiRadio,
+  type WifiNet,
+  type WifiStatus,
+  type WifiFailure,
+} from "../lib/wifi";
 import { FocusContext, useFocusable } from "@noriginmedia/norigin-spatial-navigation";
 import { useBackspace } from "../lib/useBackspace";
 import { useConfigStore } from "../stores/config";
@@ -77,7 +86,7 @@ function CountryPicker({
         className="fixed inset-0 z-[55] bg-black/90 flex flex-col items-center justify-center gap-[1.6vh] px-[6vw]"
       >
         <div className="text-[2.8vh] font-bold">{t("wifi.country")}</div>
-        <div className="flex flex-col gap-[0.8vh] w-[32.3vw] max-h-[68vh] overflow-y-auto no-scrollbar px-[1.5vw] -mx-[1.5vw]">
+        <div className="flex flex-col gap-[0.8vh] w-[35.3vw] max-h-[68vh] overflow-y-auto no-scrollbar px-[1.5vw] -mx-[1.5vw]">
           {WIFI_COUNTRIES.map((code) => (
             <FocusButton
               key={code || "auto"}
@@ -115,6 +124,7 @@ export function WifiSettings() {
   const [connecting, setConnecting] = useState<string | null>(null);
   const [forgetting, setForgetting] = useState<string | null>(null);
   const [pwFor, setPwFor] = useState<string | null>(null); // ssid awaiting a password
+  const [detail, setDetail] = useState(""); // what NetworkManager said, under the message
   const [pwHidden, setPwHidden] = useState(false); // the pwFor flow targets a hidden network
   const [hiddenSsid, setHiddenSsid] = useState(false); // OSK open for a hidden network's SSID
   const [countryOpen, setCountryOpen] = useState(false);
@@ -139,14 +149,24 @@ export function WifiSettings() {
     setPwHidden(false);
     setConnecting(ssid);
     setMsg("");
+    setDetail("");
     setTimeout(() => setFocus("wifi-rescan"), 0);
     const r = await wifiConnect(ssid, password, hidden);
     setConnecting(null);
-    // What NetworkManager said, not just that it said no. It is the difference
-    // between a wrong password and a network that never answered, and there is no
-    // log to read from the couch.
-    setMsg(r.ok ? t("wifi.connected", { ssid }) : t("wifi.failed", { ssid }) + (r.error ? " - " + r.error : ""));
+    // A sentence in the user's own language, because the two failures anyone can
+    // act on - the password is wrong, the network did not answer - are the two the
+    // shell can tell apart. NetworkManager's own words go underneath rather than
+    // into the sentence: from the couch there is no log to open, but a raw English
+    // string is not an answer either.
+    setMsg(r.ok ? t("wifi.connected", { ssid }) : failureText(r, ssid));
+    setDetail(r.ok ? "" : r.error || "");
     if (r.ok) refresh();
+  };
+  const failureText = (r: { code?: WifiFailure; error?: string }, ssid: string) => {
+    if (r.code === "bad-ssid") return t("wifi.failedName");
+    if (r.code === "bad-password") return t("wifi.failedBadPassword", { ssid });
+    if (r.code === "not-found") return t("wifi.failedNotFound", { ssid });
+    return t("wifi.failed", { ssid });
   };
   const onPick = (net: WifiNet) => {
     if (connecting || net.active) return;
@@ -270,10 +290,16 @@ export function WifiSettings() {
         {connecting ? (
           <span className="text-[1.9vh] text-accent">{t("wifi.connecting", { ssid: connecting })}</span>
         ) : msg ? (
-          <span className="text-[1.9vh] text-fg-dim">{msg}</span>
+          // min-w-0 + break-words: one long unbreakable token (a D-Bus name, a path)
+          // would otherwise push the row past the screen, and nothing here scrolls
+          // sideways to bring it back.
+          <span className="text-[1.9vh] text-fg-dim min-w-0 break-words">{msg}</span>
         ) : null}
       </div>
-      <div className="flex flex-col gap-[0.8vh] max-w-[70vw] max-h-[40vh] overflow-y-auto no-scrollbar px-[1.5vw] -mx-[1.5vw]">
+      {detail && !connecting ? (
+        <div className="text-[1.6vh] text-fg-dim/60 max-w-[73vw] min-w-0 break-words mb-[0.8vh]">{detail}</div>
+      ) : null}
+      <div className="flex flex-col gap-[0.8vh] max-w-[73vw] max-h-[40vh] overflow-y-auto no-scrollbar px-[1.5vw] -mx-[1.5vw]">
         {nets.map((n, i) => (
           <div key={n.ssid} className="flex items-center gap-[1vw]">
             <FocusButton
