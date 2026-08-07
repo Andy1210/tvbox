@@ -25,15 +25,18 @@ set -u
 XDG_SESSION_TYPE=wayland
 export XDG_SESSION_TYPE
 
-# Keep a crashing app's core dump small enough not to freeze the session.
+# Keep a crashing app's core dump from writing more than it has to.
 #
-# The default filter (0x33) includes shared anonymous mappings, and an emulator's
-# fastmem arena is exactly that: guest memory mapped through a multi-gigabyte
-# window, which the kernel dumps whole however little of it is resident. The
-# Dolphin core measured ~14 GB down the coredump pipe, minutes of solid SD
-# writes, with the compositor and the shell blocked on IO behind it. Clearing
-# bit 1 leaves the stacks, heap and JIT pages - what a backtrace needs - and the
-# dump costs under a second.
+# The default filter (0x33) includes shared anonymous mappings, which is what an
+# emulator's fastmem arena is: guest memory mapped through a multi-gigabyte
+# window. Clearing bit 1 drops those and keeps the stacks, heap and JIT pages, so
+# a backtrace still works.
+#
+# On its own this does NOT make a dump cheap, and it was measured not to: the
+# Dolphin core's address space is 65 GB against 475 MB resident, and a coredump
+# PIPE cannot skip a hole - the kernel writes it out as zeroes, a page at a time -
+# so the dump still ran past twenty seconds. What bounds the freeze is the
+# RuntimeMaxSec drop-in; this only lowers what must be written before that bound.
 #
 # coredump_filter is inherited by every child and survives exec, bwrap included,
 # so `flatpak run` apps get it too. A kernel without the knob is not a reason to
