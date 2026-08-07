@@ -10,7 +10,7 @@ What the user sees:
 
 - **HOME → "Running" row**: every backgrounded app as a chip - OK resumes it,
   the ✕ next to it really quits it (drops the window; next launch is fresh).
-- **`appswitcher` remap action** (Settings → Peripherals): bind any remote
+- **`appswitcher` remap action** (Settings → Remotes & accessories): bind any remote
   button to cycle through the running apps, FireTV-style.
 - Tiles behave as before; launching a running app's tile resumes it.
 

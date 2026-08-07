@@ -169,12 +169,12 @@ Notes:
     `010_pi-nopasswd`. `SUDO=true`/absent toggles it both ways. The tvbox shell
     itself always runs rootless - this only affects a human on the SSH shell.
   - **HOSTNAME** - the image default is `tvbox`; set this so multiple boxes are
-    distinct (also editable later on the TV: Settings → General → Device name).
+    distinct (also editable later on the TV: Settings → System → Device name).
   - **WIFI_COUNTRY** - the radio won't transmit on a channel its regulatory
     domain forbids, so a box flashed for another region needs this _before_ it
     ever associates - which is why it's here and not only in Settings. Weakest
     source first: the image's build-time `WPA_COUNTRY` (see _Building the image_),
-    then this, then the on-TV pick (Settings → Wi-Fi → Wi-Fi country), which
+    then this, then the on-TV pick (Settings → Network → Wi-Fi → Wi-Fi country), which
     persists to `~/.tvbox/config.json` and is re-applied every boot. A value that
     isn't exactly two letters is ignored rather than repaired - filtering junk out
     of `D1E` would hand back `DE`, and quietly picking a _different_ valid region
@@ -189,7 +189,7 @@ Notes:
 - **WiFi**: set up **from the TV** once booted (Settings → Network) - the image
   brings the radio up (NetworkManager ships it off) and sets a WiFi country so it
   scans out of the box. Outside that country, correct it with `WIFI_COUNTRY=` at
-  flash time or Settings → Wi-Fi → Wi-Fi country afterwards. Or preseed the whole
+  flash time or Settings → Network → Wi-Fi → Wi-Fi country afterwards. Or preseed the whole
   thing (see _Headless provisioning_).
 - **Ethernet**: works out of the box (DHCP, no config).
 - **`custom.toml` / Raspberry Pi Imager customisation - NOT supported by this

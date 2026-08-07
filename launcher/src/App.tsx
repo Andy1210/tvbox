@@ -7,7 +7,7 @@ import { Backdrop } from "./components/Backdrop";
 import { Home } from "./components/Home";
 import { SetupWizard, markSetupDone } from "./components/SetupWizard";
 import { markSetupDoneOnBox } from "./lib/api";
-import { Settings } from "./components/Settings";
+import { Settings } from "./settings/Settings";
 import { Catalog } from "./components/Catalog";
 import { Ambient } from "./components/Ambient";
 import { TypingOverlay } from "./components/TypingOverlay";

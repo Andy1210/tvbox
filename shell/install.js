@@ -124,6 +124,11 @@ const RESERVED_STATE_FILES = new Set([
   "restore-appfiles.json",
   "reconcile.json",
   "install.log",
+  // run-shell.sh opens a Chromium DevTools endpoint when this exists. An app id of
+  // "debug" satisfies the `<id>-` prefix rule on its own, so without this an app's
+  // `backup.state` could name it and a restore would write it - handing the next
+  // boot a debug endpoint. Same pair of gates as every other shell-owned path.
+  "debug-port",
 ]);
 
 // A ~/.tvbox/ sidecar an app may claim as its own in `backup.state`: one flat file

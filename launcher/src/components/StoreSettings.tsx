@@ -223,9 +223,6 @@ export function StoreSettings() {
 
   return (
     <div className="mt-[3vh]">
-      <div className="text-[2.4vh] font-semibold mb-[0.8vh]">{t("store.title")}</div>
-      <div className="text-fg-dim text-[1.8vh] mb-[1.4vh] max-w-[70vw]">{t("store.hint")}</div>
-
       {entries === null && <div className="text-[1.9vh] text-fg-dim">{t("store.loading")}</div>}
 
       {error && (

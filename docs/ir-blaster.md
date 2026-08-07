@@ -9,13 +9,13 @@ What uses it once configured:
 
 - **BT/USB remotes**: the remote bridge swallows `KEY_VOLUMEUP` /
   `KEY_VOLUMEDOWN` / `KEY_MUTE` (native buttons or ones remapped to the
-  volume actions in Settings → Peripherals) and forwards them to the blaster.
+  volume actions in Settings → Remotes & accessories) and forwards them to the blaster.
   Holding the button autorepeats at a throttled pace. With no blaster
   configured the keys pass through untouched, exactly as before.
 - **MQTT / voice assistants**: `{"action":"volume_up","steps":3}` on
   `tvbox/<id>/cmd` ([mqtt-integration.md](mqtt-integration.md)).
-- **Settings UI**: per-command Test buttons (Settings → Peripherals → IR
-  blaster).
+- **Settings UI**: per-command Test rows (Settings → Remotes & accessories → TV
+  volume).
 
 Everything funnels through one shell module ([shell/ir.js](../shell/ir.js))
 with pluggable backends behind a single `send(action)` surface. Adding a new
@@ -38,7 +38,7 @@ Setup:
    enter learn mode, or press its HA `Learn` button, then press the TV
    remote's key at it). Note which slot got which key - e.g. `Signal0` =
    volume up, `Signal1` = volume down, `Signal2` = mute.
-2. Settings → Peripherals → IR blaster: backend _ESPHome device_, set the
+2. Settings → Remotes & accessories → TV volume: backend _ESPHome device_, set the
    device host (IP or mDNS name). Port stays empty for the default (6053).
    If the device's API is encrypted, paste its `api.encryption.key` into
    _API encryption key_ (the XIAO stock firmware ships unencrypted).
@@ -66,7 +66,7 @@ needs the vendor protocol.
            data: { device: tv, command: volume_up }
    ```
 
-2. Settings → Peripherals → IR blaster: backend _Home Assistant script_, set
+2. Settings → Remotes & accessories → TV volume: backend _Home Assistant script_, set
    the HA URL and a long-lived access token (HA profile → Security).
 3. Map each command to its script entity id (`script.tv_volume_up`, …).
 

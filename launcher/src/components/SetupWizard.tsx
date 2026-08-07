@@ -5,7 +5,7 @@ import { markSetupDoneOnBox } from "../lib/api";
 import { useBackspace } from "../lib/useBackspace";
 import { FocusButton } from "./FocusButton";
 import { LanguagePicker } from "./LanguagePicker";
-import { WifiSettings } from "./WifiSettings";
+import { WifiPage } from "../settings/pages/wifi";
 import { TimezonePicker } from "./TimezonePicker";
 import { KeymapPicker } from "./KeymapPicker";
 
@@ -86,7 +86,7 @@ export function SetupWizard({ onDone }: { onDone: () => void }) {
     const first = AVAILABLE_LOCALES[0]?.id;
     const target: Record<StepId, string> = {
       language: first ? "lang-" + first : PRIMARY,
-      wifi: "wifi-rescan",
+      wifi: "wifi:rescan", // the page-scoped key from settings/Rows.tsx - NOT "wifi-rescan"
       timezone: PRIMARY,
       keyboard: PRIMARY,
       finish: PRIMARY,
@@ -113,7 +113,7 @@ export function SetupWizard({ onDone }: { onDone: () => void }) {
         <LanguagePicker size="lg" onPicked={() => setTimeout(() => setFocus(PRIMARY), 0)} />
       </div>
     );
-  else if (step === "wifi") control = <WifiSettings />;
+  else if (step === "wifi") control = <WifiPage embedded />;
   else if (step === "timezone") control = <TimezonePicker autoFocus />;
   else if (step === "keyboard") control = <KeymapPicker autoFocus />;
   else
