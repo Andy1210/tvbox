@@ -38,6 +38,7 @@ const nativeapp = require("./native"); // native (non-Electron) apps: RetroArch 
 const fileserver = require("./fileserver"); // the box's folders over WebDAV (rclone, no root)
 const browse = require("./browse"); // local + USB media: which roots exist, and listing one
 const shares = require("./shares"); // network shares (SMB over rclone, no root), mounted per config
+const miracast = require("./miracast"); // screen mirroring: the unprivileged half of a Wi-Fi Display sink
 const firetvir = require("./firetvir"); // Fire TV remote IR programming (venv deps + irdb codesets + BLE tool)
 const apps = require("./install"); // manifests + install-recipe runner (shared with the tvbox CLI)
 const store = require("./store"); // app-store registry client (manifest-only apps -> ~/.tvbox/apps)
@@ -217,6 +218,28 @@ function applyShares() {
   return r;
 }
 let rcloneInstalling = false;
+
+// Screen mirroring. The radio half is root's and runs behind a systemd unit
+// (miracast.js); what happens here is the other end of it - when frames start
+// arriving, the shared player is pointed at the FIFO they are being written to,
+// and when they stop it is let go again.
+//
+// Deliberately built where it is used rather than at module level: main.js has
+// been killed once by an object assembled out of consts declared further down
+// the file, and nothing in the test suite would catch it a second time.
+const mirroring = miracast.create({
+  log: (...a) => console.log("[miracast]", ...a),
+  onEvent: (ev) => {
+    if (ev.type === "streaming") {
+      // A mirrored phone is live: there is no seeking and nothing to resume, so
+      // it starts at zero and fullscreen like any other film. mpv reads the FIFO
+      // as an ordinary file, which is what keeps this out of player.js entirely.
+      ensureAudio(() => player.launch(ev.fifo, 0, false, null, null));
+    }
+    if (ev.type === "peer-gone" || ev.type === "stopped") player.stop();
+    if (ev.type === "error") console.warn("[miracast]", ev.message);
+  },
+});
 
 function applyFileserver() {
   try {
@@ -566,6 +589,7 @@ function serve() {
     applyShares,
     sharesDeps,
     sharesStatus: () => shares.status(config.rawShares(), sharesDeps),
+    mirroring,
     foregroundApp: () => currentAppId,
     handlePower,
     installRclone: () => installRclone() || rcloneInstalling,
@@ -816,6 +840,19 @@ function serve() {
       return httpserver.jsonRes(res, {
         ...shares.status(config.rawShares(), sharesDeps),
         installing: rcloneInstalling,
+      });
+    }
+    // Screen mirroring. `available` is what greys the tile: a box whose radio is
+    // carrying its own network cannot do this at all, and saying so up front is
+    // better than a button that always fails.
+    if (p === "/tvbox/api/miracast") {
+      const st = mirroring.state();
+      return httpserver.jsonRes(res, {
+        armed: mirroring.isArmed(),
+        streaming: mirroring.isStreaming(),
+        name: st.name || "",
+        ssid: st.ssid || "",
+        channel: st.channel || "",
       });
     }
     if (p === "/tvbox/api/browse/sources") {

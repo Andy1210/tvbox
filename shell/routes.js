@@ -144,6 +144,21 @@ function post(p, data, res, ctx) {
       (e) => httpserver.jsonRes(res, { ok: false, error: String((e && e.message) || e) }),
     );
   }
+  // Screen mirroring, armed and disarmed by hand. There is no "leave it on"
+  // setting on purpose: a group owner beacons continuously, holds a radio this
+  // board shares with Bluetooth, and its pairing button is open to whoever
+  // presses it - so it is a thing you switch on to use, like an input on a TV.
+  if (p === "/tvbox/api/miracast/start") {
+    return ctx.mirroring.start((err, st) =>
+      httpserver.jsonRes(
+        res,
+        err ? { ok: false, error: String((err && err.message) || err) } : { ok: true, name: (st && st.name) || "" },
+      ),
+    );
+  }
+  if (p === "/tvbox/api/miracast/stop") {
+    return ctx.mirroring.stop(() => httpserver.jsonRes(res, { ok: true }));
+  }
   if (p === "/tvbox/api/nav") {
     // Any navigation ends a typing session: with ctx.foregroundApp() === null (the typing
     // screen backgrounds its app) the branches below wouldn't touch it, leaving a
