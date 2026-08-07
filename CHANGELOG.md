@@ -5,6 +5,30 @@ updates). `scripts/make-release.sh` lifts the current version's `hu`/`en`
 blocks into the OTA feed's `notes` - keep both languages, keep it short, and
 write for the person on the couch (what changes for THEM), not for developers.
 
+## 2.0.3
+
+### hu
+
+- **Egy appból visszatérve a főképernyő jön, nem a képernyővédő.** A tétlenségi
+  idő eddig az app alatt is ketyegett, így mire visszamentél, már be volt
+  kapcsolva.
+- **A képernyővédő nem takarja el a gépelést.** Ha telefonról vagy a képernyő-
+  billentyűzeten írtál be valamit, egy idő után ráúszott a beírómezőre.
+- **Ha egy alkalmazás összeomlik, a doboz nem áll meg percekre.** Az összeomlás
+  után készülő memóriakép addig írta a kártyát, hogy közben semmi más nem
+  reagált - se a távirányító, se a kép. Ez most pár másodperc.
+
+### en
+
+- **Coming back from an app lands on Home, not on the screen saver.** The idle
+  timer kept running while the app was in front, so the screen saver was already
+  up by the time you got back.
+- **The screen saver no longer covers the typing screen.** Typing from a phone or
+  the on-screen keyboard could end up underneath it after a while.
+- **A crashing app no longer stops the box for minutes.** The crash report it
+  wrote to the card kept everything else waiting - the remote, the picture, all
+  of it. Now it is a couple of seconds.
+
 ## 2.0.2
 
 ### hu
