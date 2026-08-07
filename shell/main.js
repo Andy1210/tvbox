@@ -235,11 +235,30 @@ const mirroring = miracast.create({
       // it starts at zero and fullscreen like any other film. mpv reads the FIFO
       // as an ordinary file, which is what keeps this out of player.js entirely.
       ensureAudio(() => player.launch(ev.fifo, 0, false, null, null));
+      // Get the launcher out of the way. mpv plays BEHIND this window, so
+      // whatever page started mirroring - the Settings one, in practice - is
+      // drawn straight over the phone's screen until the page is dropped and
+      // the window made transparent.
+      pushNav("mirroring");
+      setVideoMode(true);
     }
-    if (ev.type === "peer-gone" || ev.type === "stopped") player.stop();
+    if (ev.type === "peer-gone" || ev.type === "stopped") {
+      player.stop();
+      setVideoMode(false);
+      pushNav("home");
+    }
     if (ev.type === "error") console.warn("[miracast]", ev.message);
   },
 });
+
+// Tell the launcher which full-screen surface to show. Safe before the window
+// exists (mirroring cannot be armed then) and safe after it has gone.
+function pushNav(dest) {
+  if (!win || win.isDestroyed()) return;
+  try {
+    win.webContents.send("tvbox-nav", { dest });
+  } catch (e) {}
+}
 
 function applyFileserver() {
   try {

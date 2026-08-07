@@ -11,6 +11,7 @@ import { Settings } from "./settings/Settings";
 import { Catalog } from "./components/Catalog";
 import { Ambient } from "./components/Ambient";
 import { TypingOverlay } from "./components/TypingOverlay";
+import { MirrorOverlay } from "./components/MirrorOverlay";
 import { NotificationToast } from "./components/NotificationToast";
 import { InstallWatcher } from "./components/InstallWatcher";
 import { RestoreWatcher } from "./components/RestoreWatcher";
@@ -80,9 +81,10 @@ export function App() {
   // the user types. The overlay reports it (see TypingOverlay).
   const ambientEnabled = config?.ambient.enabled ?? false;
   const [typing, setTyping] = useState(false);
+  const [mirroring, setMirroring] = useState(false);
   const [idle, wake] = useIdle(
     (config?.ambient.idleMinutes ?? 5) * 60000,
-    view !== "home" || !ambientEnabled || typing,
+    view !== "home" || !ambientEnabled || typing || mirroring,
   );
 
   useEffect(() => {
@@ -120,10 +122,10 @@ export function App() {
       history.replaceState(null, "", window.location.pathname); // one-shot: a manual reload lands on Home
       nav.open("settings");
     }
-    // "typing" is TypingOverlay's business (it opens over whatever is on screen);
-    // everything else is a view switch.
+    // "typing" and "mirroring" are their overlays' business (they open over
+    // whatever is on screen); everything else is a view switch.
     return window.tvbox?.onNav?.((n) => {
-      if (n.dest === "typing") return;
+      if (n.dest === "typing" || n.dest === "mirroring") return;
       if (n.dest === "settings") nav.open("settings");
       else nav.home();
     });
@@ -179,6 +181,7 @@ export function App() {
       {content}
       <NotificationToast />
       <TypingOverlay onActiveChange={setTyping} />
+      <MirrorOverlay onActiveChange={setMirroring} />
       <InstallWatcher />
       <RestoreWatcher />
     </>

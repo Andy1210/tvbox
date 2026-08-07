@@ -658,7 +658,8 @@
     "offlineWarning": "Ez a doboz wifin van, ezért a tükrözés alatt offline lesz. Leállításkor visszacsatlakozik ugyanarra a hálózatra.",
     "offlineNow": "A doboz a tükrözés alatt offline, és leállításkor visszatér.",
     "starting": "Indítás…",
-    "stopping": "Leállítás…"
+    "stopping": "Leállítás…",
+    "overlayHint": "A Vissza gombbal állíthatod le a tükrözést"
   },
   "av": {
     "displayHint": "Felbontás és képfrissítés",
