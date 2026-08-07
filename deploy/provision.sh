@@ -516,8 +516,14 @@ if [ -f "$HERE/coredump-tvbox-runtimemax.conf" ]; then
   install -d /etc/systemd/system/systemd-coredump@.service.d
   if install -m 644 "$HERE/coredump-tvbox-runtimemax.conf" \
     /etc/systemd/system/systemd-coredump@.service.d/10-tvbox-runtime-max.conf; then
-    systemctl daemon-reload 2>/dev/null || true
-    ok "core dump time limit (20s) installed"
+    # The file being in place is not the same as the running manager knowing about
+    # it, and the difference matters here: without the reload the next crash still
+    # dumps under the old 5-minute limit.
+    if systemctl daemon-reload 2>/dev/null; then
+      ok "core dump time limit (20s) installed"
+    else
+      warn "core dump time limit written but daemon-reload failed; it applies at the next boot"
+    fi
   else
     warn "could not install the core dump time limit"
   fi
