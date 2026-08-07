@@ -142,6 +142,7 @@ function create(deps) {
   let armed = false;
   let pairDeadline = 0;
   let lastRtp = 0;
+  let peerIp = null; // the only address whose RTP counts
 
   const now = d.now || (() => Date.now());
 
@@ -227,7 +228,12 @@ function create(deps) {
   function startRtp() {
     rtp = dgram.createSocket("udp4");
     let bytes = 0;
-    rtp.on("message", (packet) => {
+    rtp.on("message", (packet, from) => {
+      // Frames from anywhere else are not this session's. The port is open on
+      // every interface, and a box mirroring over ethernet keeps its LAN - so
+      // without this, anything that can reach UDP 1028 can put a picture on
+      // someone's television.
+      if (!peerIp || from.address !== peerIp) return;
       const payload = wfd.rtpPayload(packet);
       if (!payload || !fifo) return;
       lastRtp = now();
@@ -255,11 +261,9 @@ function create(deps) {
       s.setTimeout(0);
       log("connected to source", ip);
       socket = s;
+      peerIp = ip;
       session = wfd.createSession({ sourceIp: ip, rtpPort: RTP_PORT, log });
       emit({ type: "peer", ip });
-      every(KEEPALIVE_MS, () => {
-        if (socket && session && session.state.playing) socket.write(session.keepalive());
-      });
     });
     s.on("data", (chunk) => {
       if (!session) return;
@@ -271,6 +275,7 @@ function create(deps) {
     s.on("close", () => {
       if (socket === s) {
         socket = null;
+        peerIp = null;
         session = null;
         log("source closed the session");
         emit({ type: "peer-gone" });
@@ -329,6 +334,9 @@ function create(deps) {
         fifo.on("error", (e) => log("fifo:", e.message));
         startRtp();
         openPairing();
+        every(KEEPALIVE_MS, () => {
+          if (socket && session && session.state.playing) socket.write(session.keepalive());
+        });
         every(ACCEPT_EVERY_MS, () => {
           if (pairingGate(paired(), now(), pairDeadline) === "open") accept();
         });
@@ -373,6 +381,10 @@ function create(deps) {
     const done = cb || (() => {});
     clearTimers();
     stopSession();
+    lastRtp = 0;
+    dialing = null;
+    peerIp = null;
+    pairDeadline = 0;
     if (rtp) {
       try {
         rtp.close();

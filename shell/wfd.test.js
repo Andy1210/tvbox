@@ -187,6 +187,33 @@ test("the RTP header is read, not assumed to be twelve bytes", () => {
   assert.strictEqual(wfd.rtpPayload(Buffer.alloc(20)), null, "and neither is RTP version 0");
 });
 
+test("a parameter name that is really a prototype member gets none, not a function", () => {
+  // `caps[name]` would reach Object.prototype, and the peer asking is
+  // unauthenticated - push-button admits whoever presses it - so a source could
+  // ask for "constructor" and be handed a function's source as a value.
+  const s = wfd.createSession({ sourceIp: "10.0.0.1" });
+  s.feed(M1);
+  const out = s.feed(
+    msg("GET_PARAMETER rtsp://x RTSP/1.0", { CSeq: 9 }, "constructor\r\ntoString\r\nvalueOf\r\n__proto__\r\n"),
+  );
+  const body = out[0].split("\r\n\r\n")[1];
+  for (const name of ["constructor", "toString", "valueOf", "__proto__"]) {
+    assert.match(body, new RegExp("^" + name.replace(/[_$]/g, "\\$&") + ": none$", "m"), name);
+  }
+  assert.strictEqual(/function|\[native code\]/.test(body), false, "nothing from the prototype leaks into the reply");
+});
+
+test("a peer that never finishes a message is dropped rather than buffered", () => {
+  // Unauthenticated again, and the buffer only releases on a complete message:
+  // a source that omits the header terminator, or declares a Content-Length it
+  // never sends, would grow it without limit.
+  const s = wfd.createSession({ sourceIp: "10.0.0.1" });
+  const out = s.feed("OPTIONS * RTSP/1.0\r\nCSeq: 1\r\nX: " + "A".repeat(70000));
+  assert.deepStrictEqual(out, [], "nothing is answered");
+  assert.strictEqual(s.state.torndown, true, "and the caller is told to hang up");
+  assert.strictEqual(s.state.buffer.length, 0, "the buffer does not keep it either");
+});
+
 test("what we advertise stays inside what this box can actually decode", () => {
   const caps = wfd.createSession({}).caps;
   // CEA bit 8 is 1920x1080p60. The Pi 5 decodes H.264 on the CPU - it kept only

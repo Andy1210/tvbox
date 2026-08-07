@@ -39,6 +39,12 @@ const DEFAULT_CAPS = {
 
 // Our own requests are numbered from here, well clear of the source's sequence.
 const FIRST_LOCAL_CSEQ = 100;
+// The most we will hold waiting for one message to complete. RTSP here is a
+// handful of short text messages; anything approaching this is a peer that
+// never terminates a header or declares a Content-Length it will not send. It
+// is also unauthenticated - push-button admits whoever presses it - so the
+// buffer needs a ceiling rather than the benefit of the doubt.
+const MAX_BUFFER = 64 * 1024;
 
 // Split an RTSP message off the front of a buffer, or answer null when the
 // buffer does not hold a whole one yet. RTSP frames like HTTP: a start line,
@@ -163,7 +169,13 @@ function createSession(opts) {
       // we do not implement. A Galaxy source asks for five wfd_sec_* extensions
       // of its own and closes the session without a word if they are missing
       // from the reply - measured, and it looks exactly like a rejected format.
-      const body = wanted.map((name) => name + ": " + (caps[name] || "none")).join("\r\n") + "\r\n";
+      // Own properties only. `caps[name]` reaches Object.prototype, so a source
+      // asking for "constructor" or "toString" would get a function's source
+      // back as a parameter value.
+      const body =
+        wanted
+          .map((name) => name + ": " + (Object.prototype.hasOwnProperty.call(caps, name) ? caps[name] : "none"))
+          .join("\r\n") + "\r\n";
       return out.push(response("200 OK", cseq, null, body));
     }
 
@@ -225,6 +237,12 @@ function createSession(opts) {
     /** Bytes in, bytes out. Handles partial and coalesced messages. */
     feed(text) {
       state.buffer += text;
+      if (state.buffer.length > MAX_BUFFER) {
+        log("dropping a peer that sent", state.buffer.length, "bytes without a complete message");
+        state.buffer = "";
+        state.torndown = true; // the caller drops the socket on this
+        return [];
+      }
       const out = [];
       for (;;) {
         const parsed = parseMessage(state.buffer);
