@@ -1,0 +1,10 @@
+// tvbox: allow plugdev users to mount REMOVABLE media (USB sticks).
+// Internal disks are not covered: that is filesystem-mount-system, not this.
+// Nothing else is granted either - power-off-drive would cut power to a USB SSD a
+// Pi can boot from, and unmounting a mount the shell made itself needs no action.
+// KEEP IN SYNC with the heredoc in deploy/provision.sh (SSH installs write that).
+polkit.addRule(function (action, subject) {
+  if (subject.isInGroup("plugdev") && action.id === "org.freedesktop.udisks2.filesystem-mount") {
+    return polkit.Result.YES;
+  }
+});
