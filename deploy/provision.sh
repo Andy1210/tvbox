@@ -60,7 +60,11 @@ apt-get install -y -qq $HARD && ok "core deps ($HARD)" || bad "core apt deps - i
 # iw: turns WiFi power saving off on the RUNNING radio, so the drop-in below
 # doesn't have to wait for a reconnect. Soft on purpose - without it the setting
 # still lands, just at the next boot instead of immediately.
-SOFT="jq flatpak curl git unzip ca-certificates gcc libc6-dev fonts-dejavu-core iw"
+# udisks2: the only way to mount a USB stick with no root and no fstab line (the
+# polkit grant is below). Soft as well - without it the box browses its own
+# folders and says that USB is unavailable, which is also what an OTA-only box
+# gets, since OTA can never install an apt package.
+SOFT="jq flatpak curl git unzip ca-certificates gcc libc6-dev fonts-dejavu-core iw udisks2"
 apt-get install -y -qq $SOFT && ok "extra deps ($SOFT)" || warn "some extra deps missing: $SOFT"
 
 # Shared media stack in the core (kept in sync with image/stage-tvbox): mpv is
@@ -204,7 +208,11 @@ SUBSYSTEM=="cec", GROUP="video", MODE="0660"
 SUBSYSTEM=="hidraw", KERNELS=="0005:0171:*", GROUP="input", MODE="0640"
 RULES
 udevadm control --reload-rules 2>/dev/null && udevadm trigger 2>/dev/null && ok "udev rules" || warn "udev reload failed (rules apply on reboot)"
-usermod -aG input,video "$TVBOX_USER" && ok "$TVBOX_USER in input+video groups" || bad "usermod failed"
+# plugdev is the group the polkit rule below grants removable media to. Raspberry
+# Pi OS already puts its first user in it; a box built another way may not have it
+# at all, so it is created rather than assumed.
+getent group plugdev >/dev/null || groupadd plugdev
+usermod -aG input,video,plugdev "$TVBOX_USER" && ok "$TVBOX_USER in input+video+plugdev groups" || bad "usermod failed"
 
 echo "==> logind: a remote's Power button must never power the box off"
 # A BT remote's Power button reaches the box over BT as KEY_POWER. Left to
@@ -234,6 +242,36 @@ polkit.addRule(function(action, subject) {
 });
 RULES
 ok "polkit rule (netdev -> NetworkManager)"
+
+echo "==> polkit: mounting a USB stick from the box user (local media on the TV)"
+# The desktop default would already allow this - udisks grants `filesystem-mount`
+# to an ACTIVE local session - but the shell is not one: Electron moves its main
+# process into its own systemd app scope, which takes it out of the seat's logind
+# session, and polkit then sees a subject with no session at all. Measured on a Pi
+# 5: pkcheck says "authorization requires authentication" for the shell's pid and
+# yes for the compositor's, in the same session.
+#
+# ONE action, the one the shell calls. The box's own SD card is a "system internal"
+# device to udisks and answers to `filesystem-mount-system`, which is deliberately
+# absent - so nothing this rule allows can mount the partitions the box runs from.
+# Nor is anything else granted for the sake of symmetry: `power-off-drive` would cut
+# power to a USB SSD a Pi can BOOT from, and unmounting a mount the shell made
+# itself needs no action at all (udisks authorises the uid that mounted it), so
+# `filesystem-unmount-others` - the one action a desktop session does not get either
+# - stays out too.
+cat > /etc/polkit-1/rules.d/50-tvbox-udisks.rules <<'RULES'
+// tvbox: allow plugdev users to mount REMOVABLE media (USB sticks).
+// Internal disks are not covered: that is filesystem-mount-system, not this.
+// Nothing else is granted either - power-off-drive would cut power to a USB SSD a
+// Pi can boot from, and unmounting a mount the shell made itself needs no action.
+// KEEP IN SYNC with image/stage-tvbox/01-tvbox/conf/50-tvbox-udisks.rules.
+polkit.addRule(function (action, subject) {
+  if (subject.isInGroup("plugdev") && action.id === "org.freedesktop.udisks2.filesystem-mount") {
+    return polkit.Result.YES;
+  }
+});
+RULES
+ok "polkit rule (plugdev -> udisks2 filesystem-mount)"
 
 echo "==> WiFi power saving off (a mains-powered box only pays its latency cost)"
 # NM defaults wifi.powersave to enabled, and the Pi's brcmfmac honours it hard:

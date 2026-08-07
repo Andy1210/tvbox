@@ -36,6 +36,8 @@ const ir = require("./ir"); // IR blaster hub: TV volume/mute over ESPHome or Ho
 const appwins = require("./appwindows"); // background-apps window registry + hidden-set policy (LRU/RAM guard)
 const nativeapp = require("./native"); // native (non-Electron) apps: RetroArch et al own the screen AND the input
 const fileserver = require("./fileserver"); // the box's folders over WebDAV (rclone, no root)
+const browse = require("./browse"); // local + USB media: which roots exist, and listing one
+const shares = require("./shares"); // network shares (SMB over rclone, no root), mounted per config
 const firetvir = require("./firetvir"); // Fire TV remote IR programming (venv deps + irdb codesets + BLE tool)
 const apps = require("./install"); // manifests + install-recipe runner (shared with the tvbox CLI)
 const store = require("./store"); // app-store registry client (manifest-only apps -> ~/.tvbox/apps)
@@ -196,6 +198,24 @@ function emitConfigChange(sections) {
 // PATH matters here (rclone lands in ~/.tvbox/bin, which install.js prepends);
 // the Wayland vars do not - this serves files, it draws nothing.
 const fileserverDeps = { onPath: apps.onPath, childEnv: () => ({ ...process.env }), supervisor };
+// Same reason for the same one field: `udisksctl` is what mounts a stick and it is
+// not on every box (udisks2 is a soft dep, and OTA can never add an apt package),
+// so browse.js asks before it runs anything. `shares` is a function rather than a
+// list because a share can be added while the box is running.
+const browseDeps = { onPath: apps.onPath, shares: () => config.rawShares() };
+const sharesDeps = {
+  onPath: apps.onPath,
+  childEnv: () => ({ ...process.env }),
+  supervisor,
+};
+// Mount what is configured (and unmount what is not) - on boot, and after every
+// change to the list.
+function applyShares() {
+  const r = shares.apply(config.rawShares(), sharesDeps);
+  if (!r.ok) console.warn("[shares] not mounted:", r.error);
+  else if (r.mounted.length) console.log("[shares] mounting", r.mounted.join(", "));
+  return r;
+}
 let rcloneInstalling = false;
 
 function applyFileserver() {
@@ -235,7 +255,11 @@ function installRclone() {
   });
   const done = () => {
     rcloneInstalling = false;
-    if (apps.onPath("rclone") && config.rawFileserver().enabled) applyFileserver();
+    if (!apps.onPath("rclone")) return;
+    // Both features run on this one binary, so whichever asked for it, everything
+    // waiting on it can start now.
+    if (config.rawFileserver().enabled) applyFileserver();
+    if (config.rawShares().length) applyShares();
   };
   child.on("error", done);
   child.on("exit", done);
@@ -539,6 +563,9 @@ function serve() {
     ensureAudio,
     exitApp,
     fileserverStatus: () => fileserver.status(config.rawFileserver(), fileserverDeps),
+    applyShares,
+    sharesDeps,
+    sharesStatus: () => shares.status(config.rawShares(), sharesDeps),
     foregroundApp: () => currentAppId,
     handlePower,
     installRclone: () => installRclone() || rcloneInstalling,
@@ -580,7 +607,12 @@ function serve() {
     // side-effect-free reads the open-GET policy assumes). Other read-only GETs
     // stay open - they leak nothing actionable and blocking them would break
     // <img>/no-CORS uses.
-    const guardedGet = p === "/tvbox/api/tv/standby" || p.startsWith("/tvbox/api/firetvir/");
+    // browse/* is on this list for the same reason firetvir is: both GETs fork a
+    // process (lsblk), so they are not the side-effect-free reads the open-GET
+    // policy assumes. The cache in removable.js is what actually bounds the cost -
+    // an <img> or <iframe> request carries no Origin header for this to catch.
+    const guardedGet =
+      p === "/tvbox/api/tv/standby" || p.startsWith("/tvbox/api/firetvir/") || p.startsWith("/tvbox/api/browse/");
     if ((req.method !== "GET" || guardedGet) && httpserver.foreignOrigin(req, OWN_ORIGINS)) {
       console.warn("[main] rejected cross-origin", req.method, p, "from", req.headers.origin);
       res.writeHead(403, { "Content-Type": "text/plain" });
@@ -776,6 +808,25 @@ function serve() {
     if (p === "/tvbox/api/fileserver") {
       const st = fileserver.status(config.rawFileserver(), fileserverDeps);
       return httpserver.jsonRes(res, { ...st, installing: rcloneInstalling });
+    }
+    // What there is to play on the box itself: the user's own folders and each
+    // partition of a plugged-in USB stick (browse.js). Read-only; the app that
+    // walks them is the registry's `files` package, and mounting is a POST.
+    if (p === "/tvbox/api/shares") {
+      return httpserver.jsonRes(res, {
+        ...shares.status(config.rawShares(), sharesDeps),
+        installing: rcloneInstalling,
+      });
+    }
+    if (p === "/tvbox/api/browse/sources") {
+      browse.sources(browseDeps, (s) => httpserver.jsonRes(res, s));
+      return;
+    }
+    if (p === "/tvbox/api/browse/list") {
+      const q = (req.url || "").split("?")[1];
+      const target = q ? new URLSearchParams(q).get("path") || "" : "";
+      browse.list(browseDeps, target, (r) => httpserver.jsonRes(res, r));
+      return;
     }
     // App-store registry (Settings → Store). ?refresh=1 bypasses the 5-min cache.
     if (p === "/tvbox/api/store/list") {
@@ -2411,6 +2462,11 @@ app.whenReady().then(async () => {
   pairing.register("photos", require("./pairing/photos"));
   pairing.register("backup", backupPairing);
   pairing.register("text", require("./pairing/text"));
+  // Adding a share is the one form here where every field is somebody else's
+  // string - an address, a share name, a password - so it gets a phone page too.
+  const sharesPairing = require("./pairing/shares");
+  sharesPairing.init({ apply: applyShares, deps: () => sharesDeps });
+  pairing.register("shares", sharesPairing);
   // Typing for a keyboard-less app. The screen belongs to the launcher (it owns the
   // on-screen keyboard and can draw a QR), so the app is backgrounded for the
   // duration - its page keeps its state AND the focused field, and the text is sent
@@ -2605,6 +2661,7 @@ app.whenReady().then(async () => {
   });
   updater.startSchedulers(); // boot check + 6h re-check + nightly idle auto-apply
   if (config.rawFileserver().enabled) applyFileserver(); // the LAN share survives a restart
+  if (config.rawShares().length) applyShares(); // and so do the shares the box reads FROM
   setInterval(maintenance.appsAutoTick, 30 * 60 * 1000); // nightly registry app auto-update (same window)
   // Not gated to the small hours like the registry check: a bundle whose flatpak
   // moved is BROKEN-ish now (the copy is older than the app it talks to), and the

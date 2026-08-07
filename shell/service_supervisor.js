@@ -49,6 +49,13 @@ class Supervisor {
     this.svcs = new Map(); // name -> { spec, proc, timer, fails, reaps }
   }
 
+  // Which services are registered. For a caller whose set of services is data
+  // rather than code (one mount per configured network share): what it no longer
+  // wants has to be stopped, and only the supervisor knows what is still running.
+  names() {
+    return [...this.svcs.keys()];
+  }
+
   // Register + start a service (replacing any existing one of the same name).
   spawn(name, spec) {
     this.stop(name);

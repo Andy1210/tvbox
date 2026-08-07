@@ -388,6 +388,23 @@ function rawFileserver() {
   return (load() || {}).fileserver || {};
 }
 
+// Network shares (SMB), the other direction of the same idea: the file server hands
+// the box's folders OUT, these bring someone else's IN. Credentials live here for
+// the same reason - config.json is chmod 600 - and the launcher only ever learns
+// whether a password is set. The list is replaced whole: `name` is the mount point
+// and therefore the identity, so shares.js resolves what an edit means before the
+// list gets here.
+function setShares(shares) {
+  const c = load();
+  c.shares = (Array.isArray(shares) ? shares : []).slice(0, 32);
+  save(c);
+  return c.shares;
+}
+function rawShares() {
+  const s = (load() || {}).shares;
+  return Array.isArray(s) ? s : [];
+}
+
 function setAppConfig(key, val) {
   if (!key || !/^[a-z0-9_]+$/i.test(key)) return false;
   const c = load();
@@ -668,6 +685,8 @@ function replaceAll(cfg) {
 module.exports = {
   setFileserver,
   rawFileserver,
+  setShares,
+  rawShares,
   setSetupDone,
   publicConfig,
   setIptv,

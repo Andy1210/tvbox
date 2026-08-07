@@ -33,7 +33,8 @@ done
 
 # 2) device access + polkit + OS auto-updates (no auto-reboot) - see conf/
 install -m 644 conf/99-tvbox.rules "${ROOTFS_DIR}/etc/udev/rules.d/"
-install -m 644 conf/50-tvbox-networkmanager.rules conf/51-tvbox-locale.rules "${ROOTFS_DIR}/etc/polkit-1/rules.d/"
+install -m 644 conf/50-tvbox-networkmanager.rules conf/51-tvbox-locale.rules conf/50-tvbox-udisks.rules \
+  "${ROOTFS_DIR}/etc/polkit-1/rules.d/"
 install -m 644 conf/20auto-upgrades conf/52tvbox-unattended-upgrades "${ROOTFS_DIR}/etc/apt/apt.conf.d/"
 # logind: a BT remote's Power button reaches the box as KEY_POWER; without this
 # drop-in logind would power the whole box off (default HandlePowerKey=poweroff)
@@ -548,7 +549,10 @@ touch "${ROOTFS_DIR}/var/lib/systemd/linger/${FIRST_USER_NAME}"
 
 on_chroot <<CHROOT
 set -e
-usermod -aG input,video,netdev ${FIRST_USER_NAME}
+# plugdev carries the udisks polkit grant (mounting a USB stick). It is not a
+# group every base image has, and usermod on a missing one would end the build.
+getent group plugdev >/dev/null || groupadd plugdev
+usermod -aG input,video,netdev,plugdev ${FIRST_USER_NAME}
 chown -R ${FIRST_USER_NAME}:${FIRST_USER_NAME} ${USER_HOME}/.tvbox
 
 # libcec >= 8: gives cec-client --vendor-id, so the CEC bridge does not need the

@@ -234,8 +234,6 @@
     "none": "Nincs alkalmazás",
     "getMore": "„Továbbiak beszerzése” csempe",
     "uninstall": "Eltávolítás",
-    "uninstalled": "{name} eltávolítva",
-    "uninstallFailed": "{name} eltávolítása nem sikerült",
     "pairingHint": "Olvasd be a kódot a telefonoddal, majd használd a megnyíló oldalt.",
     "pairingCode": "Kód",
     "pairingDone": "Kész",
@@ -631,7 +629,8 @@
   "network": {
     "wifiHint": "A hálózat, amin a box van",
     "fileserverHint": "A box mappái számítógépről",
-    "mqttHint": "Most játszott tartalom, parancsok és értesítések MQTT-n"
+    "mqttHint": "Most játszott tartalom, parancsok és értesítések MQTT-n",
+    "sharesHint": "NAS mint forrás, hogy a filmek a hálózaton lehessenek"
   },
   "av": {
     "displayHint": "Felbontás és képfrissítés",
@@ -649,5 +648,59 @@
   "system": {
     "updateHint": "Verzió és automatikus frissítés",
     "backupHint": "Beállítások mentése telefonra, vagy visszaállítás"
+  },
+  "shares": {
+    "title": "Hálózati megosztások",
+    "hint": "Filmek és zene lejátszása NAS-ról. A Fájlok app minden megosztást forrásként mutat.",
+    "editHint": "A box csak olvassa a megosztást, nem ír rá.",
+    "add": "Megosztás hozzáadása",
+    "addPhone": "Hozzáadás telefonról",
+    "addPhoneHint": "Olvasd be a QR-kódot, és a telefonon írd be a címet és a jelszót.",
+    "phoneTitle": "Megosztás hozzáadása telefonról",
+    "phoneHint": "Olvasd be a kódot, majd a telefonon add meg a szerver címét. Kilistázza, mit kínál a szerver, így semmit nem kell kétszer begépelni.",
+    "phoneCode": "Kód",
+    "phoneAdded": "{n} megosztás hozzáadva",
+    "phoneDone": "Kész",
+    "none": "Még nincs",
+    "connected": "Csatlakozva",
+    "offline": "Nincs csatlakozva",
+    "groupServer": "Kiszolgáló",
+    "groupWhat": "Mit csatoljon",
+    "whatHint": "A teszt megkérdezi a kiszolgálót, mit kínál, és kitölti helyetted.",
+    "host": "Cím",
+    "user": "Felhasználó",
+    "guest": "Vendég",
+    "pass": "Jelszó",
+    "noPass": "Nincs",
+    "passClear": "Jelszó törlése",
+    "share": "Megosztás",
+    "path": "Mappa a megosztáson belül",
+    "wholeShare": "A teljes megosztás",
+    "name": "Név a TV-n",
+    "nameHint": "Ez lesz a mappa neve is. Betűk, számok, kötőjel.",
+    "nameAuto": "A megosztás nevéből",
+    "test": "Teszt és böngészés",
+    "testing": "Kiszolgáló kérdezése…",
+    "save": "Mentés",
+    "remove": "Megosztás törlése",
+    "removeSure": "Nyomd meg újra a törléshez",
+    "pickShare": "Válassz megosztást",
+    "pickFolder": "Lépj be egy mappába",
+    "pickFolderHint": "Vagy hagyd üresen a mappát, és a teljes megosztás csatolódik.",
+    "installRclone": "Hálózati eszköz telepítése",
+    "installing": "Telepítés…",
+    "needRclone": "Ehhez kell egy kis hálózati eszköz a boxra. A telepítése egy pillanat.",
+    "playHint": "A csatlakoztatott megosztás megjelenik a Fájlok appban, a box saját mappái mellett.",
+    "err": {
+      "bad_host": "Ez a cím nem érvényes.",
+      "bad_share": "Ez a megosztásnév nem érvényes.",
+      "bad_path": "Ez a mappa nem érvényes.",
+      "bad_name": "Ez a név nem érvényes: betűk, számok és kötőjel használható.",
+      "bad_user": "Ez a felhasználónév túl hosszú.",
+      "name_taken": "Már van ilyen nevű megosztás.",
+      "too_many": "Nincs több hely megosztásnak.",
+      "rclone_missing": "Hiányzik a hálózati eszköz - előbb telepítsd.",
+      "failed": "Nem sikerült."
+    }
   }
 }

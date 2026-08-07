@@ -1,0 +1,271 @@
+<!doctype html>
+<html lang="{{lang}}">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>{{title}}</title>
+    <style>
+      :root {
+        color-scheme: dark;
+      }
+      body {
+        margin: auto;
+        background: #0b0f14;
+        color: #f4f6fa;
+        font:
+          16px/1.5 system-ui,
+          sans-serif;
+        padding: 24px;
+        max-width: 520px;
+      }
+      h1 {
+        font-size: 20px;
+      }
+      p {
+        color: #aab4c2;
+        font-size: 14px;
+      }
+      label {
+        display: block;
+        font-size: 13px;
+        color: #aab4c2;
+        margin: 14px 0 4px;
+      }
+      input {
+        width: 100%;
+        box-sizing: border-box;
+        padding: 13px;
+        border-radius: 10px;
+        border: 1px solid #24303d;
+        background: #121821;
+        color: #f4f6fa;
+        font-size: 16px;
+      }
+      .btn {
+        display: block;
+        width: 100%;
+        text-align: center;
+        padding: 15px;
+        border-radius: 12px;
+        background: #1f6feb;
+        color: #fff;
+        font-size: 17px;
+        font-weight: 700;
+        margin-top: 18px;
+        border: 0;
+      }
+      .btn[disabled] {
+        opacity: 0.55;
+      }
+      .pick {
+        display: block;
+        width: 100%;
+        text-align: left;
+        padding: 13px;
+        border-radius: 10px;
+        background: #121821;
+        border: 1px solid #24303d;
+        color: #f4f6fa;
+        font-size: 16px;
+        margin-top: 8px;
+      }
+      .pick.on {
+        background: #1f6feb;
+        border-color: #1f6feb;
+      }
+      h2 {
+        font-size: 15px;
+        color: #aab4c2;
+        margin: 26px 0 4px;
+        font-weight: 600;
+      }
+      #st {
+        margin-top: 16px;
+        text-align: center;
+        font-size: 15px;
+        color: #7d8a99;
+        min-height: 22px;
+      }
+      .small {
+        font-size: 13px;
+        color: #7d8a99;
+        margin-top: 6px;
+      }
+      #existing div {
+        font-size: 14px;
+        color: #7d8a99;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>{{title}}</h1>
+    <p>{{hint}}</p>
+    <input id="code" type="hidden" />
+
+    <label for="host">{{host}}</label>
+    <input id="host" autocapitalize="none" autocorrect="off" inputmode="url" />
+    <label for="user">{{user}}</label>
+    <input id="user" autocapitalize="none" autocorrect="off" />
+    <label for="pass">{{pass}}</label>
+    <input id="pass" type="password" />
+    <button class="btn" id="lookup">{{lookup}}</button>
+
+    <div id="shares" style="display: none">
+      <h2>{{pickShare}}</h2>
+      <div id="shareList"></div>
+    </div>
+
+    <div id="folders" style="display: none">
+      <h2>{{pickFolder}}</h2>
+      <div class="small" id="here"></div>
+      <div id="folderList"></div>
+    </div>
+
+    <div id="namebox" style="display: none">
+      <label for="name">{{name}}</label>
+      <input id="name" autocapitalize="none" autocorrect="off" />
+      <div class="small">{{nameHint}}</div>
+      <button class="btn" id="save">{{save}}</button>
+    </div>
+
+    <div id="st"></div>
+    <h2 id="existingTitle" style="display: none">{{existing}}</h2>
+    <div id="existing"></div>
+
+    <script>
+      document.getElementById("code").value = new URLSearchParams(location.search).get("c") || "";
+      var $ = function (id) {
+        return document.getElementById(id);
+      };
+      var st = $("st");
+      var state = { share: "", path: "" };
+
+      function code() {
+        return $("code").value;
+      }
+      function q(p) {
+        return p + (p.indexOf("?") < 0 ? "?" : "&") + "c=" + encodeURIComponent(code());
+      }
+      async function post(path, body) {
+        var r = await fetch(path, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(Object.assign({ code: code() }, body)),
+        });
+        return await r.json();
+      }
+      function creds() {
+        return { host: $("host").value.trim(), user: $("user").value.trim(), pass: $("pass").value };
+      }
+
+      async function listExisting() {
+        try {
+          var d = await (await fetch(q("/share-list"))).json();
+        } catch (_) {
+          return;
+        }
+        var box = $("existing");
+        box.innerHTML = "";
+        $("existingTitle").style.display = (d.shares || []).length ? "block" : "none";
+        (d.shares || []).forEach(function (s) {
+          var el = document.createElement("div");
+          el.textContent = s.name + " - " + s.host + "/" + s.share + (s.path ? "/" + s.path : "");
+          box.appendChild(el);
+        });
+      }
+
+      // Step 1: what does this server offer?
+      $("lookup").onclick = async function () {
+        st.textContent = "{{looking}}";
+        $("shares").style.display = "none";
+        $("folders").style.display = "none";
+        $("namebox").style.display = "none";
+        var r;
+        try {
+          r = await post("/share-test", creds());
+        } catch (_) {
+          r = { ok: false, error: "{{failed}}" };
+        }
+        if (!r.ok) {
+          st.textContent = r.error || "{{failed}}";
+          return;
+        }
+        st.textContent = "";
+        var list = $("shareList");
+        list.innerHTML = "";
+        (r.shares || []).forEach(function (name) {
+          var b = document.createElement("button");
+          b.className = "pick";
+          b.textContent = name;
+          b.onclick = function () {
+            state.share = name;
+            state.path = "";
+            Array.prototype.forEach.call(list.children, function (c) {
+              c.className = "pick";
+            });
+            b.className = "pick on";
+            if (!$("name").value) $("name").value = name;
+            browse();
+          };
+          list.appendChild(b);
+        });
+        $("shares").style.display = "block";
+      };
+
+      // Step 2: walk down to where the films are. Optional - the whole share is
+      // a perfectly good answer, so the name box is shown either way.
+      async function browse() {
+        $("namebox").style.display = "block";
+        $("here").textContent = state.path || "{{folderRoot}}";
+        var r;
+        try {
+          r = await post("/share-test", Object.assign(creds(), { share: state.share, path: state.path }));
+        } catch (_) {
+          return;
+        }
+        var list = $("folderList");
+        list.innerHTML = "";
+        if (state.path) {
+          var up = document.createElement("button");
+          up.className = "pick";
+          up.textContent = "↑ {{up}}";
+          up.onclick = function () {
+            state.path = state.path.split("/").slice(0, -1).join("/");
+            browse();
+          };
+          list.appendChild(up);
+        }
+        (r.dirs || []).forEach(function (name) {
+          var b = document.createElement("button");
+          b.className = "pick";
+          b.textContent = name;
+          b.onclick = function () {
+            state.path = (state.path ? state.path + "/" : "") + name;
+            browse();
+          };
+          list.appendChild(b);
+        });
+        $("folders").style.display = "block";
+      }
+
+      $("save").onclick = async function () {
+        $("save").disabled = true;
+        st.textContent = "{{saving}}";
+        var r;
+        try {
+          r = await post(
+            "/share-save",
+            Object.assign(creds(), { share: state.share, path: state.path, name: $("name").value.trim() }),
+          );
+        } catch (_) {
+          r = { ok: false };
+        }
+        $("save").disabled = false;
+        st.textContent = r.ok ? "{{saved}}" : r.error || "{{failed}}";
+        if (r.ok) listExisting();
+      };
+
+      listExisting();
+    </script>
+  </body>
+</html>

@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { setFocus } from "@noriginmedia/norigin-spatial-navigation";
 import type { AppManifest } from "../lib/types";
-import { fetchApps, removeApp } from "../lib/api";
+import { fetchApps } from "../lib/api";
 import { useI18n } from "../lib/i18n";
 import { useAppPrefsStore, orderIds } from "../stores/appPrefs";
 import { FocusButton } from "./FocusButton";
@@ -22,7 +22,7 @@ const Chevron = ({ up }: { up?: boolean }) => (
 );
 
 export function AppOrderSettings() {
-  const { guard, gate } = usePinGuard();
+  const { gate } = usePinGuard();
   const { t, loc, tag } = useI18n();
   // null = still loading (renders nothing), [] = a real empty list - so the
   // "no apps" copy can't flash before fetchApps resolves (StoreSettings pattern)
@@ -85,7 +85,6 @@ export function AppOrderSettings() {
     setTimeout(() => setFocus(`apporder-${dir < 0 ? "up" : "down"}-${id}`), 0);
   };
 
-  const [status, setStatus] = useState<string | null>(null);
   // An app-declared phone action is open (its QR overlay); null = none. `from` is
   // the focus key of the button that opened it: the overlay is a focus boundary, so
   // without putting focus back the D-pad has no target once it unmounts.
@@ -98,18 +97,6 @@ export function AppOrderSettings() {
   // and the row behind it go away: close it and land on the row that takes its
   // place (or the toggle above the list when it was the last app). On failure the
   // screen stays open, so focus stays on the button that is still there.
-  const uninstall = async (a: AppManifest) => {
-    const ok = await removeApp(a.id);
-    setStatus(t(ok ? "appsettings.uninstalled" : "appsettings.uninstallFailed", { name: loc(a.name) }));
-    if (!ok) return setTimeout(() => setFocus("manage-remove"), 0);
-    const ids = ordered.map((x) => x.id);
-    const i = ids.indexOf(a.id);
-    const next = ids[i + 1] ?? ids[i - 1] ?? null;
-    setManageId(null);
-    fetchApps().then(setApps);
-    setTimeout(() => setFocus(next ? "apporder-manage-" + next : "apporder-getmore"), 0);
-  };
-
   return (
     <div className="mt-[3vh]">
       {/* the "Get more apps" HOME tile - shown by default, hideable here */}
@@ -168,11 +155,6 @@ export function AppOrderSettings() {
           );
         })}
         {apps !== null && !ordered.length && <div className="text-[1.9vh] text-fg-dim">{t("appsettings.none")}</div>}
-        {status && (
-          <div className="text-[1.8vh] text-fg-dim mt-[0.6vh]" role="status" aria-live="polite">
-            {status}
-          </div>
-        )}
         {gate}
       </div>
       {manageId &&
@@ -184,7 +166,6 @@ export function AppOrderSettings() {
               app={a}
               hidden={hidden.includes(a.id)}
               onToggleHidden={() => toggleHidden(a.id)}
-              onUninstall={() => guard(() => uninstall(a), "manage-remove")}
               onPairing={(kind, title) => setPairing({ kind, title, from: "manage-pair-" + kind })}
               onExit={() => {
                 const id = a.id;

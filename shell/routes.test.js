@@ -45,6 +45,13 @@ function fakeCtx(over = {}) {
     ensureAudio: (done) => done && done(),
     exitApp: () => {},
     fileserverStatus: () => ({ running: false }),
+    applyShares: () => ({ ok: true }),
+    sharesDeps: {
+      onPath: () => true,
+      childEnv: () => process.env,
+      supervisor: { names: () => [], spawn() {}, stop() {} },
+    },
+    sharesStatus: () => ({ rclone: true, shares: [] }),
     foregroundApp: () => null,
     handlePower: () => {},
     installRclone: () => false,

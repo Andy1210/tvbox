@@ -20,11 +20,17 @@ const ir = require("./ir");
 const maintenance = require("./maintenance");
 const apps = require("./install");
 const pairing = require("./pairing");
+const removable = require("./removable"); // the USB stick: mount on open, unmount before it is pulled
+const shares = require("./shares"); // network shares (SMB over rclone)
 const store = require("./store");
 const system = require("./system");
 const textinput = require("./textinput");
 const updater = require("./updater");
 const wifiradio = require("./wifiradio");
+
+// `udisksctl` is what mounts a stick, and it is not on every box (udisks2 is a soft
+// dep and OTA can never add an apt package), so removable.js asks before it runs.
+const browseDeps = { onPath: apps.onPath };
 
 function post(p, data, res, ctx) {
   // The body is whatever the caller sent, and a literal `null` is valid JSON. Every
@@ -414,6 +420,64 @@ function post(p, data, res, ctx) {
         httpserver.jsonRes(res, { ok, radio: on, ethernet: eth });
       });
     });
+  }
+  // A USB stick is mounted when someone opens it on the TV and unmounted from the
+  // same screen before it is pulled out - nothing on this box auto-mounts. The
+  // device string is checked against what is actually plugged in before it reaches
+  // a command line (removable.js), so this route cannot name an arbitrary one.
+  if (p === "/tvbox/api/browse/mount") {
+    return removable.mount(browseDeps, String(data.device || ""), (r) => httpserver.jsonRes(res, r));
+  }
+  if (p === "/tvbox/api/browse/unmount") {
+    return removable.unmount(browseDeps, String(data.device || ""), (r) => httpserver.jsonRes(res, r));
+  }
+  // Network shares (SMB over rclone). The password follows the same contract as
+  // every other credential form here: omitted keeps the stored one, "" clears it -
+  // a guest share with no password is legitimate, so the two cannot both be falsy.
+  // `name` is the mount point and therefore the identity; `original` says which
+  // share an edit is editing, so renaming one is not adding a second.
+  if (p === "/tvbox/api/shares/save") {
+    const list = config.rawShares();
+    const original = String(data.original || "");
+    const stored = list.find((s) => s.name === original);
+    let share;
+    try {
+      share = shares.shareFrom(data, stored);
+    } catch (e) {
+      return httpserver.jsonRes(res, { ok: false, error: e.message || "bad_request" });
+    }
+    const others = list.filter((s) => s.name !== original);
+    if (others.some((s) => s.name === share.name)) {
+      return httpserver.jsonRes(res, { ok: false, error: "name_taken" });
+    }
+    if (others.length >= shares.MAX_SHARES) return httpserver.jsonRes(res, { ok: false, error: "too_many" });
+    config.setShares([...others, share]);
+    ctx.applyShares();
+    return httpserver.jsonRes(res, { ok: true, status: ctx.sharesStatus() });
+  }
+  if (p === "/tvbox/api/shares/remove") {
+    const name = String(data.name || "");
+    config.setShares(config.rawShares().filter((s) => s.name !== name));
+    ctx.applyShares(); // stops the mount that is no longer wanted
+    return httpserver.jsonRes(res, { ok: true, status: ctx.sharesStatus() });
+  }
+  // Try the credentials without mounting anything, and answer with what is there:
+  // the shares a server offers (no share name yet) or the folders inside one, so
+  // the form can be used to find where the films actually are.
+  if (p === "/tvbox/api/shares/test") {
+    const stored = config.rawShares().find((s) => s.name === String(data.original || ""));
+    if (!data.share) {
+      return shares.listShares({ ...data, storedPass: stored && stored.pass }, ctx.sharesDeps, (r) =>
+        httpserver.jsonRes(res, r),
+      );
+    }
+    let share;
+    try {
+      share = shares.shareFrom(data, stored);
+    } catch (e) {
+      return httpserver.jsonRes(res, { ok: false, error: e.message || "bad_request" });
+    }
+    return shares.test(share, ctx.sharesDeps, (r) => httpserver.jsonRes(res, r));
   }
   if (p === "/tvbox/api/system/timezone") {
     return system.setTimezone(String(data.timezone || ""), (r) => httpserver.jsonRes(res, r));
