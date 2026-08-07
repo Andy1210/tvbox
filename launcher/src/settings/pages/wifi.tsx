@@ -82,7 +82,8 @@ function CountryPage() {
       subtitle={t("wifi.countryHint")}
       options={COUNTRIES.map((code) => ({ id: code, label: countryName(tag, code, t("wifi.countryAuto")) }))}
       value={country}
-      onPick={(code) => void setWifiCfg({ country: code })}
+      // Returned, not voided: ChoicePage awaits this and stays put if it throws.
+      onPick={(code) => setWifiCfg({ country: code })}
     />
   );
 }
@@ -113,6 +114,7 @@ function NetworkPage({ net }: { net: WifiNet }) {
   };
 
   const forget = async () => {
+    if (busy) return;
     setBusy("forget");
     const r = await wifiForget(net.ssid);
     setBusy("");

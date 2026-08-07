@@ -247,9 +247,9 @@ function BluetoothPage() {
 }
 
 // The existing remap screen, wrapped so it gets the page frame, the Back handler
-// and the slide-in like everything else. It brings its own focus handling, so this
-// page must not also grab focus - hence focusPolicy "rail" (it means "someone else
-// owns the D-pad", which is true here too).
+// and the slide-in like everything else. Its focusables are its own and unmarked, so
+// the page becomes a focus container and hands the focus to it - focusPolicy
+// "legacy".
 function RemoteButtonsPage() {
   const { t } = useI18n();
   const nav = useSettingsNav();

@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { useI18n } from "../../lib/i18n";
 import { useConfigStore } from "../../stores/config";
 import { StoreSettings } from "../../components/StoreSettings";
@@ -55,6 +56,10 @@ export function AppsPane() {
   const nav = useSettingsNav();
   const appsAuto = useConfigStore((s) => s.config?.update.appsAuto ?? true);
   const setUpdate = useConfigStore((s) => s.setUpdate);
+  // The store's value only changes once the save comes back, so two quick presses
+  // would both compute the same `!appsAuto` and the box would end up on whichever
+  // reply landed last - not on what the user pressed last.
+  const [saving, setSaving] = useState(false);
 
   return (
     <SettingsPage id="apps" focusPolicy="rail">
@@ -80,7 +85,11 @@ export function AppsPane() {
           label={t("update.appsAuto")}
           hint={t("update.appsAutoHint")}
           on={appsAuto}
-          onToggle={() => void setUpdate({ appsAuto: !appsAuto })}
+          disabled={saving}
+          onToggle={() => {
+            setSaving(true);
+            void setUpdate({ appsAuto: !appsAuto }).finally(() => setSaving(false));
+          }}
           onWord={t("common.on")}
           offWord={t("common.off")}
         />

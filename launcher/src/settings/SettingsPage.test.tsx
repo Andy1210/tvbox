@@ -108,10 +108,15 @@ describe("a settings page", () => {
 
   it("focuses a row that only arrives once the box answers", async () => {
     render(<LateRows />);
-    await act(async () => {
-      await new Promise((r) => setTimeout(r, 40));
-    });
-    await flushFocus();
+    // The rows appear on a 20ms timer and the page's retry ticks every 60ms, so a
+    // single fixed wait can land between the two. Settle in steps instead of picking
+    // a number and hoping.
+    for (let i = 0; i < 10 && getCurrentFocusKey() !== "late:one"; i += 1) {
+      await act(async () => {
+        await new Promise((r) => setTimeout(r, 40));
+      });
+      await flushFocus();
+    }
     expect(getCurrentFocusKey()).toBe("late:one");
   });
 

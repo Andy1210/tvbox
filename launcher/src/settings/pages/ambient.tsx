@@ -102,7 +102,9 @@ function WallpapersPage() {
             id="clear"
             label={t("ambient.photosClear")}
             trailing="none"
-            onEnter={() => void clearPhotos().then(refresh)}
+            // refresh on either outcome: it re-reads the server list, so a failed
+            // clear puts the photos back on screen instead of leaving a lie.
+            onEnter={() => void clearPhotos().then(refresh, refresh)}
           />
         )}
       </Group>
@@ -111,7 +113,7 @@ function WallpapersPage() {
           <Note>{t("ambient.photosManage")}</Note>
           <div className="flex flex-wrap gap-[1vh]">
             {photos.map((name) => (
-              <PhotoTile key={name} name={name} onDelete={() => void deletePhoto(name).then(refresh)} />
+              <PhotoTile key={name} name={name} onDelete={() => void deletePhoto(name).then(refresh, refresh)} />
             ))}
           </div>
         </div>
@@ -167,7 +169,7 @@ export function AmbientPane() {
                   subtitle={t("ambient.sleepHint")}
                   options={SLEEP_STEPS.map((m) => ({ id: String(m), label: sleepLabel(m) }))}
                   value={String(sleep)}
-                  onPick={(v) => void save({ sleepMinutes: Number(v) })}
+                  onPick={(v) => save({ sleepMinutes: Number(v) })}
                 />
               ),
             })
