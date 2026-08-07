@@ -210,6 +210,75 @@ export async function saveFileServer(patch: {
 }
 export const installRclone = () => post("/tvbox/api/fileserver/install-rclone", {});
 
+// Network shares (SMB): the other direction of the file server - someone else's
+// folders brought IN, so a film can live on a NAS. The password is never returned,
+// only whether one is stored.
+export interface ShareRow {
+  name: string; // the mount folder, and the source name on the TV
+  host: string;
+  share: string;
+  path: string; // sub-folder inside the share ("" = its root)
+  user: string;
+  domain: string;
+  hasPass: boolean;
+  mountPoint: string;
+  mounted: boolean;
+}
+export interface SharesStatus {
+  rclone: boolean; // the binary that mounts them is present
+  installing?: boolean; // ...and is being fetched right now
+  max: number;
+  shares: ShareRow[];
+}
+export interface ShareInput {
+  original?: string; // the share being edited, when it is an edit
+  name?: string;
+  host?: string;
+  share?: string;
+  path?: string;
+  user?: string;
+  domain?: string;
+  pass?: string; // omitted keeps the stored one, "" clears it
+}
+export async function fetchShares(): Promise<SharesStatus | null> {
+  try {
+    const res = await fetch("/tvbox/api/shares", { cache: "no-store" });
+    if (!res.ok) throw new Error("HTTP " + res.status);
+    return (await res.json()) as SharesStatus;
+  } catch (e) {
+    console.warn("[launcher] shares status failed:", e);
+    return null;
+  }
+}
+// These answer with the box's own reason for refusing (a name already taken, an
+// address that is not one, rclone's NT_STATUS line), which the form shows - so
+// unlike post() they carry the body back rather than just whether it worked.
+async function postJson<T>(path: string, body: unknown, onFail: T): Promise<T> {
+  try {
+    const res = await fetch(path, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    return (await res.json()) as T;
+  } catch {
+    return onFail;
+  }
+}
+export const saveShare = (input: ShareInput) =>
+  postJson<{ ok: boolean; error?: string; status?: SharesStatus }>("/tvbox/api/shares/save", input, {
+    ok: false,
+    error: "failed",
+  });
+export const removeShare = (name: string) =>
+  postJson<{ ok: boolean; status?: SharesStatus }>("/tvbox/api/shares/remove", { name }, { ok: false });
+// With no `share` this asks the server what it offers; with one, what is inside it.
+export const testShare = (input: ShareInput) =>
+  postJson<{ ok: boolean; error?: string; dirs?: string[]; shares?: string[] }>("/tvbox/api/shares/test", input, {
+    ok: false,
+    error: "failed",
+  });
+
 // Set a urlConfig app's server address (empty clears it).
 export const saveAppUrl = (key: string, baseUrl: string) => post("/tvbox/api/config/app", { key, baseUrl });
 

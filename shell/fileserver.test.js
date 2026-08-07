@@ -22,6 +22,7 @@ mk(".tvbox", "versions"); // machinery
 mk(".tvbox", "bin"); // machinery
 mk(".tvbox", "voice-notes"); // a folder no version of this code knows about
 mk("Videos");
+mk("roms"); // the USER's own folder, named like one of ours
 mk(".var", "app", "org.libretro.RetroArch", "config");
 const fileserver = require("./fileserver");
 
@@ -46,6 +47,15 @@ test("user content is offered and the box's machinery is not", () => {
   assert.strictEqual(c.get("tvbox:roms").name, "games");
   for (const m of ["shell", "shell-userdata", "versions", "bin"])
     assert.strictEqual(c.has("tvbox:" + m), false, m + " is machinery, not content");
+});
+
+test("the friendly names rename the box's own folders, never the user's", () => {
+  // ~/roms is somebody's own folder that happens to share a name with ours. Calling
+  // it "games" would mislabel it - and would MOVE it, since the name is the path a
+  // computer browses and may have bookmarked.
+  const c = byId();
+  assert.strictEqual(c.get("home:roms").name, "roms");
+  assert.strictEqual(c.get("tvbox:roms").name, "games");
 });
 
 test("a folder this code has never heard of is offered anyway", () => {

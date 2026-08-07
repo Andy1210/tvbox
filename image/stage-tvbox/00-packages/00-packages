@@ -30,3 +30,4 @@ git
 unzip
 ca-certificates
 unattended-upgrades
+udisks2

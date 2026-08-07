@@ -234,8 +234,6 @@
     "none": "No apps",
     "getMore": "\"Get more apps\" tile",
     "uninstall": "Uninstall",
-    "uninstalled": "{name} removed",
-    "uninstallFailed": "Couldn't remove {name}",
     "pairingHint": "Scan the code with your phone, then use the page it opens.",
     "pairingCode": "Code",
     "pairingDone": "Done",
@@ -631,7 +629,8 @@
   "network": {
     "wifiHint": "The network this box is on",
     "fileserverHint": "Reach the box's folders from a computer",
-    "mqttHint": "Now-playing, commands and notifications over MQTT"
+    "mqttHint": "Now-playing, commands and notifications over MQTT",
+    "sharesHint": "A NAS as a source, so films can live on the network"
   },
   "av": {
     "displayHint": "Resolution and refresh rate",
@@ -644,10 +643,64 @@
   },
   "apps": {
     "orderTitle": "Home screen order",
-    "orderHint": "Which apps show, and in what order"
+    "orderHint": "Which apps show and in what order"
   },
   "system": {
     "updateHint": "Version and automatic updates",
     "backupHint": "Copy the settings to your phone, or put them back"
+  },
+  "shares": {
+    "title": "Network shares",
+    "hint": "Play films and music from a NAS. The Files app lists each share as a source.",
+    "editHint": "The box reads the share; nothing on it is changed.",
+    "add": "Add a share",
+    "addPhone": "Add from a phone",
+    "addPhoneHint": "Scan a QR and type the address and password on your phone.",
+    "phoneTitle": "Add a share from your phone",
+    "phoneHint": "Scan the code, then enter the server's address on your phone. It will list what the server offers, so there is nothing to type twice.",
+    "phoneCode": "Code",
+    "phoneAdded": "{n} share added",
+    "phoneDone": "Done",
+    "none": "None yet",
+    "connected": "Connected",
+    "offline": "Not connected",
+    "groupServer": "Server",
+    "groupWhat": "What to mount",
+    "whatHint": "Test asks the server what it offers, then fills these in for you.",
+    "host": "Address",
+    "user": "User",
+    "guest": "Guest",
+    "pass": "Password",
+    "noPass": "None",
+    "passClear": "Clear the password",
+    "share": "Share",
+    "path": "Folder in the share",
+    "wholeShare": "The whole share",
+    "name": "Name on the TV",
+    "nameHint": "Also the folder it appears as. Letters, numbers and dashes.",
+    "nameAuto": "From the share name",
+    "test": "Test and look around",
+    "testing": "Asking the server…",
+    "save": "Save",
+    "remove": "Remove this share",
+    "removeSure": "Press again to remove",
+    "pickShare": "Pick a share",
+    "pickFolder": "Step into a folder",
+    "pickFolderHint": "Or leave the folder empty to mount the whole share.",
+    "installRclone": "Install the network tool",
+    "installing": "Installing…",
+    "needRclone": "The box needs a small network tool for this. Installing it takes a moment.",
+    "playHint": "A connected share shows up in the Files app, next to the box's own folders.",
+    "err": {
+      "bad_host": "That address is not valid.",
+      "bad_share": "That share name is not valid.",
+      "bad_path": "That folder is not valid.",
+      "bad_name": "That name is not valid: use letters, numbers and dashes.",
+      "bad_user": "That user name is too long.",
+      "name_taken": "There is already a share with that name.",
+      "too_many": "There is no room for another share.",
+      "rclone_missing": "The network tool is missing - install it first.",
+      "failed": "That didn't work."
+    }
   }
 }

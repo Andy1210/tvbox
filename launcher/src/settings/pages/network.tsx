@@ -1,6 +1,6 @@
 import { useI18n } from "../../lib/i18n";
 import { wifiStatus } from "../../lib/wifi";
-import { fetchFileServer } from "../../lib/api";
+import { fetchFileServer, fetchShares } from "../../lib/api";
 import { useConfigStore } from "../../stores/config";
 import { SettingsPage } from "../SettingsPage";
 import { Group, Row } from "../Rows";
@@ -8,6 +8,7 @@ import { useSettingsNav } from "../nav";
 import { useSummary } from "../summary";
 import { WifiPage } from "./wifi";
 import { FileServerPage } from "./fileserver";
+import { SharesPage } from "./shares";
 import { MqttPage } from "./mqtt";
 
 // The category that used to be the worst of the dump: three unrelated screens -
@@ -19,6 +20,7 @@ export function NetworkPane() {
   const nav = useSettingsNav();
   const wifi = useSummary("wifi", wifiStatus);
   const fs = useSummary("fileserver", fetchFileServer);
+  const shares = useSummary("shares", fetchShares);
   const mqtt = useConfigStore((s) => s.config?.mqtt);
 
   const wifiValue = !wifi
@@ -45,6 +47,13 @@ export function NetworkPane() {
           hint={t("network.fileserverHint")}
           value={fs ? (fs.running ? t("fileserver.running") : t("fileserver.stopped")) : undefined}
           onEnter={() => nav.push({ id: "fileserver", title: t("fileserver.title"), render: () => <FileServerPage /> })}
+        />
+        <Row
+          id="shares"
+          label={t("shares.title")}
+          hint={t("network.sharesHint")}
+          value={shares?.shares ? (shares.shares.length ? String(shares.shares.length) : t("shares.none")) : undefined}
+          onEnter={() => nav.push({ id: "shares", title: t("shares.title"), render: () => <SharesPage /> })}
         />
         <Row
           id="mqtt"
