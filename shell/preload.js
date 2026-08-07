@@ -79,6 +79,14 @@ const { ipcRenderer } = require("electron");
     },
   };
 
+  // A position on a timeline: a real number of seconds, never negative and never
+  // Infinity. Both of those reach mpv as an argument (`--start=`, an absolute
+  // seek), and neither is a place in a film.
+  function seconds(v) {
+    var n = Number(v);
+    return isFinite(n) && n > 0 ? n : 0;
+  }
+
   // ---- player control (for built-in apps that hold the "player" capability,
   // e.g. the launcher driving Live TV through the shell's mpv service) ----
   if (caps.indexOf("player") >= 0) {
@@ -96,7 +104,7 @@ const { ipcRenderer } = require("electron");
         ipcRenderer.invoke("player", "queue", {
           url: url,
           streams: streams || null,
-          startPos: Number(startPos) > 0 ? Number(startPos) : 0,
+          startPos: seconds(startPos),
         });
         ipcRenderer.invoke("player", "play");
       } catch (e) {}
@@ -121,7 +129,7 @@ const { ipcRenderer } = require("electron");
     };
     window.tvbox.seek = function (posSec) {
       try {
-        ipcRenderer.invoke("player", "seek", { posSec: Number(posSec) || 0 });
+        ipcRenderer.invoke("player", "seek", { posSec: seconds(posSec) });
       } catch (e) {}
     };
     // Live TV "browse while watching": shrink the current channel to a PiP at the

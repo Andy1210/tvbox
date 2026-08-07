@@ -97,8 +97,9 @@ export interface TvboxBridge {
   /** Absolute position, in seconds. */
   seek?(posSec: number): void;
   tracks?(): Promise<PlayerTrack[]>;
-  /** `id` is a track id from tracks(), or "no" / "auto". */
-  setTrack?(type: "audio" | "sub", id: number | string): void;
+  /** `id` is a track id from tracks(), or "no" / "auto" - the shell ignores
+   * anything else, so the type says so rather than letting it look accepted. */
+  setTrack?(type: "audio" | "sub", id: number | "no" | "auto"): void;
   pip?(on: boolean, rect?: PipRect): void;
   onPlayer?(cb: (ev: PlayerEvent) => void): () => void;
   onCommand?(cb: (c: TvCommand) => void): () => void;

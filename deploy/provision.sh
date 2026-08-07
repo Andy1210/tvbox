@@ -262,11 +262,13 @@ echo "==> polkit: mounting a USB stick from the box user (local media on the TV)
 cat > /etc/polkit-1/rules.d/50-tvbox-udisks.rules <<'RULES'
 // tvbox: allow plugdev users to mount REMOVABLE media (USB sticks).
 // Internal disks are not covered: that is filesystem-mount-system, not this.
-polkit.addRule(function(action, subject) {
-    if (subject.isInGroup("plugdev") &&
-        action.id === "org.freedesktop.udisks2.filesystem-mount") {
-        return polkit.Result.YES;
-    }
+// Nothing else is granted either - power-off-drive would cut power to a USB SSD a
+// Pi can boot from, and unmounting a mount the shell made itself needs no action.
+// KEEP IN SYNC with image/stage-tvbox/01-tvbox/conf/50-tvbox-udisks.rules.
+polkit.addRule(function (action, subject) {
+  if (subject.isInGroup("plugdev") && action.id === "org.freedesktop.udisks2.filesystem-mount") {
+    return polkit.Result.YES;
+  }
 });
 RULES
 ok "polkit rule (plugdev -> udisks2 filesystem-mount)"
