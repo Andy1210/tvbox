@@ -5,6 +5,42 @@ updates). `scripts/make-release.sh` lifts the current version's `hu`/`en`
 blocks into the OTA feed's `notes` - keep both languages, keep it short, and
 write for the person on the couch (what changes for THEM), not for developers.
 
+## 2.0.1
+
+### hu
+
+- **A wifi-jelszó, amit begépelsz, tényleg az érvényes.** Egy már ismert hálózatnál
+  eddig a régen mentett jelszó ment ki helyette, és a csatlakozás azonnal elhasalt.
+  Ha az új jelszóval sem sikerül felcsatlakozni, a doboz visszaírja a régit, és
+  megmondja, mi volt a baj - rossz jelszó, vagy nem válaszolt a hálózat. Semmit nem
+  töröl: ha egy mentett hálózat végleg elavult, a Felejtsd el gomb a tiéd.
+- **A kikapcsolt TV nem nézi végig helyetted a sorozatot.** A film közben
+  kikapcsolt TV eddig úgy állította le a lejátszást, mintha a rész véget ért volna,
+  amire a Plex pár másodperc múlva elindította a következőt - sötét szobában, végig.
+  Ugyanez vonatkozik a telefonról küldött megállításra és az appváltásra is. (A
+  Plexhez ehhez az app 1.2.1-es változata is kell; a doboz éjszaka magától
+  frissíti.)
+- **A beállításokban a kijelölt wifi-hálózat két széle nem vágódik le.**
+- A távirányító túl gyors gombismétlése is megszűnt, de az a compositorral érkezik,
+  nem ezzel a frissítéssel: ahhoz újraflashelés vagy provision kell.
+
+### en
+
+- **The wifi password you type is the one that gets used.** On a network the box
+  already knew, the saved password went out instead and the attempt failed at once.
+  If the new one does not get the box on either, the old password is put back and
+  the screen says what went wrong - a password that was not accepted, or a network
+  that did not answer. Nothing is deleted: a saved network that has gone stale for
+  good is what the Forget button is for.
+- **A TV switched off no longer watches the series for you.** Turning the TV off
+  during a film used to end playback as if the episode had finished, so Plex
+  started the next one a few seconds later, and kept going in a dark room. The same
+  now goes for a stop sent from a phone and for switching to another app. (Plex
+  needs its own 1.2.1 package for this; the box picks that up overnight.)
+- **The selected wifi network is no longer clipped at both edges in Settings.**
+- Remote buttons no longer repeat far too fast, but that fix arrives with the
+  compositor rather than with this update: it needs a re-flash or a provision.
+
 ## 2.0.0
 
 ### hu

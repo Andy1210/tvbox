@@ -10,6 +10,9 @@ export interface PlayerEvent {
   type: "playing" | "buffering" | "finished" | "error" | "position" | "duration";
   on?: boolean; // buffering on/off
   ms?: number; // position / duration, in milliseconds
+  /** Why playback ended, when it did not simply run out: "tv-standby", "stopped".
+   * An app that auto-advances on `finished` should not do so when this is set. */
+  reason?: string;
 }
 
 // Device-pixel rectangle for pip() (shrink the current channel to a PiP box).

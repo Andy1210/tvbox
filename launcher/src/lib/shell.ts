@@ -4,6 +4,9 @@ export interface PlayerEvent {
   type: "playing" | "buffering" | "finished" | "error" | "position" | "duration";
   on?: boolean;
   ms?: number;
+  /** Why playback ended, when it did not simply run out: "tv-standby", "stopped".
+   * An app that auto-advances on `finished` should not do so when this is set. */
+  reason?: string;
 }
 
 export interface TvNotification {
