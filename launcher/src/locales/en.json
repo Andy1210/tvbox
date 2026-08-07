@@ -645,7 +645,7 @@
   },
   "apps": {
     "orderTitle": "Home screen order",
-    "orderHint": "Which apps show, and in what order"
+    "orderHint": "Which apps show and in what order"
   },
   "system": {
     "updateHint": "Version and automatic updates",
@@ -654,8 +654,15 @@
   "shares": {
     "title": "Network shares",
     "hint": "Play films and music from a NAS. The Files app lists each share as a source.",
-    "smbOnly": "SMB only: mounting NFS needs root, which this box never uses.",
+    "editHint": "The box reads the share; nothing on it is changed.",
     "add": "Add a share",
+    "addPhone": "Add from a phone",
+    "addPhoneHint": "Scan a QR and type the address and password on your phone.",
+    "phoneTitle": "Add a share from your phone",
+    "phoneHint": "Scan the code, then enter the server's address on your phone. It will list what the server offers, so there is nothing to type twice.",
+    "phoneCode": "Code",
+    "phoneAdded": "{n} share added",
+    "phoneDone": "Done",
     "none": "None yet",
     "connected": "Connected",
     "offline": "Not connected",
@@ -684,7 +691,7 @@
     "pickFolderHint": "Or leave the folder empty to mount the whole share.",
     "installRclone": "Install the network tool",
     "installing": "Installing…",
-    "needRclone": "Shares are mounted with rclone, which this box does not have yet.",
+    "needRclone": "The box needs a small network tool for this. Installing it takes a moment.",
     "playHint": "A connected share shows up in the Files app, next to the box's own folders.",
     "err": {
       "bad_host": "That address is not valid.",

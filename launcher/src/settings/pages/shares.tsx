@@ -10,6 +10,7 @@ import {
   type ShareRow,
   type SharesStatus,
 } from "../../lib/api";
+import { SharePairing } from "../../components/SharePairing";
 import { SettingsPage } from "../SettingsPage";
 import { Group, InfoRow, Note, Row, TextRow } from "../Rows";
 import { useSettingsNav } from "../nav";
@@ -95,7 +96,7 @@ function ShareEditPage({ existing, onDone }: { existing?: ShareRow; onDone: () =
     <SettingsPage
       id="share-edit"
       title={existing ? existing.name : t("shares.add")}
-      subtitle={t("shares.smbOnly")}
+      subtitle={t("shares.editHint")}
       onBack={nav.pop}
       animate="push"
     >
@@ -238,6 +239,7 @@ export function SharesPage() {
   const nav = useSettingsNav();
   const [st, setSt] = useState<SharesStatus | null>(null);
   const [unreachable, setUnreachable] = useState(false);
+  const [phone, setPhone] = useState(false);
 
   const load = useCallback(async () => {
     const s = await fetchShares();
@@ -313,14 +315,26 @@ export function SharesPage() {
 
       {st.shares.length < st.max && (
         <Group>
+          {/* The phone first: an address, a user and a password are three things
+              nobody should spell out on a keyboard grid. */}
           <Row
-            id="add"
-            label={t("shares.add")}
+            id="add-phone"
+            label={t("shares.addPhone")}
+            hint={t("shares.addPhoneHint")}
             trailing="none"
             autoFocus={!st.shares.length && st.rclone}
-            onEnter={() => edit(undefined)}
+            onEnter={() => setPhone(true)}
           />
+          <Row id="add" label={t("shares.add")} trailing="none" onEnter={() => edit(undefined)} />
         </Group>
+      )}
+      {phone && (
+        <SharePairing
+          onClose={() => {
+            setPhone(false);
+            void load();
+          }}
+        />
       )}
       <Note>{t("shares.playHint")}</Note>
     </SettingsPage>

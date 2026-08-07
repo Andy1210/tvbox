@@ -2462,6 +2462,11 @@ app.whenReady().then(async () => {
   pairing.register("photos", require("./pairing/photos"));
   pairing.register("backup", backupPairing);
   pairing.register("text", require("./pairing/text"));
+  // Adding a share is the one form here where every field is somebody else's
+  // string - an address, a share name, a password - so it gets a phone page too.
+  const sharesPairing = require("./pairing/shares");
+  sharesPairing.init({ apply: applyShares, deps: () => sharesDeps });
+  pairing.register("shares", sharesPairing);
   // Typing for a keyboard-less app. The screen belongs to the launcher (it owns the
   // on-screen keyboard and can draw a QR), so the app is backgrounded for the
   // duration - its page keeps its state AND the focused field, and the text is sent
