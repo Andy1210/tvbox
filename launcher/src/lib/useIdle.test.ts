@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach, afterAll } from "vitest";
 import { act, cleanup, render } from "@testing-library/react";
 import { createElement } from "react";
 import { useIdle } from "./useIdle";
@@ -41,6 +41,12 @@ afterEach(() => {
   cleanup();
   vi.useRealTimers();
 });
+// vitest isolates each file's document, so this only matters if isolation is ever
+// turned off - at which point a stuck `hidden` getter would quietly break every
+// file that runs after this one.
+afterAll(() => {
+  Reflect.deleteProperty(document, "hidden");
+});
 
 describe("useIdle", () => {
   it("arms once the idle time passes with the window visible", () => {
@@ -61,7 +67,22 @@ describe("useIdle", () => {
     setHidden(true);
     act(() => void vi.advanceTimersByTime(120000));
     setHidden(false);
+    act(() => void vi.advanceTimersByTime(5000));
     // Coming back from an app has to land on Home, not on the overlay.
+    expect(seen[0]).toBe(false);
+  });
+
+  // A hidden renderer is throttled to about one wake a minute and frozen outright
+  // after a while, so the interval's own hidden branch cannot be trusted to keep
+  // the last-activity stamp fresh. Moving the clock without running the timers is
+  // what that looks like from inside the hook, and it is the case that decides
+  // whether the return edge has to reset the stamp.
+  it("does not arm on return when the interval was throttled while hidden", () => {
+    const seen = mount();
+    setHidden(true);
+    act(() => void vi.setSystemTime(Date.now() + 600000));
+    setHidden(false);
+    act(() => void vi.advanceTimersByTime(5000));
     expect(seen[0]).toBe(false);
   });
 
