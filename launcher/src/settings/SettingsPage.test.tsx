@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
 import { act, cleanup, render } from "@testing-library/react";
-import { useState, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { SettingsPage } from "./SettingsPage";
 import { Group, Note, Row } from "./Rows";
 import { SettingsNavProvider, useSettingsNav } from "./nav";
@@ -26,8 +26,14 @@ function Harness({ root }: { root: ReactNode }) {
 
 function LateRows() {
   const [rows, setRows] = useState<string[]>([]);
-  // Most pages read the box over HTTP, so the first render has no rows at all.
-  setTimeout(() => setRows(["one", "two"]), 20);
+  // Most pages read the box over HTTP, so the first render has no rows at all. The
+  // timer belongs in an effect, not in the render: rendering is not once, so a timer
+  // started there is re-armed by every re-render - including the one its own setState
+  // causes - which is both unlike the real pages and a source of flake.
+  useEffect(() => {
+    const id = setTimeout(() => setRows(["one", "two"]), 20);
+    return () => clearTimeout(id);
+  }, []);
   return (
     <SettingsPage id="late" title="Late">
       <Group>

@@ -50,13 +50,19 @@ export function useSummary<T>(key: string, load: () => Promise<T>): T | undefine
     // the D-pad can mount the same pane again before the first answer lands.
     const p = (hit?.inflight as Promise<T> | undefined) ?? loader.current();
     cache.set(key, { at: hit?.at ?? 0, value: hit?.value, inflight: p });
+    // A request that is no longer the current one must not touch the cache. It can
+    // still be in flight after `invalidateSummary` dropped the entry - a page that
+    // changed the setting and popped does exactly that - and writing its answer back
+    // would resurrect the value the invalidation existed to get rid of. The same
+    // check keeps an older request from overwriting a newer one's result.
+    const current = () => cache.get(key)?.inflight === p;
     void p
       .then((v) => {
-        cache.set(key, { at: Date.now(), value: v });
+        if (current()) cache.set(key, { at: Date.now(), value: v });
         if (live) setValue(v);
       })
       .catch(() => {
-        cache.delete(key);
+        if (current()) cache.delete(key);
       });
     return () => {
       live = false;
