@@ -5,6 +5,51 @@ updates). `scripts/make-release.sh` lifts the current version's `hu`/`en`
 blocks into the OTA feed's `notes` - keep both languages, keep it short, and
 write for the person on the couch (what changes for THEM), not for developers.
 
+## 2.1.0
+
+### hu
+
+- **Fájlok a boxról és USB-kulcsról.** Új _Fájlok_ app: a box saját mappái és a
+  bedugott pendrive-ok - a kulcsot megnyitáskor csatolja, és ugyanonnan ki is
+  adhatod. Megjegyzi, hol tartottál egy filmben, és nézés közben válthatsz
+  hangsávot vagy feliratot.
+- **Hálózati megosztás (SMB).** Beállítások → Hálózat → Hálózati megosztások: add
+  meg a NAS címét, a box kilistázza, mit kínál, és a megosztás forrásként
+  megjelenik a Fájlok appban. A címet és a jelszót telefonról is beírhatod, QR-rel.
+- **RetroArch: a játékok bárhol lehetnek.** Pendrive-on vagy hálózati
+  megosztáson lévő mappát belinkelhetsz a könyvtárba (RetroArch → Mappák). Az app
+  saját megosztás-beállítása megszűnt - a box csatol, az app linkel -, és a
+  telefonos feltöltés is az appból indul.
+- **Javítva:** az áruházban egy appot megnyitva a leírás és a gombok megint
+  kiférnek a képernyőre.
+- Egy app eltávolítása mostantól csak az áruházban van.
+
+> **Frissítéssel érkező boxon az USB-kulcs olvasása nem kapcsol be** (rendszercsomag
+> kell hozzá, amit a frissítés nem telepíthet). A saját mappák és a hálózati
+> megosztás így is működnek; friss telepítésű boxon minden megy.
+
+### en
+
+- **Files from the box and from a USB stick.** A new _Files_ app: the box's own
+  folders and any plugged-in stick - opening one mounts it, and the same screen
+  ejects it. It remembers where each film got to, and audio track and subtitles
+  can be switched while watching.
+- **Network shares (SMB).** Settings → Network → Network shares: give it the NAS
+  address, the box lists what the server offers, and the share turns up as a
+  source in the Files app. The address and the password can be typed on a phone
+  with a QR.
+- **RetroArch: games can live anywhere.** A folder on a stick or a network share
+  can be linked into the library (RetroArch → Folders). The app's own share setup
+  is gone - the box mounts, the app links - and uploading games from a phone
+  starts in the app.
+- **Fixed:** opening an app in the store shows its description and buttons on the
+  whole screen again.
+- Removing an app now lives only in the store.
+
+> **A box that only takes over-the-air updates will not gain USB stick support**
+> (it needs a system package an update cannot install). Its own folders and
+> network shares work regardless; a freshly flashed box has everything.
+
 ## 2.0.3
 
 ### hu
