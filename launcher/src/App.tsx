@@ -178,7 +178,11 @@ export function App() {
   return (
     <>
       <Backdrop />
-      {content}
+      {/* While a phone is on screen the launcher draws nothing of its own. Making
+          the window transparent is not enough on its own - the view underneath
+          keeps rendering, and Home's tiles ended up printed over someone's phone.
+          The overlay below is the whole UI for the duration. */}
+      {mirroring ? null : content}
       <NotificationToast />
       <TypingOverlay onActiveChange={setTyping} />
       <MirrorOverlay onActiveChange={setMirroring} />
