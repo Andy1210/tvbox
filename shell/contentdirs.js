@@ -27,6 +27,7 @@ const MACHINERY = new Set([
   "librespot-cache",
   "pyenv",
   "__pycache__",
+  "shares", // network-share mount points; offered as sources in their own right
   "shell", // the dev tree
   "shell-userdata", // Chromium profile: app logins live here
   "update",

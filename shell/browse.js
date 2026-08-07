@@ -26,6 +26,7 @@ const fsp = require("fs/promises");
 const path = require("path");
 const contentdirs = require("./contentdirs");
 const removable = require("./removable");
+const shares = require("./shares"); // network shares (SMB over rclone), mounted per config
 
 // A directory with more entries than this is a folder nobody scrolls on a TV, and
 // the whole listing travels as one JSON body. The UI is told it was cut.
@@ -57,6 +58,10 @@ function roots(deps, cb) {
       const real = await realpath(d.path);
       if (real) out.push({ id: d.id, kind: "folder", name: d.name, path: d.path, real });
     }
+    for (const s of shares.mountedRoots(deps.shares ? deps.shares() : [])) {
+      const real = await realpath(s.path);
+      if (real) out.push({ id: "share:" + s.name, kind: "network", name: s.name, path: s.path, real });
+    }
     for (const dev of r.devices || []) {
       if (!dev.mountpoint) continue;
       const real = await realpath(dev.mountpoint);
@@ -75,6 +80,12 @@ function sources(deps, cb) {
       .userDirs()
       .filter((d) => contentdirs.isDir(d.path))
       .map((d) => ({ id: d.id, kind: "folder", name: d.name, path: d.path, mounted: true }));
+    // A network share is a source in its own right, under its own name - the mount
+    // point is inside ~/.tvbox/shares, which contentdirs treats as machinery so it
+    // cannot also turn up as a folder called "shares".
+    for (const s of shares.mountedRoots(deps.shares ? deps.shares() : [])) {
+      list.push({ id: "share:" + s.name, kind: "network", name: s.name, path: s.path, mounted: true });
+    }
     for (const dev of r.devices || []) {
       list.push({
         id: "dev:" + dev.device,

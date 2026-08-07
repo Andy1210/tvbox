@@ -1,12 +1,12 @@
-# Local and USB playback
+# Local, USB and network playback
 
-Playing what is already on the box, or on a stick pushed into one of its USB
-ports. The box has served its own folders OUT over WebDAV for a while
+Playing what is already on the box, what is on a stick pushed into one of its USB
+ports, or what sits on a NAS. The box has served its own folders OUT over WebDAV for a while
 ([file server](file-server.md)) and until now nothing could play what you copied
 IN; this is the other half.
 
-The shell provides the plumbing - which roots exist, listing one, mounting a
-stick - and the **`files` app** in the
+The shell provides the plumbing - which roots exist, listing one, mounting a stick
+or a share - and the **`files` app** in the
 [registry](https://github.com/Andy1210/tvbox-apps) is the screen. Install it like
 any other app (HOME → "Get more apps").
 
@@ -20,11 +20,12 @@ Discovered, not listed, and the same rule the file server uses
 | `~/.tvbox/*` | user content, with the box's own machinery filtered out by name | `screensaver`        |
 | `~/*`        | the box user's own folders, when there are any                  | `Videos`, `Music`    |
 | USB          | every mountable partition of every removable drive              | a stick called FILMS |
+| network      | each mounted SMB share (Settings -> Network -> Network shares)  | a NAS called `films` |
 
-There is deliberately no "add a source" screen and no configured path. A network
-share is reachable the same way as anything else - mount it under a user folder
-(an fstab line at `~/Videos/nas`, or a home folder that IS the mount) and it
-appears, because every check is done on the **real** path.
+There is deliberately no "add a source" screen for a FOLDER and no configured path:
+what the box has, it offers. A share mounted some other way (an fstab line at
+`~/Videos/nas`, or a home folder that IS the mount) appears through the same rule,
+because every check is done on the **real** path.
 
 That same rule is why a **symlink** is not a way in: one that points out of its
 root is refused on open and left out of the listing (it would otherwise report the
@@ -75,6 +76,38 @@ hotplug flag: the Pi's own SD card reports `hotplug: true` (measured, util-linux
 2.41), so that flag alone would offer the disk the box boots from. A device counts
 when the kernel calls it removable or it arrived over USB - and never when the
 running system sits on it, which a Pi booting from a USB SSD makes a real case.
+
+## Network shares
+
+**Settings -> Network -> Network shares.** A NAS is the other real place films
+live, and it is the same idea as the file server turned around: that hands the
+box's folders OUT, this brings someone else's IN.
+
+**SMB, not NFS**, for the same reason as everywhere else here: mounting NFS goes
+through the mount syscall and therefore needs root. rclone mounts SMB over FUSE as
+the ordinary user, and it is already the box's no-root network tool (the file
+server serves WebDAV with it, the RetroArch package mounts its game library with
+it). A box without `rclone` offers to fetch it, sha256-pinned into `~/.tvbox/bin`,
+the same no-root download every app dep uses.
+
+Each share is mounted at `~/.tvbox/shares/<name>` and appears as a source under
+that name. `shares` is machinery to contentdirs.js, so a share is offered once, in
+its own right, rather than also turning up as a folder called "shares".
+
+Two things are decided differently from the RetroArch package's share, which mounts
+the same way:
+
+- **The cache mode.** rclone's `full` downloads a whole file in the background:
+  right for a 700 MB disc image an emulator seeks around in, wrong for a 60 GB film
+  someone watches once. This uses `minimal` plus a read-ahead, so reads stay ranged.
+- **Read-only.** This is a player; a mistyped delete over SMB is not recoverable.
+
+The form is built around the box doing the finding, because typing a share name and
+a folder path on a TV is where a feature like this gets abandoned: **Test** asks the
+server what it offers (the shares, then the folders inside one) and every answer is
+a row that fills the field it belongs to. The credentials live in `config.json`
+(chmod 600) and reach rclone through its environment, never a command line -
+anyone on the box can read one of those.
 
 ## What the app plays
 
@@ -127,6 +160,8 @@ security boundary, so it is worth knowing what it refuses:
   mounting them with no root.
 - `shell/browse.js` + `browse.test.js` - the roots and the guarded listing. Most of
   what those tests assert is a refusal.
+- `shell/shares.js` + `shares.test.js` - network shares: what a form may store, and
+  what gets mounted. UI: `launcher/src/settings/pages/shares.tsx`.
 - `shell/contentdirs.js` - which folders hold user content; shared with
   `shell/fileserver.js`.
 - `shell/main.js` (the two GETs) and `shell/routes.js` (mount/unmount).

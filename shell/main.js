@@ -37,6 +37,7 @@ const appwins = require("./appwindows"); // background-apps window registry + hi
 const nativeapp = require("./native"); // native (non-Electron) apps: RetroArch et al own the screen AND the input
 const fileserver = require("./fileserver"); // the box's folders over WebDAV (rclone, no root)
 const browse = require("./browse"); // local + USB media: which roots exist, and listing one
+const shares = require("./shares"); // network shares (SMB over rclone, no root), mounted per config
 const firetvir = require("./firetvir"); // Fire TV remote IR programming (venv deps + irdb codesets + BLE tool)
 const apps = require("./install"); // manifests + install-recipe runner (shared with the tvbox CLI)
 const store = require("./store"); // app-store registry client (manifest-only apps -> ~/.tvbox/apps)
@@ -199,8 +200,22 @@ function emitConfigChange(sections) {
 const fileserverDeps = { onPath: apps.onPath, childEnv: () => ({ ...process.env }), supervisor };
 // Same reason for the same one field: `udisksctl` is what mounts a stick and it is
 // not on every box (udisks2 is a soft dep, and OTA can never add an apt package),
-// so browse.js asks before it runs anything.
-const browseDeps = { onPath: apps.onPath };
+// so browse.js asks before it runs anything. `shares` is a function rather than a
+// list because a share can be added while the box is running.
+const browseDeps = { onPath: apps.onPath, shares: () => config.rawShares() };
+const sharesDeps = {
+  onPath: apps.onPath,
+  childEnv: () => ({ ...process.env }),
+  supervisor,
+};
+// Mount what is configured (and unmount what is not) - on boot, and after every
+// change to the list.
+function applyShares() {
+  const r = shares.apply(config.rawShares(), sharesDeps);
+  if (!r.ok) console.warn("[shares] not mounted:", r.error);
+  else if (r.mounted.length) console.log("[shares] mounting", r.mounted.join(", "));
+  return r;
+}
 let rcloneInstalling = false;
 
 function applyFileserver() {
@@ -240,7 +255,11 @@ function installRclone() {
   });
   const done = () => {
     rcloneInstalling = false;
-    if (apps.onPath("rclone") && config.rawFileserver().enabled) applyFileserver();
+    if (!apps.onPath("rclone")) return;
+    // Both features run on this one binary, so whichever asked for it, everything
+    // waiting on it can start now.
+    if (config.rawFileserver().enabled) applyFileserver();
+    if (config.rawShares().length) applyShares();
   };
   child.on("error", done);
   child.on("exit", done);
@@ -544,6 +563,9 @@ function serve() {
     ensureAudio,
     exitApp,
     fileserverStatus: () => fileserver.status(config.rawFileserver(), fileserverDeps),
+    applyShares,
+    sharesDeps,
+    sharesStatus: () => shares.status(config.rawShares(), sharesDeps),
     foregroundApp: () => currentAppId,
     handlePower,
     installRclone: () => installRclone() || rcloneInstalling,
@@ -790,6 +812,12 @@ function serve() {
     // What there is to play on the box itself: the user's own folders and each
     // partition of a plugged-in USB stick (browse.js). Read-only; the app that
     // walks them is the registry's `files` package, and mounting is a POST.
+    if (p === "/tvbox/api/shares") {
+      return httpserver.jsonRes(res, {
+        ...shares.status(config.rawShares(), sharesDeps),
+        installing: rcloneInstalling,
+      });
+    }
     if (p === "/tvbox/api/browse/sources") {
       browse.sources(browseDeps, (s) => httpserver.jsonRes(res, s));
       return;
@@ -2628,6 +2656,7 @@ app.whenReady().then(async () => {
   });
   updater.startSchedulers(); // boot check + 6h re-check + nightly idle auto-apply
   if (config.rawFileserver().enabled) applyFileserver(); // the LAN share survives a restart
+  if (config.rawShares().length) applyShares(); // and so do the shares the box reads FROM
   setInterval(maintenance.appsAutoTick, 30 * 60 * 1000); // nightly registry app auto-update (same window)
   // Not gated to the small hours like the registry check: a bundle whose flatpak
   // moved is BROKEN-ish now (the copy is older than the app it talks to), and the
