@@ -93,6 +93,24 @@ is only how that passphrase is handed over. A neighbour in range can see the
 box's name in their cast list while it is armed - a group owner has to beacon -
 but cannot join it.
 
+## What is on screen while it runs
+
+Nothing of ours. mpv plays **behind** the launcher's window, so anything the
+launcher draws lands on top of the phone - the Settings page that armed
+mirroring did exactly that at first, and Home's tiles were printed over the
+picture even after the window was made transparent, because the view underneath
+kept rendering.
+
+So when the first frames arrive the shell pushes a `mirroring` destination and
+turns the window transparent; the launcher drops its view and renders only a
+hint, which fades after four seconds. **Back stops mirroring** and is the only
+control - there is nothing to configure mid-session, and someone holding a
+remote in front of their own phone screen needs exactly one thing.
+
+The shell pushes another destination when frames stop, so the screen follows the
+shell rather than guessing: the shell is the one that knows whether a phone is
+still sending.
+
 ## Quality
 
 The phone picks the format. A Galaxy S26 Ultra chooses 1920x1080p30, H.264 High
