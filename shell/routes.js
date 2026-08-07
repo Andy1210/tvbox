@@ -20,11 +20,16 @@ const ir = require("./ir");
 const maintenance = require("./maintenance");
 const apps = require("./install");
 const pairing = require("./pairing");
+const removable = require("./removable"); // the USB stick: mount on open, unmount before it is pulled
 const store = require("./store");
 const system = require("./system");
 const textinput = require("./textinput");
 const updater = require("./updater");
 const wifiradio = require("./wifiradio");
+
+// `udisksctl` is what mounts a stick, and it is not on every box (udisks2 is a soft
+// dep and OTA can never add an apt package), so removable.js asks before it runs.
+const browseDeps = { onPath: apps.onPath };
 
 function post(p, data, res, ctx) {
   // The body is whatever the caller sent, and a literal `null` is valid JSON. Every
@@ -414,6 +419,16 @@ function post(p, data, res, ctx) {
         httpserver.jsonRes(res, { ok, radio: on, ethernet: eth });
       });
     });
+  }
+  // A USB stick is mounted when someone opens it on the TV and unmounted from the
+  // same screen before it is pulled out - nothing on this box auto-mounts. The
+  // device string is checked against what is actually plugged in before it reaches
+  // a command line (removable.js), so this route cannot name an arbitrary one.
+  if (p === "/tvbox/api/browse/mount") {
+    return removable.mount(browseDeps, String(data.device || ""), (r) => httpserver.jsonRes(res, r));
+  }
+  if (p === "/tvbox/api/browse/unmount") {
+    return removable.unmount(browseDeps, String(data.device || ""), (r) => httpserver.jsonRes(res, r));
   }
   if (p === "/tvbox/api/system/timezone") {
     return system.setTimezone(String(data.timezone || ""), (r) => httpserver.jsonRes(res, r));

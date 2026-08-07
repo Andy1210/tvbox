@@ -7,18 +7,20 @@
 // the ordinary user, and what it serves is a directory of SYMLINKS built from the
 // folders the user picked. rclone follows them (--copy-links), writes included.
 //
-// Nothing about which folders exist is written down here. They are DISCOVERED:
-// whatever user data sits in ~/.tvbox (the box's own machinery is filtered out by
-// name, so a folder a future app introduces shows up on its own), the home
-// directory's own folders, and each installed flatpak app's data dir - which is how
-// an emulator's BIOS folder becomes reachable at all. ~/.tvbox itself is offered
-// too, with a warning, because it holds the box's settings and the apps' logins.
+// Nothing about which folders exist is written down here. They are DISCOVERED
+// (contentdirs.js): whatever user data sits in ~/.tvbox (the box's own machinery is
+// filtered out by name, so a folder a future app introduces shows up on its own),
+// the home directory's own folders, and each installed flatpak app's data dir -
+// which is how an emulator's BIOS folder becomes reachable at all. ~/.tvbox itself
+// is offered too, with a warning, because it holds the box's settings and the apps'
+// logins.
 //
 // A password is mandatory: this binds to the LAN on purpose, and there is no
 // sensible "just for a minute" version of exposing someone's home directory.
 const fs = require("fs");
 const os = require("os");
 const path = require("path");
+const contentdirs = require("./contentdirs"); // which folders hold user content
 const flatpak = require("./flatpak");
 
 const HOME = os.homedir();
@@ -48,24 +50,6 @@ function portOf(v) {
 const DEFAULT_USER = "tvbox";
 const MIN_PASSWORD = 8;
 
-// ~/.tvbox is both the box's working directory and where some user content lives.
-// This is the machinery half - filtered out so the rest can be offered without a
-// list of what to share (which would go stale the moment an app adds a folder).
-const MACHINERY = new Set([
-  "apps", // installed app packages
-  "apps-data", // extracted web bundles
-  "bin", // no-root binaries (rclone, librespot)
-  "cache",
-  "current", // OTA symlink
-  "fileserver", // where the share root used to live (boxes that ran an early build)
-  "librespot-cache",
-  "pyenv",
-  "__pycache__",
-  "shell", // the dev tree
-  "shell-userdata", // Chromium profile: app logins live here
-  "update",
-  "versions", // OTA releases
-]);
 // Friendlier, stable, ASCII names for the folders a computer will see. Anything not
 // named here keeps its own directory name. These names are also what the launcher
 // lists, untranslated: the picker names the folder someone will go looking for in a
@@ -91,24 +75,7 @@ const RCLONE_DOWNLOAD = {
   },
 };
 
-function isDir(p) {
-  try {
-    return fs.statSync(p).isDirectory();
-  } catch (e) {
-    return false;
-  }
-}
-function subdirs(dir) {
-  try {
-    return fs
-      .readdirSync(dir, { withFileTypes: true })
-      .filter((e) => e.isDirectory())
-      .map((e) => e.name)
-      .sort();
-  } catch (e) {
-    return [];
-  }
-}
+const { isDir, subdirs } = contentdirs;
 // A share name has to survive being a path segment on someone else's computer.
 const MAX_NAME = 64;
 const NAME_RE = new RegExp("^[A-Za-z0-9][A-Za-z0-9._-]{0," + (MAX_NAME - 1) + "}$");
@@ -140,16 +107,13 @@ function candidates() {
     out.push({ id, path: dir, name: unique, warn: !!warn });
   };
 
-  // user content under ~/.tvbox (machinery filtered out, so new folders appear)
-  for (const d of subdirs(TVBOX)) {
-    if (MACHINERY.has(d) || d.startsWith(".")) continue;
-    add("tvbox:" + d, path.join(TVBOX, d), SHARE_NAMES[d] || d);
-  }
-  // the box user's own folders (Videos, Music, … - only if they exist)
-  for (const d of subdirs(HOME)) {
-    if (d.startsWith(".")) continue;
-    add("home:" + d, path.join(HOME, d), d);
-  }
+  // user content under ~/.tvbox (machinery filtered out, so new folders appear),
+  // then the box user's own folders (Videos, Music, … - only if they exist).
+  // SHARE_NAMES renames the box's OWN folders only: `~/roms` is the user's, and
+  // advertising it as "games" would both mislabel it and move an existing share
+  // (a name a computer has bookmarked must not change under it).
+  for (const c of contentdirs.userDirs())
+    add(c.id, c.path, c.id.startsWith("tvbox:") ? SHARE_NAMES[c.name] || c.name : c.name);
   // each installed flatpak app's data dir: saves, states and the BIOS folder an
   // emulator reads, which is the whole reason this exists
   for (const d of subdirs(path.join(HOME, ".var", "app"))) {
