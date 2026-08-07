@@ -22,7 +22,13 @@ import { armPhoneTyping, cancelTyping, fetchTypingStatus, submitTyping, type Typ
 // PAGE authored, so it is shown as a quote from the app, never as the shell's own
 // question - otherwise a page could label a field "Parental PIN" and have our trusted
 // keyboard collect it.
-export function TypingOverlay() {
+// `onActiveChange` reports whether a session is on screen. It is reported from
+// here rather than derived from the nav pushes because this component is the only
+// thing that knows: a "typing" push can end in no session at all (the status read
+// fails and we cancel), and the shell closes the session itself when the phone
+// submits. A caller that watched the pushes instead would believe a session was up
+// in both cases.
+export function TypingOverlay({ onActiveChange }: { onActiveChange?: (active: boolean) => void }) {
   const { t } = useI18n();
   const [st, setSt] = useState<TypingStatus | null>(null);
   const [qr, setQr] = useState("");
@@ -50,6 +56,13 @@ export function TypingOverlay() {
     if (restoreFocus) setTimeout(() => setFocus(back || "home-settings"), 0);
   };
 
+  // The same predicate the render gate below uses, deliberately: a caller that
+  // suppresses something while this is up must not keep suppressing it for a state
+  // that draws nothing.
+  useEffect(() => {
+    onActiveChange?.(!!st?.active);
+  }, [st, onActiveChange]);
+
   // The shell pushes "typing" to open and "home" to close (it closes the session
   // itself when the phone submits, so the screen must follow the shell, not guess).
   // Any OTHER push is someone else's business - closing (and restoring focus) then
@@ -57,7 +70,13 @@ export function TypingOverlay() {
   useEffect(() => {
     const off = window.tvbox?.onNav?.((n) => {
       if (n.dest === "typing") {
-        focusBefore.current = getCurrentFocusKey() || null;
+        // Not `|| null`: this doubles as the "a session was opened" flag for the
+        // close branch below, and the launcher can genuinely have nothing focused
+        // (between a reload and Home's first app-list load, or on the retry
+        // screen). A null there swallowed the shell's closing push, leaving the
+        // screen up for good - and now the ambient suppression with it. The
+        // fallback is what close() restores to anyway when the key has gone away.
+        focusBefore.current = getCurrentFocusKey() || "home-settings";
         const mine = ++generation.current;
         fetchTypingStatus().then((s) => {
           if (mine !== generation.current) return;
