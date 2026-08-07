@@ -104,6 +104,45 @@ if [ -d "$TVBOX/current/shell" ]; then
 else
   cd "$TVBOX/shell" || exit 1
 fi
+
+# Opt-in Chromium DevTools protocol, for measuring the launcher on the TV it
+# actually runs on: `touch ~/.tvbox/debug-port` (or write a port into it), restart
+# the shell, then `ssh -L 9222:127.0.0.1:9222` and attach a CDP client. There is
+# nowhere to pass an argument - greetd starts the session and the session starts
+# this script - so the request is a marker file.
+#
+# **The marker is consumed, not honoured for ever.** One request, one boot. An open
+# DevTools endpoint is arbitrary code in the launcher window, which runs with Node in
+# its preload, so it reaches ~/.tvbox/config.json and everything in it; leaving a
+# forgotten `touch` to survive every reboot and OTA update is not a debug aid, it is a
+# back door with no indication on the TV that it is there.
+#
+# Two deliberate omissions. There is no `--remote-debugging-address`, so the endpoint
+# binds loopback - that is Chromium's default for the absence of that switch, not a
+# property of the port flag, so do not add one. And no `--remote-allow-origins`: a CDP
+# client sends no Origin header and does not need it, while a wildcard would let any
+# PAGE this Chromium renders - including third-party app windows - open the endpoint.
+# Add `--remote-allow-origins=devtools://devtools` only if you attach a browser
+# DevTools frontend, and take it out again afterwards.
+#
+# Note the message below goes to the session's stderr (the greetd journal), NOT to
+# shell.log - the redirect on the exec line truncates that file a moment later.
+TVBOX_DEBUG_ARGS=""
+if [ -f "$TVBOX/debug-port" ]; then
+  port=$(cat "$TVBOX/debug-port" 2>/dev/null)
+  rm -f "$TVBOX/debug-port"
+  # Digits only, and a port this user can actually bind. 0 would make Chromium pick a
+  # random one and report a port that is not the one it listens on.
+  # Digits only AND at most five of them: a longer run of digits passes the first
+  # test but overflows the integer comparison below, which exits 2 and leaves the
+  # value in place.
+  case "$port" in
+    *[!0-9]* | "" | ??????*) port=9222 ;;
+  esac
+  if [ "$port" -lt 1024 ] || [ "$port" -gt 65535 ]; then port=9222; fi
+  TVBOX_DEBUG_ARGS="--remote-debugging-port=$port"
+  echo "tvbox: DevTools protocol on 127.0.0.1:$port for THIS boot only (marker consumed)" >&2
+fi
 # Capture this session's shell output (main-process + renderer console, mpv) to a
 # log for on-device debugging over ssh - `cat ~/.tvbox/shell.log`. Truncated each
 # boot so it stays bounded to one session. Harmless on a kiosk (no console shown).
@@ -115,4 +154,4 @@ fi
 # chrome-sandbox, so the npm-installed helper staying non-setuid is fine. Windows
 # that opt out per-window (the launcher, local apps - they need Node in the
 # preload) are unaffected either way.
-exec ./node_modules/.bin/electron . --ozone-platform=wayland >"$TVBOX/shell.log" 2>&1
+exec ./node_modules/.bin/electron . --ozone-platform=wayland $TVBOX_DEBUG_ARGS >"$TVBOX/shell.log" 2>&1

@@ -5,6 +5,42 @@ updates). `scripts/make-release.sh` lifts the current version's `hu`/`en`
 blocks into the OTA feed's `notes` - keep both languages, keep it short, and
 write for the person on the couch (what changes for THEM), not for developers.
 
+## 2.0.2
+
+### hu
+
+- **Új Beállítások képernyő.** Eddig egy kategória alatt minden egy hosszú oszlopba
+  volt öntve - a Hálózat alatt például a wifi-kereső, a fájlmegosztás és a Home
+  Assistant egymás alatt. Most bal oldalt vannak a kategóriák, jobbra a hozzájuk
+  tartozó sorok, és aminek több beállítása van, annak saját oldala lett. A legtöbb sor
+  jobb szélén ott áll, hogy épp mi van beállítva, így a nyitóképernyőn látod, mit
+  csinál a doboz, anélkül hogy bármit meg kellene nyitnod.
+- **A Bluetooth-eszközök saját oldalt kaptak**: csatlakoztatás, lecsatlakoztatás és
+  eltávolítás egy helyen, az eszköz töltöttségével együtt. A listában ikon mutatja,
+  hogy hangszóró, billentyűzet vagy távirányító.
+- **Egy mentett wifi-hálózatra újra rá lehet csatlakozni** anélkül, hogy előbb el
+  kellene felejteni és újra begépelni a jelszót.
+- A képernyővédő elalvási ideje választható lista lett a körbekattintgatás helyett,
+  a Névjegy adatai csoportokba kerültek, a nyílt forráskódú hivatkozások pedig
+  külön oldalra.
+
+### en
+
+- **A new Settings screen.** A category used to be one long column - Network alone
+  stacked the wifi scanner, the file sharing and Home Assistant one under the other.
+  Now the categories are on the left, their rows on the right, and anything with
+  more than a couple of settings has a page of its own. Most rows show what they are
+  currently set to, so the first screen tells you what the box is doing without
+  opening anything.
+- **Bluetooth devices have their own page**: connect, disconnect and remove in one
+  place, with the device's battery. The list shows an icon for a speaker, a keyboard
+  or a remote.
+- **A saved wifi network can be joined again** without having to forget it and
+  retype the password first.
+- The screen saver's sleep delay is a list to pick from instead of a button you
+  click through, the About figures are grouped, and the open-source credits moved to
+  a page of their own.
+
 ## 2.0.1
 
 ### hu

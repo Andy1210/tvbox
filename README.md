@@ -87,7 +87,7 @@ per app; the shell launches each one, either as a local bundle composited over
   Bravia Sync, etc.). Enable it in the TV's settings.
 - **Optional: a Bluetooth or USB remote.** Any evdev remote works as a second
   input alongside CEC (or instead of it, e.g. a TV whose CEC is unreliable); its
-  buttons are remappable per-device from the TV (Settings → Peripherals). See
+  buttons are remappable per-device from the TV (Settings → Remotes & accessories). See
   [The remote](#the-remote).
 
 > CEC quirks vary by TV. Some sets can't tell Back from Exit, so **Home is a
@@ -129,7 +129,7 @@ What the image gives you:
   HOSTNAME=living-room
   WIFI_SSID=MyNetwork
   WIFI_PASSWORD=secret        # omit for open
-  WIFI_COUNTRY=DE             # radio region; also on the TV (Settings → Wi-Fi)
+  WIFI_COUNTRY=DE             # radio region; also on the TV (Settings → Network → Wi-Fi → Wi-Fi country)
   SUDO=true                   # passwordless sudo over SSH for power users
   SSH_AUTHORIZED_KEY=ssh-ed25519 AAAA... you@host
   SAFE_MODE=true              # boot with network + SSH but no TV session
@@ -139,7 +139,7 @@ What the image gives you:
   (`ssh tv@<box-ip>`); `SUDO=true` is an opt-in power-user affordance (a normal
   box has no sudo - the app always runs rootless). See
   [docs/sd-image.md](docs/sd-image.md) for every key. The hostname is also
-  editable later on the TV (Settings → General → Device name).
+  editable later on the TV (Settings → System → Device name).
 
 - **Self-updating.** OTA app/box updates from the releases feed, plus OS
   security updates, both without ever auto-rebooting.
@@ -194,7 +194,7 @@ itself updated over the air ([Updates and backup](#updates-and-backup)); re-run
 ### Getting apps
 
 Apps live in the **[tvbox-apps registry](https://github.com/Andy1210/tvbox-apps)**
-and install from the box: HOME → "Get more apps" (or Settings → App Store). A
+and install from the box: HOME → "Get more apps" (or Settings → Apps → App Store). A
 flashed box starts empty; an OTA-updated box keeps the apps it already had.
 Because only the shared media stack ships, apps install their own
 binaries/bundles from the UI, no CLI needed:
@@ -250,7 +250,7 @@ pass-through, so a "standard" remote (arrows / OK / Back / Home / media) works
 out of the box.
 
 Because a remote can send its own button codes, the layout is **remappable
-per-device** from the TV: **Settings → Peripherals** lists each connected
+per-device** from the TV: **Settings → Remotes & accessories** lists each connected
 remote, and a _learn_ mode captures the next button you press and binds it to an
 action - remapping one remote never touches another. On Fire TV / Alexa
 remotes this includes the buttons that don't arrive as normal keys at all: the
@@ -286,7 +286,7 @@ untouched. Details: [docs/gamepad.md](docs/gamepad.md).
 
 Most TVs ignore CEC volume from a source device, so out of the box the
 remotes' volume keys go nowhere. Point a network **IR blaster** at the TV and
-configure it under **Settings → Peripherals → IR blaster**: from then on the
+configure it under **Settings → Remotes & accessories → TV volume**: from then on the
 remotes' volume up / down / mute (and the same commands over
 [MQTT](docs/mqtt-integration.md), e.g. from a voice assistant) drive the TV's
 real volume. Two backends are supported - an **ESPHome** IR transceiver spoken
@@ -298,7 +298,7 @@ for anything HA can drive (Broadlink RM4 and friends). Setup recipes:
 
 A Fire TV / Alexa Voice Remote has its own IR blaster, but it normally only
 learns TV codes when paired to a Fire TV box. tvbox can program it directly:
-pair the remote over Bluetooth, then under **Settings → Peripherals** (it shows
+pair the remote over Bluetooth, then under **Settings → Remotes & accessories** (it shows
 up under the remote itself, only for a remote that supports this) pick your TV
 brand and save. tvbox looks the codes up in the community
 [irdb](https://github.com/probonopd/irdb) database and writes them to the
@@ -309,7 +309,7 @@ notes: [docs/firetv-remote-ir.md](docs/firetv-remote-ir.md).
 
 ## The App Store
 
-**Settings → App Store** (also HOME → "Get more apps") lists apps from the
+**Settings → Apps → App Store** (also HOME → "Get more apps") lists apps from the
 [tvbox-apps registry](https://github.com/Andy1210/tvbox-apps): a curated git
 repo whose CI builds every app from source on merge and publishes one
 `index.json` to its GitHub Pages site, which every box fetches over HTTPS.
@@ -438,7 +438,7 @@ Full story, including what it deliberately does not cover:
 The box keeps itself current and never reboots or interrupts playback on its own
 ([docs/updates-and-backup.md](docs/updates-and-backup.md) has the full story):
 
-- **tvbox OTA.** Settings → System & updates checks a release feed daily,
+- **tvbox OTA.** Settings → System → Software update checks a release feed daily,
   installs overnight when idle (toggleable), and auto-rolls-back a release that
   doesn't boot. Publishing is tagging `v<version>` (CI attaches the tarball +
   `update.json` to the Release). `tvbox update` from SSH.
@@ -446,7 +446,7 @@ The box keeps itself current and never reboots or interrupts playback on its own
   the background with `Automatic-Reboot "false"`; when a reboot would help,
   Settings shows a hint and a button, on your timing.
 - **App bundles.** A nightly user-scope `flatpak update` timer.
-- **Backup/restore.** Settings → System & updates → QR: your phone downloads a
+- **Backup/restore.** Settings → System → Backup: your phone downloads a
   password-encrypted `.tvbackup` (channels, accounts, layout) and can restore it
   later, even onto a re-flashed box.
 

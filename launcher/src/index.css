@@ -101,6 +101,64 @@
     display: none; /* never paint over mpv showing through the window */
   }
 
+  /* Settings page transitions - the only place in this UI where more than a fade
+     runs, and bounded on purpose. A drilled-into page slides in ONCE and its
+     groups arrive behind it; both animate transform and opacity only, the two
+     properties this hardware composites without a repaint. Note what does NOT
+     animate: a focus move (Rows.tsx swaps the fill and snaps), because that is
+     the press a remote sends twenty times a second and it is where the old UI
+     lost its frames. */
+  .tv-page-push {
+    animation: tv-page-in 190ms cubic-bezier(0.22, 0.61, 0.36, 1) both;
+  }
+  @keyframes tv-page-in {
+    from {
+      opacity: 0;
+      transform: translate3d(2.2vw, 0, 0);
+    }
+    to {
+      opacity: 1;
+      transform: none; /* not translate3d(0,0,0): a transformed ancestor becomes the
+                          containing block for position:fixed descendants, and
+                          pickers/OSK opened from a page must keep the viewport */
+    }
+  }
+  /* DIRECT children only. Rows inside a list that refreshes on its own (a Wi-Fi
+     rescan) are grandchildren, so an arriving result never restarts the animation
+     under the user's focus. Delays stop at the sixth group - past that the stagger
+     outlasts the transition and the page reads as slow rather than smooth. */
+  .tv-stagger > * {
+    animation: tv-row-in 200ms cubic-bezier(0.22, 0.61, 0.36, 1) both;
+  }
+  .tv-stagger > *:nth-child(1) {
+    animation-delay: 30ms;
+  }
+  .tv-stagger > *:nth-child(2) {
+    animation-delay: 65ms;
+  }
+  .tv-stagger > *:nth-child(3) {
+    animation-delay: 100ms;
+  }
+  .tv-stagger > *:nth-child(4) {
+    animation-delay: 135ms;
+  }
+  .tv-stagger > *:nth-child(5) {
+    animation-delay: 170ms;
+  }
+  .tv-stagger > *:nth-child(n + 6) {
+    animation-delay: 200ms;
+  }
+  @keyframes tv-row-in {
+    from {
+      opacity: 0;
+      transform: translate3d(0, 1.2vh, 0);
+    }
+    to {
+      opacity: 1;
+      transform: none;
+    }
+  }
+
   /* Store install progress (AppDetail InstallProgress): an INDETERMINATE bar -
      the shell reports a coarse phase, not a percentage - so a short fill sweeps
      across the track instead of filling to a fake number. */

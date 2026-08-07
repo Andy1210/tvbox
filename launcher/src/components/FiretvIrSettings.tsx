@@ -235,7 +235,7 @@ export function FiretvIrSettings({ device }: { device?: { id: string; name: stri
     return (
       <Osk
         key="ftir-filter"
-        title={t("firetvir.brandFilter")}
+        title={t("firetvir.filterBrand")}
         initial={filter}
         onDone={(v) => {
           setEditingFilter(false);
