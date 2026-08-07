@@ -589,8 +589,11 @@ RULES
   if id -nG "$TVBOX_USER" 2>/dev/null | tr ' ' '\n' | grep -qx netdev; then
     ok "screen mirroring installed (tvbox-miracast, armed on request)"
   else
+    # A group added here does not reach the RUNNING session, and this one is not
+    # optional: without netdev the shell cannot open the pairing button, so a
+    # phone would find the box, ask to pair, and be answered by nothing at all.
     usermod -aG netdev "$TVBOX_USER" 2>/dev/null &&
-      ok "screen mirroring installed; added $TVBOX_USER to netdev" ||
+      warn "screen mirroring installed; $TVBOX_USER added to netdev - REBOOT before mirroring will pair" ||
       warn "screen mirroring installed but $TVBOX_USER is not in netdev - it will not be able to pair"
   fi
 else

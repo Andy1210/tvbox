@@ -137,3 +137,19 @@ stream. It engages only from 1440p up, so a mirrored phone never reaches it.
   packets later; same room, everything through to the stream.
 - **It connects but nothing appears.** Look at the RTSP log for where the
   negotiation stopped; `journalctl -u tvbox-miracast` has the radio side.
+- **The phone asks to pair and is answered by nothing** (`P2P-PROV-DISC-PBC-REQ`
+  in the supplicant log with no `WPS-PBC-ACTIVE` after it). The shell could not
+  open the push button. Either the box user is not in `netdev` yet - provision
+  adds it, but a group only reaches a session that started afterwards, so
+  **reboot once after the first provision** - or the group's control socket was
+  not chgrp'd, which the helper does and the shell logs when it fails.
+
+## Testing it without a phone
+
+`deploy/tvbox-miracast` aside, everything here is reachable from a script: the
+sink dials a source and reads RTP, and neither cares what is at the other end.
+Stand a fake source at the address the sink will dial (add it to `lo`, write a
+lease line into `/run/tvbox-miracast/leases`), play the source half of M1-M7,
+and send a captured `.ts` as RTP **from that same address** - the sink drops
+frames from anywhere else. That exercises the negotiation, the player and the
+launcher, which is the half a phone cannot help you debug anyway.
