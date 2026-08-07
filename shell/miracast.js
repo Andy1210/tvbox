@@ -361,10 +361,19 @@ function create(deps) {
           emit({ type: "peer-gone" });
           if (armed) openPairing();
         });
+        // Try each lease in turn rather than only the newest. A phone can hold
+        // more than one at a time - same MAC, new address - and dnsmasq keeps a
+        // lease well past the phone that held it, so always dialling the newest
+        // means one dead entry can hide the live one for as long as it lasts.
+        // Measured: a lease left from an earlier session swallowed the whole of
+        // the next one.
+        let next = 0;
         every(DIAL_EVERY_MS, () => {
           if (socket || dialing) return;
-          const ip = peers()[0];
-          if (!ip) return;
+          const list = peers();
+          if (!list.length) return;
+          const ip = list[next % list.length];
+          next += 1;
           dialing = ip;
           dial(ip);
           setTimeout(() => {

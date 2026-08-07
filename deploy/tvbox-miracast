@@ -129,7 +129,10 @@ cmd_stop() {
     nmcli connection up id "$conn" 2>/dev/null || nmcli device connect "$dev" 2>/dev/null
   fi
   [ "$restore" = "off" ] && nmcli radio wifi off 2>/dev/null
-  rm -f "$CONF" "$PIDFILE" "$DNSMASQ_PID"
+  # The leases belong to the group that just ended: a new group is a new
+  # session, and a leftover address is only something for the next one's
+  # dialler to waste its time on.
+  rm -f "$CONF" "$PIDFILE" "$DNSMASQ_PID" "$LEASES"
   # A refusal recorded by die() has to survive this. The unit runs ExecStopPost on
   # failure, so a stop that always cleared the file would erase the explanation
   # milliseconds after it was written, and the shell would only ever see systemd's
@@ -248,7 +251,7 @@ EOF
   # a file it can no longer open - and it exits rather than run without one.
   rm -f "$DNSMASQ_LOG"
   $DNSMASQ --interface="$grp" --bind-interfaces --except-interface=lo --port=0 \
-    --dhcp-range="$POOL_FROM,$POOL_TO,255.255.255.0,12h" \
+    --dhcp-range="$POOL_FROM,$POOL_TO,255.255.255.0,1h" \
     --dhcp-option=3,"$SELF_IP" --dhcp-option=6,"$SELF_IP" \
     --dhcp-leasefile="$LEASES" --log-dhcp --log-facility="$DNSMASQ_LOG" \
     --pid-file="$DNSMASQ_PID" || die dhcp "dnsmasq would not start"
