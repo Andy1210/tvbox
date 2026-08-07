@@ -96,7 +96,8 @@ function parseSpec(nat) {
 //
 // One generation, because an app that dies is normally launched again before
 // anyone looks: truncate-on-open alone leaves the healthy relaunch and loses the
-// run that failed. Two files still cannot grow without bound.
+// run that failed. It bounds how many files are kept, not how big they get - a
+// single run's output is still whatever the app decides to print.
 //
 // The id is a manifest id, which the validator constrains to APP_ID - an id that
 // does not match is refused rather than reshaped into some other file's name. The
@@ -111,7 +112,12 @@ function logFor(id) {
   const p = path.join(os.homedir(), ".tvbox", "native-" + id + ".log");
   try {
     fs.renameSync(p, p + ".1");
-  } catch (e) {} // no previous run, or a rotation we can do nothing about
+  } catch (e) {
+    // No previous run is the normal case and says nothing. Anything else means the
+    // run we were keeping is about to be truncated away, which is worth a line -
+    // it is the failure this rotation exists to prevent.
+    if (e.code !== "ENOENT") console.warn("[native] could not rotate the log for", id, "-", e.message);
+  }
   try {
     const fd = fs.openSync(p, "w", 0o600);
     fs.fchmodSync(fd, 0o600);

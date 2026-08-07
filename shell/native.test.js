@@ -173,6 +173,7 @@ test("the run before this one is kept as .log.1", async () => {
   const { logs } = await launchUnderTempHome("sleeper", home);
   assert.deepStrictEqual(logs.sort(), ["native-sleeper.log", "native-sleeper.log.1"]);
   assert.strictEqual(fs.readFileSync(log + ".1", "utf8"), "the run that crashed\n");
+  assert.strictEqual(fs.readFileSync(log, "utf8"), "", "the new run's log must start empty");
   fs.rmSync(home, { recursive: true, force: true });
 });
 
