@@ -10,6 +10,10 @@ import { useIdle } from "./useIdle";
 // overlay, which is what decides whether Home comes back as Home.
 
 let hidden = false;
+// Keep whatever was there. happy-dom serves `hidden` off the prototype today, so
+// there is no own property to put back and deleting ours is enough - but a runtime
+// that defines it on the document itself would be left without one.
+const ownHidden = Object.getOwnPropertyDescriptor(document, "hidden");
 Object.defineProperty(document, "hidden", { get: () => hidden, configurable: true });
 
 function setHidden(v: boolean) {
@@ -45,7 +49,8 @@ afterEach(() => {
 // turned off - at which point a stuck `hidden` getter would quietly break every
 // file that runs after this one.
 afterAll(() => {
-  Reflect.deleteProperty(document, "hidden");
+  if (ownHidden) Object.defineProperty(document, "hidden", ownHidden);
+  else Reflect.deleteProperty(document, "hidden");
 });
 
 describe("useIdle", () => {
