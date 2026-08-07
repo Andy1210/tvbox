@@ -6,19 +6,27 @@ on the phone, no PIN, no account.
 
 ## What it needs
 
-**A free wifi radio.** The phone connects to the box directly over Wi-Fi Direct,
-not through the router, and this board cannot run a station and a group owner at
-the same time - the group comes up and tears itself down inside the same second.
-So the box has to reach the network some other way:
+**The whole wifi radio, for the length of the session.** The phone connects to
+the box directly over Wi-Fi Direct, not through the router, and this board cannot
+run a station and a group owner at the same time - the group comes up and tears
+itself down inside the same second.
 
-| The box is on…         | Mirroring                               |
-| ---------------------- | --------------------------------------- |
-| Ethernet               | works; the internal radio is free       |
-| Wifi only              | refused, with the reason on screen      |
-| Wifi via a USB adapter | works; the internal radio is free again |
+| The box is on…         | Mirroring                                            |
+| ---------------------- | ---------------------------------------------------- |
+| Ethernet               | works, and costs nothing; the radio was idle anyway  |
+| Wifi only              | works, but the box is offline while it runs          |
+| Wifi via a USB adapter | works, and costs nothing; the internal radio is free |
 
-The refusal is deliberate: taking the radio would cut the box off its own
-network, including the ssh session of whoever is setting it up.
+On a wifi-only box the network goes down when mirroring starts and comes back on
+**the same connection** when it stops - by name, not "whichever profile
+autoconnects", which is a different promise on a box that knows several networks.
+The page warns before you start; it does not refuse, because while someone is
+watching their phone on the TV the box has no use for the network.
+
+Two things make that safe to do. The radio state is restored as it was found, so
+a box whose owner keeps wifi off does not silently gain it. And the unit carries
+`RuntimeMaxSec`, because a session nobody ends would leave a box offline with no
+way to reach it.
 
 **A phone that still speaks Miracast.** Samsung does (Smart View). Pixels do not -
 Google dropped it in favour of Cast, which cannot be implemented without a

@@ -113,10 +113,11 @@ function ctxKeysFrom(source, marker) {
 }
 
 test("arming screen mirroring reports a refusal instead of pretending it worked", () => {
-  // A box whose radio carries its own network cannot mirror at all. The helper
-  // says why; the route has to carry that sentence through, because on a TV with
-  // only a remote "nothing happened" is the worst possible answer.
-  const why = "the wifi radio is carrying this box's network";
+  // The helper answers with a CODE and the launcher translates it - a sentence
+  // from a shell script would reach a Hungarian TV in English. What matters here
+  // is that it travels at all: "nothing happened" is the worst possible answer on
+  // a device with only a remote.
+  const why = "radio-busy";
   const res = fakeRes();
   routes.post(
     "/tvbox/api/miracast/start",
@@ -125,7 +126,7 @@ test("arming screen mirroring reports a refusal instead of pretending it worked"
     fakeCtx({ mirroring: { start: (cb) => cb(new Error(why)), stop: (cb) => cb() } }),
   );
   assert.strictEqual(jsonOf(res).ok, false);
-  assert.match(jsonOf(res).error, /carrying this box/);
+  assert.strictEqual(jsonOf(res).error, "radio-busy");
 
   const ok = fakeRes();
   routes.post("/tvbox/api/miracast/start", {}, ok, fakeCtx());

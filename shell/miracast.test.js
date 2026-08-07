@@ -39,17 +39,15 @@ test("the newest lease is the one to dial", () => {
   assert.deepStrictEqual(miracast.peersFromLeases(""), []);
 });
 
-test("a box whose radio is busy is refused, and the reason travels", () => {
-  // The Broadcom radio cannot hold a station and a group owner at once, so the
-  // helper refuses rather than cutting the box off its own network. That refusal
-  // has to reach the UI intact - "it did nothing" is the worst possible answer
-  // on a device with only a remote.
+test("a failure to arm reaches the caller as a code, not as an exit status", () => {
+  // Whatever went wrong, the viewer has to be told in their own language, so what
+  // travels is a code the launcher translates - never a sentence from a shell
+  // script, which would reach a Hungarian TV in English.
   const events = [];
-  const why = "the wifi radio is carrying this box's network; mirroring needs it free";
   const m = miracast.create({
-    stateFile: stateFileWith(["state=stopped"]),
+    stateFile: stateFileWith(["state=error", "error=radio-busy"]),
     onEvent: (e) => events.push(e),
-    run: (cmd, args, opts, cb) => cb(new Error("exit 1"), "", why),
+    run: (cmd, args, opts, cb) => cb(new Error("exit 1"), "", ""),
   });
 
   let reported = null;
@@ -61,18 +59,16 @@ test("a box whose radio is busy is refused, and the reason travels", () => {
   assert.strictEqual(m.isArmed(), false);
   assert.strictEqual(events.length, 1);
   assert.strictEqual(events[0].type, "error");
-  assert.match(events[0].message, /needs it free/, "and learns why, in the helper's own words");
+  assert.strictEqual(events[0].message, "radio-busy", "and learns why - as a code the launcher can translate");
 });
 
-test("the helper's own sentence beats systemd's boilerplate", () => {
+test("the helper's own code beats systemd's boilerplate", () => {
   // Measured on a box: `systemctl start` answers "the control process exited with
-  // error code" and nothing else - the useful sentence went to the journal. The
-  // helper leaves it in the state file, and that is the one that must reach the
-  // screen, because it is the one that says what to do.
-  const why = "the wifi radio is carrying this box's network; mirroring needs it free";
+  // error code" and nothing else - the useful part went to the journal. The helper
+  // leaves a code in the state file, and that is what must reach the screen.
   const events = [];
   const m = miracast.create({
-    stateFile: stateFileWith(["state=error", "error=" + why]),
+    stateFile: stateFileWith(["state=error", "error=radio-busy"]),
     onEvent: (e) => events.push(e),
     run: (cmd, args, opts, cb) => cb(new Error("Command failed: systemctl start tvbox-miracast.service"), "", ""),
   });
@@ -80,8 +76,8 @@ test("the helper's own sentence beats systemd's boilerplate", () => {
   m.start((err) => {
     reported = err;
   });
-  assert.match(events[0].message, /carrying this box/);
-  assert.match(String(reported.message), /carrying this box/, "and the caller gets it too, not the exit code");
+  assert.strictEqual(events[0].message, "radio-busy");
+  assert.strictEqual(String(reported.message), "radio-busy", "and the caller gets it too, not the exit code");
 });
 
 test("a helper that starts but produces no group is still a failure", () => {

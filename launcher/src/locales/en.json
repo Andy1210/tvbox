@@ -644,11 +644,19 @@
     "streaming": "Mirroring",
     "lookFor": "Look for",
     "retry": "Try again",
-    "note": "Turns the wifi radio into a receiver for as long as you use it. Your phone connects to the box directly, so the radio has to be free - a box that is itself on wifi cannot do this.",
+    "note": "Shows a phone's screen on the TV. The phone connects to the box directly over wifi, not through the router, so the box's radio becomes a receiver for as long as you use it.",
     "armedNote": "Open the cast or Smart View menu on your phone and pick this box. No PIN needed. If nobody connects within two minutes the box stops on its own.",
     "err": {
+      "radio-busy": "The wifi radio is busy. Try again in a moment.",
+      "no-wifi": "This box has no wifi adapter.",
+      "no-wfd": "This box's wifi software has no Wi-Fi Display support.",
+      "group": "Couldn't set the wifi radio up as a receiver.",
+      "dhcp": "Couldn't hand the phone an address.",
+      "supplicant": "The wifi service wouldn't start.",
       "unknown": "Couldn't start mirroring."
-    }
+    },
+    "offlineWarning": "This box is on wifi, so it goes offline while mirroring. It reconnects to the same network when you stop.",
+    "offlineNow": "The box is offline while mirroring, and comes back when you stop."
   },
   "av": {
     "displayHint": "Resolution and refresh rate",

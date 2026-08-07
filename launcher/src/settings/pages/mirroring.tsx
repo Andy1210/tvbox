@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useI18n } from "../../lib/i18n";
 import { fetchMirroring, startMirroring, stopMirroring, type MirrorStatus } from "../../lib/api";
+import { wifiStatus, type WifiStatus } from "../../lib/wifi";
 import { SettingsPage } from "../SettingsPage";
 import { Group, InfoRow, Note, Row } from "../Rows";
 import { invalidateSummary } from "../summary";
@@ -19,9 +20,22 @@ import { invalidateSummary } from "../summary";
 // or vanish without anyone touching the remote.
 const POLL_MS = 2000;
 
+// The box answers with a code, never a sentence: it is a shell script, and a
+// sentence from one would reach a Hungarian TV in English. `mirroring.err.` is a
+// dynamic locale prefix, so the parity test cannot catch a code with nothing
+// behind it - translate() hands back the key it could not find, which on a TV
+// reads as gibberish, so fall back to the generic one. Same shape as the file
+// server's errText, for the same reason.
+function errText(t: (k: string) => string, code: string): string {
+  const key = "mirroring.err." + code;
+  const msg = t(key);
+  return msg === key ? t("mirroring.err.unknown") : msg;
+}
+
 export function MirroringPage() {
   const { t } = useI18n();
   const [st, setSt] = useState<MirrorStatus | null>(null);
+  const [net, setNet] = useState<WifiStatus | null>(null);
   const [unreachable, setUnreachable] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const busy = useRef(false);
@@ -38,6 +52,16 @@ export function MirroringPage() {
     return () => clearInterval(timer);
   }, [load]);
 
+  // Whether mirroring will cost this box its network is knowable before anyone
+  // presses anything, and it is the one thing worth saying in advance: a phone
+  // connects to the radio directly, so a box with no cable goes offline for the
+  // length of the session. It comes back on the same connection afterwards, which
+  // is why this is a warning and not a refusal.
+  useEffect(() => {
+    void wifiStatus().then(setNet);
+  }, []);
+  const willGoOffline = !!net?.connected && !net?.ethernet?.connected;
+
   const toggle = async () => {
     if (busy.current) return;
     busy.current = true;
@@ -45,10 +69,7 @@ export function MirroringPage() {
     const armed = !!st?.armed;
     const r = armed ? await stopMirroring() : await startMirroring();
     busy.current = false;
-    // The box refuses for one reason worth reading - its radio is carrying its
-    // own network - so the sentence it sends is shown rather than a generic
-    // failure. Someone holding only a remote cannot go and look in a log.
-    if (!r.ok) setError(r.error || t("mirroring.err.unknown"));
+    if (!r.ok) setError(errText(t, r.error || "unknown"));
     invalidateSummary("mirroring");
     void load();
   };
@@ -82,6 +103,8 @@ export function MirroringPage() {
         {armed && st?.name ? <InfoRow label={t("mirroring.lookFor")} value={st.name} /> : null}
       </Group>
       {error ? <Note tone="warn">{error}</Note> : null}
+      {willGoOffline && !armed ? <Note tone="warn">{t("mirroring.offlineWarning")}</Note> : null}
+      {armed && willGoOffline ? <Note tone="warn">{t("mirroring.offlineNow")}</Note> : null}
       <Note>{armed ? t("mirroring.armedNote") : t("mirroring.note")}</Note>
     </SettingsPage>
   );

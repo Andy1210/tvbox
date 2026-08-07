@@ -17,11 +17,15 @@
 #
 # Four things here are not obvious, and each one cost a measurement:
 #
-#  1. THE RADIO MUST BE FREE. A group owner and an associated station do not
-#     coexist on the Broadcom part in the Pi - the group comes up and tears
-#     itself down inside the same second. So this refuses rather than breaking
-#     the box's own network, and a wifi-only box needs a cable or a second
-#     adapter before it can mirror.
+#  1. THE RADIO MUST BE FREE WHILE MIRRORING. A group owner and an associated
+#     station do not coexist on the Broadcom part in the Pi - the group comes up
+#     and tears itself down inside the same second. On a box with no other way
+#     to the network this takes the wifi DOWN for the length of the session and
+#     puts it back afterwards, on the same connection it was on: while someone
+#     is watching their phone on the TV the box has no use for the network, and
+#     refusing outright would make mirroring impossible on a wifi-only box for
+#     no gain. The unit's RuntimeMaxSec is the backstop for a session nobody
+#     ends, because a box left offline cannot be fixed remotely.
 #  2. NETWORKMANAGER TEARS DOWN A GROUP IT DID NOT CREATE, the instant the group
 #     registers on D-Bus. Hence our own wpa_supplicant on an interface NM has
 #     been told to stop managing. Marking only the p2p-* interfaces unmanaged is
@@ -55,18 +59,23 @@ WPA_SUPPLICANT=/usr/sbin/wpa_supplicant
 IW=/usr/sbin/iw
 DNSMASQ=/usr/sbin/dnsmasq
 
-# Leave the reason where the shell can read it, not only in the journal.
+# Leave the reason where the shell can read it, not only in the journal. A CODE
+# rather than a sentence: the launcher translates it, and a raw English string
+# from a shell script would reach a Hungarian TV in English.
 # `systemctl start` answers a caller with its own boilerplate - "the control
 # process exited with error code" - and the one refusal that actually happens
 # here tells the viewer what to do about it ("use a wired connection"). On a TV
 # with only a remote, losing that sentence turns a fixable situation into a
 # button that does nothing.
 die() {
-  echo "tvbox-miracast: $*" >&2
+  code=$1
+  shift
+  echo "tvbox-miracast: $code: $*" >&2
   mkdir -p "$STATE_DIR" 2>/dev/null
   {
     echo "state=error"
-    echo "error=$*"
+    echo "error=$code"
+    echo "errorText=$*"
   } >"$STATE" 2>/dev/null
   chmod 644 "$STATE" 2>/dev/null
   exit 1
@@ -104,13 +113,20 @@ cmd_stop() {
   sleep 1
   for g in $(group_ifaces); do $IW dev "$g" del 2>/dev/null; done
 
-  local dev restore
+  local dev restore conn
   dev=$(sed -n 's/^device=//p' "$STATE" 2>/dev/null)
   restore=$(sed -n 's/^radio_was=//p' "$STATE" 2>/dev/null)
-  [ -n "$dev" ] && nmcli device set "$dev" managed yes 2>/dev/null
-  # Put the radio back exactly as it was found. A box whose owner keeps wifi off
-  # - to leave the shared antenna to Bluetooth - must not silently gain wifi
-  # because someone mirrored a phone once.
+  conn=$(sed -n 's/^restore_conn=//p' "$STATE" 2>/dev/null)
+  if [ -n "$dev" ]; then
+    nmcli device set "$dev" managed yes 2>/dev/null
+    nmcli device set "$dev" autoconnect yes 2>/dev/null
+  fi
+  # Back onto the network it was on, by name. Only then is the radio state put
+  # back: a box whose owner keeps wifi off - to leave the shared antenna to
+  # Bluetooth - must not silently gain wifi because someone mirrored once.
+  if [ -n "$conn" ]; then
+    nmcli connection up id "$conn" 2>/dev/null || nmcli device connect "$dev" 2>/dev/null
+  fi
   [ "$restore" = "off" ] && nmcli radio wifi off 2>/dev/null
   rm -f "$CONF" "$PIDFILE" "$DNSMASQ_PID"
   # A refusal recorded by die() has to survive this. The unit runs ExecStopPost on
@@ -131,19 +147,25 @@ cmd_start() {
     1) freq=2412 ;;
     6) freq=2437 ;;
     11) freq=2462 ;;
-    *) die "channel must be 1, 6 or 11 - a source only discovers a sink there" ;;
+    *) die bad-channel "channel must be 1, 6 or 11 - a source only discovers a sink there" ;;
   esac
 
   local dev
   dev=$(wifi_device)
-  [ -n "$dev" ] || die "no wifi device"
+  [ -n "$dev" ] || die no-wifi "no wifi device on this box"
 
   local radio_was
   radio_was=$(nmcli radio wifi 2>/dev/null)
   [ "$radio_was" = "enabled" ] && radio_was=on || radio_was=off
 
+  # If the radio is the box's only way out, mirroring costs it the network. Note
+  # WHICH connection, so the same one comes back - "the best autoconnect profile"
+  # is not the same promise on a box that knows several networks.
+  local offline=0 restore_conn=""
   if radio_carries_the_network "$dev"; then
-    die "the wifi radio is carrying this box's network; mirroring needs it free (use a wired connection, or a second wifi adapter)"
+    offline=1
+    restore_conn=$(nmcli -t -f NAME,DEVICE connection show --active 2>/dev/null |
+      awk -F: -v d="$dev" '$2 == d {print $1; exit}')
   fi
 
   mkdir -p "$STATE_DIR"
@@ -179,22 +201,22 @@ max_num_sta=1
 EOF
 
   $WPA_SUPPLICANT -B -Dnl80211 -i "$dev" -c "$CONF" -P "$PIDFILE" -f "$STATE_DIR/wpa_supplicant.log" -t ||
-    die "wpa_supplicant would not start"
+    die supplicant "wpa_supplicant would not start"
   sleep 2
 
   local W="$WPA_CLI -p $CTRL -i $dev"
-  $W set wifi_display 1 >/dev/null || die "this wpa_supplicant has no Wi-Fi Display support"
+  $W set wifi_display 1 >/dev/null || die no-wfd "this wpa_supplicant has no Wi-Fi Display support"
   # WFD Device Information: 0x0011 = primary sink, session available; 0x1c44 is
   # the RTSP port (7236) and 0x00c8 the throughput we claim, in Mbps.
   $W wfd_subelem_set 0 000600111c4400c8 >/dev/null
-  $W p2p_group_add "freq=$freq" >/dev/null || die "could not create the group (is another one still up?)"
+  $W p2p_group_add "freq=$freq" >/dev/null || die group "could not create the group (is another one still up?)"
   sleep 4
 
   local grp
   grp=$(group_ifaces | head -1)
-  [ -n "$grp" ] || die "no group interface appeared"
+  [ -n "$grp" ] || die group "no group interface appeared"
   if [ "$(cat "/sys/class/net/$grp/operstate" 2>/dev/null)" != "up" ]; then
-    die "the group came up and was torn down again - see $STATE_DIR/wpa_supplicant.log"
+    die group "the group came up and was torn down again - see $STATE_DIR/wpa_supplicant.log"
   fi
 
   # Keep answering discovery while the group runs, or we are only findable in the
@@ -211,7 +233,7 @@ EOF
     --dhcp-range="$POOL_FROM,$POOL_TO,255.255.255.0,12h" \
     --dhcp-option=3,"$SELF_IP" --dhcp-option=6,"$SELF_IP" \
     --dhcp-leasefile="$LEASES" --log-dhcp --log-facility="$DNSMASQ_LOG" \
-    --pid-file="$DNSMASQ_PID" || die "dnsmasq would not start"
+    --pid-file="$DNSMASQ_PID" || die dhcp "dnsmasq would not start"
 
   {
     echo "state=running"
@@ -222,6 +244,8 @@ EOF
     echo "channel=$channel"
     echo "leases=$LEASES"
     echo "radio_was=$radio_was"
+    echo "offline=$offline"
+    echo "restore_conn=$restore_conn"
     echo "ssid=$($IW dev "$grp" info 2>/dev/null | awk '/ssid/{print $2}')"
   } >"$STATE"
   chmod 644 "$STATE"
@@ -231,7 +255,7 @@ EOF
 # The push button has a two-minute walk time, so whoever is waiting for a phone
 # has to be able to re-open it without restarting the group.
 cmd_accept() {
-  [ -f "$STATE" ] || die "not running"
+  [ -f "$STATE" ] || die not-running "not running"
   local grp
   grp=$(sed -n 's/^iface=//p' "$STATE")
   $WPA_CLI -p "$CTRL" -i "$grp" wps_pbc >/dev/null || die "could not open the push button"
@@ -246,5 +270,5 @@ case "${1:-}" in
   stop) cmd_stop ;;
   status) cmd_status ;;
   accept) cmd_accept ;;
-  *) die "usage: tvbox-miracast start <device-name> [channel] | stop | status | accept" ;;
+  *) die usage "usage: tvbox-miracast start <device-name> [channel] | stop | status | accept" ;;
 esac
