@@ -25,9 +25,11 @@ export interface TvNotification {
 // the launcher with the #settings hash instead (App.tsx handles both).
 // "typing" is not a view: it opens the typing screen over whatever is on screen
 // (the shell pushes it when a text field takes focus in an app), and the shell
-// pushes "home" when that session ends.
+// pushes "home" when that session ends. "mirroring" works the same way and for
+// the same reason - the shell knows whether frames are still arriving from a
+// phone, and the screen must follow that rather than guess.
 export interface TvNav {
-  dest: "home" | "settings" | "typing";
+  dest: "home" | "settings" | "typing" | "mirroring";
 }
 
 export interface TvboxBridge {

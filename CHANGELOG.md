@@ -5,6 +5,39 @@ updates). `scripts/make-release.sh` lifts the current version's `hu`/`en`
 blocks into the OTA feed's `notes` - keep both languages, keep it short, and
 write for the person on the couch (what changes for THEM), not for developers.
 
+## 2.2.0
+
+### hu
+
+- **A telefonod képe a TV-n.** Beállítások → Hálózat → Képernyőtükrözés: indítsd
+  el, majd a telefonon válaszd ki a boxot a tükrözés (Samsungon Smart View)
+  menüben. Nem kell hozzá app, PIN vagy fiók. Tükrözés közben a Vissza gombbal
+  állíthatod le.
+- A telefon közvetlenül a boxhoz csatlakozik, ezért a box wifi rádiója a
+  tükrözés idejére vevővé alakul. **Ha a box wifin van, addig offline lesz** - a
+  képernyő előre szól, és leállításkor magától visszacsatlakozik ugyanarra a
+  hálózatra. Vezetékes boxon ez a kérdés fel sem merül.
+- Ha két percen belül nem csatlakozik telefon, a box magától leáll és visszaadja
+  a rádiót.
+
+> **Frissítéssel érkező boxon a tükrözés nem kapcsol be** (rendszerbeállítás kell
+> hozzá, amit a frissítés nem telepíthet); friss telepítésű boxon megy.
+
+### en
+
+- **Your phone's screen on the TV.** Settings → Network → Screen mirroring: start
+  it, then pick the box in your phone's cast menu (Smart View on Samsung). No app,
+  no PIN, no account. Press Back while mirroring to stop.
+- The phone connects to the box directly, so the box's wifi radio becomes a
+  receiver for the session. **If the box is on wifi it goes offline meanwhile** -
+  the screen says so first, and it reconnects to the same network when you stop.
+  A wired box never faces the question.
+- If no phone connects within two minutes the box stops on its own and gives the
+  radio back.
+
+> **Mirroring stays off on a box that arrived by update** (it needs a system
+> setting an update cannot install); a freshly installed box has it.
+
 ## 2.1.0
 
 ### hu

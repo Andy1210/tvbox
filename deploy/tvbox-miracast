@@ -1,0 +1,301 @@
+#!/bin/bash
+# Turn this box's wifi radio into a Wi-Fi Display group owner, and give it back.
+#
+# This is the ONE privileged half of screen mirroring, and it is deliberately
+# small: it creates the group and hands out an address, and knows nothing about
+# RTSP, the player, or what is being mirrored. The protocol runs unprivileged in
+# the shell (shell/miracast.js), which needs no rights at all - it dials TCP 7236
+# outbound and binds UDP 1028, both of which an ordinary user may do.
+#
+# Installed by provision.sh into /usr/local/sbin, like the diagnostics and safe
+# mode: a root unit must never exec a file out of the box user's home, because a
+# user app's plugin.js is trusted Node code running as that user.
+#
+# Usage:  tvbox-miracast start <device-name> [channel]
+#         tvbox-miracast stop
+#         tvbox-miracast status
+#
+# Four things here are not obvious, and each one cost a measurement:
+#
+#  1. THE RADIO MUST BE FREE WHILE MIRRORING. A group owner and an associated
+#     station do not coexist on the Broadcom part in the Pi - the group comes up
+#     and tears itself down inside the same second. On a box with no other way
+#     to the network this takes the wifi DOWN for the length of the session and
+#     puts it back afterwards, on the same connection it was on: while someone
+#     is watching their phone on the TV the box has no use for the network, and
+#     refusing outright would make mirroring impossible on a wifi-only box for
+#     no gain. The unit's RuntimeMaxSec is the backstop for a session nobody
+#     ends, because a box left offline cannot be fixed remotely.
+#  2. NETWORKMANAGER TEARS DOWN A GROUP IT DID NOT CREATE, the instant the group
+#     registers on D-Bus. Hence our own wpa_supplicant on an interface NM has
+#     been told to stop managing. Marking only the p2p-* interfaces unmanaged is
+#     not enough - measured.
+#  3. THE GROUP MUST SIT ON A 2.4 GHz SOCIAL CHANNEL (1, 6 or 11). A source finds
+#     a sink by P2P device discovery on those channels; it does not scan for our
+#     SSID, so a group owner on 5 GHz is never probed and simply never appears.
+#  4. A LEFTOVER p2p-wlan0-N INTERFACE makes the next group creation fail with a
+#     bare "FAIL" - the radio allows exactly one. A group torn down by the driver
+#     leaves the netdev behind wpa_supplicant's back, so clear it first.
+set -u
+
+STATE_DIR=/run/tvbox-miracast
+STATE=$STATE_DIR/state
+CONF=$STATE_DIR/wpa_supplicant.conf
+CTRL=/run/wpa_supplicant_tvbox_miracast
+PIDFILE=$STATE_DIR/wpa_supplicant.pid
+DNSMASQ_PID=$STATE_DIR/dnsmasq.pid
+DNSMASQ_LOG=$STATE_DIR/dnsmasq.log
+LEASES=$STATE_DIR/leases
+
+# The P2P subnet. 192.168.49.0/24 is what Android's own Wi-Fi Direct uses, so a
+# phone is never surprised by it, and it is far from the ranges a home router
+# hands out.
+SELF_IP=192.168.49.1
+POOL_FROM=192.168.49.10
+POOL_TO=192.168.49.20
+
+WPA_CLI=/usr/sbin/wpa_cli
+WPA_SUPPLICANT=/usr/sbin/wpa_supplicant
+IW=/usr/sbin/iw
+DNSMASQ=/usr/sbin/dnsmasq
+
+# Leave the reason where the shell can read it, not only in the journal. A CODE
+# rather than a sentence: the launcher translates it, and a raw English string
+# from a shell script would reach a Hungarian TV in English.
+# `systemctl start` answers a caller with its own boilerplate - "the control
+# process exited with error code" - and the one refusal that actually happens
+# here tells the viewer what to do about it ("use a wired connection"). On a TV
+# with only a remote, losing that sentence turns a fixable situation into a
+# button that does nothing.
+die() {
+  code=$1
+  shift
+  echo "tvbox-miracast: $code: $*" >&2
+  mkdir -p "$STATE_DIR" 2>/dev/null
+  {
+    echo "state=error"
+    echo "error=$code"
+    echo "errorText=$*"
+  } >"$STATE" 2>/dev/null
+  chmod 644 "$STATE" 2>/dev/null
+  exit 1
+}
+
+wifi_device() {
+  # Whichever interface NetworkManager calls wifi. Not hardcoded to wlan0: a box
+  # with a USB adapter is exactly the case where mirroring becomes possible, and
+  # there the internal radio is the free one.
+  nmcli -t -f DEVICE,TYPE device 2>/dev/null | awk -F: '$2=="wifi"{print $1; exit}'
+}
+
+group_ifaces() {
+  ip -br link 2>/dev/null | awk '/^p2p-/{print $1}'
+}
+
+radio_carries_the_network() {
+  # An IPv4 address on the wifi device means the box is reaching the world
+  # through it, and taking it away would cut the box off - including the ssh
+  # session of whoever is setting this up.
+  ip -4 addr show "$1" 2>/dev/null | grep -q "inet "
+}
+
+cmd_status() {
+  [ -f "$STATE" ] || {
+    echo "state=stopped"
+    return 0
+  }
+  cat "$STATE"
+}
+
+cmd_stop() {
+  systemctl stop tvbox-miracast-fuse.timer 2>/dev/null
+  if [ -f "$PIDFILE" ]; then kill "$(cat "$PIDFILE")" 2>/dev/null; fi
+  if [ -f "$DNSMASQ_PID" ]; then kill "$(cat "$DNSMASQ_PID")" 2>/dev/null; fi
+  sleep 1
+  for g in $(group_ifaces); do $IW dev "$g" del 2>/dev/null; done
+
+  local dev restore conn
+  dev=$(sed -n 's/^device=//p' "$STATE" 2>/dev/null)
+  restore=$(sed -n 's/^radio_was=//p' "$STATE" 2>/dev/null)
+  conn=$(sed -n 's/^restore_conn=//p' "$STATE" 2>/dev/null)
+  if [ -n "$dev" ]; then
+    nmcli device set "$dev" managed yes 2>/dev/null
+    nmcli device set "$dev" autoconnect yes 2>/dev/null
+  fi
+  # Back onto the network it was on, by name. Only then is the radio state put
+  # back: a box whose owner keeps wifi off - to leave the shared antenna to
+  # Bluetooth - must not silently gain wifi because someone mirrored once.
+  if [ -n "$conn" ]; then
+    nmcli connection up id "$conn" 2>/dev/null || nmcli device connect "$dev" 2>/dev/null
+  fi
+  [ "$restore" = "off" ] && nmcli radio wifi off 2>/dev/null
+  # The leases belong to the group that just ended: a new group is a new
+  # session, and a leftover address is only something for the next one's
+  # dialler to waste its time on.
+  rm -f "$CONF" "$PIDFILE" "$DNSMASQ_PID" "$LEASES"
+  # A refusal recorded by die() has to survive this. The unit runs ExecStopPost on
+  # failure, so a stop that always cleared the file would erase the explanation
+  # milliseconds after it was written, and the shell would only ever see systemd's
+  # boilerplate. The next successful start overwrites it.
+  if [ "$(sed -n 's/^state=//p' "$STATE" 2>/dev/null)" != "error" ]; then
+    rm -f "$STATE"
+    echo "state=stopped"
+  fi
+}
+
+cmd_start() {
+  # The name reaches a config file as `device_name=<name>`, and this runs as
+  # root: anything that could carry a newline through would be writing
+  # wpa_supplicant directives rather than a name. It comes from the hostname
+  # today, which cannot contain one - so this costs nothing and stops the next
+  # caller from being the interesting one.
+  local name
+  name=$(printf '%s' "${1:-tvbox}" | tr -cd 'A-Za-z0-9 ._-' | cut -c1-32)
+  [ -n "$name" ] || name=tvbox
+  local channel=${2:-6}
+  local freq
+  case "$channel" in
+    1) freq=2412 ;;
+    6) freq=2437 ;;
+    11) freq=2462 ;;
+    *) die bad-channel "channel must be 1, 6 or 11 - a source only discovers a sink there" ;;
+  esac
+
+  local dev
+  dev=$(wifi_device)
+  [ -n "$dev" ] || die no-wifi "no wifi device on this box"
+
+  local radio_was
+  radio_was=$(nmcli radio wifi 2>/dev/null)
+  [ "$radio_was" = "enabled" ] && radio_was=on || radio_was=off
+
+  # If the radio is the box's only way out, mirroring costs it the network. Note
+  # WHICH connection, so the same one comes back - "the best autoconnect profile"
+  # is not the same promise on a box that knows several networks.
+  local offline=0 restore_conn=""
+  if radio_carries_the_network "$dev"; then
+    offline=1
+    restore_conn=$(nmcli -t -f NAME,DEVICE connection show --active 2>/dev/null |
+      awk -F: -v d="$dev" '$2 == d {print $1; exit}')
+  fi
+
+  mkdir -p "$STATE_DIR"
+  chmod 755 "$STATE_DIR"
+  cmd_stop >/dev/null 2>&1 # idempotent: a half-finished previous run must not block this one
+
+  nmcli radio wifi on 2>/dev/null
+  nmcli device set "$dev" autoconnect no 2>/dev/null
+  nmcli device set "$dev" managed no 2>/dev/null
+  sleep 1
+  ip link set "$dev" up 2>/dev/null
+
+  cat >"$CONF" <<EOF
+ctrl_interface=$CTRL
+ctrl_interface_group=netdev
+update_config=0
+device_name=$name
+# WPS category 7-1 is "Display / Television", which is what a source expects a
+# sink to say it is.
+device_type=7-0050F204-1
+# A television has no keyboard. Offering anything else makes a phone ask the
+# viewer to type a PIN shown on the TV, which is a poor thing to do to someone
+# holding only a remote.
+config_methods=virtual_push_button
+p2p_go_intent=15
+p2p_listen_channel=$channel
+p2p_oper_channel=$channel
+# One screen, one phone. Mirroring is a single-viewer thing, and a group that
+# accepts a second station is a group a stranger can sit in while the owner is
+# already casting - the push button is open to whoever presses it, so the number
+# of seats is a real part of the guard, not a tidiness setting.
+max_num_sta=1
+EOF
+
+  $WPA_SUPPLICANT -B -Dnl80211 -i "$dev" -c "$CONF" -P "$PIDFILE" -f "$STATE_DIR/wpa_supplicant.log" -t ||
+    die supplicant "wpa_supplicant would not start"
+  sleep 2
+
+  local W="$WPA_CLI -p $CTRL -i $dev"
+  $W set wifi_display 1 >/dev/null || die no-wfd "this wpa_supplicant has no Wi-Fi Display support"
+  # WFD Device Information: 0x0011 = primary sink, session available; 0x1c44 is
+  # the RTSP port (7236) and 0x00c8 the throughput we claim, in Mbps.
+  $W wfd_subelem_set 0 000600111c4400c8 >/dev/null
+  $W p2p_group_add "freq=$freq" >/dev/null || die group "could not create the group (is another one still up?)"
+  sleep 4
+
+  local grp
+  grp=$(group_ifaces | head -1)
+  [ -n "$grp" ] || die group "no group interface appeared"
+  if [ "$(cat "/sys/class/net/$grp/operstate" 2>/dev/null)" != "up" ]; then
+    die group "the group came up and was torn down again - see $STATE_DIR/wpa_supplicant.log"
+  fi
+
+  # The GROUP interface's control socket is created root:root - the config's
+  # ctrl_interface_group applies to the interfaces the supplicant was STARTED
+  # with, not to one it creates later for a P2P group. Without this the shell
+  # cannot open the WPS push button at all, and a phone's pairing request is
+  # answered by nothing: the supplicant logs three requests and no button, which
+  # reads exactly like the phone being at fault. Every manual test missed it,
+  # because they all ran as root.
+  chgrp netdev "$CTRL/$grp" 2>/dev/null
+  chmod 770 "$CTRL/$grp" 2>/dev/null
+
+  # Keep answering discovery while the group runs, or we are only findable in the
+  # instant between beacons.
+  $W p2p_ext_listen 500 5000 >/dev/null 2>&1
+
+  ip addr replace "$SELF_IP/24" dev "$grp"
+  ip link set "$grp" up
+
+  # dnsmasq drops privileges after it starts, so a log left by a previous run is
+  # a file it can no longer open - and it exits rather than run without one.
+  rm -f "$DNSMASQ_LOG"
+  $DNSMASQ --interface="$grp" --bind-interfaces --except-interface=lo --port=0 \
+    --dhcp-range="$POOL_FROM,$POOL_TO,255.255.255.0,1h" \
+    --dhcp-option=3,"$SELF_IP" --dhcp-option=6,"$SELF_IP" \
+    --dhcp-leasefile="$LEASES" --log-dhcp --log-facility="$DNSMASQ_LOG" \
+    --pid-file="$DNSMASQ_PID" || die dhcp "dnsmasq would not start"
+
+  # The backstop for a session nobody ends. RuntimeMaxSec= cannot do it: systemd
+  # ignores that setting for a oneshot unit and says so in the journal, which is
+  # how this was noticed. A transient timer is honoured; stop cancels it.
+  systemd-run --unit=tvbox-miracast-fuse --on-active=3h \
+    systemctl stop tvbox-miracast.service >/dev/null 2>&1
+
+  {
+    echo "state=running"
+    echo "device=$dev"
+    echo "iface=$grp"
+    echo "name=$name"
+    echo "ip=$SELF_IP"
+    echo "channel=$channel"
+    echo "leases=$LEASES"
+    echo "radio_was=$radio_was"
+    echo "offline=$offline"
+    echo "restore_conn=$restore_conn"
+    echo "ssid=$($IW dev "$grp" info 2>/dev/null | awk '/ssid/{print $2}')"
+  } >"$STATE"
+  chmod 644 "$STATE"
+  cat "$STATE"
+}
+
+# The push button has a two-minute walk time, so whoever is waiting for a phone
+# has to be able to re-open it without restarting the group.
+cmd_accept() {
+  [ -f "$STATE" ] || die not-running "not running"
+  local grp
+  grp=$(sed -n 's/^iface=//p' "$STATE")
+  $WPA_CLI -p "$CTRL" -i "$grp" wps_pbc >/dev/null || die accept "could not open the push button"
+  echo "accepting"
+}
+
+case "${1:-}" in
+  start)
+    shift
+    cmd_start "$@"
+    ;;
+  stop) cmd_stop ;;
+  status) cmd_status ;;
+  accept) cmd_accept ;;
+  *) die usage "usage: tvbox-miracast start <device-name> [channel] | stop | status | accept" ;;
+esac

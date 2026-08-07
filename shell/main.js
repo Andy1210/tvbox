@@ -38,6 +38,7 @@ const nativeapp = require("./native"); // native (non-Electron) apps: RetroArch 
 const fileserver = require("./fileserver"); // the box's folders over WebDAV (rclone, no root)
 const browse = require("./browse"); // local + USB media: which roots exist, and listing one
 const shares = require("./shares"); // network shares (SMB over rclone, no root), mounted per config
+const miracast = require("./miracast"); // screen mirroring: the unprivileged half of a Wi-Fi Display sink
 const firetvir = require("./firetvir"); // Fire TV remote IR programming (venv deps + irdb codesets + BLE tool)
 const apps = require("./install"); // manifests + install-recipe runner (shared with the tvbox CLI)
 const store = require("./store"); // app-store registry client (manifest-only apps -> ~/.tvbox/apps)
@@ -217,6 +218,58 @@ function applyShares() {
   return r;
 }
 let rcloneInstalling = false;
+
+// Screen mirroring. The radio half is root's and runs behind a systemd unit
+// (miracast.js); what happens here is the other end of it - when frames start
+// arriving, the shared player is pointed at the FIFO they are being written to,
+// and when they stop it is let go again.
+//
+// Deliberately built where it is used rather than at module level: main.js has
+// been killed once by an object assembled out of consts declared further down
+// the file, and nothing in the test suite would catch it a second time.
+// Whether mirroring is what is on the screen right now. Not the same as "armed":
+// a sink can be up and waiting with a film still playing behind the Settings
+// page someone armed it from.
+let mirrorOnScreen = false;
+const mirroring = miracast.create({
+  log: (...a) => console.log("[miracast]", ...a),
+  onEvent: (ev) => {
+    if (ev.type === "streaming") {
+      // A mirrored phone is live: there is no seeking and nothing to resume, so
+      // it starts at zero and fullscreen like any other film. mpv reads the FIFO
+      // as an ordinary file, which is what keeps this out of player.js entirely.
+      ensureAudio(() => player.launch(ev.fifo, 0, false, null, null));
+      // Get the launcher out of the way. mpv plays BEHIND this window, so
+      // whatever page started mirroring - the Settings one, in practice - is
+      // drawn straight over the phone's screen until the page is dropped and
+      // the window made transparent.
+      pushNav("mirroring");
+      setVideoMode(true);
+      mirrorOnScreen = true;
+    }
+    // Only undo what mirroring actually did. `stopped` is emitted by every
+    // stop() - including a disarm from Settings and the pair-timeout - and
+    // `peer-gone` fires for a source that drops before a single frame arrives.
+    // Without this guard, disarming a sink nobody ever used would stop the mpv
+    // playing someone's film and throw the viewer off the page they were on.
+    if ((ev.type === "peer-gone" || ev.type === "stopped") && mirrorOnScreen) {
+      mirrorOnScreen = false;
+      player.stop();
+      setVideoMode(false);
+      pushNav("home");
+    }
+    if (ev.type === "error") console.warn("[miracast]", ev.message);
+  },
+});
+
+// Tell the launcher which full-screen surface to show. Safe before the window
+// exists (mirroring cannot be armed then) and safe after it has gone.
+function pushNav(dest) {
+  if (!win || win.isDestroyed()) return;
+  try {
+    win.webContents.send("tvbox-nav", { dest });
+  } catch (e) {}
+}
 
 function applyFileserver() {
   try {
@@ -566,6 +619,7 @@ function serve() {
     applyShares,
     sharesDeps,
     sharesStatus: () => shares.status(config.rawShares(), sharesDeps),
+    mirroring,
     foregroundApp: () => currentAppId,
     handlePower,
     installRclone: () => installRclone() || rcloneInstalling,
@@ -816,6 +870,19 @@ function serve() {
       return httpserver.jsonRes(res, {
         ...shares.status(config.rawShares(), sharesDeps),
         installing: rcloneInstalling,
+      });
+    }
+    // Screen mirroring. `available` is what greys the tile: a box whose radio is
+    // carrying its own network cannot do this at all, and saying so up front is
+    // better than a button that always fails.
+    if (p === "/tvbox/api/miracast") {
+      const st = mirroring.state();
+      return httpserver.jsonRes(res, {
+        armed: mirroring.isArmed(),
+        streaming: mirroring.isStreaming(),
+        name: st.name || "",
+        ssid: st.ssid || "",
+        channel: st.channel || "",
       });
     }
     if (p === "/tvbox/api/browse/sources") {

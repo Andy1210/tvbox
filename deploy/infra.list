@@ -41,5 +41,9 @@ deploy/tvbox-diag.service
 deploy/tvbox-diag.timer
 deploy/tvbox-safemode.service
 deploy/tvbox-safemode-screen.service
+# Screen mirroring: the privileged helper and its unit. Same root-side caveat as
+# the pair above - provision.sh installs them, OTA only carries them.
+deploy/tvbox-miracast
+deploy/tvbox-miracast.service
 deploy/greetd-tvbox-safemode.conf
 deploy/coredump-tvbox-runtimemax.conf

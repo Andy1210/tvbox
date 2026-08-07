@@ -52,6 +52,13 @@ function fakeCtx(over = {}) {
       supervisor: { names: () => [], spawn() {}, stop() {} },
     },
     sharesStatus: () => ({ rclone: true, shares: [] }),
+    mirroring: {
+      start: (cb) => cb && cb(null, { name: "tvbox" }),
+      stop: (cb) => cb && cb(null),
+      state: () => ({}),
+      isArmed: () => false,
+      isStreaming: () => false,
+    },
     foregroundApp: () => null,
     handlePower: () => {},
     installRclone: () => false,
@@ -104,6 +111,28 @@ function ctxKeysFrom(source, marker) {
   const body = source.slice(start, end === -1 ? source.indexOf("\n};", start) : end);
   return new Set([...body.matchAll(/^\s{2,4}([a-zA-Z_]+)[,:]/gm)].map((m) => m[1]));
 }
+
+test("arming screen mirroring reports a refusal instead of pretending it worked", () => {
+  // The helper answers with a CODE and the launcher translates it - a sentence
+  // from a shell script would reach a Hungarian TV in English. What matters here
+  // is that it travels at all: "nothing happened" is the worst possible answer on
+  // a device with only a remote.
+  const why = "radio-busy";
+  const res = fakeRes();
+  routes.post(
+    "/tvbox/api/miracast/start",
+    {},
+    res,
+    fakeCtx({ mirroring: { start: (cb) => cb(new Error(why)), stop: (cb) => cb() } }),
+  );
+  assert.strictEqual(jsonOf(res).ok, false);
+  assert.strictEqual(jsonOf(res).error, "radio-busy");
+
+  const ok = fakeRes();
+  routes.post("/tvbox/api/miracast/start", {}, ok, fakeCtx());
+  assert.strictEqual(jsonOf(ok).ok, true);
+  assert.strictEqual(jsonOf(ok).name, "tvbox", "the name a phone will look for comes back for the UI to show");
+});
 
 test("every ctx member a route uses is one the shell actually provides", () => {
   const used = new Set(
