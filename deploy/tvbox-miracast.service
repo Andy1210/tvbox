@@ -33,9 +33,7 @@ ExecStop=/usr/local/sbin/tvbox-miracast stop
 # be on it, and a box that cannot reach the network cannot be fixed remotely.
 ExecStopPost=-/usr/local/sbin/tvbox-miracast stop
 TimeoutStartSec=60
-# The backstop for a session nobody ends. On a box with no cable, mirroring costs
-# the network for as long as it runs, and if the shell dies mid-session nothing
-# else would give it back - a box that is offline cannot be fixed remotely. The
-# shell stops this itself in the ordinary case, within two minutes if no phone
-# ever connects.
-RuntimeMaxSec=3h
+# No RuntimeMaxSec here: systemd ignores it for a oneshot unit and logs that it
+# is doing so. The helper arms a transient timer instead, which is honoured, and
+# it matters - on a box with no cable mirroring costs the network for as long as
+# it runs, and a box left offline cannot be fixed remotely.

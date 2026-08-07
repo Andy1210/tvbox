@@ -38,6 +38,11 @@ export function MirroringPage() {
   const [net, setNet] = useState<WifiStatus | null>(null);
   const [unreachable, setUnreachable] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Arming takes five to eight seconds: the radio is handed over, a group owner
+  // is created and DHCP comes up. Without this the row says "Off" for all of it
+  // and there is no way to tell whether the press even registered - the one
+  // thing a remote must never leave in doubt.
+  const [pending, setPending] = useState<"start" | "stop" | null>(null);
   const busy = useRef(false);
 
   const load = useCallback(async () => {
@@ -67,8 +72,10 @@ export function MirroringPage() {
     busy.current = true;
     setError(null);
     const armed = !!st?.armed;
+    setPending(armed ? "stop" : "start");
     const r = armed ? await stopMirroring() : await startMirroring();
     busy.current = false;
+    setPending(null);
     if (!r.ok) setError(errText(t, r.error || "unknown"));
     invalidateSummary("mirroring");
     void load();
@@ -86,7 +93,13 @@ export function MirroringPage() {
 
   const armed = !!st?.armed;
   const streaming = !!st?.streaming;
-  const status = streaming ? t("mirroring.streaming") : armed ? t("mirroring.waiting") : t("mirroring.off");
+  const status = pending
+    ? t(pending === "start" ? "mirroring.starting" : "mirroring.stopping")
+    : streaming
+      ? t("mirroring.streaming")
+      : armed
+        ? t("mirroring.waiting")
+        : t("mirroring.off");
 
   return (
     <SettingsPage id="mirroring">
@@ -99,6 +112,7 @@ export function MirroringPage() {
           onEnter={() => void toggle()}
           autoFocus
           trailing="none"
+          disabled={!!pending}
         />
         {armed && st?.name ? <InfoRow label={t("mirroring.lookFor")} value={st.name} /> : null}
       </Group>

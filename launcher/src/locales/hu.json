@@ -656,7 +656,9 @@
       "unknown": "Nem sikerült elindítani a tükrözést."
     },
     "offlineWarning": "Ez a doboz wifin van, ezért a tükrözés alatt offline lesz. Leállításkor visszacsatlakozik ugyanarra a hálózatra.",
-    "offlineNow": "A doboz a tükrözés alatt offline, és leállításkor visszatér."
+    "offlineNow": "A doboz a tükrözés alatt offline, és leállításkor visszatér.",
+    "starting": "Indítás…",
+    "stopping": "Leállítás…"
   },
   "av": {
     "displayHint": "Felbontás és képfrissítés",

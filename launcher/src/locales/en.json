@@ -656,7 +656,9 @@
       "unknown": "Couldn't start mirroring."
     },
     "offlineWarning": "This box is on wifi, so it goes offline while mirroring. It reconnects to the same network when you stop.",
-    "offlineNow": "The box is offline while mirroring, and comes back when you stop."
+    "offlineNow": "The box is offline while mirroring, and comes back when you stop.",
+    "starting": "Starting…",
+    "stopping": "Stopping…"
   },
   "av": {
     "displayHint": "Resolution and refresh rate",

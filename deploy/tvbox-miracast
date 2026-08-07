@@ -108,6 +108,7 @@ cmd_status() {
 }
 
 cmd_stop() {
+  systemctl stop tvbox-miracast-fuse.timer 2>/dev/null
   if [ -f "$PIDFILE" ]; then kill "$(cat "$PIDFILE")" 2>/dev/null; fi
   if [ -f "$DNSMASQ_PID" ]; then kill "$(cat "$DNSMASQ_PID")" 2>/dev/null; fi
   sleep 1
@@ -219,6 +220,16 @@ EOF
     die group "the group came up and was torn down again - see $STATE_DIR/wpa_supplicant.log"
   fi
 
+  # The GROUP interface's control socket is created root:root - the config's
+  # ctrl_interface_group applies to the interfaces the supplicant was STARTED
+  # with, not to one it creates later for a P2P group. Without this the shell
+  # cannot open the WPS push button at all, and a phone's pairing request is
+  # answered by nothing: the supplicant logs three requests and no button, which
+  # reads exactly like the phone being at fault. Every manual test missed it,
+  # because they all ran as root.
+  chgrp netdev "$CTRL/$grp" 2>/dev/null
+  chmod 770 "$CTRL/$grp" 2>/dev/null
+
   # Keep answering discovery while the group runs, or we are only findable in the
   # instant between beacons.
   $W p2p_ext_listen 500 5000 >/dev/null 2>&1
@@ -234,6 +245,12 @@ EOF
     --dhcp-option=3,"$SELF_IP" --dhcp-option=6,"$SELF_IP" \
     --dhcp-leasefile="$LEASES" --log-dhcp --log-facility="$DNSMASQ_LOG" \
     --pid-file="$DNSMASQ_PID" || die dhcp "dnsmasq would not start"
+
+  # The backstop for a session nobody ends. RuntimeMaxSec= cannot do it: systemd
+  # ignores that setting for a oneshot unit and says so in the journal, which is
+  # how this was noticed. A transient timer is honoured; stop cancels it.
+  systemd-run --unit=tvbox-miracast-fuse --on-active=3h \
+    systemctl stop tvbox-miracast.service >/dev/null 2>&1
 
   {
     echo "state=running"

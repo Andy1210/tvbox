@@ -51,6 +51,12 @@ const PAIR_WINDOW_MS = 120000;
 const KEEPALIVE_MS = 10000;
 // The phone appears in the lease file a moment before it listens for RTSP.
 const DIAL_EVERY_MS = 1000;
+// How long a silent stream is still a stream. A phone that is switched off or
+// carried out of range does not close the RTSP connection - it just stops
+// sending, and waiting for TCP to work that out leaves a frozen frame on the TV
+// for a minute or more. Three seconds is far longer than any gap in a live
+// stream and short enough that stopping feels like a consequence of leaving.
+const STREAM_GONE_MS = 3000;
 
 /** The helper's state file: plain `key=value` lines, world-readable on purpose. */
 function parseState(text) {
@@ -116,6 +122,7 @@ function create(deps) {
   let dialing = null;
   let armed = false;
   let pairDeadline = 0;
+  let lastRtp = 0;
 
   const now = d.now || (() => Date.now());
 
@@ -163,11 +170,23 @@ function create(deps) {
     }
   }
 
-  /** Re-open the WPS push button. No root: the control socket is group netdev. */
+  /**
+   * Re-open the WPS push button. No root: the control socket is group netdev -
+   * but only because the helper chgrps the group's socket, which wpa_supplicant
+   * creates root:root whatever the config says.
+   *
+   * The failure is logged rather than discarded, and that is not tidiness. When
+   * this call silently failed, the symptom was a phone that found the box, asked
+   * to pair three times and got no answer - a bug that reads entirely as the
+   * phone's fault, with nothing anywhere to say otherwise.
+   */
   function accept() {
     const iface = state().iface;
-    if (!iface) return;
-    run(WPA_CLI, ["-p", CTRL, "-i", iface, "wps_pbc"], { timeout: 5000 }, () => {});
+    if (!iface) return log("no group interface to accept on");
+    run(WPA_CLI, ["-p", CTRL, "-i", iface, "wps_pbc"], { timeout: 5000 }, (err, out, errOut) => {
+      const said = String(errOut || out || "").trim();
+      if (err || /FAIL/.test(said)) log("could not open the push button:", said || (err && err.message));
+    });
   }
 
   // A FIFO rather than a file: mpv reads it as it is written, and nothing has to
@@ -189,6 +208,7 @@ function create(deps) {
     rtp.on("message", (packet) => {
       const payload = wfd.rtpPayload(packet);
       if (!payload || !fifo) return;
+      lastRtp = now();
       if (!bytes) {
         log("first frames arrived");
         emit({ type: "streaming", fifo: fifoPath });
@@ -295,6 +315,17 @@ function create(deps) {
           log("nobody paired within the window");
           emit({ type: "pair-timeout" });
           stop();
+        });
+        // Frames stopped: the phone is off, or out of range. Tear the session
+        // down ourselves rather than leave its last frame on the TV until TCP
+        // gives up on a peer that never said goodbye.
+        every(1000, () => {
+          if (!lastRtp || now() - lastRtp < STREAM_GONE_MS) return;
+          log("frames stopped arriving");
+          lastRtp = 0;
+          stopSession(); // clears `socket`, so its close handler stays quiet
+          emit({ type: "peer-gone" });
+          if (armed) openPairing();
         });
         every(DIAL_EVERY_MS, () => {
           if (socket || dialing) return;
