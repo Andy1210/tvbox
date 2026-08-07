@@ -42,3 +42,4 @@ deploy/tvbox-diag.timer
 deploy/tvbox-safemode.service
 deploy/tvbox-safemode-screen.service
 deploy/greetd-tvbox-safemode.conf
+deploy/coredump-tvbox-runtimemax.conf

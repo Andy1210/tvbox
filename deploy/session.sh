@@ -24,6 +24,21 @@ set -u
 # it is a Wayland session, and toolkits key off that.
 XDG_SESSION_TYPE=wayland
 export XDG_SESSION_TYPE
+
+# Keep a crashing app's core dump small enough not to freeze the session.
+#
+# The default filter (0x33) includes shared anonymous mappings, and an emulator's
+# fastmem arena is exactly that: guest memory mapped through a multi-gigabyte
+# window, which the kernel dumps whole however little of it is resident. The
+# Dolphin core measured ~14 GB down the coredump pipe, minutes of solid SD
+# writes, with the compositor and the shell blocked on IO behind it. Clearing
+# bit 1 leaves the stacks, heap and JIT pages - what a backtrace needs - and the
+# dump costs under a second.
+#
+# coredump_filter is inherited by every child and survives exec, bwrap included,
+# so `flatpak run` apps get it too. A kernel without the knob is not a reason to
+# stop the session.
+echo 0x31 >/proc/self/coredump_filter 2>/dev/null || true
 # Both ways, because the first can fail for reasons its presence does not cover (no
 # session bus yet, a manager that refuses the set), and a silent skip here is a
 # 25-second stall in every app later.
