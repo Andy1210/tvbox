@@ -42,7 +42,11 @@ function RailItem({
   return (
     <div
       ref={ref}
-      onClick={onSelect}
+      // Only while the rail is the thing you can navigate. It leaves the spatial-nav
+      // tree when a page is pushed, and a mouse - the box does support one - could
+      // otherwise switch category behind the open page, which is the state the whole
+      // "the rail stands down" rule exists to prevent.
+      onClick={enabled ? onSelect : undefined}
       className={[
         "flex items-center gap-[1vw] px-[1.3vw] py-[1.5vh] rounded-[1.2vh] min-h-[6.4vh]",
         // Three states, not two: focused (the D-pad is here), selected-but-not-
