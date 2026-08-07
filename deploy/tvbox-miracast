@@ -55,8 +55,20 @@ WPA_SUPPLICANT=/usr/sbin/wpa_supplicant
 IW=/usr/sbin/iw
 DNSMASQ=/usr/sbin/dnsmasq
 
+# Leave the reason where the shell can read it, not only in the journal.
+# `systemctl start` answers a caller with its own boilerplate - "the control
+# process exited with error code" - and the one refusal that actually happens
+# here tells the viewer what to do about it ("use a wired connection"). On a TV
+# with only a remote, losing that sentence turns a fixable situation into a
+# button that does nothing.
 die() {
   echo "tvbox-miracast: $*" >&2
+  mkdir -p "$STATE_DIR" 2>/dev/null
+  {
+    echo "state=error"
+    echo "error=$*"
+  } >"$STATE" 2>/dev/null
+  chmod 644 "$STATE" 2>/dev/null
   exit 1
 }
 
@@ -100,8 +112,15 @@ cmd_stop() {
   # - to leave the shared antenna to Bluetooth - must not silently gain wifi
   # because someone mirrored a phone once.
   [ "$restore" = "off" ] && nmcli radio wifi off 2>/dev/null
-  rm -f "$STATE" "$CONF" "$PIDFILE" "$DNSMASQ_PID"
-  echo "state=stopped"
+  rm -f "$CONF" "$PIDFILE" "$DNSMASQ_PID"
+  # A refusal recorded by die() has to survive this. The unit runs ExecStopPost on
+  # failure, so a stop that always cleared the file would erase the explanation
+  # milliseconds after it was written, and the shell would only ever see systemd's
+  # boilerplate. The next successful start overwrites it.
+  if [ "$(sed -n 's/^state=//p' "$STATE" 2>/dev/null)" != "error" ]; then
+    rm -f "$STATE"
+    echo "state=stopped"
+  fi
 }
 
 cmd_start() {

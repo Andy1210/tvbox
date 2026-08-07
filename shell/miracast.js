@@ -253,10 +253,15 @@ function create(deps) {
     if (armed) return done(null, state());
     run("systemctl", ["start", UNIT], { timeout: 45000 }, (err, out, errOut) => {
       if (err) {
-        const why = String(errOut || err.message || "").trim();
+        // `systemctl start` reports its own boilerplate - "the control process
+        // exited with error code" - and the helper's actual sentence goes to the
+        // journal. It leaves that sentence in the state file for exactly this
+        // reason: there is one refusal that really happens (the radio is carrying
+        // the box's network) and it tells the viewer what to do about it.
+        const why = state().error || String(errOut || err.message || "").trim();
         log("could not arm:", why);
         emit({ type: "error", message: why });
-        return done(err);
+        return done(new Error(why));
       }
       const s = state();
       if (s.state !== "running") {

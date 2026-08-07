@@ -64,6 +64,26 @@ test("a box whose radio is busy is refused, and the reason travels", () => {
   assert.match(events[0].message, /needs it free/, "and learns why, in the helper's own words");
 });
 
+test("the helper's own sentence beats systemd's boilerplate", () => {
+  // Measured on a box: `systemctl start` answers "the control process exited with
+  // error code" and nothing else - the useful sentence went to the journal. The
+  // helper leaves it in the state file, and that is the one that must reach the
+  // screen, because it is the one that says what to do.
+  const why = "the wifi radio is carrying this box's network; mirroring needs it free";
+  const events = [];
+  const m = miracast.create({
+    stateFile: stateFileWith(["state=error", "error=" + why]),
+    onEvent: (e) => events.push(e),
+    run: (cmd, args, opts, cb) => cb(new Error("Command failed: systemctl start tvbox-miracast.service"), "", ""),
+  });
+  let reported = null;
+  m.start((err) => {
+    reported = err;
+  });
+  assert.match(events[0].message, /carrying this box/);
+  assert.match(String(reported.message), /carrying this box/, "and the caller gets it too, not the exit code");
+});
+
 test("a helper that starts but produces no group is still a failure", () => {
   const events = [];
   const m = miracast.create({
