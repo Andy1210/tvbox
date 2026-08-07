@@ -234,8 +234,6 @@
     "none": "Nincs alkalmazás",
     "getMore": "„Továbbiak beszerzése” csempe",
     "uninstall": "Eltávolítás",
-    "uninstalled": "{name} eltávolítva",
-    "uninstallFailed": "{name} eltávolítása nem sikerült",
     "pairingHint": "Olvasd be a kódot a telefonoddal, majd használd a megnyíló oldalt.",
     "pairingCode": "Kód",
     "pairingDone": "Kész",

@@ -8,27 +8,27 @@ import { FocusButton } from "./FocusButton";
 import { Icon } from "./Icon";
 
 // Everything about ONE installed app, on its own screen: what it is, whether it is
-// on the home screen, the actions it declares for a phone, and removing it.
+// on the home screen, and any actions it declares for a phone.
 //
-// It exists because the list row could not hold it. Each app brings its own phone
-// actions (RetroArch alone declares three), so the row grew past the point where the
-// app's NAME still fit, and per-app version and update information is on the way.
-// A row can hold a name and a way in; the app's own actions belong behind it.
+// Two things deliberately do NOT live here. Removing an app is the store's - it is
+// where an app arrives, with its version and its changelog, and the button here
+// only ever appeared for an app with a downloaded bundle, which reads as a rule
+// nobody can learn. And reordering stays in the list, because moving an app is
+// about its neighbours.
 //
-// Reordering deliberately stays in the list: moving an app is about its neighbours,
-// so it belongs where the neighbours are visible.
+// An app's own settings belong in the app. `pairing` is what is left for the ones
+// that cannot have them there - a phone action for an app with no screen of its
+// own - and an app that HAS a screen should put them on it.
 export function AppManage({
   app,
   hidden,
   onToggleHidden,
-  onUninstall,
   onPairing,
   onExit,
 }: {
   app: AppManifest;
   hidden: boolean; // from the home-screen prefs store, not the manifest
   onToggleHidden: () => void;
-  onUninstall: () => void;
   onPairing: (kind: string, label: string) => void;
   onExit: () => void;
 }) {
@@ -99,11 +99,6 @@ export function AppManage({
           <FocusButton focusKey="manage-hide" onEnter={onToggleHidden} className={btn + " bg-white/10"}>
             {hidden ? t("appsettings.show") : t("appsettings.hide")}
           </FocusButton>
-          {app.installable && app.installed && (
-            <FocusButton focusKey="manage-remove" onEnter={onUninstall} className={btn + " bg-red-500/15 text-red-200"}>
-              {t("appsettings.uninstall")}
-            </FocusButton>
-          )}
           <FocusButton focusKey="manage-back" onEnter={onExit} className={btn + " bg-white/10"}>
             {t("appsettings.back")}
           </FocusButton>

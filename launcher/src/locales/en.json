@@ -234,8 +234,6 @@
     "none": "No apps",
     "getMore": "\"Get more apps\" tile",
     "uninstall": "Uninstall",
-    "uninstalled": "{name} removed",
-    "uninstallFailed": "Couldn't remove {name}",
     "pairingHint": "Scan the code with your phone, then use the page it opens.",
     "pairingCode": "Code",
     "pairingDone": "Done",
