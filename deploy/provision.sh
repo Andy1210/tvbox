@@ -546,6 +546,60 @@ if [ "$DIAG_OK" = 1 ]; then
     warn "could not start tvbox-diag.timer (it will start at the next boot)"
 fi
 
+echo "==> screen mirroring (Wi-Fi Display sink)"
+# Creating a Wi-Fi Direct group needs root - wpa_supplicant, an address on the
+# group interface, DHCP on port 67 - and root at runtime is exactly what nothing
+# in the shell may have. So the privileged part is this helper plus a unit, and
+# the shell reaches it the same way it reaches everything else root owns: a
+# polkit grant for a group it is in, never sudo.
+#
+# The unit is deliberately NOT enabled. A group owner beacons continuously and
+# holds a radio this board shares with Bluetooth, so it is armed on request and
+# given back afterwards.
+# Both halves or neither. Installing the helper without the unit leaves a box
+# that says mirroring is available and cannot start it - and a polkit rule
+# granting access to a unit that is not there.
+if [ -f "$HERE/tvbox-miracast" ] && [ -f "$HERE/tvbox-miracast.service" ] &&
+  install -m 755 -o root -g root "$HERE/tvbox-miracast" /usr/local/sbin/tvbox-miracast &&
+  install -m 644 "$HERE/tvbox-miracast.service" /etc/systemd/system/tvbox-miracast.service; then
+  # ONE unit, three verbs, one group. Not a blanket manage-units grant: that
+  # would hand the box user every service on the machine, including the ones
+  # that bring the session up.
+  cat > /etc/polkit-1/rules.d/52-tvbox-miracast.rules <<'RULES'
+// tvbox: let the box user arm and disarm screen mirroring.
+// Only this unit and only start/stop/restart - a general manage-units grant
+// would cover greetd, NetworkManager and everything else besides.
+// The shell has no logind session (Electron moves its main process into its own
+// app scope), so this matches on the GROUP, not on subject.active.
+polkit.addRule(function (action, subject) {
+  if (
+    action.id === "org.freedesktop.systemd1.manage-units" &&
+    action.lookup("unit") === "tvbox-miracast.service" &&
+    ["start", "stop", "restart"].indexOf(action.lookup("verb")) >= 0 &&
+    subject.isInGroup("netdev")
+  ) {
+    return polkit.Result.YES;
+  }
+});
+RULES
+  systemctl daemon-reload 2>/dev/null || true
+  # wpa_supplicant's control socket is group netdev, which is what lets the shell
+  # re-open the WPS push button without root. On Raspberry Pi OS the box user is
+  # already in netdev; say so rather than assume it.
+  if id -nG "$TVBOX_USER" 2>/dev/null | tr ' ' '\n' | grep -qx netdev; then
+    ok "screen mirroring installed (tvbox-miracast, armed on request)"
+  else
+    # A group added here does not reach the RUNNING session, and this one is not
+    # optional: without netdev the shell cannot open the pairing button, so a
+    # phone would find the box, ask to pair, and be answered by nothing at all.
+    usermod -aG netdev "$TVBOX_USER" 2>/dev/null &&
+      warn "screen mirroring installed; $TVBOX_USER added to netdev - REBOOT before mirroring will pair" ||
+      warn "screen mirroring installed but $TVBOX_USER is not in netdev - it will not be able to pair"
+  fi
+else
+  warn "tvbox-miracast helper or unit missing - screen mirroring unavailable"
+fi
+
 # A core dump is written by a root unit, so its time limit is root's to set. The
 # session's own coredump_filter (session.sh) is what keeps dumps small; this is
 # the ceiling for when it cannot, so the box can never be held for minutes by an

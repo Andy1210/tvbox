@@ -630,7 +630,36 @@
     "wifiHint": "A hálózat, amin a box van",
     "fileserverHint": "A box mappái számítógépről",
     "mqttHint": "Most játszott tartalom, parancsok és értesítések MQTT-n",
-    "sharesHint": "NAS mint forrás, hogy a filmek a hálózaton lehessenek"
+    "sharesHint": "NAS mint forrás, hogy a filmek a hálózaton lehessenek",
+    "mirroringHint": "A telefon képernyője a TV-n"
+  },
+  "mirroring": {
+    "title": "Képernyőtükrözés",
+    "start": "Tükrözés indítása",
+    "stop": "Tükrözés leállítása",
+    "startHint": "Utána válaszd ki ezt a dobozt a telefonon",
+    "stopHint": "Visszaadja a wifi rádiót",
+    "off": "Ki",
+    "waiting": "Várakozás telefonra",
+    "streaming": "Tükrözés",
+    "lookFor": "Ezt keresd",
+    "retry": "Újra",
+    "note": "A telefon képernyőjét mutatja a TV-n. A telefon közvetlenül a dobozhoz csatlakozik wifin, nem a routeren keresztül, ezért a doboz rádiója vevőként működik, amíg használod.",
+    "armedNote": "Nyisd meg a telefonon a tükrözés vagy Smart View menüt, és válaszd ezt a dobozt. PIN nem kell. Ha két percen belül senki nem csatlakozik, a doboz magától leáll.",
+    "err": {
+      "radio-busy": "A wifi rádió foglalt. Próbáld újra egy pillanat múlva.",
+      "no-wifi": "Ebben a dobozban nincs wifi adapter.",
+      "no-wfd": "A doboz wifi szoftvere nem támogatja a Wi-Fi Displayt.",
+      "group": "Nem sikerült a wifi rádiót vevőként beállítani.",
+      "dhcp": "Nem sikerült címet adni a telefonnak.",
+      "supplicant": "A wifi szolgáltatás nem indult el.",
+      "unknown": "Nem sikerült elindítani a tükrözést."
+    },
+    "offlineWarning": "Ez a doboz wifin van, ezért a tükrözés alatt offline lesz. Leállításkor visszacsatlakozik ugyanarra a hálózatra.",
+    "offlineNow": "A doboz a tükrözés alatt offline, és leállításkor visszatér.",
+    "starting": "Indítás…",
+    "stopping": "Leállítás…",
+    "overlayHint": "A Vissza gombbal állíthatod le a tükrözést"
   },
   "av": {
     "displayHint": "Felbontás és képfrissítés",
