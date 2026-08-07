@@ -24,9 +24,11 @@ The page warns before you start; it does not refuse, because while someone is
 watching their phone on the TV the box has no use for the network.
 
 Two things make that safe to do. The radio state is restored as it was found, so
-a box whose owner keeps wifi off does not silently gain it. And the unit carries
-`RuntimeMaxSec`, because a session nobody ends would leave a box offline with no
-way to reach it.
+a box whose owner keeps wifi off does not silently gain it. And the helper arms a
+three-hour `tvbox-miracast-fuse.timer` that stops the unit, because a session
+nobody ends would leave a box offline with no way to reach it. (`RuntimeMaxSec=`
+cannot do that job: systemd ignores it for a `oneshot` unit and logs that it is
+doing so.)
 
 **A phone that still speaks Miracast.** Samsung does (Smart View). Pixels do not -
 Google dropped it in favour of Cast, which cannot be implemented without a
@@ -38,7 +40,7 @@ LAN.
 
 Two halves, split along the privilege line:
 
-```
+```text
 Settings page ─POST /tvbox/api/miracast/start─→ shell/miracast.js
                                                     │
               systemctl start tvbox-miracast.service│   (polkit: netdev, one unit, three verbs)

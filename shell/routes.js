@@ -157,7 +157,11 @@ function post(p, data, res, ctx) {
     );
   }
   if (p === "/tvbox/api/miracast/stop") {
-    return ctx.mirroring.stop(() => httpserver.jsonRes(res, { ok: true }));
+    // A stop that failed leaves the radio taken and the box possibly offline,
+    // which is the last thing to report as success.
+    return ctx.mirroring.stop((err) =>
+      httpserver.jsonRes(res, err ? { ok: false, error: String((err && err.message) || err) } : { ok: true }),
+    );
   }
   if (p === "/tvbox/api/nav") {
     // Any navigation ends a typing session: with ctx.foregroundApp() === null (the typing

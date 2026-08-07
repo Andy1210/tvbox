@@ -22,6 +22,7 @@
 const fs = require("fs");
 const net = require("net");
 const dgram = require("dgram");
+const os = require("os");
 const path = require("path");
 const { execFile } = require("child_process");
 
@@ -34,7 +35,12 @@ const UNIT = "tvbox-miracast.service";
 const WPA_CLI = "/usr/sbin/wpa_cli";
 const RTSP_PORT = 7236;
 const RTP_PORT = 1028;
-const FIFO = "/tmp/tvbox-miracast.ts";
+// The pipe carries a live picture of someone's phone, so it does not belong in
+// /tmp, where any local account can read it - or pre-create the path as a
+// symlink and have us write through it. The per-user runtime directory is 0700
+// and cleaned up with the session; ~/.tvbox is the fallback for a process that
+// somehow has no XDG_RUNTIME_DIR.
+const FIFO = path.join(process.env.XDG_RUNTIME_DIR || path.join(os.homedir(), ".tvbox"), "tvbox-miracast.ts");
 
 // How often to re-open the push button, and for how long in total.
 //
@@ -57,6 +63,10 @@ const DIAL_EVERY_MS = 1000;
 // for a minute or more. Three seconds is far longer than any gap in a live
 // stream and short enough that stopping feels like a consequence of leaving.
 const STREAM_GONE_MS = 3000;
+// How much unread stream to hold before dropping. About a second at the
+// bitrates a phone mirrors at - enough to ride out a scheduling hiccup, far too
+// little to matter if the reader has gone away entirely.
+const MAX_QUEUED_BYTES = 256 * 1024;
 
 /** The helper's state file: plain `key=value` lines, world-readable on purpose. */
 function parseState(text) {
@@ -69,19 +79,28 @@ function parseState(text) {
 }
 
 /**
- * Addresses dnsmasq has leased, newest first.
+ * Addresses dnsmasq has leased and has not yet forgotten, newest first.
  *
- * A lease line is `<expiry> <mac> <ip> <hostname> <client-id>`. Newest first
- * matters: a phone that reconnects after a crash can hold two leases, and the
- * older one belongs to a socket that is no longer listening.
+ * A lease line is `<expiry> <mac> <ip> <hostname> <client-id>`, expiry being a
+ * unix time in seconds (0 = never). Newest first matters: a phone that
+ * reconnects can hold two leases, and the older one belongs to a socket nothing
+ * is listening on.
+ *
+ * **Expired rows must go.** A lease outlives the phone that held it, and this
+ * list answers two questions at once - whether anyone is here (which shuts the
+ * pairing button and stops the give-up timer) and who to dial. Keeping a dead
+ * lease therefore wedges the sink open forever while dialling an address nobody
+ * answers on, from the first ordinary disconnect onwards.
  */
-function peersFromLeases(text) {
+function peersFromLeases(text, nowSec) {
+  const now = Number.isFinite(nowSec) ? nowSec : Math.floor(Date.now() / 1000);
   const rows = [];
   for (const line of String(text || "").split("\n")) {
     const parts = line.trim().split(/\s+/);
     if (parts.length < 3) continue;
     const expiry = parseInt(parts[0], 10);
     if (!Number.isFinite(expiry)) continue;
+    if (expiry !== 0 && expiry <= now) continue;
     if (/^\d+\.\d+\.\d+\.\d+$/.test(parts[2])) rows.push({ expiry, ip: parts[2], name: parts[3] || "" });
   }
   return rows.sort((a, b) => b.expiry - a.expiry).map((r) => r.ip);
@@ -193,13 +212,16 @@ function create(deps) {
   // grow on the SD card while someone mirrors a two-hour film from their phone.
   function openFifo(cb) {
     try {
-      if (!fs.existsSync(fifoPath)) {
-        return run("mkfifo", [fifoPath], { timeout: 5000 }, (err) => cb(err));
-      }
+      const found = fs.existsSync(fifoPath) && fs.lstatSync(fifoPath);
+      // Something is there but it is not a pipe - a stale regular file, or a
+      // symlink pointing somewhere else entirely. Writing a live picture of
+      // someone's phone through it is not a risk worth taking, so replace it.
+      if (found && !found.isFIFO()) fs.unlinkSync(fifoPath);
+      else if (found) return cb(null);
     } catch (e) {
       return cb(e);
     }
-    cb(null);
+    run("mkfifo", [fifoPath], { timeout: 5000 }, (err) => cb(err));
   }
 
   function startRtp() {
@@ -214,9 +236,13 @@ function create(deps) {
         emit({ type: "streaming", fifo: fifoPath });
       }
       bytes += payload.length;
-      // A player that has gone away leaves us writing into a broken pipe; the
-      // stream is live, so dropping is right and buffering is not.
-      if (!fifo.write(payload)) fifo.emit("drain");
+      // This is live: a player that has gone away, or is reading slowly, must
+      // cost us frames rather than memory. So watch the queue and DROP when it
+      // is over the mark. (Emitting "drain" by hand, which is what this did
+      // first, tells the stream a full buffer is empty - which defeats
+      // backpressure entirely and lets it grow without bound.)
+      if (fifo.writableLength > MAX_QUEUED_BYTES) return;
+      fifo.write(payload);
     });
     rtp.on("error", (err) => log("rtp:", err.message));
     rtp.bind(RTP_PORT);
@@ -237,7 +263,7 @@ function create(deps) {
     });
     s.on("data", (chunk) => {
       if (!session) return;
-      for (const out of session.feed(chunk.toString("binary"))) s.write(out);
+      for (const out of session.feed(chunk.toString("latin1"))) s.write(out);
       if (session.state.torndown) stopSession();
     });
     s.on("timeout", () => s.destroy());

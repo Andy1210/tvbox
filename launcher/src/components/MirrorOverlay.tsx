@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { useI18n } from "../lib/i18n";
+import { useBackspace } from "../lib/useBackspace";
 import { stopMirroring } from "../lib/api";
 
 // What is on screen while a phone is mirroring: as close to nothing as possible.
@@ -48,20 +49,14 @@ export function MirrorOverlay({ onActiveChange }: { onActiveChange?: (on: boolea
     return () => clearTimeout(timer);
   }, [active, hint]);
 
-  // Back ends the session. Captured on the window, because nothing here is
-  // focusable: a focusable element would take the D-pad away from a launcher
-  // that is about to come back, and there is nothing to move between anyway.
-  useEffect(() => {
-    if (!active) return;
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key !== "Backspace" && e.key !== "Escape" && e.key !== "GoBack") return;
-      e.preventDefault();
-      e.stopPropagation();
-      void stopMirroring();
-    };
-    window.addEventListener("keydown", onKey, true);
-    return () => window.removeEventListener("keydown", onKey, true);
-  }, [active]);
+  // Back ends the session, through the shared handler stack rather than a
+  // listener of this component's own: it already knows every key a remote calls
+  // Back (a CEC bridge sends Backspace, a Bluetooth remote BrowserBack/GoBack,
+  // some send Escape), and it fires only the top handler - so nothing else
+  // reacts to the same press while a phone is on screen.
+  useBackspace(() => {
+    void stopMirroring();
+  }, active);
 
   if (!active) return null;
 

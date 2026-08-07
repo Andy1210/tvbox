@@ -35,8 +35,22 @@ test("the newest lease is the one to dial", () => {
     "not a lease line",
     "1786135000 aa:bb:cc:dd:ee:ff not-an-ip Thing *",
   ].join("\n");
-  assert.deepStrictEqual(miracast.peersFromLeases(leases), ["192.168.49.14", "192.168.49.10"]);
-  assert.deepStrictEqual(miracast.peersFromLeases(""), []);
+  assert.deepStrictEqual(miracast.peersFromLeases(leases, 1786120000), ["192.168.49.14", "192.168.49.10"]);
+  assert.deepStrictEqual(miracast.peersFromLeases("", 1786120000), []);
+});
+
+test("a lease that has run out is not a phone", () => {
+  // This list answers two questions at once - is anyone here, and who to dial -
+  // so a dead lease shuts the pairing button forever AND keeps the dialler
+  // knocking on an address nobody answers. dnsmasq keeps a lease well past the
+  // phone that held it, so this starts at the first ordinary disconnect.
+  const rows = [
+    "1786100000 be:27:7a:0a:aa:5e 192.168.49.10 gone *", // expired
+    "1786200000 be:27:7a:0a:aa:5e 192.168.49.11 here *", // still valid
+    "0 aa:bb:cc:dd:ee:ff 192.168.49.12 forever *", // dnsmasq writes 0 for no expiry
+  ].join("\n");
+  assert.deepStrictEqual(miracast.peersFromLeases(rows, 1786150000), ["192.168.49.11", "192.168.49.12"]);
+  assert.deepStrictEqual(miracast.peersFromLeases(rows, 1786300000), ["192.168.49.12"], "only the endless one is left");
 });
 
 test("a failure to arm reaches the caller as a code, not as an exit status", () => {

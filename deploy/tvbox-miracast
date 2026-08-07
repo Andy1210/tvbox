@@ -141,7 +141,14 @@ cmd_stop() {
 }
 
 cmd_start() {
-  local name=${1:-tvbox}
+  # The name reaches a config file as `device_name=<name>`, and this runs as
+  # root: anything that could carry a newline through would be writing
+  # wpa_supplicant directives rather than a name. It comes from the hostname
+  # today, which cannot contain one - so this costs nothing and stops the next
+  # caller from being the interesting one.
+  local name
+  name=$(printf '%s' "${1:-tvbox}" | tr -cd 'A-Za-z0-9 ._-' | cut -c1-32)
+  [ -n "$name" ] || name=tvbox
   local channel=${2:-6}
   local freq
   case "$channel" in
@@ -275,7 +282,7 @@ cmd_accept() {
   [ -f "$STATE" ] || die not-running "not running"
   local grp
   grp=$(sed -n 's/^iface=//p' "$STATE")
-  $WPA_CLI -p "$CTRL" -i "$grp" wps_pbc >/dev/null || die "could not open the push button"
+  $WPA_CLI -p "$CTRL" -i "$grp" wps_pbc >/dev/null || die accept "could not open the push button"
   echo "accepting"
 }
 

@@ -556,10 +556,12 @@ echo "==> screen mirroring (Wi-Fi Display sink)"
 # The unit is deliberately NOT enabled. A group owner beacons continuously and
 # holds a radio this board shares with Bluetooth, so it is armed on request and
 # given back afterwards.
-if [ -f "$HERE/tvbox-miracast" ] && install -m 755 -o root -g root \
-  "$HERE/tvbox-miracast" /usr/local/sbin/tvbox-miracast; then
-  [ -f "$HERE/tvbox-miracast.service" ] &&
-    install -m 644 "$HERE/tvbox-miracast.service" /etc/systemd/system/tvbox-miracast.service
+# Both halves or neither. Installing the helper without the unit leaves a box
+# that says mirroring is available and cannot start it - and a polkit rule
+# granting access to a unit that is not there.
+if [ -f "$HERE/tvbox-miracast" ] && [ -f "$HERE/tvbox-miracast.service" ] &&
+  install -m 755 -o root -g root "$HERE/tvbox-miracast" /usr/local/sbin/tvbox-miracast &&
+  install -m 644 "$HERE/tvbox-miracast.service" /etc/systemd/system/tvbox-miracast.service; then
   # ONE unit, three verbs, one group. Not a blanket manage-units grant: that
   # would hand the box user every service on the machine, including the ones
   # that bring the session up.
@@ -592,7 +594,7 @@ RULES
       warn "screen mirroring installed but $TVBOX_USER is not in netdev - it will not be able to pair"
   fi
 else
-  warn "tvbox-miracast missing - screen mirroring unavailable"
+  warn "tvbox-miracast helper or unit missing - screen mirroring unavailable"
 fi
 
 # A core dump is written by a root unit, so its time limit is root's to set. The

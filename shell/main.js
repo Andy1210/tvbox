@@ -227,6 +227,10 @@ let rcloneInstalling = false;
 // Deliberately built where it is used rather than at module level: main.js has
 // been killed once by an object assembled out of consts declared further down
 // the file, and nothing in the test suite would catch it a second time.
+// Whether mirroring is what is on the screen right now. Not the same as "armed":
+// a sink can be up and waiting with a film still playing behind the Settings
+// page someone armed it from.
+let mirrorOnScreen = false;
 const mirroring = miracast.create({
   log: (...a) => console.log("[miracast]", ...a),
   onEvent: (ev) => {
@@ -241,8 +245,15 @@ const mirroring = miracast.create({
       // the window made transparent.
       pushNav("mirroring");
       setVideoMode(true);
+      mirrorOnScreen = true;
     }
-    if (ev.type === "peer-gone" || ev.type === "stopped") {
+    // Only undo what mirroring actually did. `stopped` is emitted by every
+    // stop() - including a disarm from Settings and the pair-timeout - and
+    // `peer-gone` fires for a source that drops before a single frame arrives.
+    // Without this guard, disarming a sink nobody ever used would stop the mpv
+    // playing someone's film and throw the viewer off the page they were on.
+    if ((ev.type === "peer-gone" || ev.type === "stopped") && mirrorOnScreen) {
+      mirrorOnScreen = false;
       player.stop();
       setVideoMode(false);
       pushNav("home");
