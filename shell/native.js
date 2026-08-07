@@ -90,8 +90,13 @@ function parseSpec(nat) {
   return null;
 }
 
-// A per-app log next to the shell's own, opened truncating. Returns a raw fd for
-// spawn's stdio, or null when it cannot be opened (never a reason not to launch).
+// A per-app log next to the shell's own, opened truncating, with the previous
+// run kept beside it as `.log.1`. Returns a raw fd for spawn's stdio, or null
+// when it cannot be opened (never a reason not to launch).
+//
+// One generation, because an app that dies is normally launched again before
+// anyone looks: truncate-on-open alone leaves the healthy relaunch and loses the
+// run that failed. Two files still cannot grow without bound.
 //
 // The id is a manifest id, which the validator constrains to APP_ID - an id that
 // does not match is refused rather than reshaped into some other file's name. The
@@ -103,8 +108,12 @@ function logFor(id) {
     console.warn("[native] no log file: unexpected app id", id);
     return null;
   }
+  const p = path.join(os.homedir(), ".tvbox", "native-" + id + ".log");
   try {
-    const fd = fs.openSync(path.join(os.homedir(), ".tvbox", "native-" + id + ".log"), "w", 0o600);
+    fs.renameSync(p, p + ".1");
+  } catch (e) {} // no previous run, or a rotation we can do nothing about
+  try {
+    const fd = fs.openSync(p, "w", 0o600);
     fs.fchmodSync(fd, 0o600);
     return fd;
   } catch (e) {
@@ -144,8 +153,7 @@ function start(m, extraArgs) {
   // Keep the app's own output. A TV has no terminal to run it from, so without
   // this an app that explains itself only on stdout (RetroArch prints the URL and
   // the reason when a download fails, while the screen says only "failed") is
-  // undiagnosable on a real box. Truncated per launch: what matters is the run
-  // that just went wrong, and this must not grow forever.
+  // undiagnosable on a real box. This run and the one before it, no more.
   const log = logFor(m.id);
   let child;
   try {

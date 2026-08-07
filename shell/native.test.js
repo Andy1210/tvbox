@@ -12,9 +12,12 @@ const native = require("./native");
 // Run a real (harmless) native app under a throwaway HOME and hand back what
 // landed in its ~/.tvbox. HOME is honoured by os.homedir() on POSIX, and native.js
 // resolves the log path per launch, so this needs no module reloading.
-async function launchUnderTempHome(id) {
-  const home = fs.mkdtempSync(path.join(os.tmpdir(), "tvbox-native-log-"));
-  fs.mkdirSync(path.join(home, ".tvbox"));
+// Pass a home back in to launch a second time into the same one.
+async function launchUnderTempHome(id, home) {
+  if (!home) {
+    home = fs.mkdtempSync(path.join(os.tmpdir(), "tvbox-native-log-"));
+    fs.mkdirSync(path.join(home, ".tvbox"));
+  }
   const prev = process.env.HOME;
   process.env.HOME = home;
   try {
@@ -157,6 +160,19 @@ test("a native app's log is created owner-only", async () => {
   assert.deepStrictEqual(logs, ["native-sleeper.log"]);
   const st = fs.statSync(path.join(home, ".tvbox", "native-sleeper.log"));
   assert.strictEqual(st.mode & 0o777, 0o600, "mode was " + (st.mode & 0o777).toString(8));
+  fs.rmSync(home, { recursive: true, force: true });
+});
+
+// A crash is reported after the box is back, i.e. after the next launch has
+// already opened the log truncating. One kept generation is what leaves anything
+// to read about the run that actually failed.
+test("the run before this one is kept as .log.1", async () => {
+  const { home } = await launchUnderTempHome("sleeper");
+  const log = path.join(home, ".tvbox", "native-sleeper.log");
+  fs.writeFileSync(log, "the run that crashed\n");
+  const { logs } = await launchUnderTempHome("sleeper", home);
+  assert.deepStrictEqual(logs.sort(), ["native-sleeper.log", "native-sleeper.log.1"]);
+  assert.strictEqual(fs.readFileSync(log + ".1", "utf8"), "the run that crashed\n");
   fs.rmSync(home, { recursive: true, force: true });
 });
 

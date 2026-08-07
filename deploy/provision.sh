@@ -508,6 +508,21 @@ if [ "$DIAG_OK" = 1 ]; then
     warn "could not start tvbox-diag.timer (it will start at the next boot)"
 fi
 
+# A core dump is written by a root unit, so its time limit is root's to set. The
+# session's own coredump_filter (session.sh) is what keeps dumps small; this is
+# the ceiling for when it cannot, so the box can never be held for minutes by an
+# app that crashed. Reasons in the file itself.
+if [ -f "$HERE/coredump-tvbox-runtimemax.conf" ]; then
+  install -d /etc/systemd/system/systemd-coredump@.service.d
+  if install -m 644 "$HERE/coredump-tvbox-runtimemax.conf" \
+    /etc/systemd/system/systemd-coredump@.service.d/10-tvbox-runtime-max.conf; then
+    systemctl daemon-reload 2>/dev/null || true
+    ok "core dump time limit (20s) installed"
+  else
+    warn "could not install the core dump time limit"
+  fi
+fi
+
 echo "==> user-service lingering (CEC bridge starts at boot, before login)"
 loginctl enable-linger "$TVBOX_USER" 2>/dev/null && ok "linger enabled for $TVBOX_USER" || warn "enable-linger failed"
 

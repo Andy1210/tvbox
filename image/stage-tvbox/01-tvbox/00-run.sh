@@ -332,6 +332,11 @@ ln -sf ../tvbox-diag.timer \
 install -d "${ROOTFS_DIR}/etc/systemd/system/greetd.service.d"
 install -m 644 "${ROOTFS_DIR}${USER_HOME}/.tvbox/greetd-tvbox-safemode.conf" \
   "${ROOTFS_DIR}/etc/systemd/system/greetd.service.d/10-tvbox-safemode.conf"
+# The ceiling on how long a crashing app's core dump may hold the box. Root, like
+# the unit it patches; session.sh carries the user-space half.
+install -d "${ROOTFS_DIR}/etc/systemd/system/systemd-coredump@.service.d"
+install -m 644 "${ROOTFS_DIR}${USER_HOME}/.tvbox/coredump-tvbox-runtimemax.conf" \
+  "${ROOTFS_DIR}/etc/systemd/system/systemd-coredump@.service.d/10-tvbox-runtime-max.conf"
 
 # 2c) Headless provisioning WITHOUT custom.toml (which this image can't process).
 #     The account password is locked, so there's no way into a fresh box until
