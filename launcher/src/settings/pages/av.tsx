@@ -123,7 +123,7 @@ function OutputPage({ state }: { state: AudioState }) {
       value={state.override || ""}
       onPick={(sink) => {
         invalidateSummary("audio");
-        void setDefaultSink(sink);
+        return setDefaultSink(sink).then(() => undefined);
       }}
     />
   );
@@ -185,7 +185,7 @@ function SoundPage() {
             onStep={(d) => void bump(d)}
           />
         )}
-        {!state?.sinks.length && <InfoRow label={t("audio.none")} value="" />}
+        {state && !state.sinks.length && <InfoRow label={t("audio.none")} value="" />}
       </Group>
       <Group>
         <ToggleRow
@@ -220,7 +220,7 @@ function LanguagesPage() {
           subtitle={t(which === "audio" ? "audio.trackLangHint" : "audio.subLangHint")}
           options={options}
           value={which === "audio" ? audioLang : subLang}
-          onPick={(code) => void setPlayer(which === "audio" ? { audioLang: code } : { subLang: code })}
+          onPick={(code) => setPlayer(which === "audio" ? { audioLang: code } : { subLang: code })}
         />
       ),
     });

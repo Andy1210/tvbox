@@ -129,7 +129,7 @@ What the image gives you:
   HOSTNAME=living-room
   WIFI_SSID=MyNetwork
   WIFI_PASSWORD=secret        # omit for open
-  WIFI_COUNTRY=DE             # radio region; also on the TV (Settings → Network → Wi-Fi)
+  WIFI_COUNTRY=DE             # radio region; also on the TV (Settings → Network → Wi-Fi → Wi-Fi country)
   SUDO=true                   # passwordless sudo over SSH for power users
   SSH_AUTHORIZED_KEY=ssh-ed25519 AAAA... you@host
   SAFE_MODE=true              # boot with network + SSH but no TV session

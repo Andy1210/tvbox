@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useI18n } from "../../lib/i18n";
 import { fetchFileServer, saveFileServer, installRclone, type FileServerStatus } from "../../lib/api";
 import { SettingsPage } from "../SettingsPage";
@@ -26,6 +26,16 @@ import { invalidateSummary } from "../summary";
 // translated one - the name here is what to look for in a file manager.
 const RCLONE_POLL_MS = 2000;
 
+// The box's error codes are a moving set and `fileserver.err.` is a dynamic locale
+// prefix, so the parity test cannot catch a code with no sentence behind it.
+// translate() hands back the key it could not find, which on a TV reads as gibberish -
+// fall back to the generic one instead.
+function errText(t: (k: string) => string, code: string): string {
+  const key = "fileserver.err." + code;
+  const msg = t(key);
+  return msg === key ? t("fileserver.err.unknown") : msg;
+}
+
 // Self-contained on purpose (see PushedPage): it reads and writes the shared set
 // itself, because the page that opened it is unmounted while this one is up.
 export function FoldersPage() {
@@ -46,7 +56,13 @@ export function FoldersPage() {
 
   const folders = st?.folders || [];
   const candidates = st?.candidates || [];
+  const saving = useRef(false);
   const onToggle = async (id: string) => {
+    // One write at a time. Two presses in quick succession otherwise leave two in
+    // flight, and the first answer to come back replaces the state with a snapshot
+    // taken before the second press - so the row flips itself back.
+    if (saving.current) return;
+    saving.current = true;
     const next = folders.includes(id) ? folders.filter((x) => x !== id) : [...folders, id];
     setSt((s) => s && { ...s, folders: next }); // the row answers the press, not the round trip
     invalidateSummary("fileserver");
@@ -54,6 +70,7 @@ export function FoldersPage() {
     // The box refuses some of these - un-sharing the last folder while the server is
     // enabled is `no_folders`, a share it cannot build is `share_failed` - and it has a
     // sentence for each. Swallowing them left the row flipped and the server stopped.
+    saving.current = false;
     setError(r.ok ? null : r.error || "failed");
     if (r.status) setSt(r.status);
     else void load(); // the optimistic flip was not accepted; show what the box has
@@ -79,7 +96,7 @@ export function FoldersPage() {
       onBack={nav.pop}
       animate="push"
     >
-      {error && <Note tone="warn">{t("fileserver.err." + error)}</Note>}
+      {error && <Note tone="warn">{errText(t, error)}</Note>}
       {!candidates.length ? (
         <Note>{t("fileserver.noFolders")}</Note>
       ) : (
@@ -171,7 +188,7 @@ export function FileServerPage() {
   return (
     <SettingsPage id="fs" title={t("fileserver.title")} subtitle={t("fileserver.hint")} onBack={nav.pop} animate="push">
       <Note tone={st.running ? "accent" : "dim"}>{st.running ? t("fileserver.running") : t("fileserver.stopped")}</Note>
-      {error && <Note tone="warn">{t("fileserver.err." + error)}</Note>}
+      {error && <Note tone="warn">{errText(t, error)}</Note>}
 
       {!st.rclone && (
         <Group>

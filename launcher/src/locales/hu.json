@@ -291,7 +291,8 @@
     "groupDevice": "Eszköz",
     "groupNetwork": "Hálózat",
     "groupHealth": "Állapot",
-    "refresh": "Frissítés"
+    "refresh": "Frissítés",
+    "irdbNotice": "Contains/accesses irdb by Simon Peter and contributors, used under permission. For licensing details and for information on how to contribute to the database, see https://github.com/probonopd/irdb"
   },
   "aboutCredits": {
     "electron": "alkalmazásváz",
@@ -611,7 +612,8 @@
       "no_folders": "Válassz legalább egy mappát.",
       "rclone_missing": "Az rclone nincs telepítve.",
       "failed": "Nem sikerült.",
-      "share_failed": "Nem sikerült előkészíteni a megosztást (írási hiba)."
+      "share_failed": "Nem sikerült előkészíteni a megosztást (írási hiba).",
+      "unknown": "Ez nem sikerült."
     },
     "passClear": "Jelszó törlése",
     "passClearHint": "ezzel a kiszolgáló leáll",

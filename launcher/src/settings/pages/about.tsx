@@ -39,11 +39,6 @@ const CREDITS: { name: string; what: string; url: string; license: string }[] = 
   { name: "Tailwind CSS", what: "aboutCredits.tailwind", url: "tailwindcss.com", license: "MIT" },
 ];
 
-// Verbatim per irdb LICENSE.md clause 2 - keep as-is.
-const IRDB_NOTICE =
-  "Contains/accesses irdb by Simon Peter and contributors, used under permission. " +
-  "For licensing details and for information on how to contribute to the database, see https://github.com/probonopd/irdb";
-
 function CreditsPage() {
   const { t } = useI18n();
   const nav = useSettingsNav();
@@ -62,7 +57,10 @@ function CreditsPage() {
           </li>
         ))}
       </ul>
-      <p className="text-[1.7vh] text-fg-dim mt-[2vh] max-w-[56vw] break-words">{IRDB_NOTICE}</p>
+      {/* Required verbatim by irdb LICENSE.md clause 2, so the key holds the same
+          English text in both locales - but it is still a launcher string, and those
+          go through t() and exist in both files. */}
+      <p className="text-[1.7vh] text-fg-dim mt-[2vh] max-w-[56vw] break-words">{t("about.irdbNotice")}</p>
     </SettingsPage>
   );
 }

@@ -133,8 +133,11 @@ if [ -f "$TVBOX/debug-port" ]; then
   rm -f "$TVBOX/debug-port"
   # Digits only, and a port this user can actually bind. 0 would make Chromium pick a
   # random one and report a port that is not the one it listens on.
+  # Digits only AND at most five of them: a longer run of digits passes the first
+  # test but overflows the integer comparison below, which exits 2 and leaves the
+  # value in place.
   case "$port" in
-    *[!0-9]* | "") port=9222 ;;
+    *[!0-9]* | "" | ??????*) port=9222 ;;
   esac
   if [ "$port" -lt 1024 ] || [ "$port" -gt 65535 ]; then port=9222; fi
   TVBOX_DEBUG_ARGS="--remote-debugging-port=$port"

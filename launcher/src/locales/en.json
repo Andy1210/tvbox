@@ -291,7 +291,8 @@
     "groupDevice": "Device",
     "groupNetwork": "Network",
     "groupHealth": "Health",
-    "refresh": "Refresh"
+    "refresh": "Refresh",
+    "irdbNotice": "Contains/accesses irdb by Simon Peter and contributors, used under permission. For licensing details and for information on how to contribute to the database, see https://github.com/probonopd/irdb"
   },
   "aboutCredits": {
     "electron": "app shell",
@@ -611,7 +612,8 @@
       "no_folders": "Pick at least one folder.",
       "rclone_missing": "rclone is not installed.",
       "failed": "That did not work.",
-      "share_failed": "Could not prepare the share (write error)."
+      "share_failed": "Could not prepare the share (write error).",
+      "unknown": "That did not work."
     },
     "passClear": "Clear password",
     "passClearHint": "this stops the server",

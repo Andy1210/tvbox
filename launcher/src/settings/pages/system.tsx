@@ -140,7 +140,7 @@ function RegionPage() {
                   title={t("region.hourFormat")}
                   options={["auto", "12", "24"].map((v) => ({ id: v, label: hourLabel(v) }))}
                   value={hourFormat}
-                  onPick={(v) => void setUi({ hourFormat: v as "auto" | "12" | "24" })}
+                  onPick={(v) => setUi({ hourFormat: v as "auto" | "12" | "24" })}
                 />
               ),
             })
@@ -421,9 +421,8 @@ export function SystemPane() {
   const region = useSummary("region", fetchRegion);
   const update = useSummary("update", fetchUpdateStatus);
   const pinSet = useConfigStore((s) => !!s.config?.parental.pinSet);
-  // Module-level, NOT state: this pane remounts on every move of the rail (selection
-  // follows focus), and a warning that vanishes because someone pressed Down is a
-  // warning nobody reads.
+  // Seeded from the module-level flag (see renamedTo / hostnameDeferred above), which
+  // is what survives this pane remounting on every move of the rail.
   const [deferred, setDeferred] = useState(hostnameDeferred);
   const hostname = renamedTo ?? info?.hostname ?? "";
   const langLabel = AVAILABLE_LOCALES.find((l) => l.id === locale)?.name || locale || DASH;

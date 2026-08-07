@@ -1,5 +1,5 @@
 import { type ReactNode } from "react";
-import { FocusContext, useFocusable } from "@noriginmedia/norigin-spatial-navigation";
+import { FocusContext, setFocus, useFocusable } from "@noriginmedia/norigin-spatial-navigation";
 import { useI18n } from "../lib/i18n";
 import { useFocusableItem } from "../lib/useFocusableItem";
 
@@ -46,7 +46,10 @@ function RailItem({
       // tree when a page is pushed, and a mouse - the box does support one - could
       // otherwise switch category behind the open page, which is the state the whole
       // "the rail stands down" rule exists to prevent.
-      onClick={enabled ? onSelect : undefined}
+      // Focus follows selection for the D-pad via onFocus; a pointer has to be told,
+      // or the ring stays on the category you were on and the next Down moves from
+      // there instead of from the one you just clicked.
+      onClick={enabled ? () => void setFocus("rail:" + cat.id) : undefined}
       className={[
         "flex items-center gap-[1vw] px-[1.3vw] py-[1.5vh] rounded-[1.2vh] min-h-[6.4vh]",
         // Three states, not two: focused (the D-pad is here), selected-but-not-
