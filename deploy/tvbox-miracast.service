@@ -1,0 +1,35 @@
+# tvbox: the wifi radio as a Wi-Fi Display sink (deploy/tvbox-miracast).
+#
+# SYSTEM unit, root, because creating a Wi-Fi Direct group means driving
+# wpa_supplicant, addressing an interface and serving DHCP on port 67. The
+# protocol half needs none of that and stays in the shell as the box user.
+#
+# NOT enabled: there is no [Install] section on purpose. A group owner beacons
+# continuously and holds a radio the box shares with Bluetooth, so mirroring is
+# armed when someone asks for it and given back when they stop - never at boot.
+# The shell starts and stops it through a polkit grant for the netdev group
+# (provision.sh), which is how the box user reaches root's side of anything here.
+[Unit]
+Description=tvbox: screen mirroring (Wi-Fi Display sink)
+# NetworkManager has to be up first: the helper asks it which device is the wifi
+# one, then takes that device out of its hands. Against a NetworkManager that is
+# still starting, both steps race.
+After=NetworkManager.service
+Wants=NetworkManager.service
+Conflicts=shutdown.target
+Before=shutdown.target
+
+[Service]
+Type=oneshot
+# The helper leaves wpa_supplicant and dnsmasq running and returns, so the unit
+# has to stay "active" for ExecStop to be the thing that tears them down.
+RemainAfterExit=yes
+# %H is the hostname, which is already this box's identity everywhere else -
+# the MQTT device id and the Spotify device name are derived from it too, so a
+# phone sees the same name in Smart View as in every other list.
+ExecStart=/usr/local/sbin/tvbox-miracast start %H
+ExecStop=/usr/local/sbin/tvbox-miracast stop
+# A failure here must not leave the radio half-taken: the box's own network may
+# be on it, and a box that cannot reach the network cannot be fixed remotely.
+ExecStopPost=-/usr/local/sbin/tvbox-miracast stop
+TimeoutStartSec=60

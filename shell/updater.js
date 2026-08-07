@@ -91,6 +91,11 @@ const INFRA_FILES = [
   "tvbox-gamepad.service",
   "tvbox-flatpak-update.service",
   "tvbox-flatpak-update.timer",
+  // Screen mirroring's privileged half and the unit the shell starts it with.
+  // Root-side like the diagnostics pair, so an OTA-only box carries the files
+  // until its next provision rather than gaining the feature straight away.
+  "tvbox-miracast",
+  "tvbox-miracast.service",
 ];
 // Files an earlier release installed and this one does not: they are removed on
 // update rather than left to be found by something that still looks for them.
@@ -117,6 +122,7 @@ const EXECUTABLE = [
   "tvbox-safemode.sh",
   "tvbox-session",
   "install-compositor.sh",
+  "tvbox-miracast", // provision copies it to /usr/local/sbin; systemd exec's it
 ];
 // Where each shipped user unit gets its "enable" symlink (its [Install]
 // WantedBy). syncInfra creates these directly - same trick as the image build:
