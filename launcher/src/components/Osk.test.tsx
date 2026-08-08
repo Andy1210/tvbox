@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render } from "@testing-library/react";
-import { Osk } from "./Osk";
+import { Osk, OSK_LAYERS } from "./Osk";
 import { setupRemote, placeRow, remote, setFocus } from "../test/remote";
 
 // The on-screen keyboard modal (IPTV URLs, credentials). Driven by the D-pad:
@@ -74,6 +74,69 @@ describe("Osk", () => {
     await setFocus("osk-done");
     await remote.ok();
     expect(onDone).toHaveBeenCalledWith("b");
+  });
+
+  it("the symbol layer types what no amount of Shift on QWERTY can", async () => {
+    // There was no comma anywhere on this keyboard, and no accented letter - so
+    // a search box was unusable in Hungarian and a sentence could not be typed.
+    const onDone = vi.fn();
+    const { getByText } = render(<Osk title="Search" onDone={onDone} onCancel={() => {}} />);
+    await setFocus("osk-layer");
+    await remote.ok(); // -> symbols
+    await setFocus("osk-1-0");
+    await remote.ok(); // 'á'
+    await setFocus("osk-1-9");
+    await remote.ok(); // ','
+    await setFocus("osk-2-0");
+    await remote.ok(); // ';'
+    await setFocus("osk-done");
+    await remote.ok();
+    expect(onDone).toHaveBeenCalledWith("á,;");
+    expect(getByText("abc")).toBeTruthy(); // the key now says where it goes back to
+  });
+
+  it("Shift on the symbol layer gives the accents a capital", async () => {
+    const onDone = vi.fn();
+    render(<Osk title="Search" onDone={onDone} onCancel={() => {}} />);
+    await setFocus("osk-layer");
+    await remote.ok();
+    await setFocus("osk-shift");
+    await remote.ok();
+    await setFocus("osk-1-4");
+    await remote.ok(); // 'Ö'
+    await setFocus("osk-done");
+    await remote.ok();
+    expect(onDone).toHaveBeenCalledWith("Ö");
+  });
+
+  it("every layer has the same shape, so switching cannot unmount the focused key", () => {
+    // Keys are focused BY POSITION (`osk-<row>-<col>`), so a layer with a shorter
+    // row would drop the focused key and leave the D-pad with nowhere to be - the
+    // one state a remote cannot get out of. Asserted on the layouts themselves:
+    // the focus keys are not in the DOM, so there is nothing to count there.
+    const { ROWS_LOWER, ...others } = OSK_LAYERS;
+    const shape = (rows: string[]) => rows.map((r) => [...r].length);
+    for (const [name, rows] of Object.entries(others)) {
+      expect(shape(rows), name + " differs from ROWS_LOWER").toEqual(shape(ROWS_LOWER));
+    }
+    // And no row may repeat a character: the keys are React-keyed by the
+    // character, so a duplicate would collide within its row.
+    for (const rows of Object.values(OSK_LAYERS)) {
+      for (const row of rows) expect(new Set([...row]).size, "duplicate in " + row).toBe([...row].length);
+    }
+  });
+
+  it("switching layers really swaps the faces", async () => {
+    const { getByText, queryByText } = render(<Osk title="URL" onDone={() => {}} onCancel={() => {}} />);
+    expect(getByText("q")).toBeTruthy();
+    await setFocus("osk-layer");
+    await remote.ok();
+    expect(queryByText("q")).toBeNull();
+    expect(getByText("á")).toBeTruthy();
+    await setFocus("osk-layer");
+    await remote.ok();
+    expect(getByText("q")).toBeTruthy();
+    expect(queryByText("á")).toBeNull();
   });
 
   it("remote Back cancels", async () => {

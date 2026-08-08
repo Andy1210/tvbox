@@ -7,8 +7,27 @@ import { FocusButton } from "./FocusButton";
 // result (or onCancel on remote Back). QWERTY-ish with a digits row and a row of
 // URL symbols so IPTV URLs/credentials are easy; Shift toggles case. A movable
 // caret (◀ ▶) lets you insert/delete mid-string instead of only at the end.
+//
+// Two layers, because a search box needs what a URL does not: the letters keep
+// the URL symbols they always had, and the second layer carries punctuation
+// (there was no comma anywhere) plus the accented Hungarian letters, which no
+// amount of Shift on a QWERTY row will produce. Shift applies to both layers -
+// on the symbols it is the accent row that changes case, since nothing else
+// there has a case.
+//
+// EVERY layer has the same row lengths, and that is load-bearing rather than
+// tidy: a key is focused by position (`osk-<row>-<col>`), so a layer whose row
+// ran short would unmount the focused key and leave the D-pad with nowhere to
+// be - the one state a remote cannot get out of.
 const ROWS_LOWER = ["1234567890", "qwertyuiop", "asdfghjkl", "zxcvbnm", "@.:/-_?&=%"];
 const ROWS_UPPER = ["1234567890", "QWERTYUIOP", "ASDFGHJKL", "ZXCVBNM", "@.:/-_?&=%"];
+const ROWS_SYM = ["1234567890", "áéíóöőúüű,", ";!?'\"()[]", "{}<>*+~", "€$£#|\\§°^`"];
+const ROWS_SYM_UPPER = ["1234567890", "ÁÉÍÓÖŐÚÜŰ,", ";!?'\"()[]", "{}<>*+~", "€$£#|\\§°^`"];
+
+// Exported for the test that pins the shapes together. They are hand-written
+// constants and the focus keys are positional, so "these four agree" is a real
+// invariant with no other way to check it.
+export const OSK_LAYERS = { ROWS_LOWER, ROWS_UPPER, ROWS_SYM, ROWS_SYM_UPPER };
 
 function Key({
   focusKey,
@@ -110,6 +129,7 @@ export function Osk({
   const [text, setText] = useState(initial || "");
   const [cursor, setCursor] = useState((initial || "").length); // caret index into text
   const [upper, setUpper] = useState(false);
+  const [symbols, setSymbols] = useState(false);
   const { ref, focusKey } = useFocusable({ focusKey: "osk", isFocusBoundary: true });
 
   useEffect(() => {
@@ -131,7 +151,7 @@ export function Osk({
   const left = () => setCursor((c) => Math.max(0, c - 1));
   const right = () => setCursor((c) => Math.min(text.length, c + 1));
 
-  const rows = upper ? ROWS_UPPER : ROWS_LOWER;
+  const rows = symbols ? (upper ? ROWS_SYM_UPPER : ROWS_SYM) : upper ? ROWS_UPPER : ROWS_LOWER;
 
   return (
     <FocusContext.Provider value={focusKey}>
@@ -158,6 +178,13 @@ export function Osk({
           <div className="flex gap-[1vw] mt-[0.5vh]">
             <Key focusKey="osk-shift" onEnter={() => setUpper((u) => !u)}>
               <KeyGlyph name="shift" />
+            </Key>
+            {/* Text rather than a glyph: these are ASCII, which the box's
+                Chromium is certain to have - the reason every other key face
+                here is drawn. The label says where the key GOES, the way a
+                phone's does, so it reads as one switch and not two states. */}
+            <Key focusKey="osk-layer" onEnter={() => setSymbols((s) => !s)}>
+              <span className="text-[1.9vh] font-semibold tracking-tight">{symbols ? "abc" : "#+="}</span>
             </Key>
             <Key focusKey="osk-left" onEnter={left}>
               <KeyGlyph name="left" />
