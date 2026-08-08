@@ -752,6 +752,38 @@ class Bridge:
             self.shell_post(NAV_URL, {"dest": "app", "app": action[4:]})
 
     # ---- volume keys -> IR blaster (shell /tvbox/api/ir/send) ----
+    def press_action(self, action):
+        """One press+release of a canonical action, asked for by the shell.
+
+        This is where a PHONE's button arrives (shell/phoneremote.js), and it
+        enters below the device-specific half on purpose: a phone has no evdev
+        node, no keymap to remap through, nothing to learn and nothing to panic
+        tap. What it does share is everything that comes after - so a volume
+        press still goes to the TV over the IR blaster rather than to the box,
+        Home still reaches the shell over HTTP while a native app owns the
+        screen, and power still follows the configured policy. The phone is a
+        remote at the action level, which is what makes it work in every app
+        without any app knowing it exists.
+
+        `ir_passthrough` is deliberately not consulted: it exempts remotes that
+        blast the TV with their OWN IR, and a phone cannot.
+        """
+        if action in SPECIAL_ACTIONS or APP_ACTION_RE.match(action):
+            self.do_special(action)
+            return True
+        code = ACTION_KEY.get(action)
+        if code is None:
+            return False
+        if IR_KEY_ACTION.get(code) in self.ir_actions:
+            self.ir_press(IR_KEY_ACTION[code], 1)
+            return True
+        # A tap, not a hold: press and release together. Holding is the phone
+        # page's job to repeat, so a dropped release can never leave a key stuck
+        # down - which on a uinput device nothing else owns would need a restart.
+        self.emit(code, 1)
+        self.emit(code, 0)
+        return True
+
     def ir_press(self, action, value):
         # press (1) sends; autorepeat (2) sends throttled so holding the button
         # ramps the TV volume at a sane pace; release (0) is just swallowed.
@@ -823,6 +855,14 @@ class Bridge:
         elif line == "learn-off":
             self.learning = None
             self.captured = False
+        elif line.startswith("key ") and len(line) > 4:
+            # A phone's button, via the shell. The FIFO is 0600 and owned by the
+            # bridge, so the shell is the only thing that can write here - the
+            # gating of who may ask lives there (shell/phoneremote.js), not in a
+            # bridge that has no idea what a token is.
+            action = line[4:].strip()
+            if not self.press_action(action):
+                log("unknown key action:", action)
 
 
 def open_fifo():
