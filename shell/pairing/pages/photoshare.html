@@ -25,16 +25,25 @@
         color: #aab4c2;
         font-size: 14px;
       }
+      /* A <label> and a <button> both wear this, and a button also arrives with the
+         platform's own border and font. Saying so here is what stops the two
+         looking like different controls. */
       .btn {
         display: block;
+        width: 100%;
+        box-sizing: border-box;
         text-align: center;
         padding: 16px;
+        border: 0;
         border-radius: 12px;
         background: #1f6feb;
         color: #fff;
+        font: inherit;
         font-size: 17px;
         font-weight: 700;
         margin-top: 16px;
+        -webkit-appearance: none;
+        appearance: none;
       }
       .btn.ghost {
         background: #1b2430;
@@ -67,6 +76,41 @@
       #code {
         display: none;
       }
+      #grid {
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        gap: 8px;
+        margin-top: 12px;
+      }
+      .cell {
+        position: relative;
+        aspect-ratio: 1/1;
+        border-radius: 10px;
+        overflow: hidden;
+        background: #161b22;
+      }
+      .cell img {
+        width: 100%;
+        height: 100%;
+        object-fit: cover;
+        display: block;
+      }
+      .cell button {
+        position: absolute;
+        top: 5px;
+        right: 5px;
+        width: 30px;
+        height: 30px;
+        border: 0;
+        border-radius: 50%;
+        background: rgba(0, 0, 0, 0.6);
+        color: #fff;
+        font: inherit;
+        font-size: 16px;
+        line-height: 30px;
+        padding: 0;
+        cursor: pointer;
+      }
     </style>
   </head>
   <body>
@@ -77,14 +121,17 @@
     <input id="f" type="file" accept="image/*" multiple />
     <div id="st"></div>
     <div id="count"></div>
-    <button class="btn ghost" id="clear">{{clear}}</button>
+    <div id="grid"></div>
+    <button class="btn ghost" id="clear" style="display: none">{{clear}}</button>
     <script>
       document.getElementById("code").value = new URLSearchParams(location.search).get("c") || "";
       function code() {
         return document.getElementById("code").value;
       }
       var st = document.getElementById("st"),
-        countEl = document.getElementById("count");
+        countEl = document.getElementById("count"),
+        grid = document.getElementById("grid"),
+        clearBtn = document.getElementById("clear");
       function q(p) {
         return p + (p.indexOf("?") < 0 ? "?" : "&") + "c=" + encodeURIComponent(code());
       }
@@ -92,14 +139,50 @@
         st.textContent = text;
         st.className = bad ? "bad" : "";
       }
+      // What the TV is holding, shown back. The pictures are the box's answer, not
+      // the phone's memory of what it sent: a second phone can be casting into the
+      // same session, and after a reload there is nothing local left to draw.
       async function refresh() {
         try {
           var r = await fetch(q("/pshare-list"));
-          var n = (await r.json()).count || 0;
+          var d = await r.json();
+          var names = d.names || [];
         } catch (_) {
           return;
         }
-        countEl.innerHTML = n ? "{{onTv}}: <b>" + n + "</b> {{photos}}" : "";
+        countEl.innerHTML = names.length ? "{{onTv}}: <b>" + names.length + "</b> {{photos}}" : "";
+        clearBtn.style.display = names.length ? "" : "none";
+        // Redrawn only when the set really changed - otherwise every upload would
+        // reload the tiles already on screen.
+        var key = names.join("|");
+        if (key === grid.dataset.names) return;
+        grid.dataset.names = key;
+        grid.innerHTML = "";
+        names.forEach(function (n) {
+          var cell = document.createElement("div");
+          cell.className = "cell";
+          var img = document.createElement("img");
+          // A tile, not the photo: the box renders these small, and the phone is
+          // on wifi looking at thirty of them.
+          img.src = q("/pshare-img") + "&name=" + encodeURIComponent(n);
+          img.loading = "lazy";
+          var b = document.createElement("button");
+          b.textContent = "✕";
+          b.title = "{{del}}";
+          b.onclick = async function () {
+            try {
+              await fetch("/pshare-delete", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ code: code(), name: n }),
+              });
+            } catch (_) {}
+            refresh();
+          };
+          cell.appendChild(img);
+          cell.appendChild(b);
+          grid.appendChild(cell);
+        });
       }
       // The phone does the downscaling: it has the picture in memory already, and
       // a megabyte over wifi is the difference between photos appearing as you
