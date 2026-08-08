@@ -13,7 +13,7 @@ import {
 } from "../../lib/phoneremote";
 import { FocusButton } from "../../components/FocusButton";
 import { SettingsPage } from "../SettingsPage";
-import { Group, InfoRow, Note, Row } from "../Rows";
+import { Group, InfoRow, Note, Row, rowKey, usePageId } from "../Rows";
 import { invalidateSummary } from "../summary";
 
 // Settings -> Remotes and devices -> Phone as a remote.
@@ -123,6 +123,7 @@ export function PhoneRemotePage() {
   const [status, setStatus] = useState<"loading" | "ok" | "unsupported" | "error">("loading");
   const [pairing, setPairing] = useState(false);
   const busy = useRef(false);
+  const page = usePageId();
 
   const load = useCallback(async () => {
     const r = await fetchPhoneRemote();
@@ -234,6 +235,11 @@ export function PhoneRemotePage() {
           onClose={() => {
             setPairing(false);
             void load();
+            // Put the cursor back on the row that opened this. The overlay's
+            // focusables go in one commit with nothing left to inherit from, and
+            // a page whose D-pad lands nowhere is the one state a remote cannot
+            // get out of. After the unmount, hence the timeout.
+            setTimeout(() => setFocus(rowKey(page, "pair")), 0);
           }}
         />
       ) : null}

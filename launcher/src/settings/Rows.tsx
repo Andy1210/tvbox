@@ -25,7 +25,10 @@ const PageContext = createContext<string>("page");
 export const PageScope = PageContext.Provider;
 export const usePageId = (): string => useContext(PageContext);
 
-const rowKey = (page: string, id: string) => `${page}:${id}`;
+// Exported so a screen that opens an overlay can put the cursor back on the row
+// that opened it - the key is positional, and guessing its shape at a call site
+// is how the two drift apart.
+export const rowKey = (page: string, id: string) => `${page}:${id}`;
 
 // Rounded card holding a run of rows, with hairline dividers. The focused row
 // fills edge to edge inside it, so the group is what gives the list its shape -

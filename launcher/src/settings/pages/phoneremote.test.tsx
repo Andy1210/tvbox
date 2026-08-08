@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { act, cleanup, render } from "@testing-library/react";
 import { PhoneRemoteSubPage } from "./phoneremote";
+import { getCurrentFocusKey } from "@noriginmedia/norigin-spatial-navigation";
 import { setupRemote, remote, setFocus } from "../../test/remote";
 
 // The one page in Settings that opens a door, so what is tested here is what it
@@ -119,6 +120,30 @@ describe("the phone-remote settings page", () => {
     const { getByText } = render(<PhoneRemoteSubPage onBack={() => {}} />);
     await settle();
     expect(getByText("Never used")).toBeTruthy();
+  });
+
+  it("closing the pairing screen puts the cursor back where it was", async () => {
+    // Both ways out. Without this the overlay's focusables go in one commit with
+    // nothing left to inherit from, and the D-pad is dead on the page underneath -
+    // the one state a remote cannot get out of.
+    stubShell({ enabled: true, phones: [] });
+    render(<PhoneRemoteSubPage onBack={() => {}} />);
+    await settle();
+
+    for (const leave of [
+      () => remote.back(),
+      async () => {
+        await setFocus("pr-pair-done");
+        await remote.ok();
+      },
+    ]) {
+      await setFocus("phoneremote:pair");
+      await remote.ok();
+      await settle();
+      await leave();
+      await settle();
+      expect(getCurrentFocusKey()).toBe("phoneremote:pair");
+    }
   });
 
   it("a blip offers a retry rather than claiming the box is too old", async () => {
