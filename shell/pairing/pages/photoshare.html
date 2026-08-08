@@ -1,0 +1,181 @@
+<!doctype html>
+<html lang="{{lang}}">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>{{title}}</title>
+    <style>
+      :root {
+        color-scheme: dark;
+      }
+      body {
+        margin: auto;
+        background: #0b0f14;
+        color: #f4f6fa;
+        font:
+          16px/1.5 system-ui,
+          sans-serif;
+        padding: 24px;
+        max-width: 520px;
+      }
+      h1 {
+        font-size: 20px;
+      }
+      p {
+        color: #aab4c2;
+        font-size: 14px;
+      }
+      .btn {
+        display: block;
+        text-align: center;
+        padding: 16px;
+        border-radius: 12px;
+        background: #1f6feb;
+        color: #fff;
+        font-size: 17px;
+        font-weight: 700;
+        margin-top: 16px;
+      }
+      .btn.ghost {
+        background: #1b2430;
+        color: #aab4c2;
+        font-size: 15px;
+      }
+      #st {
+        margin-top: 16px;
+        text-align: center;
+        font-size: 15px;
+        color: #7d8a99;
+        min-height: 22px;
+      }
+      #st.bad {
+        color: #ff9a9a;
+      }
+      #count {
+        margin-top: 28px;
+        text-align: center;
+        font-size: 15px;
+        color: #aab4c2;
+      }
+      #count b {
+        color: #f4f6fa;
+        font-size: 22px;
+      }
+      input[type="file"] {
+        display: none;
+      }
+      #code {
+        display: none;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>{{title}}</h1>
+    <p>{{hint}}</p>
+    <input id="code" />
+    <label class="btn" for="f">{{pick}}</label>
+    <input id="f" type="file" accept="image/*" multiple />
+    <div id="st"></div>
+    <div id="count"></div>
+    <button class="btn ghost" id="clear">{{clear}}</button>
+    <script>
+      document.getElementById("code").value = new URLSearchParams(location.search).get("c") || "";
+      function code() {
+        return document.getElementById("code").value;
+      }
+      var st = document.getElementById("st"),
+        countEl = document.getElementById("count");
+      function q(p) {
+        return p + (p.indexOf("?") < 0 ? "?" : "&") + "c=" + encodeURIComponent(code());
+      }
+      function say(text, bad) {
+        st.textContent = text;
+        st.className = bad ? "bad" : "";
+      }
+      async function refresh() {
+        try {
+          var r = await fetch(q("/pshare-list"));
+          var n = (await r.json()).count || 0;
+        } catch (_) {
+          return;
+        }
+        countEl.innerHTML = n ? "{{onTv}}: <b>" + n + "</b> {{photos}}" : "";
+      }
+      // The phone does the downscaling: it has the picture in memory already, and
+      // a megabyte over wifi is the difference between photos appearing as you
+      // pick them and a progress bar. 2560 is above what the TV renders at, so a
+      // zoom on the box still has pixels behind it.
+      function resize(file) {
+        return new Promise(function (res) {
+          var img = new Image(),
+            url = URL.createObjectURL(file);
+          img.onload = function () {
+            var m = 2560,
+              w = img.width,
+              h = img.height;
+            if (w > m || h > m) {
+              if (w >= h) {
+                h = Math.round((h * m) / w);
+                w = m;
+              } else {
+                w = Math.round((w * m) / h);
+                h = m;
+              }
+            }
+            var c = document.createElement("canvas");
+            c.width = w;
+            c.height = h;
+            c.getContext("2d").drawImage(img, 0, 0, w, h);
+            URL.revokeObjectURL(url);
+            res(c.toDataURL("image/jpeg", 0.85));
+          };
+          img.onerror = function () {
+            URL.revokeObjectURL(url);
+            res(null);
+          };
+          img.src = url;
+        });
+      }
+      document.getElementById("f").addEventListener("change", async function (e) {
+        var files = Array.prototype.slice.call(e.target.files || []),
+          ok = 0,
+          full = false;
+        for (var i = 0; i < files.length && !full; i++) {
+          say("{{uploading}} " + (i + 1) + "/" + files.length + "…");
+          var data = await resize(files[i]);
+          if (!data) continue;
+          try {
+            var r = await fetch("/pshare" + location.search, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ code: code(), name: files[i].name, data: data }),
+            });
+            if (r.ok) ok++;
+            else if (r.status === 507) full = true;
+          } catch (_) {}
+          // Each photo is shown as it lands rather than at the end: the TV is
+          // filling up in front of the person holding the phone.
+          refresh();
+        }
+        e.target.value = "";
+        if (full) say("{{full}}", true);
+        else if (ok) say(ok + "/" + files.length + " " + "{{done}}");
+        else say("{{failed}}", true);
+        refresh();
+      });
+      document.getElementById("clear").addEventListener("click", async function () {
+        if (!confirm("{{clearConfirm}}")) return;
+        try {
+          await fetch("/pshare-clear", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ code: code() }),
+          });
+        } catch (_) {}
+        say("");
+        refresh();
+      });
+      refresh();
+    </script>
+  </body>
+</html>

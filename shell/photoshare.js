@@ -1,0 +1,148 @@
+// Photos a phone pushed at the TV to be looked at now.
+//
+// The screensaver has an upload of its own (ambient.js) and this is deliberately
+// not it. The difference is lifetime, and it decides the whole design: a cast is
+// over when you stop looking, nobody tidies a folder from a remote control, and
+// the box's SD card is not where someone's holiday should come to rest. So the
+// session is emptied when the viewer closes - and, because a power cut is not a
+// viewer closing, on every shell start as well. A cleanup that needs the user to
+// remember it is a cleanup that does not happen.
+//
+// The directory lives under ~/.tvbox so it travels with the box's own state, and
+// its name is in contentdirs' MACHINERY set, so it can never also turn up in the
+// Files app as a browsable folder called "photoshare".
+const fs = require("fs");
+const os = require("os");
+const path = require("path");
+
+const DIR = path.join(os.homedir(), ".tvbox", "photoshare");
+
+// What one session may hold. The phone downscales before it uploads, so these are
+// roughly a thousand photos' worth of headroom over what anyone shows on a TV -
+// they exist so that a runaway upload cannot fill the boot medium, not to ration
+// an ordinary use.
+const MAX_ITEMS = 300;
+const MAX_BYTES = 200e6;
+
+// Every name `save` produces has to match this, and the case-insensitivity is the
+// load-bearing part: a camera writes IMG_0001.JPG, and a pattern that admitted only
+// lower case would accept the upload and then hide the file from list(), clear()
+// AND the boot sweep - a photo nobody can see and nothing ever deletes, on a box
+// whose whole promise is that these do not stay. The test below pins the two
+// against each other rather than against a list of extensions.
+const NAME_RE = /^\d{4}-[A-Za-z0-9._-]+\.(jpe?g|png|webp)$/i;
+
+// The first bytes of the three formats a phone can send. A signature is not a
+// decode and does not pretend to be one - it is what makes the stored file at
+// least the KIND of thing its name says.
+function isImage(buf) {
+  if (buf.length < 12) return false;
+  if (buf[0] === 0xff && buf[1] === 0xd8 && buf[2] === 0xff) return true; // JPEG
+  if (buf.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]))) return true; // PNG
+  if (buf.subarray(0, 4).toString("latin1") === "RIFF" && buf.subarray(8, 12).toString("latin1") === "WEBP")
+    return true;
+  return false;
+}
+
+function ensure() {
+  try {
+    fs.mkdirSync(DIR, { recursive: true });
+    return true;
+  } catch (e) {
+    console.warn("[photoshare] cannot create", DIR, e.message);
+    return false;
+  }
+}
+
+// The session's photos, in the order they arrived - which is the order the phone's
+// picker offered them, and so the order the person expects to page through. The
+// four-digit prefix each file is stored under is what makes that a plain sort.
+function list() {
+  try {
+    return fs
+      .readdirSync(DIR)
+      .filter((f) => NAME_RE.test(f))
+      .sort();
+  } catch (e) {
+    return [];
+  }
+}
+
+function totalBytes(names) {
+  let n = 0;
+  for (const f of names) {
+    try {
+      n += fs.statSync(path.join(DIR, f)).size;
+    } catch (e) {}
+  }
+  return n;
+}
+
+// One uploaded photo (base64, optionally still wrapped in a data: URL). Returns
+// the stored name, or throws with a reason the phone page can show.
+function save(name, base64) {
+  if (!ensure()) throw new Error("failed");
+  const names = list();
+  if (names.length >= MAX_ITEMS) throw new Error("full");
+  const body = String(base64 || "").replace(/^data:[^,]*,/, "");
+  const buf = Buffer.from(body, "base64");
+  if (!buf.length) throw new Error("empty");
+  // It has to look like the picture the name claims it is. Base64 decoding accepts
+  // anything, and this route writes to the box's own disk from the LAN - so a
+  // session should not be able to become a place to leave arbitrary bytes under a
+  // .jpg. The renderer would refuse them later anyway; refusing here means they
+  // are never stored.
+  if (!isImage(buf)) throw new Error("not_an_image");
+  if (totalBytes(names) + buf.length > MAX_BYTES) throw new Error("full");
+
+  let safe = String(name || "photo")
+    .replace(/[^A-Za-z0-9._-]/g, "_")
+    .replace(/^\.+/, "_") // never a dotfile, and never "..": list() would skip it and clear() would not
+    .slice(-60);
+  if (!/\.(jpe?g|png|webp)$/i.test(safe)) safe += ".jpg";
+  // Numbered from what is already there rather than from a counter in memory, so a
+  // shell that reloaded mid-session does not start writing over the first photos.
+  const last = names.length ? parseInt(names[names.length - 1].slice(0, 4), 10) : 0;
+  const file = String(last + 1).padStart(4, "0") + "-" + safe;
+  // The invariant, checked rather than assumed. Everything that finds a photo
+  // again - list(), pathFor(), clear() and the sweep at boot - goes through
+  // NAME_RE, so a name this function builds but that pattern would not match is a
+  // file on the box that nothing can show and nothing will ever delete. Refusing
+  // is the safe half: the phone is told, and the disk stays clean.
+  if (!NAME_RE.test(file)) throw new Error("failed");
+  fs.writeFileSync(path.join(DIR, file), buf);
+  return file;
+}
+
+// The absolute path of one session photo, or "" for a name that is not one of
+// ours. The pattern is the guard: it admits no separator and no leading dot, so
+// there is nothing for a traversal to be built out of.
+function pathFor(name) {
+  const n = String(name || "");
+  if (!NAME_RE.test(n)) return "";
+  const p = path.join(DIR, n);
+  return p.startsWith(DIR + path.sep) ? p : "";
+}
+
+// Empty the session. Returns how many went - the caller reports it, and a count of
+// zero is a useful answer when someone presses it twice.
+function clear() {
+  let n = 0;
+  for (const f of list()) {
+    try {
+      fs.unlinkSync(path.join(DIR, f));
+      n++;
+    } catch (e) {}
+  }
+  return n;
+}
+
+// Called once at boot. Anything still here belongs to a session whose TV was
+// turned off at the wall, and there is no one left who wants it.
+function sweep() {
+  const n = clear();
+  if (n) console.log("[photoshare] cleared " + n + " photo(s) left over from a previous session");
+  return n;
+}
+
+module.exports = { DIR, MAX_ITEMS, MAX_BYTES, list, save, pathFor, clear, sweep };

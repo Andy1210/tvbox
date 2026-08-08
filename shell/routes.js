@@ -20,6 +20,7 @@ const ir = require("./ir");
 const maintenance = require("./maintenance");
 const apps = require("./install");
 const pairing = require("./pairing");
+const photoshare = require("./photoshare"); // photos a phone cast at the viewer
 const removable = require("./removable"); // the USB stick: mount on open, unmount before it is pulled
 const shares = require("./shares"); // network shares (SMB over rclone)
 const store = require("./store");
@@ -463,6 +464,12 @@ function post(p, data, res, ctx) {
   }
   if (p === "/tvbox/api/browse/unmount") {
     return removable.unmount(browseDeps, String(data.device || ""), (r) => httpserver.jsonRes(res, r));
+  }
+  // The viewer, saying it is done with the photos a phone cast at it. This is the
+  // ordinary way the session ends; the sweep at boot is only for the times the TV
+  // was switched off instead.
+  if (p === "/tvbox/api/photoshare/clear") {
+    return httpserver.jsonRes(res, { ok: true, removed: photoshare.clear() });
   }
   // Network shares (SMB over rclone). The password follows the same contract as
   // every other credential form here: omitted keeps the stored one, "" clears it -
