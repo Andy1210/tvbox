@@ -8,6 +8,9 @@
 //    manifest, so Home Assistant offers the box for setup with no ids typed in.
 //    MQTT discovery cannot create a media_player (Home Assistant has no such MQTT
 //    platform), so integration-level discovery is the equivalent.
+//  - publishes what the box knows about ITSELF to  tvbox/<deviceId>/diag  (retained) -
+//    version, update/rollback outcome, link rate, heat, disk (shell/diag.js). Retained
+//    because the question it answers is asked hours later: docs/fleet-view.md,
 //  - announces availability via a retained LWT on  tvbox/<deviceId>/status,
 //  - subscribes  tvbox/<deviceId>/cmd    (control: launch app / transport / TV power)
 //        and     tvbox/<deviceId>/notify (on-screen notifications).
