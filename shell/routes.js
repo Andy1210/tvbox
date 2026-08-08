@@ -545,7 +545,13 @@ function post(p, data, res, ctx) {
     return system.setTimezone(String(data.timezone || ""), (r) => httpserver.jsonRes(res, r));
   }
   if (p === "/tvbox/api/system/keymap") {
-    return system.setKeymap(String(data.keymap || ""), (r) => httpserver.jsonRes(res, r));
+    // Two writes, and both are needed. localectl changes it for the session that
+    // is running; the config copy is what survives a reboot, because localed on
+    // this image persists nothing (see config.setKeyboard). A box that has not
+    // been provisioned since this landed still gets the session behaviour.
+    const layout = String(data.keymap || "");
+    const stored = config.setKeyboard({ layout });
+    return system.setKeymap(layout, (r) => httpserver.jsonRes(res, { ...r, stored: !!stored }));
   }
   if (p === "/tvbox/api/system/hostname") {
     return system.setHostname(String(data.hostname || ""), (r) => httpserver.jsonRes(res, r));

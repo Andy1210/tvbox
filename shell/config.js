@@ -402,6 +402,25 @@ function rawFileserver() {
 // whether a password is set. The list is replaced whole: `name` is the mount point
 // and therefore the identity, so shares.js resolves what an edit means before the
 // list gets here.
+// The keyboard layout picked in Settings. It is ALSO set through localectl for
+// the running session, but that is all localed does on this image: Raspberry Pi
+// OS ships a drop-in making /etc/X11/xorg.conf.d read-only for it, and localed
+// then logs "Failed to write X11 keyboard layout, ignoring" and persists
+// nothing - so the pick is gone at the next boot. Keeping it here is what a
+// root boot unit re-applies (tvbox-keymap, deploy/provision.sh), the same shape
+// as the Wi-Fi regulatory country.
+function setKeyboard(kb) {
+  const layout = String((kb && kb.layout) || "");
+  if (!/^[a-z0-9][a-z0-9,_-]{0,31}$/.test(layout)) return null;
+  const c = load();
+  c.keyboard = { ...c.keyboard, layout };
+  save(c);
+  return c.keyboard;
+}
+function rawKeyboard() {
+  return load().keyboard || {};
+}
+
 // The phone remote (phoneremote.js): whether the LAN listener runs at all, and
 // the adopted phones. Raw because the rows carry a token HASH - publicConfig
 // below shows names and times only.
@@ -710,6 +729,8 @@ module.exports = {
   rawShares,
   setPhoneRemote,
   rawPhoneRemote,
+  setKeyboard,
+  rawKeyboard,
   setSetupDone,
   publicConfig,
   setIptv,
