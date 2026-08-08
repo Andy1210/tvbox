@@ -333,7 +333,10 @@ async function appsAutoTick() {
   appsAutoBusy = true;
   try {
     const l = await store.listForUi(config)(true);
-    for (const id of l.updates || []) {
+    // `autoUpdates`, not `updates`: an app from a registry that is not on
+    // unattended updates still shows an Update button in the store, it just
+    // waits for the press.
+    for (const id of l.autoUpdates || []) {
       // re-checked per app: a user install started during the awaited registry
       // refresh (or a provisionFull that just scheduled a service restart)
       // must stop the run - store.install would swap ~/.tvbox/apps/<id> under it.

@@ -856,4 +856,5 @@ module.exports = {
   validateManifest,
   USER_BIN,
   USER_APPS_DIR,
+  APPS_DATA,
 };

@@ -3,6 +3,7 @@ import { FocusContext, useFocusable, setFocus } from "@noriginmedia/norigin-spat
 import { useFocusableItem } from "@sdk/useFocusableItem";
 import { type StoreEntry } from "../lib/api";
 import { useI18n } from "../lib/i18n";
+import { sourceLabel } from "../lib/storesource";
 import { useBackspace } from "../lib/useBackspace";
 import { useEntryAnim } from "../lib/useEntryAnim";
 import { usePinGuard } from "../lib/usePinGuard";
@@ -166,6 +167,23 @@ export function AppDetail({
             </span>
           )}
         </div>
+
+        {/* Where this app comes from. This is the screen the Install press is on,
+            so it is where the registry belongs: the official one goes unsaid, an
+            added one is named, and a second registry offering the same id is named
+            too - an app that exists in more than one place is exactly the case
+            where "which one is this" stops being obvious. */}
+        {app.source && !app.source.official && (
+          <div className="text-[1.9vh] text-fg-dim mb-[1.6vh]">
+            {t("store.fromSource", { name: sourceLabel(app.source) })}
+            {app.alsoIn && app.alsoIn.length > 0 && (
+              <span className="text-[1.7vh] opacity-70">
+                {" "}
+                · {t("store.alsoIn", { names: app.alsoIn.map((u) => sourceLabel({ url: u })).join(", ") })}
+              </span>
+            )}
+          </div>
+        )}
 
         {/* The flatpak an app runs (RetroArch) or was built from (Plex) has its own
             version, on its own update channel - the registry never sees it, so

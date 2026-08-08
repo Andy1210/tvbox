@@ -201,6 +201,228 @@ test("listForUi flags updateAvailable when the registry version is newer than in
   }
 });
 
+// ---- several registries merged into one catalogue ----
+// A manifest-only app is enough for these: install() writes the index entry
+// itself to ~/.tvbox/apps/<id>.json, so what is on disk names the registry it
+// came from without any package plumbing in the way.
+function registry(apps) {
+  const state = { apps };
+  const server = http.createServer((req, res) => {
+    if (req.url.split("?")[0] !== "/index.json") {
+      res.writeHead(404);
+      return res.end("no");
+    }
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ registryVersion: 1, apps: state.apps }));
+  });
+  return {
+    state,
+    listen: async () => {
+      await new Promise((r) => server.listen(0, "127.0.0.1", r));
+      return "http://127.0.0.1:" + server.address().port + "/index.json";
+    },
+    close: () => server.close(),
+  };
+}
+const manifestOnly = (id, name, version) => ({
+  id,
+  name,
+  version,
+  type: "webclient",
+  status: "ready",
+  runtime: { serve: "remote" },
+});
+
+test("two registries merge into one catalogue, each app labelled with its source", async () => {
+  const a = registry([manifestOnly("offapp", "OffApp", "1.0.0")]);
+  const b = registry([manifestOnly("brewapp", "BrewApp", "1.0.0")]);
+  const [urlA, urlB] = [await a.listen(), await b.listen()];
+  const config = {
+    rawStore: () => ({ registry: urlA, sources: [{ url: urlB, name: "Homebrew" }] }),
+    appConfig: () => ({}),
+  };
+  try {
+    const list = await store.listForUi(config)(true);
+    assert.deepEqual(
+      list.apps.map((e) => e.id),
+      ["offapp", "brewapp"],
+      "the primary registry's apps come first, in its own order",
+    );
+    assert.equal(list.apps[1].source.url, urlB);
+    assert.equal(list.apps[1].source.name, "Homebrew");
+    assert.equal(list.apps[1].source.official, false, "an added registry is never labelled official");
+    assert.equal(list.error, null);
+    assert.equal(list.sources.length, 2);
+    assert.deepEqual(
+      list.sources.map((s) => s.count),
+      [1, 1],
+    );
+  } finally {
+    a.close();
+    b.close();
+  }
+});
+
+test("a registry that is down costs its own apps and nothing else", async () => {
+  const a = registry([manifestOnly("offapp", "OffApp", "1.0.0")]);
+  const urlA = await a.listen();
+  const config = {
+    // A port nothing listens on: this source fails while the other answers.
+    rawStore: () => ({ registry: urlA, sources: ["http://127.0.0.1:1/index.json"] }),
+    appConfig: () => ({}),
+  };
+  try {
+    const list = await store.listForUi(config)(true);
+    assert.deepEqual(
+      list.apps.map((e) => e.id),
+      ["offapp"],
+    );
+    assert.equal(list.error, null, "one dead source must not blank the whole store");
+    assert.equal(list.sources[1].count, 0);
+    assert.ok(list.sources[1].error, "the failure travels next to the source it belongs to");
+  } finally {
+    a.close();
+  }
+});
+
+test("an id offered by two registries resolves to the first configured, and names the other", async () => {
+  const a = registry([manifestOnly("dup", "FromPrimary", "1.0.0")]);
+  const b = registry([manifestOnly("dup", "FromExtra", "2.0.0")]);
+  const [urlA, urlB] = [await a.listen(), await b.listen()];
+  const config = { rawStore: () => ({ registry: urlA, sources: [urlB] }), appConfig: () => ({}) };
+  try {
+    const list = await store.listForUi(config)(true);
+    assert.equal(list.apps.length, 1, "one id is one row, whatever it is offered by");
+    assert.equal(list.apps[0].name, "FromPrimary");
+    assert.equal(list.apps[0].version, "1.0.0", "a higher version elsewhere does not win the id");
+    assert.deepEqual(list.apps[0].alsoIn, [urlB]);
+  } finally {
+    a.close();
+    b.close();
+  }
+});
+
+// The one that matters: without the pin, a registry added later could publish a
+// higher version under an installed app's id and the nightly auto-update would
+// re-install the app from it, unattended and unannounced.
+test("an app stays with the registry it was installed from, even when another claims its id", async () => {
+  const a = registry([]); // the primary, empty for now
+  const b = registry([manifestOnly("brewapp", "Brew", "1.0.0")]);
+  const [urlA, urlB] = [await a.listen(), await b.listen()];
+  const config = { rawStore: () => ({ registry: urlA, sources: [urlB] }), appConfig: () => ({}) };
+  const installedManifest = () => JSON.parse(fs.readFileSync(path.join(TMP, ".tvbox", "apps", "brewapp.json"), "utf8"));
+  try {
+    assert.equal((await store.install(config, "brewapp")).ok, true);
+    assert.equal(installedManifest().name, "Brew");
+
+    // The primary now offers the same id at a much higher version.
+    a.state.apps = [manifestOnly("brewapp", "Hijacked", "9.0.0")];
+    let list = await store.listForUi(config)(true);
+    assert.equal(list.apps.length, 1);
+    assert.equal(list.apps[0].name, "Brew", "the pinned source keeps the id");
+    assert.equal(list.apps[0].version, "1.0.0");
+    assert.equal(list.apps[0].updateAvailable, false, "another registry's version is not an update");
+    assert.deepEqual(list.updates, [], "so the nightly auto-update has nothing to act on");
+    assert.deepEqual(list.apps[0].alsoIn, [urlA]);
+
+    // ...and a real update, from the pinned source, still works.
+    b.state.apps = [manifestOnly("brewapp", "Brew", "1.1.0")];
+    list = await store.listForUi(config)(true);
+    assert.equal(list.apps[0].updateAvailable, true);
+    assert.deepEqual(list.updates, ["brewapp"]);
+    assert.equal((await store.install(config, "brewapp")).ok, true);
+    assert.equal(installedManifest().name, "Brew");
+    assert.equal(installedManifest().version, "1.1.0");
+    store.uninstall("brewapp");
+  } finally {
+    a.close();
+    b.close();
+  }
+});
+
+// Unattended updates are the moment a source's trust is spent with nobody
+// watching, so they are the source's own setting: an owner can leave the
+// official catalogue on it and still review what an added registry ships.
+test("the nightly run only offers apps whose registry is on unattended updates", async () => {
+  const a = registry([manifestOnly("offapp", "OffApp", "1.0.0")]);
+  const b = registry([manifestOnly("brewapp", "Brew", "1.0.0")]);
+  const [urlA, urlB] = [await a.listen(), await b.listen()];
+  const store_ = { registry: urlA, sources: [{ url: urlB }] };
+  const config = { rawStore: () => store_, appConfig: () => ({}) };
+  try {
+    assert.equal((await store.install(config, "offapp")).ok, true);
+    assert.equal((await store.install(config, "brewapp")).ok, true);
+    a.state.apps = [manifestOnly("offapp", "OffApp", "1.1.0")];
+    b.state.apps = [manifestOnly("brewapp", "Brew", "1.1.0")];
+
+    let list = await store.listForUi(config)(true);
+    assert.deepEqual(list.updates.sort(), ["brewapp", "offapp"], "both are offered to press");
+    assert.deepEqual(list.autoUpdates, ["offapp"], "an added registry is not unattended by default");
+    assert.equal(list.sources[1].autoUpdate, false);
+
+    store_.sources = [{ url: urlB, autoUpdate: true }];
+    list = await store.listForUi(config)(true);
+    assert.deepEqual(list.autoUpdates.sort(), ["brewapp", "offapp"]);
+
+    // ...and the primary can be taken off it while an added one stays on.
+    store_.autoUpdate = false;
+    list = await store.listForUi(config)(true);
+    assert.deepEqual(list.autoUpdates, ["brewapp"]);
+    store.uninstall("offapp");
+    store.uninstall("brewapp");
+  } finally {
+    a.close();
+    b.close();
+  }
+});
+
+test("an app whose registry was removed is not handed to another one overnight", async () => {
+  const a = registry([]);
+  const b = registry([manifestOnly("orphan", "Brew", "1.0.0")]);
+  const [urlA, urlB] = [await a.listen(), await b.listen()];
+  const store_ = { registry: urlA, sources: [{ url: urlB }] };
+  const config = { rawStore: () => store_, appConfig: () => ({}) };
+  try {
+    assert.equal((await store.install(config, "orphan")).ok, true);
+    // The owner drops the registry it came from, and the primary happens to carry
+    // the same id at a higher version.
+    store_.sources = [];
+    a.state.apps = [manifestOnly("orphan", "Official", "2.0.0")];
+    const list = await store.listForUi(config)(true);
+    const e = list.apps.find((x) => x.id === "orphan");
+    assert.equal(e.pinnedElsewhere, true);
+    assert.equal(e.updateAvailable, true, "the update is still offered to press");
+    assert.deepEqual(list.autoUpdates, [], "...but the box does not take it by itself");
+    store.uninstall("orphan");
+  } finally {
+    a.close();
+    b.close();
+  }
+});
+
+test("sources: the extra registries are capped, deduplicated and scheme-checked", () => {
+  const many = Array.from({ length: 15 }, (_, i) => "https://example.test/" + i + "/index.json");
+  const cfg = (sources) => ({ rawStore: () => ({ sources }) });
+  assert.equal(store.sources(cfg(many)).length, store.MAX_EXTRA_SOURCES + 1, "primary plus the cap");
+  assert.equal(store.sources(cfg(["https://a.test/index.json", "https://a.test/index.json"])).length, 2);
+  // A public http registry would be an unauthenticated channel for host-side app
+  // code, so it is refused here the way the OTA feed refuses one.
+  assert.equal(store.sources(cfg(["http://example.test/index.json"])).length, 1);
+  assert.equal(store.sources(cfg([])).length, 1);
+  assert.equal(store.sources(cfg([]))[0].official, true);
+});
+
+// Two caps, one number: config.js drops what it will not store and store.js
+// ignores what it will not fetch. They are separate on purpose (a config file
+// edited by hand never passes through the form), so this is what keeps them equal.
+test("the cap config.js stores is the cap store.js reads", () => {
+  const config = require("./config");
+  const many = Array.from({ length: 20 }, (_, i) => ({ url: "https://example.test/" + i + "/index.json" }));
+  const saved = config.setStore({ sources: many });
+  assert.equal(saved.sources.length, store.MAX_EXTRA_SOURCES);
+  config.setStore({ sources: [] });
+});
+
 test("an unreachable registry says so, instead of 'not in registry'", async () => {
   // Forcing a refresh on install means the registry has to answer. When it does
   // not, the app is not missing - the network is - and saying the wrong one of
