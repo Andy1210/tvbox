@@ -2,7 +2,9 @@ import { Fragment, useCallback, useEffect, useRef, useState } from "react";
 import { useI18n } from "../../lib/i18n";
 import { fetchBtStatus, fetchBtDevices, btScan, btAction, type BtDevice, type BtStatus } from "../../lib/bluetooth";
 import { fetchIrStatus } from "../../lib/ir";
+import { fetchPhoneRemote } from "../../lib/phoneremote";
 import { useConfigStore } from "../../stores/config";
+import { PhoneRemoteSubPage } from "./phoneremote";
 import { SettingsPage } from "../SettingsPage";
 import { Group, InfoRow, Note, Row, ToggleRow } from "../Rows";
 import { useSettingsNav } from "../nav";
@@ -272,6 +274,7 @@ export function PeripheralsPane() {
   const nav = useSettingsNav();
   const bt = useSummary("bt", fetchBtDevices);
   const ir = useSummary("ir", fetchIrStatus);
+  const phone = useSummary("phoneremote", fetchPhoneRemote);
   const remoteCount = useConfigStore((s) => Object.keys(s.config?.remote?.devices || {}).length);
 
   const btValue = !bt
@@ -297,6 +300,27 @@ export function PeripheralsPane() {
           // Not remote.customCount - that one counts remapped BUTTONS on one remote.
           value={remoteCount ? t("remote.devicesCount", { n: remoteCount }) : undefined}
           onEnter={() => nav.push({ id: "remote", title: t("remote.title"), render: () => <RemoteButtonsPage /> })}
+        />
+        <Row
+          id="phoneremote"
+          label={t("phoneRemote.title")}
+          hint={t("peripherals.phoneRemoteHint")}
+          value={
+            phone?.kind === "ok"
+              ? phone.state.enabled
+                ? phone.state.phones.length
+                  ? t("phoneRemote.pairedCount", { n: phone.state.phones.length })
+                  : t("phoneRemote.on")
+                : t("phoneRemote.off")
+              : undefined
+          }
+          onEnter={() =>
+            nav.push({
+              id: "phoneremote",
+              title: t("phoneRemote.title"),
+              render: () => <PhoneRemoteSubPage onBack={nav.pop} />,
+            })
+          }
         />
         <Row
           id="ir"

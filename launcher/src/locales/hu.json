@@ -668,7 +668,8 @@
   "peripherals": {
     "btHint": "Hangszórók, távirányítók, kontrollerek",
     "remoteHint": "Taníts be egy másik gombot a távirányítón",
-    "irHint": "TV-hangerő, ha a tv CEC-en nem fogadja"
+    "irHint": "TV-hangerő, ha a tv CEC-en nem fogadja",
+    "phoneRemoteHint": "Gombok nyomása a telefonodról"
   },
   "apps": {
     "orderTitle": "Kezdőlap sorrendje",
@@ -731,5 +732,33 @@
       "rclone_missing": "Hiányzik a hálózati eszköz - előbb telepítsd.",
       "failed": "Nem sikerült."
     }
+  },
+  "phoneRemote": {
+    "code": "Kód",
+    "done": "Kész",
+    "enable": "Telefonos távirányító",
+    "enableHint": "Engedi, hogy egy párosított telefon nyomogassa a box gombjait a helyi hálózaton",
+    "forget": "Törlés",
+    "neverUsed": "Még nem használták",
+    "nonePaired": "Még egy sincs",
+    "note": "Kikapcsolva a box semmit nem fogad a hálózatról. Bekapcsolva egy párosított telefon ugyanazokat a gombokat nyomhatja, mint a távirányító.",
+    "off": "Kikapcsolva",
+    "on": "Bekapcsolva",
+    "onNote": "A box figyel a helyi hálózaton. Csak párosított telefon tud gombot nyomni, és bármelyiket törölheted itt. Kikapcsoláskor a párosítások is törlődnek.",
+    "pair": "Telefon párosítása",
+    "pairFailed": "Előbb kapcsold be a telefonos távirányítót.",
+    "pairHint": "Olvasd be a kódot a telefonoddal, és add meg a lenti négy számjegyet. Ugyanazon a wifin kell lennetek.",
+    "pairRowHint": "Kódot mutat a TV-n, amit a telefonoddal beolvasol",
+    "pairTitle": "Telefon párosítása",
+    "paired": "Párosított telefonok",
+    "pairedCount": "{n} telefon",
+    "retry": "Újra",
+    "seenDays": "{n} napja",
+    "seenHours": "{n} órája",
+    "seenMinutes": "{n} perce",
+    "seenNow": "Épp most",
+    "title": "Telefon távirányítóként",
+    "unreachable": "A box nem válaszolt. Próbáld újra.",
+    "unsupported": "Ehhez a box szoftvere túl régi."
   }
 }
