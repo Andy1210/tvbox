@@ -231,7 +231,11 @@ export function Osk({
   const right = () => setCursor((c) => Math.min(text.length, c + 1));
 
   const L = oskLayers(layout !== undefined ? layout : detected);
-  const rows = symbols ? (upper ? L.ROWS_SYM_UPPER : L.ROWS_SYM) : upper ? L.ROWS_UPPER : L.ROWS_LOWER;
+  // Two toggles that mean different things: `symbols` picks the LAYER, `upper`
+  // picks the case within it. Named rather than nested, so the two do not read
+  // as one condition.
+  const layer = symbols ? { plain: L.ROWS_SYM, caps: L.ROWS_SYM_UPPER } : { plain: L.ROWS_LOWER, caps: L.ROWS_UPPER };
+  const rows = upper ? layer.caps : layer.plain;
 
   return (
     <FocusContext.Provider value={focusKey}>
@@ -248,7 +252,13 @@ export function Osk({
         <div className="flex flex-col gap-[1vh] items-center">
           {rows.map((row, r) => (
             <div key={r} className="flex gap-[1vw]">
-              {row.split("").map((ch, c) => (
+              {/* The string ITERATOR, not split(""): split cuts UTF-16 code
+                  units, so a character outside the basic plane would become two
+                  broken halves - two keys where the shape check counted one,
+                  which is exactly the off-by-one the positional focus keys
+                  cannot survive. Nothing here needs it today; agreeing with the
+                  test's measure is what keeps that true. */}
+              {[...row].map((ch, c) => (
                 <Key key={ch} focusKey={`osk-${r}-${c}`} onEnter={() => insert(ch)}>
                   {ch}
                 </Key>
