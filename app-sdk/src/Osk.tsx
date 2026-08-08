@@ -9,11 +9,10 @@ import { FocusButton } from "./FocusButton";
 // caret (◀ ▶) lets you insert/delete mid-string instead of only at the end.
 //
 // Two layers, because a search box needs what a URL does not: the letters keep
-// the URL symbols they always had, and the second layer carries punctuation
-// (there was no comma anywhere) plus the accented Hungarian letters, which no
-// amount of Shift on a QWERTY row will produce. Shift applies to both layers -
-// on the symbols it is the accent row that changes case, since nothing else
-// there has a case.
+// the URL symbols they always had, and the second layer carries the punctuation
+// there was none of (no comma existed anywhere) plus the letters a QWERTY row
+// cannot produce. Shift applies to both layers - on the symbols it is the
+// accent row that changes case, since nothing else there has a case.
 //
 // EVERY layer has the same row lengths, and that is load-bearing rather than
 // tidy: a key is focused by position (`osk-<row>-<col>`), so a layer whose row
@@ -21,13 +20,77 @@ import { FocusButton } from "./FocusButton";
 // be - the one state a remote cannot get out of.
 const ROWS_LOWER = ["1234567890", "qwertyuiop", "asdfghjkl", "zxcvbnm", "@.:/-_?&=%"];
 const ROWS_UPPER = ["1234567890", "QWERTYUIOP", "ASDFGHJKL", "ZXCVBNM", "@.:/-_?&=%"];
-const ROWS_SYM = ["1234567890", "áéíóöőúüű,", ";!?'\"()[]", "{}<>*+~", "€$£#|\\§°^`"];
-const ROWS_SYM_UPPER = ["1234567890", "ÁÉÍÓÖŐÚÜŰ,", ";!?'\"()[]", "{}<>*+~", "€$£#|\\§°^`"];
+const SYM_TAIL = [";!?'\"()[]", "{}<>*+~", "€$£#|\\§°^`"];
 
-// Exported for the test that pins the shapes together. They are hand-written
-// constants and the focus keys are positional, so "these four agree" is a real
-// invariant with no other way to check it.
-export const OSK_LAYERS = { ROWS_LOWER, ROWS_UPPER, ROWS_SYM, ROWS_SYM_UPPER };
+// Which letters the symbol layer offers, by the box's KEYBOARD LAYOUT - the X11
+// layout set in Settings → System → Region, the same one a plugged-in keyboard
+// uses. Baking one language in would be choosing a country on behalf of everyone
+// who runs this, and the setting already exists to be asked.
+//
+// Each entry is exactly as long as the row it replaces, for the reason above; a
+// layout with fewer letters than that pads with punctuation rather than a
+// shorter row. Unknown layouts get the punctuation row, which is strictly more
+// than the keyboard offered before.
+const PUNCT_ROW = ",;:!?'\"()*";
+const ACCENT_ROWS: Record<string, [string, string]> = {
+  hu: ["áéíóöőúüű,", "ÁÉÍÓÖŐÚÜŰ,"],
+  de: ["äöüß,;:!?'", "ÄÖÜß,;:!?'"],
+  fr: ["àâçéèêëîïô", "ÀÂÇÉÈÊËÎÏÔ"],
+  es: ["áéíóúñü¿¡,", "ÁÉÍÓÚÑÜ¿¡,"],
+  pl: ["ąćęłńóśźż,", "ĄĆĘŁŃÓŚŹŻ,"],
+  it: ["àèéìòùç,;:", "ÀÈÉÌÒÙÇ,;:"],
+  pt: ["ãáàâçéêíõ,", "ÃÁÀÂÇÉÊÍÕ,"],
+  ro: ["ăâîșț,;:!?", "ĂÂÎȘȚ,;:!?"],
+  sk: ["áäčďéíĺľňó", "ÁÄČĎÉÍĹĽŇÓ"],
+  hr: ["čćđšž,;:!?", "ČĆĐŠŽ,;:!?"],
+  tr: ["çğıöşü,;:!", "ÇĞİÖŞÜ,;:!"],
+};
+
+// The X11 layout string can carry a variant ("hu(101_qwertz_comma_dead)") or a
+// list ("us,hu"); the first token before a comma or bracket is the layout.
+export function layoutKey(raw?: string | null): string {
+  return String(raw || "")
+    .split(/[,(]/)[0]
+    .trim()
+    .toLowerCase();
+}
+
+export function oskLayers(layout?: string | null) {
+  const pair = ACCENT_ROWS[layoutKey(layout)];
+  const first = pair ? pair[0] : PUNCT_ROW;
+  const second = pair ? pair[1] : PUNCT_ROW;
+  return {
+    ROWS_LOWER,
+    ROWS_UPPER,
+    ROWS_SYM: ["1234567890", first, ...SYM_TAIL],
+    ROWS_SYM_UPPER: ["1234567890", second, ...SYM_TAIL],
+  };
+}
+
+// Every layout this ships with, for the test that pins their shapes together:
+// they are hand-written constants and the focus keys are positional, so "these
+// all agree" is a real invariant with no other way to check it.
+export const OSK_LAYOUTS = Object.keys(ACCENT_ROWS);
+
+// Asked once per page, not once per keyboard: the shell answers this by running
+// `localectl`, and a keyboard that forks a process every time it opens would be
+// paying for a value that changes about once in a box's life. A failed read is
+// cached as "" so a box whose shell is older does not retry on every field.
+let cachedLayout: string | null = null;
+let inFlight: Promise<string> | null = null;
+function fetchLayout(): Promise<string> {
+  if (cachedLayout !== null) return Promise.resolve(cachedLayout);
+  if (!inFlight) {
+    inFlight = fetch("/tvbox/api/system/region", { cache: "no-store" })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => (cachedLayout = layoutKey(d && d.keymap)))
+      .catch(() => (cachedLayout = ""))
+      .finally(() => {
+        inFlight = null;
+      });
+  }
+  return inFlight;
+}
 
 function Key({
   focusKey,
@@ -116,6 +179,7 @@ export function Osk({
   onDone,
   onCancel,
   extra,
+  layout,
 }: {
   title: string;
   initial?: string;
@@ -125,12 +189,27 @@ export function Osk({
   // INSIDE the keyboard because the OSK is a focus boundary - a button outside it
   // could never be reached with the arrows.
   extra?: { label: string; onPress: () => void };
+  // The box's keyboard layout, if the caller already knows it. Left out, the
+  // keyboard asks the shell once and caches the answer for the session.
+  layout?: string;
 }) {
   const [text, setText] = useState(initial || "");
   const [cursor, setCursor] = useState((initial || "").length); // caret index into text
   const [upper, setUpper] = useState(false);
   const [symbols, setSymbols] = useState(false);
+  const [detected, setDetected] = useState<string | null>(cachedLayout);
   const { ref, focusKey } = useFocusable({ focusKey: "osk", isFocusBoundary: true });
+
+  // Which letters the symbol layer shows follows Settings → System → Region, so
+  // it is never asked before the keyboard is on screen and never asked twice.
+  useEffect(() => {
+    if (layout !== undefined || detected !== null) return;
+    let alive = true;
+    void fetchLayout().then((l) => alive && setDetected(l));
+    return () => {
+      alive = false;
+    };
+  }, [layout, detected]);
 
   useEffect(() => {
     const id = setTimeout(() => setFocus("osk-1-0"), 0);
@@ -151,7 +230,8 @@ export function Osk({
   const left = () => setCursor((c) => Math.max(0, c - 1));
   const right = () => setCursor((c) => Math.min(text.length, c + 1));
 
-  const rows = symbols ? (upper ? ROWS_SYM_UPPER : ROWS_SYM) : upper ? ROWS_UPPER : ROWS_LOWER;
+  const L = oskLayers(layout !== undefined ? layout : detected);
+  const rows = symbols ? (upper ? L.ROWS_SYM_UPPER : L.ROWS_SYM) : upper ? L.ROWS_UPPER : L.ROWS_LOWER;
 
   return (
     <FocusContext.Provider value={focusKey}>
