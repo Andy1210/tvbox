@@ -37,6 +37,7 @@ function fakeCtx(over = {}) {
     appIsRunning: () => false,
     applyFileserver: () => ({ ok: true }),
     applyMqttConfig: () => {},
+    notify: () => {},
     audioSink: () => null,
     childEnv: () => process.env,
     destroyAppWindow: () => {},
@@ -155,6 +156,24 @@ test("every ctx member a route uses is one the shell actually provides", () => {
     [...provided].filter((name) => !used.has(name)),
     [],
   );
+});
+
+test("an on-screen note is capped before the launcher ever sees it", () => {
+  const seen = [];
+  const res = fakeRes();
+  routes.post(
+    "/tvbox/api/notify",
+    { title: "t".repeat(400), message: "m".repeat(900), duration: 999999, raise: 1 },
+    res,
+    fakeCtx({ notify: (n) => seen.push(n) }),
+  );
+  assert.strictEqual(jsonOf(res).ok, true);
+  // The launcher draws what it is given, and an answer from a language model is
+  // not a length anyone promised - so the cap is here, not there.
+  assert.strictEqual(seen[0].title.length, 120);
+  assert.strictEqual(seen[0].message.length, 400);
+  assert.strictEqual(seen[0].duration, 60000);
+  assert.strictEqual(seen[0].raise, true);
 });
 
 test("a path with no route is a 404, not a silent success", () => {

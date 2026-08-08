@@ -203,9 +203,12 @@ KERNEL=="uinput", GROUP="input", MODE="0660", OPTIONS+="static_node=uinput"
 SUBSYSTEM=="cec", GROUP="video", MODE="0660"
 # Fire TV / Alexa remotes (Amazon VID 0x0171): their app buttons (Netflix/Prime/
 # ...) arrive as a vendor HID report the kernel maps to no key, so the remote
-# bridge reads them straight from hidraw. Grant the `input` group read on just
+# bridge reads them straight from hidraw. Grant the `input` group access to just
 # those remotes' hidraw nodes (parent HID name is <bus>:0171:<pid>.<n>).
-SUBSYSTEM=="hidraw", KERNELS=="0005:0171:*", GROUP="input", MODE="0640"
+# WRITE as well as read (0660, not 0640): the remote's microphone only streams
+# after the host sends it an output report, so the voice satellite has to write to
+# the same node - see docs/voice-satellite.md.
+SUBSYSTEM=="hidraw", KERNELS=="0005:0171:*", GROUP="input", MODE="0660"
 RULES
 udevadm control --reload-rules 2>/dev/null && udevadm trigger 2>/dev/null && ok "udev rules" || warn "udev reload failed (rules apply on reboot)"
 # plugdev is the group the polkit rule below grants removable media to. Raspberry

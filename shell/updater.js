@@ -61,6 +61,7 @@ const INFRA_FILES = [
   "cec_vendor_shim.c", // the bridge compiles it on start (mtime check)
   "remote_input_bridge.py", // BT/USB remote bridge (the tvbox-remote user service)
   "gamepad_shim.py", // unrecognised pad -> virtual standard Xbox pad (tvbox-gamepad)
+  "voice_satellite.py", // the remote's microphone as a Home Assistant satellite (tvbox-voice)
   "firetv_remote_ir.py", // program a Fire TV remote's IR buttons over BLE (no Fire TV)
   "keymap_compile.py", // byte-accurate keymap/IR compiler used by firetv_remote_ir.py
   "ir_protocols.py", // IR protocol encoders (NEC/RC5/RC6/SIRC/...) - irdb row -> raw timings
@@ -89,6 +90,7 @@ const INFRA_FILES = [
   "tvbox-cec.service",
   "tvbox-remote.service",
   "tvbox-gamepad.service",
+  "tvbox-voice.service", // the remote's microphone as an assist_satellite
   "tvbox-flatpak-update.service",
   "tvbox-flatpak-update.timer",
   // Screen mirroring's privileged half and the unit the shell starts it with.
@@ -111,6 +113,7 @@ const USER_UNITS = [
   "tvbox-cec.service",
   "tvbox-remote.service",
   "tvbox-gamepad.service",
+  "tvbox-voice.service",
   "tvbox-flatpak-update.service",
   "tvbox-flatpak-update.timer",
 ];
@@ -134,6 +137,7 @@ const UNIT_WANTS = {
   "tvbox-cec.service": "default.target.wants",
   "tvbox-remote.service": "default.target.wants",
   "tvbox-gamepad.service": "default.target.wants",
+  "tvbox-voice.service": "default.target.wants",
   "tvbox-flatpak-update.timer": "timers.target.wants",
 };
 
