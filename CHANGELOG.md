@@ -5,6 +5,29 @@ updates). `scripts/make-release.sh` lifts the current version's `hu`/`en`
 blocks into the OTA feed's `notes` - keep both languages, keep it short, and
 write for the person on the couch (what changes for THEM), not for developers.
 
+## 2.9.0
+
+### hu
+
+- **Biztonsági javítás a szülői felügyeletben.** A "PIN kérése kényes
+  műveletekhez" kapcsolót eddig PIN nélkül ki lehetett kapcsolni - vagyis meg
+  lehetett kerülni vele magát a PIN-t. Mostantól a kikapcsolás is PIN-t kér
+  (a bekapcsolás nem).
+- **Fejlesztői eszközök** a Beállítások → Rendszer alatt: a Chromium hibakereső
+  egy indulásra, és a TV képének megosztása a párosított telefonoddal. Utóbbi
+  külön kapcsoló, magától lejár, és a telefonon nagyítható.
+- A képernyő-billentyűzet PIN-panelján megint lehet lefelé navigálni.
+
+### en
+
+- **A security fix in parental controls.** The "require PIN for sensitive
+  actions" switch could be turned off without the PIN - which was a way around
+  the PIN itself. Turning it off now asks for it (turning it on does not).
+- **Developer tools** under Settings → System: the Chromium debugger for one
+  boot, and sharing the TV's screen with your paired phone. That one is a
+  separate switch, runs out on its own, and can be zoomed on the phone.
+- The PIN pad can be navigated with the arrows again.
+
 ## 2.8.0
 
 ### hu
