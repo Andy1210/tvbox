@@ -105,6 +105,33 @@ Two consequences worth knowing:
   than silence. If a recording comes back choppy, that is the link, not the codec:
   compare the frames received against the seconds they cover.
 
+## The answer on the screen
+
+`voice.answer` decides how an answer reaches the room:
+
+| Value            | What happens                                   |
+| ---------------- | ---------------------------------------------- |
+| `both` (default) | spoken, and the text as a note on screen       |
+| `toast`          | text only - nothing interrupts what is playing |
+| `speak`          | spoken only, as a puck would                   |
+
+The note is the box's ONE notification surface, not something the voice service
+invented: Home Assistant already pushes the same thing over the MQTT `notify`
+topic, and now anything on the box can raise one.
+
+- **An app's page**: `POST /tvbox/api/notify` with `{title?, message, duration?,
+raise?}`. A local app shares the shell's origin, so a plain `fetch` works.
+- **A host plugin**: `host.notify({ message: "…" })`.
+
+Both go through the same cap (title 120 characters, message 400, duration a
+minute) because the launcher draws whatever it is handed, and neither an app nor a
+language model has promised a length.
+
+**One limit worth knowing**: the note is drawn by the launcher, so while an app is
+in the foreground it is not visible unless the note asks to `raise` the launcher -
+which covers the app. Making a note appear over a running app needs a surface of
+its own, and that is not built yet.
+
 ## What it deliberately does not do
 
 - **No wake word.** The button is the wake word. Nothing listens until it is held,

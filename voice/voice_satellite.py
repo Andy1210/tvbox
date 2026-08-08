@@ -50,6 +50,7 @@ import socket
 import subprocess
 import sys
 import time
+import urllib.request
 
 LOG = logging.getLogger("tvbox-voice")
 
@@ -105,6 +106,10 @@ def load_config():
         # How far to pull the box's own audio down while the answer plays, so a
         # film does not talk over it. 1.0 leaves it alone.
         "duck": float(cfg.get("duck", 0.3)),
+        # How the answer reaches the room: spoken, as a note on the screen, or
+        # both. A toast is the one that does not interrupt a film, which is why it
+        # is part of the default.
+        "answer": str(cfg.get("answer") or "both").lower(),
     }
 
 
@@ -305,6 +310,31 @@ class RemoteMic:
         self._decoder.close()
 
 
+# ---------------------------------------------------------------- on screen
+
+
+SHELL_NOTIFY_URL = "http://127.0.0.1:8097/tvbox/api/notify"
+
+
+def show_toast(text):
+    """Put the answer on the TV as a note.
+
+    A spoken answer talks over whatever is playing; a toast does not, which is why
+    both are offered and both are the default. The shell draws it - the same note
+    Home Assistant can already push over MQTT - and it is on loopback, so a box
+    with no shell running simply gets a failed connection and carries on.
+    """
+    text = (text or "").strip()
+    if not text:
+        return
+    body = json.dumps({"message": text, "duration": 8000}).encode("utf-8")
+    req = urllib.request.Request(SHELL_NOTIFY_URL, data=body, headers={"Content-Type": "application/json"})
+    try:
+        urllib.request.urlopen(req, timeout=5).read()
+    except Exception as e:  # the shell may be restarting; an answer is not worth a crash
+        LOG.warning("could not show the answer on screen: %s", e)
+
+
 # ---------------------------------------------------------------- playback
 
 
@@ -452,18 +482,28 @@ class Satellite:
         elif etype == "transcript":
             LOG.info("heard: %s", data.get("text", ""))
         elif etype == "synthesize":
-            LOG.info("answer: %s", data.get("text", ""))
+            text = data.get("text", "")
+            LOG.info("answer: %s", text)
+            if self.config["answer"] in ("toast", "both"):
+                await asyncio.to_thread(show_toast, text)
         elif etype == "audio-start":
-            self.player.start(
-                int(data.get("rate") or SND_RATE),
-                int(data.get("width") or SND_WIDTH),
-                int(data.get("channels") or SND_CHANNELS),
-            )
+            LOG.info("answer audio: %s Hz", data.get("rate"))
+            if self.config["answer"] in ("speak", "both"):
+                self.player.start(
+                    int(data.get("rate") or SND_RATE),
+                    int(data.get("width") or SND_WIDTH),
+                    int(data.get("channels") or SND_CHANNELS),
+                )
         elif etype == "audio-chunk":
             self.player.write(payload)
         elif etype == "audio-stop":
             self.player.stop()
             await self._send("played")
+        else:
+            # Anything unrecognised is worth a line: this is a protocol we speak
+            # from the outside, and silence about an unexpected event is how a
+            # missing answer looks like nothing at all.
+            LOG.info("event: %s %s", etype, {k: v for k, v in data.items() if k != "audio"})
 
     def send(self, etype, data=None, payload=b""):
         """Queue one event. Safe to call from the microphone's reader callback."""
