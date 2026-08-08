@@ -139,6 +139,19 @@ test("the address can be handed out without opening the adoption window", async 
   assert.equal(phoneremote.address(), "", "and nothing to point anyone at while it is off");
 });
 
+test("the address is the socket's, not the one that was asked for", async () => {
+  // `enabled` is a setting, not a listener. A box whose port was taken has the
+  // switch on and nothing bound, and an address handed out then points at nobody -
+  // which on the TV looks like the phone is at fault. A REAL port number here, not
+  // the ephemeral 0 the other tests use: falling back to the configured one is
+  // exactly the mistake under test, and 0 hides it.
+  box({ enabled: true });
+  phoneremote.init({ port: 8197 }); // configured, never started
+  assert.equal(phoneremote.address(), "", "nothing is listening yet");
+  await new Promise((r) => phoneremote.apply(r));
+  assert.equal(phoneremote.address(), "http://192.168.1.50:8197");
+});
+
 // --------------------------------------------------------------- adoption
 
 test("a phone is adopted with the code on the TV, and then keeps working", async () => {

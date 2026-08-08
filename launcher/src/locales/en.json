@@ -755,6 +755,7 @@
     "addressRowHint": "A QR code, for reopening it on a phone that is already paired",
     "addressTitle": "The remote's address",
     "addressHint": "The same address for every paired phone. One that is already paired needs no code again; a new one does, and the Pair row gives it.",
+    "qrAlt": "QR code",
     "pairTitle": "Pair a phone",
     "paired": "Paired phones",
     "pairedCount": "{n} phones",

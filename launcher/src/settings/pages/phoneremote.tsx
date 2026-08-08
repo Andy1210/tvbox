@@ -53,7 +53,7 @@ function PairOverlay({ address, onClose }: { address?: string; onClose: () => vo
       setInfo({ shortUrl: address, code: "" });
       void QRCode.toDataURL(address, { width: 480, margin: 1 })
         .then((d) => alive && setQr(d))
-        .catch(() => {});
+        .catch(() => {}); // the address itself is already on screen
       return () => {
         alive = false;
       };
@@ -96,11 +96,20 @@ function PairOverlay({ address, onClose }: { address?: string; onClose: () => vo
         </div>
         {failed ? (
           <div className="text-[2.2vh] text-warn">{t("phoneRemote.pairFailed")}</div>
-        ) : qr ? (
+        ) : info ? (
           <>
-            <img src={qr} alt="QR" className="w-[30vh] h-[30vh] rounded-[1.4vh] bg-white p-[1vh]" />
-            <div className="text-[2.2vh] font-semibold tabular-nums">{info?.shortUrl}</div>
-            {info?.code ? (
+            {/* The address and the code are what the phone needs; the QR only saves
+                typing them. So a picture that could not be drawn must not take them
+                off the screen with it - which is what waiting for `qr` here did. */}
+            {qr ? (
+              <img
+                src={qr}
+                alt={t("phoneRemote.qrAlt")}
+                className="w-[30vh] h-[30vh] rounded-[1.4vh] bg-white p-[1vh]"
+              />
+            ) : null}
+            <div className="text-[2.2vh] font-semibold tabular-nums">{info.shortUrl}</div>
+            {info.code ? (
               <div className="text-[2vh] text-fg-dim">
                 {t("phoneRemote.code")}:{" "}
                 <span className="font-bold text-fg tabular-nums tracking-[0.3vw]">{info.code}</span>

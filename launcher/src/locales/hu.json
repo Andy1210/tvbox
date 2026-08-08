@@ -755,6 +755,7 @@
     "addressRowHint": "QR-kód, ha egy már párosított telefonon újra meg kell nyitni",
     "addressTitle": "A távirányító címe",
     "addressHint": "Ugyanez a cím minden párosított telefonhoz. Egy már párosítottnak nem kell újra kód; egy újnak igen, azt a Párosítás sor adja.",
+    "qrAlt": "QR-kód",
     "pairTitle": "Telefon párosítása",
     "paired": "Párosított telefonok",
     "pairedCount": "{n} telefon",

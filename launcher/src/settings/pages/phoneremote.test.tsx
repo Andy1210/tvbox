@@ -2,6 +2,7 @@ import { describe, it, expect, vi, afterEach } from "vitest";
 import { act, cleanup, render } from "@testing-library/react";
 import { PhoneRemoteSubPage } from "./phoneremote";
 import { getCurrentFocusKey } from "@noriginmedia/norigin-spatial-navigation";
+import QRCode from "qrcode";
 import { setupRemote, remote, setFocus } from "../../test/remote";
 
 // The one page in Settings that opens a door, so what is tested here is what it
@@ -165,6 +166,22 @@ describe("the phone-remote settings page", () => {
     await remote.back();
     await settle();
     expect(getCurrentFocusKey()).toBe("phoneremote:address");
+  });
+
+  it("a QR that cannot be drawn still leaves the address on screen", async () => {
+    // The picture only saves typing; the address is the thing the phone needs. It
+    // used to be rendered inside the QR's own branch, so a failed draw left a
+    // spinner and nothing to read - the one state where a phone cannot be helped
+    // by reading the TV out loud.
+    vi.spyOn(QRCode, "toDataURL").mockRejectedValue(new Error("no canvas"));
+    stubShell({ enabled: true, phones: [{ id: "a1", name: "Andy's phone", addedAt: 1, lastSeenAt: null }] });
+    const { getByText, queryByRole } = render(<PhoneRemoteSubPage onBack={() => {}} />);
+    await settle();
+    await setFocus("phoneremote:address");
+    await remote.ok();
+    await settle();
+    expect(getByText("http://192.168.1.9:8100")).toBeTruthy();
+    expect(queryByRole("img")).toBeNull();
   });
 
   it("a blip offers a retry rather than claiming the box is too old", async () => {
