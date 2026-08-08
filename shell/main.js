@@ -1698,8 +1698,13 @@ function hideOverlay() {
 // still brings the launcher forward, for the notes that are meant to interrupt.
 function handleTvNotify(payload) {
   const note = payload || {};
+  // A note with no text of its own is one the LAUNCHER writes: `{kind:"lowBattery"}`
+  // carries a name and a percentage, and the sentence around them is a localized
+  // string that lives there, not here. Drawing it in the overlay would put an empty
+  // dark bar over the film - worse than the note staying where it can be read.
+  const hasText = !!(String(note.message || "").trim() || String(note.title || "").trim());
   claimOverlayPlacement((placeable) => {
-    if (!placeable) return; // older compositor: the launcher's own note is all there is
+    if (!placeable || !hasText) return; // the launcher's own note is all there is
     try {
       const w = ensureOverlayWindow();
       const show = () => {
