@@ -171,6 +171,24 @@ test("the session is capped", () => {
   assert.throws(() => photoshare.save("one-too-many.jpg", b64(PNG)), /full/);
 });
 
+test("one photo can be taken back off, and only ours can", () => {
+  // The phone shows the session back and offers a ✕ per tile, so this is reachable
+  // from the LAN with a pairing code. It leans on pathFor for that: a name that is
+  // not one of ours must delete nothing rather than reach a file elsewhere.
+  const a = photoshare.save("keep.jpg", b64(PNG));
+  const b = photoshare.save("drop.jpg", b64(PNG));
+  fs.writeFileSync(path.join(photoshare.DIR, "stray.jpg"), PNG);
+
+  assert.equal(photoshare.remove(b), true);
+  assert.deepEqual(photoshare.list(), [a], "and the others stay");
+  assert.equal(photoshare.remove(b), true, "asking twice is not an error - it is already gone");
+
+  for (const nope of ["", "stray.jpg", "../config.json", "sub/0001-x.jpg", "0001-x.jpg/../../y"]) {
+    assert.equal(photoshare.remove(nope), false, nope);
+  }
+  assert.ok(fs.existsSync(path.join(photoshare.DIR, "stray.jpg")), "nothing outside the pattern was touched");
+});
+
 test("boot clears whatever a switched-off TV left behind", () => {
   photoshare.save("last-night.jpg", b64(PNG));
   assert.equal(photoshare.sweep(), 1);

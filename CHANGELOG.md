@@ -5,6 +5,30 @@ updates). `scripts/make-release.sh` lifts the current version's `hu`/`en`
 blocks into the OTA feed's `notes` - keep both languages, keep it short, and
 write for the person on the couch (what changes for THEM), not for developers.
 
+## 2.9.1
+
+### hu
+
+- **A távirányítóval megint minden sorra rá lehet állni.** A listákban néha
+  kimaradt egy sor - se le, se fel nem lehetett ráállni -, és hogy melyik, az
+  attól függött, mi volt fölötte. Ez most javítva, mindenhol.
+- A párosított telefonoknál egy sor megmutatja a box címét QR-kóddal, ha egy már
+  párosított telefonon újra meg kell nyitni. Ez nem ad új párosítási kódot, így
+  nem érvényteleníti a másik telefonét.
+- A telefonról küldött képeknél most látszik a feltöltött képek előnézete, és
+  egyesével is le lehet venni őket a TV-ről.
+
+### en
+
+- **Every row can be reached with the remote again.** A list would sometimes skip
+  one - it could not be focused from above or below - and which row it was
+  depended on what sat above it. Fixed everywhere.
+- The paired phones now have a row that shows the box's address as a QR code, for
+  reopening it on a phone that is already paired. It issues no new pairing code,
+  so it cannot invalidate another phone's.
+- Photos cast from a phone are shown back with previews, and can be taken off the
+  TV one at a time.
+
 ## 2.9.0
 
 ### hu

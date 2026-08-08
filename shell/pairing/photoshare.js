@@ -9,7 +9,9 @@
 // viewer renders at, so a modest zoom still has pixels behind it, and it keeps a
 // photo around a megabyte - which is what makes sending thirty of them over wifi
 // feel immediate.
+const fs = require("fs");
 const photoshare = require("../photoshare");
+const images = require("../images");
 
 const STR = {
   hu: {
@@ -20,6 +22,7 @@ const STR = {
     done: "kész - nézd a TV-t.",
     onTv: "A TV-n most",
     photos: "kép",
+    del: "Levétel",
     clear: "Képek eltávolítása",
     clearConfirm: "Leveszed a képeket a TV-ről?",
     full: "Betelt - előbb vedd le a képeket a TV-ről.",
@@ -33,6 +36,7 @@ const STR = {
     done: "done - look at the TV.",
     onTv: "On the TV now",
     photos: "photos",
+    del: "Take it off",
     clear: "Remove the photos",
     clearConfirm: "Take the photos off the TV?",
     full: "Full - take the photos off the TV first.",
@@ -56,9 +60,48 @@ module.exports = {
         }
       },
     },
-    // How many are on the TV. The phone shows this so that picking the same album
-    // twice is visibly a mistake rather than a silent one.
-    "GET /pshare-list": (req, res, ctx) => ctx.json(res, { count: photoshare.list().length }),
+    // What is on the TV. Names as well as a count, so the phone can show the
+    // session back and take one photo off it - picking the same album twice is a
+    // mistake to undo, not just one to be told about.
+    "GET /pshare-list": (req, res, ctx) => {
+      const names = photoshare.list();
+      ctx.json(res, { count: names.length, names, max: photoshare.MAX_ITEMS });
+    },
+    // The TILE, not the photo. The phone already holds the original it sent; what
+    // it needs back is something small enough to put thirty of on a screen over
+    // wifi, and images.js will usually have the camera's own thumbnail to hand.
+    "GET /pshare-img": (req, res, ctx) => {
+      const p = photoshare.pathFor(ctx.query.get("name"));
+      if (!p) {
+        res.writeHead(400);
+        return res.end();
+      }
+      images.thumb(p, (err, tile) => {
+        if (err) {
+          res.writeHead(err === "not_found" ? 404 : 500);
+          return res.end();
+        }
+        // The headers wait for the file to open, and an `error` is handled: the
+        // cache entry can be pruned between the callback above and this read, and
+        // an unhandled stream error takes the whole shell down with it.
+        const stream = fs.createReadStream(tile);
+        stream.on("open", () => {
+          res.writeHead(200, { "Content-Type": "image/jpeg", "Cache-Control": "no-store" });
+          stream.pipe(res);
+        });
+        stream.on("error", (e) => {
+          console.warn("[photoshare] tile read failed:", tile, e.message);
+          if (!res.headersSent) res.writeHead(500);
+          try {
+            res.end();
+          } catch (e2) {}
+        });
+        // `pipe` unpipes on a closed response but does not close the file, and a
+        // phone scrolling a grid abandons tiles it has moved past.
+        res.on("close", () => stream.destroy());
+      });
+    },
+    "POST /pshare-delete": (req, res, ctx) => ctx.json(res, { ok: photoshare.remove(String(ctx.body.name || "")) }),
     "POST /pshare-clear": (req, res, ctx) => ctx.json(res, { ok: true, removed: photoshare.clear() }),
   },
 };

@@ -235,6 +235,20 @@ function arm(cb) {
   });
 }
 
+// The plain address, with no code on it. Empty while the listener is down or the
+// box has no LAN address - the same two reasons arm() refuses.
+//
+// The port comes from the socket rather than from boundPort(), which falls back
+// to the CONFIGURED one: `enabled` is a setting, so a listener that never came up
+// - the port was taken - would otherwise be handed out as an address nothing
+// answers, and on the TV that is indistinguishable from a phone at fault.
+function address() {
+  const ip = deps.lanIp();
+  const bound = server && server.listening && server.address();
+  const p = bound && bound.port;
+  return enabled() && ip && ip !== "127.0.0.1" && p ? `http://${ip}:${p}` : "";
+}
+
 function disarm() {
   adopt = null;
 }
@@ -400,6 +414,7 @@ function handle(req, res) {
 
 module.exports = {
   PORT,
+  address,
   screenOn,
   screenUntil,
   shareScreen,
