@@ -340,9 +340,11 @@ ten more `index.json` addresses (https anywhere, plain http only on your own
 network) and merges them into the same catalogue, each app labelled with where it
 came from. An added registry is **not** reviewed by us and its apps can do
 everything an official one's can, so the screen says so before you add one; what
-the box keeps track of is which registry each app was installed from, so nobody
-else's registry can take over an installed app by publishing a higher version
-under its id. Unattended overnight updates are per source, off by default for
+the box keeps track of is which registry each app was installed from, so no other
+registry can take an installed app over on its own by publishing a higher version
+under its id. (If you remove the registry an app came from, another one offering
+the same app is still only ever installed by your own press on Update, never
+overnight.) Unattended overnight updates are per source, off by default for
 anything you added. Details, and the local-registry loop for writing apps:
 [docs/app-store-sources.md](docs/app-store-sources.md).
 

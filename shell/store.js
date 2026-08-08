@@ -170,6 +170,24 @@ function readPin(id) {
     return null; // an app installed before this bookkeeping, or removed since
   }
 }
+// Every pin there is, in one directory read. The alternative - asking per
+// catalogue row - is a failed open for each of the apps that were never
+// installed, on a list the launcher polls every 1.5s while an install runs.
+function readPins() {
+  const out = new Map();
+  let names;
+  try {
+    names = fs.readdirSync(PIN_DIR);
+  } catch (e) {
+    return out; // no app on this box has been installed from a registry yet
+  }
+  for (const n of names) {
+    if (!n.endsWith(".json")) continue;
+    const url = readPin(n.slice(0, -5));
+    if (url) out.set(n.slice(0, -5), url);
+  }
+  return out;
+}
 function writePin(id, url) {
   try {
     fs.mkdirSync(PIN_DIR, { recursive: true });
@@ -201,8 +219,9 @@ function mergeSources(loaded) {
     }
   }
   const chosen = new Map();
+  const pins = readPins();
   for (const [id, list] of candidates) {
-    const pin = readPin(id);
+    const pin = pins.get(id);
     const c = (pin && list.find((x) => x.source.url === pin)) || list[0];
     chosen.set(id, {
       ...c,

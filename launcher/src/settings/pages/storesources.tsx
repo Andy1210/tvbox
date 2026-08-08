@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useI18n } from "../../lib/i18n";
 import { fetchStore, saveStoreSources, type StoreSource } from "../../lib/api";
 import { sourceLabel } from "../../lib/storesource";
@@ -43,17 +43,27 @@ function SourceEditPage({
   const [armed, setArmed] = useState(false); // adding a source is one press away from running its code
   const [armRemove, setArmRemove] = useState(false);
   const [busy, setBusy] = useState(false);
+  // A ref, not the state, is what refuses the second press: two presses inside
+  // one render tick both read the same `busy` from their own closure, and the
+  // `disabled` prop only takes effect once React has re-rendered.
+  const writing = useRef(false);
   const [error, setError] = useState("");
 
-  const write = async (list: Draft[]) => {
+  // `expect` is the url this write is supposed to end up storing, and only a save
+  // has one: on a removal the address is meant to be gone, so checking for it
+  // there would report a successful removal as a refused address.
+  const write = async (list: Draft[], expect?: string) => {
+    if (writing.current) return; // one write at a time: each one replaces the WHOLE list
+    writing.current = true;
     setBusy(true);
     const r = await saveStoreSources(list.map((d) => ({ url: d.url, name: d.name || null, autoUpdate: d.autoUpdate })));
+    writing.current = false;
     setBusy(false);
     // The box answers with what it stored. A url it refused (not https, and not a
     // LAN address) comes back missing, and saying so beats a page that closes as
     // if it had worked.
     if (!r.ok) return setError(t("storeSources.saveFailed"));
-    if (draft.url && !r.sources.some((s) => s.url === draft.url.trim())) return setError(t("storeSources.badUrl"));
+    if (expect && !r.sources.some((s) => s.url === expect)) return setError(t("storeSources.badUrl"));
     onDone();
     nav.pop();
   };
@@ -63,7 +73,7 @@ function SourceEditPage({
     if (!url) return setError(t("storeSources.needUrl"));
     if (!existing && !armed) return setArmed(true);
     const rest = others.map((s) => ({ url: s.url, name: s.name || "", autoUpdate: !!s.autoUpdate }));
-    void write([...rest, { ...draft, url }]);
+    void write([...rest, { ...draft, url }], url);
   };
 
   const remove = () => {
@@ -121,6 +131,7 @@ function SourceEditPage({
           id="save"
           label={busy ? t("storeSources.saving") : armed ? t("storeSources.addSure") : t("storeSources.save")}
           trailing="none"
+          disabled={busy}
           onEnter={save}
         />
         {existing && (
@@ -129,6 +140,7 @@ function SourceEditPage({
             label={armRemove ? t("storeSources.removeSure") : t("storeSources.remove")}
             hint={t("storeSources.removeHint")}
             trailing="none"
+            disabled={busy}
             onEnter={remove}
           />
         )}
@@ -145,6 +157,11 @@ export function StoreSourcesPage() {
   // Add row asks for it rather than keeping a second copy that could drift.
   const [maxSources, setMaxSources] = useState(10);
   const [unreachable, setUnreachable] = useState(false);
+  // Every save replaces the WHOLE list, so a second press before the first answer
+  // lands would write a state nobody asked for. Same guard the apps auto-update
+  // toggle uses, for the same reason.
+  const [saving, setSaving] = useState(false);
+  const savingRef = useRef(false);
 
   // The list comes from the store itself rather than from the config: it is the
   // only answer that also carries what each registry ANSWERED (how many apps, or
@@ -197,11 +214,19 @@ export function StoreSourcesPage() {
       ),
     });
   const setPrimaryAuto = async (on: boolean) => {
-    await saveStoreSources(
-      extras.map((s) => ({ url: s.url, name: s.name, autoUpdate: !!s.autoUpdate })),
-      on,
-    );
-    await load();
+    if (savingRef.current) return;
+    savingRef.current = true;
+    setSaving(true);
+    try {
+      await saveStoreSources(
+        extras.map((s) => ({ url: s.url, name: s.name, autoUpdate: !!s.autoUpdate })),
+        on,
+      );
+      await load();
+    } finally {
+      savingRef.current = false;
+      setSaving(false);
+    }
   };
 
   return (
@@ -221,6 +246,7 @@ export function StoreSourcesPage() {
           on={primary.autoUpdate}
           onWord={t("common.on")}
           offWord={t("common.off")}
+          disabled={saving}
           autoFocus
           onToggle={() => void setPrimaryAuto(!primary.autoUpdate)}
         />

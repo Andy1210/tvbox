@@ -11,7 +11,7 @@ Settings -> Apps -> Store sources.
 A registry is a single `index.json` reachable over HTTP, plus the package files
 it names, served **relative to the index**:
 
-```
+```text
 https://example.test/store/index.json      { registryVersion: 1, apps: [...], packages: {...} }
 https://example.test/store/apps/<id>/…     the files each package app is made of
 ```
