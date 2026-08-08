@@ -32,7 +32,7 @@ import { invalidateSummary } from "../summary";
 // screen reacts to the pairing rather than to the next press.
 const POLL_MS = 1500;
 
-function PairOverlay({ onClose }: { onClose: () => void }) {
+function PairOverlay({ address, onClose }: { address?: string; onClose: () => void }) {
   const { t } = useI18n();
   const { ref, focusKey } = useFocusable({
     focusKey: "pr-pair",
@@ -46,6 +46,18 @@ function PairOverlay({ onClose }: { onClose: () => void }) {
 
   useEffect(() => {
     let alive = true;
+    // Showing the ADDRESS mints nothing: a phone that is already paired needs no
+    // code, and issuing one here would invalidate the code another phone is in
+    // the middle of using.
+    if (address) {
+      setInfo({ shortUrl: address, code: "" });
+      void QRCode.toDataURL(address, { width: 480, margin: 1 })
+        .then((d) => alive && setQr(d))
+        .catch(() => {}); // the address itself is already on screen
+      return () => {
+        alive = false;
+      };
+    }
     void armPhoneRemote().then(async (d) => {
       if (!alive) return;
       if (!d.ok || !d.url) return setFailed(true);
@@ -62,7 +74,7 @@ function PairOverlay({ onClose }: { onClose: () => void }) {
       alive = false;
       void disarmPhoneRemote();
     };
-  }, []);
+  }, [address]);
 
   useEffect(() => {
     const id = setTimeout(() => setFocus("pr-pair-done"), 0);
@@ -76,18 +88,33 @@ function PairOverlay({ onClose }: { onClose: () => void }) {
         ref={ref}
         className="fixed inset-0 z-[55] bg-black/90 flex flex-col items-center justify-center gap-[2.2vh] px-[6vw] text-center"
       >
-        <div className="text-[3vh] font-bold">{t("phoneRemote.pairTitle")}</div>
-        <div className="text-[2vh] text-fg-dim max-w-[62vw]">{t("phoneRemote.pairHint")}</div>
+        <div className="text-[3vh] font-bold">
+          {address ? t("phoneRemote.addressTitle") : t("phoneRemote.pairTitle")}
+        </div>
+        <div className="text-[2vh] text-fg-dim max-w-[62vw]">
+          {address ? t("phoneRemote.addressHint") : t("phoneRemote.pairHint")}
+        </div>
         {failed ? (
           <div className="text-[2.2vh] text-warn">{t("phoneRemote.pairFailed")}</div>
-        ) : qr ? (
+        ) : info ? (
           <>
-            <img src={qr} alt="QR" className="w-[30vh] h-[30vh] rounded-[1.4vh] bg-white p-[1vh]" />
-            <div className="text-[2.2vh] font-semibold tabular-nums">{info?.shortUrl}</div>
-            <div className="text-[2vh] text-fg-dim">
-              {t("phoneRemote.code")}:{" "}
-              <span className="font-bold text-fg tabular-nums tracking-[0.3vw]">{info?.code}</span>
-            </div>
+            {/* The address and the code are what the phone needs; the QR only saves
+                typing them. So a picture that could not be drawn must not take them
+                off the screen with it - which is what waiting for `qr` here did. */}
+            {qr ? (
+              <img
+                src={qr}
+                alt={t("phoneRemote.qrAlt")}
+                className="w-[30vh] h-[30vh] rounded-[1.4vh] bg-white p-[1vh]"
+              />
+            ) : null}
+            <div className="text-[2.2vh] font-semibold tabular-nums">{info.shortUrl}</div>
+            {info.code ? (
+              <div className="text-[2vh] text-fg-dim">
+                {t("phoneRemote.code")}:{" "}
+                <span className="font-bold text-fg tabular-nums tracking-[0.3vw]">{info.code}</span>
+              </div>
+            ) : null}
           </>
         ) : (
           <div className="w-[6vh] h-[6vh] rounded-full border-[0.5vh] border-white/20 border-t-white animate-spin" />
@@ -122,6 +149,10 @@ export function PhoneRemotePage() {
   const [phones, setPhones] = useState<PairedPhone[] | null>(null);
   const [status, setStatus] = useState<"loading" | "ok" | "unsupported" | "error">("loading");
   const [pairing, setPairing] = useState(false);
+  // The box's address, and whether it is on screen as a QR. Separate from
+  // `pairing`: this one hands out no code.
+  const [url, setUrl] = useState("");
+  const [showing, setShowing] = useState(false);
   const busy = useRef(false);
   const page = usePageId();
 
@@ -131,6 +162,7 @@ export function PhoneRemotePage() {
     if (r.kind !== "ok") return;
     setEnabled(r.state.enabled);
     setPhones(r.state.phones);
+    setUrl(r.state.url);
   }, []);
 
   useEffect(() => {
@@ -214,6 +246,18 @@ export function PhoneRemotePage() {
 
       {enabled && list.length ? (
         <Group title={t("phoneRemote.paired")}>
+          {/* One address for all of them - a phone is told apart by the token it
+              stored, not by where it goes - so this is one row, not one per phone. */}
+          {url ? (
+            <Row
+              id="address"
+              label={t("phoneRemote.address")}
+              hint={t("phoneRemote.addressRowHint")}
+              value={url.replace(/^https?:\/\//, "")}
+              onEnter={() => setShowing(true)}
+              trailing="none"
+            />
+          ) : null}
           {list.map((p) => (
             <Row
               key={p.id}
@@ -230,6 +274,15 @@ export function PhoneRemotePage() {
       {enabled && !list.length ? <InfoRow label={t("phoneRemote.paired")} value={t("phoneRemote.nonePaired")} /> : null}
 
       <Note tone={enabled ? "warn" : "dim"}>{enabled ? t("phoneRemote.onNote") : t("phoneRemote.note")}</Note>
+      {showing ? (
+        <PairOverlay
+          address={url}
+          onClose={() => {
+            setShowing(false);
+            setTimeout(() => setFocus(rowKey(page, "address")), 0);
+          }}
+        />
+      ) : null}
       {pairing ? (
         <PairOverlay
           onClose={() => {

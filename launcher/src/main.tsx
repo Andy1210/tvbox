@@ -1,13 +1,14 @@
 import { createRoot } from "react-dom/client";
-import { init } from "@noriginmedia/norigin-spatial-navigation";
+import { initSpatialNavigation } from "@sdk/spatial-nav";
 import { startGamepadNav } from "@sdk/gamepad";
 import { App } from "./App";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 import "./index.css";
 
 // Spatial navigation: the CEC->uinput bridge sends arrow keys + Enter, which
-// norigin maps to directional focus moves + onEnterPress.
-init({
+// norigin maps to directional focus moves + onEnterPress. Through the SDK, which
+// is where the choice of layout adapter is made and explained.
+initSpatialNavigation({
   debug: false,
   visualDebug: false,
   // Back/Home/media keys are handled by the shell preload, not here.

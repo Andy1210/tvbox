@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, vi, afterEach } from "vitest";
 import { act, cleanup, render } from "@testing-library/react";
 import { DevToolsPage } from "./devtools";
 import { useConfigStore } from "../../stores/config";
@@ -40,7 +40,6 @@ const setPin = (pinSet: boolean, requirePin = pinSet) =>
   });
 
 describe("developer tools", () => {
-  beforeEach(() => setupRemote());
   afterEach(() => {
     cleanup();
     vi.unstubAllGlobals();

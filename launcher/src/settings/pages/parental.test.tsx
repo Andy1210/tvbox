@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, vi, afterEach } from "vitest";
 import { act, cleanup, render } from "@testing-library/react";
 import { ParentalPage } from "./system";
 import { useConfigStore } from "../../stores/config";
@@ -42,7 +42,6 @@ const config = (requirePin: boolean) =>
   });
 
 describe("parental controls", () => {
-  beforeEach(() => setupRemote());
   afterEach(() => {
     cleanup();
     vi.unstubAllGlobals();

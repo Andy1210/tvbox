@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, vi, afterEach } from "vitest";
 import { act, cleanup, render, screen } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { FileServerPage } from "./fileserver";
@@ -51,7 +51,6 @@ function stubShell(hasPass: boolean, over: Partial<ReturnType<typeof STATUS>> = 
 const settle = () => act(async () => await new Promise((r) => setTimeout(r, 20)));
 
 describe("the file server form", () => {
-  beforeEach(() => setupRemote());
   afterEach(() => {
     cleanup();
     vi.unstubAllGlobals();

@@ -984,6 +984,11 @@ function serve() {
         // When the screen share runs out, so Settings can count it down rather
         // than just say "on".
         screenUntil: phoneremote.screenUntil(),
+        // Where a phone goes. The same for every one of them - a token tells them
+        // apart, not the address - and deliberately NOT a pairing code: minting
+        // one for someone who just wanted the address would invalidate the code a
+        // phone is holding.
+        url: phoneremote.address(),
       });
     }
     if (p === "/tvbox/api/photoshare") {

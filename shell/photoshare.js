@@ -137,6 +137,21 @@ function clear() {
   return n;
 }
 
+// One photo, taken back off the TV. Goes through pathFor, so a name that is not
+// one of ours deletes nothing rather than reaching for a file elsewhere; a name
+// that IS ours but has already gone is `true`, because the caller asked for it to
+// be absent and it is.
+function remove(name) {
+  const p = pathFor(name);
+  if (!p) return false;
+  try {
+    fs.unlinkSync(p);
+    return true;
+  } catch (e) {
+    return e.code === "ENOENT";
+  }
+}
+
 // Called once at boot. Anything still here belongs to a session whose TV was
 // turned off at the wall, and there is no one left who wants it.
 function sweep() {
@@ -145,4 +160,4 @@ function sweep() {
   return n;
 }
 
-module.exports = { DIR, MAX_ITEMS, MAX_BYTES, list, save, pathFor, clear, sweep };
+module.exports = { DIR, MAX_ITEMS, MAX_BYTES, list, save, pathFor, remove, clear, sweep };
