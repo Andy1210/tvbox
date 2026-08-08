@@ -5,6 +5,34 @@ updates). `scripts/make-release.sh` lifts the current version's `hu`/`en`
 blocks into the OTA feed's `notes` - keep both languages, keep it short, and
 write for the person on the couch (what changes for THEM), not for developers.
 
+## 2.6.0
+
+### hu
+
+- **Képeket is nézhetsz a TV-n.** Egy mappa fotói rácsban nyílnak meg, bármelyik
+  kitölti a képernyőt, és a nyilakkal lapozol köztük. Az OK gomb nagyít,
+  nagyításban az iránygombokkal mozogsz a képen belül.
+- **Küldhetsz képeket a telefonodról.** A Fájlok appban válaszd a "Telefonról"
+  sort, olvasd be a kódot a telefonoddal, és a kiválasztott képek megjelennek a
+  TV-n, ahogy érkeznek. Amikor bezárod, le is kerülnek a boxról.
+- A Fájlok kezdőképernyőjén a telefon, az USB-kulcs és a hálózati megosztás
+  külön, felül van, nem a box saját mappái közé keveredve.
+
+> A képekhez a Fájlok appnak is frissülnie kell - magától megteszi.
+
+### en
+
+- **You can look at photos on the TV now.** A folder of them opens as a grid, any
+  one fills the screen, and the arrows move between them. OK enlarges a photo,
+  and the arrows then move around inside it.
+- **You can send photos from your phone.** In the Files app pick "From your
+  phone", scan the code, and the photos you choose appear on the TV as they
+  arrive. They come off the box again when you close it.
+- On the Files home screen your phone, a USB stick and a network share are their
+  own group at the top, instead of being mixed in with the box's own folders.
+
+> Photos also need the Files app to update - it does that by itself.
+
 ## 2.5.1
 
 ### hu
