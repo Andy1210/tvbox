@@ -20,6 +20,30 @@ import { FocusButton } from "./FocusButton";
 // be - the one state a remote cannot get out of.
 const ROWS_LOWER = ["1234567890", "qwertyuiop", "asdfghjkl", "zxcvbnm", "@.:/-_?&=%"];
 const ROWS_UPPER = ["1234567890", "QWERTYUIOP", "ASDFGHJKL", "ZXCVBNM", "@.:/-_?&=%"];
+// The letters themselves follow the layout too, not only the accents: on a
+// Hungarian or German keyboard the top row is QWERTZ, and an on-screen keyboard
+// that spelled QWERTY while the box was set to one of those would be showing the
+// wrong keyboard. Only the swap is modelled - the letters that MOVE between
+// these layouts - because the rows are a fixed shape and inventing a full
+// national layout inside it would be guessing.
+const QWERTZ = ["1234567890", "qwertzuiop", "asdfghjkl", "yxcvbnm", "@.:/-_?&=%"];
+const QWERTZ_UPPER = ["1234567890", "QWERTZUIOP", "ASDFGHJKL", "YXCVBNM", "@.:/-_?&=%"];
+const LETTERS = {
+  qwertz: [QWERTZ, QWERTZ_UPPER],
+};
+// Which layouts are QWERTZ rather than QWERTY. Left out deliberately: AZERTY
+// (fr, be) moves a letter BETWEEN rows, which these fixed row shapes cannot
+// express - so those keep QWERTY rather than get a half-right AZERTY.
+const LETTER_STYLE: Record<string, keyof typeof LETTERS> = {
+  hu: "qwertz",
+  de: "qwertz",
+  sk: "qwertz",
+  hr: "qwertz",
+  cz: "qwertz",
+  sl: "qwertz",
+  ch: "qwertz",
+  at: "qwertz",
+};
 const SYM_TAIL = [";!?'\"()[]", "{}<>*+~", "€$£#|\\§°^`"];
 
 // Which letters the symbol layer offers, by the box's KEYBOARD LAYOUT - the X11
@@ -56,12 +80,14 @@ export function layoutKey(raw?: string | null): string {
 }
 
 export function oskLayers(layout?: string | null) {
-  const pair = ACCENT_ROWS[layoutKey(layout)];
+  const key = layoutKey(layout);
+  const pair = ACCENT_ROWS[key];
   const first = pair ? pair[0] : PUNCT_ROW;
   const second = pair ? pair[1] : PUNCT_ROW;
+  const letters = LETTERS[LETTER_STYLE[key]] || [ROWS_LOWER, ROWS_UPPER];
   return {
-    ROWS_LOWER,
-    ROWS_UPPER,
+    ROWS_LOWER: letters[0],
+    ROWS_UPPER: letters[1],
     ROWS_SYM: ["1234567890", first, ...SYM_TAIL],
     ROWS_SYM_UPPER: ["1234567890", second, ...SYM_TAIL],
   };
@@ -78,13 +104,27 @@ export const OSK_LAYOUTS = Object.keys(ACCENT_ROWS);
 // cached as "" so a box whose shell is older does not retry on every field.
 let cachedLayout: string | null = null;
 let inFlight: Promise<string> | null = null;
+let told = 0; // bumped whenever someone tells us the layout outright
+
+// Told, rather than re-read. Settings changes the layout on a page that is
+// already loaded, and this value is cached for the life of that page - so
+// without this the keyboard would keep the layout the box had when the launcher
+// started, which looks exactly like the setting having done nothing.
+export function noteOskLayout(layout: string) {
+  cachedLayout = layoutKey(layout);
+  // A read started before this can still be in flight, and it would land on the
+  // value the box had a moment ago. Bumping the generation is what makes that
+  // answer arrive too late to matter.
+  told++;
+}
 function fetchLayout(): Promise<string> {
   if (cachedLayout !== null) return Promise.resolve(cachedLayout);
   if (!inFlight) {
+    const started = told;
     inFlight = fetch("/tvbox/api/system/region", { cache: "no-store" })
       .then((r) => (r.ok ? r.json() : null))
-      .then((d) => (cachedLayout = layoutKey(d && d.keymap)))
-      .catch(() => (cachedLayout = ""))
+      .then((d) => (started === told ? (cachedLayout = layoutKey(d && d.keymap)) : cachedLayout || ""))
+      .catch(() => (started === told ? (cachedLayout = "") : cachedLayout || ""))
       .finally(() => {
         inFlight = null;
       });

@@ -368,6 +368,46 @@ systemctl enable tvbox-wifi-country.service >/dev/null 2>&1 && ok "wifi country 
 # apply immediately too - provision runs as root anyway
 /usr/local/sbin/tvbox-wifi-country && ok "wifi country applied" || warn "wifi country apply failed (raspi-config missing?)"
 
+echo "==> Keyboard layout (root apply of the Settings pick at every boot)"
+# The Settings pick reaches localectl too, but that is all it does on this image:
+# Raspberry Pi OS ships a drop-in making /etc/X11/xorg.conf.d read-only for
+# systemd-localed ("we don't use it"), and localed then logs
+#   Failed to write X11 keyboard layout, ignoring: Read-only file system
+# and persists NOTHING - so the layout is back to the image default at the next
+# boot. This writes the file the OS actually reads, and re-tells localed, so the
+# pick survives. Mirrors tvbox-wifi-country - KEEP IN SYNC (image 00-run.sh).
+cat > /usr/local/sbin/tvbox-keymap <<KMEOF
+#!/bin/sh
+# tvbox: apply the keyboard layout picked in Settings (root - /etc/default).
+KB=\$(sed -n 's/.*"layout"[[:space:]]*:[[:space:]]*"\([a-z0-9,_-]\{1,32\}\)".*/\1/p' /home/$TVBOX_USER/.tvbox/config.json 2>/dev/null | head -n1)
+[ -n "\$KB" ] || exit 0 # nothing picked -> leave the OS setting alone
+[ -f /etc/default/keyboard ] || exit 0
+# In place, so every other field (model, variant, options, BACKSPACE) is left
+# exactly as the image had it.
+sed -i "s/^XKBLAYOUT=.*/XKBLAYOUT=\"\$KB\"/" /etc/default/keyboard
+# And tell the running localed, so Settings reads back what was picked rather
+# than what the file said before this ran.
+command -v localectl >/dev/null && localectl set-x11-keymap "\$KB" >/dev/null 2>&1
+exit 0
+KMEOF
+chmod 755 /usr/local/sbin/tvbox-keymap
+cat > /etc/systemd/system/tvbox-keymap.service <<KMEOF
+[Unit]
+Description=tvbox: apply the keyboard layout picked in Settings
+After=systemd-localed.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=-/usr/local/sbin/tvbox-keymap
+
+[Install]
+WantedBy=multi-user.target
+KMEOF
+systemctl daemon-reload 2>/dev/null || true
+systemctl enable tvbox-keymap.service >/dev/null 2>&1 && ok "keymap unit" || warn "keymap unit enable failed"
+/usr/local/sbin/tvbox-keymap && ok "keymap applied" || warn "keymap apply failed"
+
 echo "==> Bluetooth ERTM toggle (root apply of the Settings pick at every boot)"
 # Off by default (the kernel default, ERTM on). It exists because some gamepads -
 # Xbox ones especially - handle L2CAP Enhanced Retransmission Mode badly and drop

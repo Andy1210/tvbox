@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { setFocus } from "@noriginmedia/norigin-spatial-navigation";
 import { useI18n, type I18n } from "../lib/i18n";
+import { noteOskLayout } from "@sdk/Osk";
 import { fetchRegion, setKeymap } from "../lib/region";
 import { FocusButton } from "./FocusButton";
 
@@ -83,6 +84,11 @@ export function KeymapPicker({ onChange, autoFocus }: { onChange?: (km: string) 
   const pick = async (code: string) => {
     setPicked(code); // reflect the choice immediately
     const ok = await setKeymap(code);
+    // The on-screen keyboard reads the layout once per page and caches it, so it
+    // is told here rather than left to notice: Settings runs on a page that is
+    // already loaded, and a keyboard still spelling the old layout reads as the
+    // setting having done nothing.
+    if (ok) noteOskLayout(code);
     if (ok) {
       setCurrent(code);
       setDeferred(false);

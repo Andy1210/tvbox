@@ -1,0 +1,282 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="theme-color" content="#0b0f14" />
+    <title>tvbox remote</title>
+    <style>
+      :root {
+        color-scheme: dark;
+      }
+      * {
+        box-sizing: border-box;
+        -webkit-tap-highlight-color: transparent;
+      }
+      body {
+        margin: 0;
+        background: #0b0f14;
+        color: #f4f6fa;
+        font:
+          16px/1.4 system-ui,
+          sans-serif;
+        /* A remote is held, not read: nothing here should select or scroll. */
+        user-select: none;
+        overscroll-behavior: none;
+        touch-action: manipulation;
+        min-height: 100dvh;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 18px;
+        padding: max(18px, env(safe-area-inset-top)) 18px max(18px, env(safe-area-inset-bottom));
+      }
+      .hint {
+        color: #7d8a99;
+        font-size: 13px;
+        text-align: center;
+        min-height: 18px;
+      }
+      .hint.bad {
+        color: #ff9a9a;
+      }
+      button {
+        font: inherit;
+        color: inherit;
+        background: #171f29;
+        border: 0;
+        border-radius: 14px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+      }
+      button:active {
+        background: #2b3746;
+        transform: scale(0.97);
+      }
+      /* The pad is one grid so the arrows keep their positions on any phone. */
+      #pad {
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        gap: 10px;
+        width: min(86vw, 320px);
+        aspect-ratio: 1;
+      }
+      #pad button {
+        font-size: 26px;
+      }
+      #pad .ok {
+        font-size: 17px;
+        font-weight: 700;
+        background: #1f6feb;
+        border-radius: 50%;
+      }
+      #pad .ok:active {
+        background: #3b83f0;
+      }
+      .row {
+        display: flex;
+        gap: 10px;
+        width: min(86vw, 320px);
+      }
+      .row button {
+        flex: 1;
+        height: 54px;
+        font-size: 15px;
+        font-weight: 600;
+      }
+      .row.small button {
+        height: 46px;
+        font-size: 14px;
+        color: #aab4c2;
+      }
+      #setup {
+        width: min(86vw, 320px);
+        display: none;
+        flex-direction: column;
+        gap: 12px;
+      }
+      #setup input {
+        font: inherit;
+        color: inherit;
+        background: #171f29;
+        border: 1px solid #26313d;
+        border-radius: 12px;
+        padding: 14px;
+        width: 100%;
+      }
+      #setup button {
+        height: 52px;
+        background: #1f6feb;
+        font-weight: 700;
+      }
+      h1 {
+        font-size: 18px;
+        margin: 0;
+        text-align: center;
+      }
+      #main {
+        display: none;
+        flex-direction: column;
+        align-items: center;
+        gap: 18px;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="setup">
+      <h1>Pair this phone</h1>
+      <p class="hint">Enter the four digits shown on the TV.</p>
+      <input id="code" inputmode="numeric" pattern="[0-9]*" maxlength="4" placeholder="0000" autocomplete="off" />
+      <input id="name" maxlength="40" placeholder="This phone" autocomplete="off" />
+      <button id="pair">Pair</button>
+      <p class="hint" id="setup-msg"></p>
+    </div>
+
+    <div id="main">
+      <div id="pad">
+        <span></span>
+        <button data-key="up">▲</button>
+        <span></span>
+        <button data-key="left">◀</button>
+        <button class="ok" data-key="ok">OK</button>
+        <button data-key="right">▶</button>
+        <span></span>
+        <button data-key="down">▼</button>
+        <span></span>
+      </div>
+      <div class="row">
+        <button data-key="back">Back</button>
+        <button data-key="home">Home</button>
+        <button data-key="playpause">Play</button>
+      </div>
+      <div class="row">
+        <button data-key="volume_down">Vol −</button>
+        <button data-key="mute">Mute</button>
+        <button data-key="volume_up">Vol +</button>
+      </div>
+      <div class="row small">
+        <button data-key="rewind">◀◀</button>
+        <button data-key="settings">Settings</button>
+        <button data-key="fastforward">▶▶</button>
+      </div>
+      <p class="hint" id="msg"></p>
+    </div>
+
+    <script>
+      // The token is this phone's, and it is the only thing that gets it in. It
+      // lives in localStorage so the page is a bookmark rather than a pairing
+      // ceremony every time - which is the whole point of adopting a phone
+      // instead of running a session.
+      var KEY = "tvbox-remote-token";
+      var token = null;
+      try {
+        token = localStorage.getItem(KEY);
+      } catch (e) {}
+
+      var setup = document.getElementById("setup"),
+        main = document.getElementById("main"),
+        msg = document.getElementById("msg"),
+        setupMsg = document.getElementById("setup-msg");
+
+      function show(paired) {
+        setup.style.display = paired ? "none" : "flex";
+        main.style.display = paired ? "flex" : "none";
+      }
+      function say(el, text, bad) {
+        el.textContent = text;
+        el.className = bad ? "hint bad" : "hint";
+      }
+
+      async function post(path, body) {
+        var r = await fetch(path, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+        });
+        var d = null;
+        try {
+          d = await r.json();
+        } catch (e) {}
+        return { status: r.status, body: d || {} };
+      }
+
+      // Pre-filled from the QR, so the usual path is one tap.
+      document.getElementById("code").value = new URLSearchParams(location.search).get("c") || "";
+
+      document.getElementById("pair").addEventListener("click", async function () {
+        var code = document.getElementById("code").value.trim();
+        var name = document.getElementById("name").value.trim();
+        say(setupMsg, "Pairing…");
+        var r;
+        try {
+          r = await post("/adopt", { code: code, name: name });
+        } catch (e) {
+          return say(setupMsg, "The box did not answer.", true);
+        }
+        if (r.status === 403) return say(setupMsg, "That code is not the one on the TV.", true);
+        if (!r.body.ok) return say(setupMsg, "This box cannot pair another phone.", true);
+        token = r.body.token;
+        try {
+          localStorage.setItem(KEY, token);
+        } catch (e) {}
+        say(setupMsg, "");
+        show(true);
+      });
+
+      var busy = false;
+      async function press(action) {
+        if (!token || busy) return;
+        busy = true; // one in flight: a fast tapper should not queue presses
+        try {
+          var r = await post("/key", { token: token, action: action });
+          if (r.status === 403) {
+            // The box forgot this phone (or was reset). Say so and ask again,
+            // rather than leaving a pad that silently does nothing.
+            try {
+              localStorage.removeItem(KEY);
+            } catch (e) {}
+            token = null;
+            show(false);
+            say(setupMsg, "This phone is no longer paired with the box.", true);
+          } else if (!r.body.ok) {
+            say(msg, "The box could not send that.", true);
+          } else {
+            say(msg, "");
+          }
+        } catch (e) {
+          say(msg, "The box did not answer.", true);
+        }
+        busy = false;
+      }
+
+      // pointerdown, not click: a remote should fire when the finger lands.
+      document.querySelectorAll("[data-key]").forEach(function (b) {
+        b.addEventListener("pointerdown", function (ev) {
+          ev.preventDefault();
+          if (navigator.vibrate) navigator.vibrate(8);
+          press(b.getAttribute("data-key"));
+        });
+      });
+
+      show(!!token);
+      if (token) {
+        // Confirm the box still knows this phone, so a stale bookmark says so
+        // before someone presses at it.
+        post("/ping", { token: token })
+          .then(function (r) {
+            if (r.status !== 403) return;
+            try {
+              localStorage.removeItem(KEY);
+            } catch (e) {}
+            token = null;
+            show(false);
+            say(setupMsg, "This phone is no longer paired with the box.", true);
+          })
+          .catch(function () {});
+      }
+    </script>
+  </body>
+</html>

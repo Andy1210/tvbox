@@ -115,9 +115,9 @@ describe("Osk", () => {
     // one state a remote cannot get out of. Asserted on the layouts themselves:
     // the focus keys are not in the DOM, so there is nothing to count there.
     const shape = (rows: string[]) => rows.map((r) => [...r].length);
-    const base = shape(oskLayers("hu").ROWS_LOWER);
+    const base = shape(oskLayers("us").ROWS_LOWER);
     // Every shipped layout, plus the fallback an unknown one gets.
-    for (const layout of [...OSK_LAYOUTS, "us", "", "zz"]) {
+    for (const layout of [...OSK_LAYOUTS, "us", "de", "cz", "sl", "", "zz"]) {
       const layers = oskLayers(layout);
       for (const [name, rows] of Object.entries(layers)) {
         expect(shape(rows), `${layout}/${name}`).toEqual(base);
@@ -126,6 +126,22 @@ describe("Osk", () => {
         }
       }
     }
+  });
+
+  it("a QWERTZ layout gets a QWERTZ keyboard", () => {
+    // The letters that MOVE are the whole visible difference: an on-screen
+    // keyboard spelling QWERTY while the box is set to Hungarian is showing the
+    // wrong keyboard.
+    expect(oskLayers("hu").ROWS_LOWER[1]).toBe("qwertzuiop");
+    expect(oskLayers("hu").ROWS_LOWER[3]).toBe("yxcvbnm");
+    expect(oskLayers("hu").ROWS_UPPER[1]).toBe("QWERTZUIOP");
+    expect(oskLayers("de").ROWS_LOWER[1]).toBe("qwertzuiop");
+    // QWERTY layouts are untouched, and so is AZERTY - it moves a letter between
+    // rows, which these fixed row shapes cannot express, so it keeps QWERTY
+    // rather than get a half-right layout.
+    expect(oskLayers("us").ROWS_LOWER[1]).toBe("qwertyuiop");
+    expect(oskLayers("pl").ROWS_LOWER[1]).toBe("qwertyuiop");
+    expect(oskLayers("fr").ROWS_LOWER[1]).toBe("qwertyuiop");
   });
 
   it("the letters come from the box's keyboard layout, not from a guess", () => {

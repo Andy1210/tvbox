@@ -142,6 +142,37 @@ exec /usr/bin/raspi-config nonint do_wifi_country "\${CC:-${WIFI_COUNTRY}}"
 EOF
 chmod 755 "${ROOTFS_DIR}/usr/local/sbin/tvbox-wifi-country"
 
+# Keyboard layout picked in Settings. localectl alone does not survive a reboot
+# on this image: Raspberry Pi OS ships a drop-in making /etc/X11/xorg.conf.d
+# read-only for systemd-localed, which then logs "Failed to write X11 keyboard
+# layout, ignoring" and persists nothing. This writes the file the OS reads.
+# KEEP IN SYNC with deploy/provision.sh (tvbox-keymap).
+cat > "${ROOTFS_DIR}/usr/local/sbin/tvbox-keymap" <<EOF
+#!/bin/sh
+# tvbox: apply the keyboard layout picked in Settings (root - /etc/default).
+KB=\$(sed -n 's/.*"layout"[[:space:]]*:[[:space:]]*"\([a-z0-9,_-]\{1,32\}\)".*/\1/p' /home/${FIRST_USER_NAME}/.tvbox/config.json 2>/dev/null | head -n1)
+[ -n "\$KB" ] || exit 0 # nothing picked -> leave the image default alone
+[ -f /etc/default/keyboard ] || exit 0
+sed -i "s/^XKBLAYOUT=.*/XKBLAYOUT=\"\$KB\"/" /etc/default/keyboard
+command -v localectl >/dev/null && localectl set-x11-keymap "\$KB" >/dev/null 2>&1
+exit 0
+EOF
+chmod 755 "${ROOTFS_DIR}/usr/local/sbin/tvbox-keymap"
+
+cat > "${ROOTFS_DIR}/etc/systemd/system/tvbox-keymap.service" <<'EOF'
+[Unit]
+Description=tvbox: apply the keyboard layout picked in Settings
+After=systemd-localed.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=-/usr/local/sbin/tvbox-keymap
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
 cat > "${ROOTFS_DIR}/etc/systemd/system/tvbox-wifi-unblock.service" <<'EOF'
 [Unit]
 Description=tvbox: enable + localise WiFi on a fresh box (radio on, country set, rfkill cleared)
@@ -172,6 +203,8 @@ EOF
 install -d "${ROOTFS_DIR}/etc/systemd/system/multi-user.target.wants"
 ln -sf ../tvbox-wifi-unblock.service \
   "${ROOTFS_DIR}/etc/systemd/system/multi-user.target.wants/tvbox-wifi-unblock.service"
+ln -sf ../tvbox-keymap.service \
+  "${ROOTFS_DIR}/etc/systemd/system/multi-user.target.wants/tvbox-keymap.service"
 
 # 2b-ii) Bluetooth ERTM toggle. Off by default (the kernel default, ERTM on). It
 #     exists because some gamepads - Xbox ones especially - handle L2CAP Enhanced
