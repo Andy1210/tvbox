@@ -1,0 +1,19 @@
+# tvbox voice satellite -> the TV remote's microphone as a Home Assistant
+# `assist_satellite` - systemd USER unit (no root: the remote's hidraw node is
+# reachable through the `input` group, granted 0660 by provision.sh because the
+# start command is a WRITE, unlike the app-button reads the remote bridge does).
+# Installed to ~/.config/systemd/user/ by deploy.sh; starts at boot via
+# `loginctl enable-linger`.
+[Unit]
+Description=tvbox voice satellite (TV remote microphone -> Home Assistant Assist)
+
+[Service]
+ExecStart=/usr/bin/python3 %h/.tvbox/voice_satellite.py
+# on-failure, NOT always: the service exits 0 when config.voice.enabled is unset,
+# and `always` would turn that documented off-switch into a respawn loop.
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=yes
+
+[Install]
+WantedBy=default.target

@@ -150,6 +150,17 @@ else
   warn "gamepad shim not running yet (fresh group grant? fine after reboot)"
 fi
 
+# The voice satellite exits 0 unless config.voice.enabled is set, so it is
+# installed and enabled here either way and simply does nothing until asked.
+cp ~/.tvbox/tvbox-voice.service ~/.config/systemd/user/tvbox-voice.service
+if systemctl --user daemon-reload 2>/dev/null \
+   && systemctl --user enable tvbox-voice.service >/dev/null 2>&1 \
+   && systemctl --user restart tvbox-voice.service 2>/dev/null; then
+  ok "voice satellite"
+else
+  warn "voice satellite not running yet (fine after reboot)"
+fi
+
 echo "==> session (tvbox shell; no panel / Kodi)"
 # The compositor starts ~/.tvbox/session.sh, which rsync has just put there. Only
 # the executable bit is ours to add.
