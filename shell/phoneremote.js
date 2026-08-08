@@ -184,13 +184,22 @@ function boundPort() {
 }
 
 // The TV is showing a code. Returns what the QR should carry.
-function arm() {
-  if (!enabled()) return null;
-  start();
-  adopt = { code: String(crypto.randomInt(1000, 10000)), expires: Date.now() + ADOPT_TTL_MS, fails: 0 };
-  const ip = deps.lanIp() || "127.0.0.1";
-  const p = boundPort();
-  return { url: `http://${ip}:${p}/?c=${adopt.code}`, shortUrl: `http://${ip}:${p}`, code: adopt.code, port: p };
+function arm(cb) {
+  if (!enabled()) return void (cb && cb(null));
+  // Wait for the bind before describing where to find it. A QR built from an
+  // unbound socket carries port 0, and one built from a loopback address points
+  // the phone at itself - both are a code someone types in for nothing, which is
+  // worse than being told it is not ready.
+  start(() => {
+    const ip = deps.lanIp();
+    const p = boundPort();
+    if (!ip || ip === "127.0.0.1" || !p) {
+      console.warn("[phoneremote] not arming: no LAN address yet");
+      return void (cb && cb(null));
+    }
+    adopt = { code: String(crypto.randomInt(1000, 10000)), expires: Date.now() + ADOPT_TTL_MS, fails: 0 };
+    cb && cb({ url: `http://${ip}:${p}/?c=${adopt.code}`, shortUrl: `http://${ip}:${p}`, code: adopt.code, port: p });
+  });
 }
 
 function disarm() {

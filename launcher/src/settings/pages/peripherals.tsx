@@ -306,10 +306,10 @@ export function PeripheralsPane() {
           label={t("phoneRemote.title")}
           hint={t("peripherals.phoneRemoteHint")}
           value={
-            phone
-              ? phone.enabled
-                ? phone.phones.length
-                  ? t("phoneRemote.pairedCount", { n: phone.phones.length })
+            phone?.kind === "ok"
+              ? phone.state.enabled
+                ? phone.state.phones.length
+                  ? t("phoneRemote.pairedCount", { n: phone.state.phones.length })
                   : t("phoneRemote.on")
                 : t("phoneRemote.off")
               : undefined

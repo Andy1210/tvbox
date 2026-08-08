@@ -121,6 +121,21 @@ describe("the phone-remote settings page", () => {
     expect(getByText("Never used")).toBeTruthy();
   });
 
+  it("a blip offers a retry rather than claiming the box is too old", async () => {
+    // The two answers are not the same, and telling them apart is the difference
+    // between "your box needs updating" and "try again" - which is what every
+    // other screen here does with a failed read.
+    vi.stubGlobal("fetch", () => Promise.reject(new Error("network")));
+    const { getByText, queryByText } = render(<PhoneRemoteSubPage onBack={() => {}} />);
+    await settle();
+    expect(queryByText("This box's software is too old for it.")).toBeNull();
+    expect(getByText("Try again")).toBeTruthy();
+    expect(getByText("The box did not answer. Try again.")).toBeTruthy();
+    // The press itself is not driven here: this row is the same `autoFocus`
+    // retry row the mirroring page uses for its own unreachable state, and it
+    // mounts after the first paint, which this harness's focus does not follow.
+  });
+
   it("a box whose shell is too old says so instead of offering a switch", async () => {
     vi.stubGlobal("fetch", () => Promise.resolve(new Response("not found", { status: 404 })));
     const { getByText, queryByText } = render(<PhoneRemoteSubPage onBack={() => {}} />);

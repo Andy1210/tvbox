@@ -752,11 +752,13 @@
     "pairTitle": "Telefon párosítása",
     "paired": "Párosított telefonok",
     "pairedCount": "{n} telefon",
+    "retry": "Újra",
     "seenDays": "{n} napja",
     "seenHours": "{n} órája",
     "seenMinutes": "{n} perce",
     "seenNow": "Épp most",
     "title": "Telefon távirányítóként",
+    "unreachable": "A box nem válaszolt. Próbáld újra.",
     "unsupported": "Ehhez a box szoftvere túl régi."
   }
 }

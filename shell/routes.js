@@ -469,15 +469,21 @@ function post(p, data, res, ctx) {
   // The phone remote. Turning it on is what opens the LAN listener at all, so the
   // toggle and the socket are the same decision - `apply` is not a hint.
   if (p === "/tvbox/api/phoneremote/enable") {
-    config.setPhoneRemote({ enabled: !!data.enabled });
-    if (!data.enabled) phoneremote.forgetAll(); // off means the paired phones go too
+    // Coerced once and reused, so the stored value, the forget and the answer
+    // can never disagree about what was asked for.
+    const on = !!data.enabled;
+    config.setPhoneRemote({ enabled: on });
+    if (!on) phoneremote.forgetAll(); // off means the paired phones go too
     phoneremote.apply();
-    return httpserver.jsonRes(res, { ok: true, enabled: !!data.enabled, phones: phoneremote.list() });
+    return httpserver.jsonRes(res, { ok: true, enabled: on, phones: phoneremote.list() });
   }
   // Show a code on the TV so a phone can be adopted. Returns what the QR carries.
   if (p === "/tvbox/api/phoneremote/arm") {
-    const info = phoneremote.arm();
-    return httpserver.jsonRes(res, info ? { ok: true, ...info } : { ok: false, error: "disabled" });
+    // Async now: it waits for the socket to bind before it can say where the
+    // phone should go.
+    return phoneremote.arm((info) =>
+      httpserver.jsonRes(res, info ? { ok: true, ...info } : { ok: false, error: "unavailable" }),
+    );
   }
   if (p === "/tvbox/api/phoneremote/disarm") {
     phoneremote.disarm();
@@ -550,8 +556,13 @@ function post(p, data, res, ctx) {
     // this image persists nothing (see config.setKeyboard). A box that has not
     // been provisioned since this landed still gets the session behaviour.
     const layout = String(data.keymap || "");
-    const stored = config.setKeyboard({ layout });
-    return system.setKeymap(layout, (r) => httpserver.jsonRes(res, { ...r, stored: !!stored }));
+    return system.setKeymap(layout, (r) => {
+      // Only a layout the system ACCEPTED is written down. The stored copy is
+      // what a root unit re-applies at every boot, so persisting one localectl
+      // rejected would hand the next boot a keyboard nobody can type on.
+      const stored = r && r.ok ? config.setKeyboard({ layout }) : null;
+      httpserver.jsonRes(res, { ...r, stored: !!stored });
+    });
   }
   if (p === "/tvbox/api/system/hostname") {
     return system.setHostname(String(data.hostname || ""), (r) => httpserver.jsonRes(res, r));

@@ -120,16 +120,16 @@ export function PhoneRemotePage() {
   const { t } = useI18n();
   const [enabled, setEnabled] = useState(false);
   const [phones, setPhones] = useState<PairedPhone[] | null>(null);
-  const [unsupported, setUnsupported] = useState(false);
+  const [status, setStatus] = useState<"loading" | "ok" | "unsupported" | "error">("loading");
   const [pairing, setPairing] = useState(false);
   const busy = useRef(false);
 
   const load = useCallback(async () => {
-    const st = await fetchPhoneRemote();
-    if (!st) return setUnsupported(true);
-    setUnsupported(false);
-    setEnabled(st.enabled);
-    setPhones(st.phones);
+    const r = await fetchPhoneRemote();
+    setStatus(r.kind);
+    if (r.kind !== "ok") return;
+    setEnabled(r.state.enabled);
+    setPhones(r.state.phones);
   }, []);
 
   useEffect(() => {
@@ -163,13 +163,26 @@ export function PhoneRemotePage() {
     busy.current = true;
     const r = await forgetPhone(id);
     busy.current = false;
-    if (r.ok) setPhones(r.phones || []);
+    if (r.ok) {
+      setPhones(r.phones || []);
+      invalidateSummary("phoneremote"); // the row behind this one counts them
+    }
   };
 
-  if (unsupported) {
+  // A box whose shell has no such route is told so; anything else is a retry,
+  // because a blip must never read as "your box is too old".
+  if (status === "unsupported") {
     return (
       <Group>
         <Note tone="warn">{t("phoneRemote.unsupported")}</Note>
+      </Group>
+    );
+  }
+  if (status === "error") {
+    return (
+      <Group>
+        <Row id="retry" label={t("phoneRemote.retry")} onEnter={() => void load()} autoFocus trailing="none" />
+        <Note tone="warn">{t("phoneRemote.unreachable")}</Note>
       </Group>
     );
   }

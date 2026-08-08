@@ -752,11 +752,13 @@
     "pairTitle": "Pair a phone",
     "paired": "Paired phones",
     "pairedCount": "{n} phones",
+    "retry": "Try again",
     "seenDays": "{n} days ago",
     "seenHours": "{n} hours ago",
     "seenMinutes": "{n} minutes ago",
     "seenNow": "Just now",
     "title": "Phone as a remote",
+    "unreachable": "The box did not answer. Try again.",
     "unsupported": "This box's software is too old for it."
   }
 }

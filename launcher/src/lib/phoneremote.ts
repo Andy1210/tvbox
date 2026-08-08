@@ -17,17 +17,24 @@ export interface PhoneRemoteState {
   port: number;
 }
 
-// A box whose shell predates this answers 404, which is not the same as "no
-// phones": the caller greys the feature out rather than offering one that cannot
-// work. null means unsupported or unreachable.
-export async function fetchPhoneRemote(): Promise<PhoneRemoteState | null> {
+// A 404 and a socket that went away are not the same answer, and telling them
+// apart is the difference between "your box is too old" and "try again". The
+// second is recoverable and must offer a retry rather than a dead end - the same
+// rule every other screen here follows.
+export type PhoneRemoteResult = { kind: "ok"; state: PhoneRemoteState } | { kind: "unsupported" } | { kind: "error" };
+
+export async function fetchPhoneRemote(): Promise<PhoneRemoteResult> {
   try {
     const res = await fetch("/tvbox/api/phoneremote", { cache: "no-store" });
-    if (!res.ok) return null;
+    if (res.status === 404) return { kind: "unsupported" };
+    if (!res.ok) return { kind: "error" };
     const d = await res.json();
-    return { enabled: !!d.enabled, phones: Array.isArray(d.phones) ? d.phones : [], port: Number(d.port) || 0 };
+    return {
+      kind: "ok",
+      state: { enabled: !!d.enabled, phones: Array.isArray(d.phones) ? d.phones : [], port: Number(d.port) || 0 },
+    };
   } catch {
-    return null;
+    return { kind: "error" };
   }
 }
 

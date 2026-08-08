@@ -104,6 +104,7 @@ export const OSK_LAYOUTS = Object.keys(ACCENT_ROWS);
 // cached as "" so a box whose shell is older does not retry on every field.
 let cachedLayout: string | null = null;
 let inFlight: Promise<string> | null = null;
+let told = 0; // bumped whenever someone tells us the layout outright
 
 // Told, rather than re-read. Settings changes the layout on a page that is
 // already loaded, and this value is cached for the life of that page - so
@@ -111,14 +112,19 @@ let inFlight: Promise<string> | null = null;
 // started, which looks exactly like the setting having done nothing.
 export function noteOskLayout(layout: string) {
   cachedLayout = layoutKey(layout);
+  // A read started before this can still be in flight, and it would land on the
+  // value the box had a moment ago. Bumping the generation is what makes that
+  // answer arrive too late to matter.
+  told++;
 }
 function fetchLayout(): Promise<string> {
   if (cachedLayout !== null) return Promise.resolve(cachedLayout);
   if (!inFlight) {
+    const started = told;
     inFlight = fetch("/tvbox/api/system/region", { cache: "no-store" })
       .then((r) => (r.ok ? r.json() : null))
-      .then((d) => (cachedLayout = layoutKey(d && d.keymap)))
-      .catch(() => (cachedLayout = ""))
+      .then((d) => (started === told ? (cachedLayout = layoutKey(d && d.keymap)) : cachedLayout || ""))
+      .catch(() => (started === told ? (cachedLayout = "") : cachedLayout || ""))
       .finally(() => {
         inFlight = null;
       });
