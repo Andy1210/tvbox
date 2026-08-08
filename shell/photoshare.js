@@ -32,6 +32,18 @@ const MAX_BYTES = 200e6;
 // against each other rather than against a list of extensions.
 const NAME_RE = /^\d{4}-[A-Za-z0-9._-]+\.(jpe?g|png|webp)$/i;
 
+// The first bytes of the three formats a phone can send. A signature is not a
+// decode and does not pretend to be one - it is what makes the stored file at
+// least the KIND of thing its name says.
+function isImage(buf) {
+  if (buf.length < 12) return false;
+  if (buf[0] === 0xff && buf[1] === 0xd8 && buf[2] === 0xff) return true; // JPEG
+  if (buf.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]))) return true; // PNG
+  if (buf.subarray(0, 4).toString("latin1") === "RIFF" && buf.subarray(8, 12).toString("latin1") === "WEBP")
+    return true;
+  return false;
+}
+
 function ensure() {
   try {
     fs.mkdirSync(DIR, { recursive: true });
@@ -75,6 +87,12 @@ function save(name, base64) {
   const body = String(base64 || "").replace(/^data:[^,]*,/, "");
   const buf = Buffer.from(body, "base64");
   if (!buf.length) throw new Error("empty");
+  // It has to look like the picture the name claims it is. Base64 decoding accepts
+  // anything, and this route writes to the box's own disk from the LAN - so a
+  // session should not be able to become a place to leave arbitrary bytes under a
+  // .jpg. The renderer would refuse them later anyway; refusing here means they
+  // are never stored.
+  if (!isImage(buf)) throw new Error("not_an_image");
   if (totalBytes(names) + buf.length > MAX_BYTES) throw new Error("full");
 
   let safe = String(name || "photo")

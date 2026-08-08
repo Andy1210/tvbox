@@ -110,6 +110,26 @@ test("anything save accepts, the session can also see and delete", () => {
   assert.deepEqual(fs.readdirSync(photoshare.DIR), [], "and nothing is left behind");
 });
 
+test("what is not a picture is not stored under a picture's name", () => {
+  // Base64 decoding accepts anything, and this route writes to the box's disk from
+  // the LAN - a session must not become somewhere to leave arbitrary bytes.
+  assert.throws(
+    () => photoshare.save("payload.jpg", Buffer.from("#!/bin/sh\nrm -rf /\n").toString("base64")),
+    /not_an_image/,
+  );
+  assert.throws(
+    () => photoshare.save("doc.png", Buffer.from("%PDF-1.7 not a png at all").toString("base64")),
+    /not_an_image/,
+  );
+  assert.deepEqual(photoshare.list(), [], "and nothing was written");
+  // The three a phone can actually send still go through.
+  assert.ok(photoshare.save("real.png", b64(PNG)));
+  assert.ok(photoshare.save("real.jpg", b64(Buffer.concat([Buffer.from([0xff, 0xd8, 0xff, 0xe0]), Buffer.alloc(16)]))));
+  assert.ok(
+    photoshare.save("real.webp", b64(Buffer.concat([Buffer.from("RIFF...."), Buffer.from("WEBP"), Buffer.alloc(8)]))),
+  );
+});
+
 test("an empty body is refused", () => {
   assert.throws(() => photoshare.save("empty.jpg", ""), /empty/);
   assert.throws(() => photoshare.save("empty.jpg", "data:image/jpeg;base64,"), /empty/);

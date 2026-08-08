@@ -236,6 +236,10 @@ function sendImage(res, file) {
       res.end(); // it broke half way; the status is already out there
     } catch (e2) {}
   });
+  // A grid scrolling quickly abandons tiles it has moved past, and `pipe` only
+  // unpipes on a closed response - it does not close the file. Without this each
+  // abandoned tile would leave a descriptor open until the process exits.
+  res.on("close", () => stream.destroy());
 }
 
 // Why there is no picture, as a status the UI can tell apart: a missing box
@@ -2808,7 +2812,13 @@ app.whenReady().then(async () => {
   pairing.register("text", require("./pairing/text"));
   // Whatever a previous session was showing outlived the TV being switched off.
   // The viewer empties this when it closes; boot is what covers everything else.
-  photoshare.sweep();
+  // Wrapped because this runs during startup, where an exception does not fail a
+  // feature - it fails the shell, and the respawn loop then does it again.
+  try {
+    photoshare.sweep();
+  } catch (e) {
+    console.warn("[photoshare] boot sweep:", e.message);
+  }
   // Adding a share is the one form here where every field is somebody else's
   // string - an address, a share name, a password - so it gets a phone page too.
   const sharesPairing = require("./pairing/shares");
