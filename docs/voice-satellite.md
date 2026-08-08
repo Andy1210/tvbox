@@ -36,7 +36,10 @@ has no authentication). Turn it on in `~/.tvbox/config.json`:
   "enabled": true,
   "port": 10700, // what Home Assistant connects to
   "name": "tvbox-livingroom", // defaults to the hostname
-  "duck": 0.3 // how far to pull the box's own audio down while the answer plays
+  "area": "Living room", // only a hint for the setup dialog; the real room is the device's area
+  "pipeline": null, // a named Assist pipeline, or null for the preferred one
+  "answer": "both", // both | toast | speak
+  "duck": 0.3 // how far to pull a playing film down while the answer plays
 }
 ```
 

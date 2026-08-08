@@ -82,6 +82,23 @@ SND_CHANNELS = 1
 
 DEFAULT_PORT = 10700
 
+# The port takes unauthenticated connections from the LAN, so a declared length is
+# a stranger's number: reading it blindly lets one header allocate the Pi's memory.
+# Both are far above anything Assist sends (a chunk is a few kilobytes).
+MAX_DATA = 1 << 16
+MAX_PAYLOAD = 1 << 20
+# Audio is the only thing that arrives faster than it can be sent, so the outbound
+# queue is bounded and chunks are what gets dropped when a peer stops reading.
+MAX_QUEUED = 256
+
+
+def _number(value, default, cast):
+    """A config value is hand-edited JSON: a typo must not take the service down."""
+    try:
+        return cast(value)
+    except (TypeError, ValueError):
+        return default
+
 
 # ---------------------------------------------------------------- config
 
@@ -100,13 +117,13 @@ def load_config():
         cfg = {}
     return {
         "enabled": bool(cfg.get("enabled")),
-        "port": int(cfg.get("port") or DEFAULT_PORT),
+        "port": _number(cfg.get("port") or DEFAULT_PORT, DEFAULT_PORT, int),
         "name": str(cfg.get("name") or socket.gethostname()),
         "area": str(cfg.get("area") or ""),  # a hint for Home Assistant's setup dialog
         "pipeline": cfg.get("pipeline") or None,  # a named Assist pipeline, else the default
-        # How far to pull the box's own audio down while the answer plays, so a
-        # film does not talk over it. 1.0 leaves it alone.
-        "duck": float(cfg.get("duck", 0.3)),
+        # How far to pull the OTHER stream down while the answer plays, so a film
+        # does not talk over it. 1.0 leaves it alone.
+        "duck": _number(cfg.get("duck", 0.3), 0.3, float),
         # How the answer reaches the room: spoken, as a note on the screen, or
         # both. A toast is the one that does not interrupt a film, which is why it
         # is part of the default.
@@ -129,13 +146,18 @@ async def read_event(reader):
         return None, None
     data = header.get("data") or {}
     data_length = header.get("data_length") or 0
+    payload_length = header.get("payload_length") or 0
+    if data_length > MAX_DATA or payload_length > MAX_PAYLOAD:
+        # Not a peer worth reading: nothing Assist sends is anywhere near this, and
+        # honouring the number is how one header empties the box's memory.
+        LOG.warning("refusing an event claiming %d + %d bytes", data_length, payload_length)
+        return None, None
     if data_length:
         extra = await reader.readexactly(data_length)
         try:
             data = {**data, **json.loads(extra.decode("utf-8"))}
         except ValueError:
             pass
-    payload_length = header.get("payload_length") or 0
     payload = await reader.readexactly(payload_length) if payload_length else b""
     return {"type": header.get("type"), "data": data}, payload
 
@@ -182,13 +204,17 @@ class OpusDecoder:
         if err.value != 0 or not self._dec:
             raise RuntimeError("opus_decoder_create failed: %d" % err.value)
         self._channels = channels
-        self._pcm = (ctypes.c_short * (FRAME_SAMPLES * 6))()
+        # Room for the longest frame Opus can hand back (60 ms), per channel: the
+        # decoder writes interleaved samples, so a buffer sized for one channel
+        # would be written past on anything but mono.
+        self._max_samples = FRAME_SAMPLES * 3
+        self._pcm = (ctypes.c_short * (self._max_samples * channels))()
 
     def decode(self, frame):
-        got = self._lib.opus_decode(self._dec, frame, len(frame), self._pcm, FRAME_SAMPLES * 6, 0)
+        got = self._lib.opus_decode(self._dec, frame, len(frame), self._pcm, self._max_samples, 0)
         if got <= 0:
             return b""
-        return bytes(bytearray(self._pcm)[: got * 2 * self._channels])
+        return ctypes.string_at(self._pcm, got * 2 * self._channels)
 
     def close(self):
         if self._dec:
@@ -261,6 +287,9 @@ class RemoteMic:
             self._drop()
             return
         if not data:
+            # End of file, and the descriptor stays readable: returning here means
+            # the event loop calls this again at once, forever. Let `run` reopen it.
+            self._drop()
             return
         report = data[0]
         if report == CONSUMER_REPORT and len(data) >= 3:
@@ -468,16 +497,18 @@ class Player:
             err = b""
             try:
                 proc.kill()
-            except OSError:
+                proc.wait(timeout=5)  # kill without reaping leaves a zombie behind
+            except (OSError, subprocess.SubprocessError):
                 pass
         if proc.returncode not in (0, None) or err.strip():
             LOG.warning("player exited %s: %s", proc.returncode, err.decode("utf-8", "replace").strip()[:300])
+        # Whatever happened to the player, the film's volume is not ours to keep.
+        self._duck_end()
 
     def stop(self):
         if self._proc:
             LOG.info("played %d bytes", self._written)
         self._reap()
-        self._duck_end()
 
 
 # ---------------------------------------------------------------- satellite
@@ -493,14 +524,26 @@ class Satellite:
         # Everything we send goes through one queue and one writer task. Audio is
         # fifty chunks a second and their ORDER is the recording: firing a task per
         # chunk would hand the ordering to the scheduler, and speech reassembled out
-        # of order is not speech.
-        self._out = asyncio.Queue()
-        self._writer_task = None
+        # of order is not speech. Bounded, because a peer that stops reading would
+        # otherwise be answered with the box's memory.
+        self._out = asyncio.Queue(maxsize=MAX_QUEUED)
+        self._dropped = 0
 
     # ---- server side
 
     async def handle_client(self, reader, writer):
         peer = writer.get_extra_info("peername")
+        if self.writer is not None:
+            # One session at a time, and the FIRST one keeps it. The port has no
+            # authentication, so replacing the live connection would let anything on
+            # the LAN take the microphone away from Home Assistant mid-sentence -
+            # and tearing down the displaced one would stop the answer playing.
+            LOG.warning("refusing a second connection from %s", peer[0] if peer else "?")
+            try:
+                writer.close()
+            except OSError:
+                pass
+            return
         LOG.info("Home Assistant connected from %s", peer[0] if peer else "?")
         self.writer = writer
         try:
@@ -562,8 +605,17 @@ class Satellite:
 
     def send(self, etype, data=None, payload=b""):
         """Queue one event. Safe to call from the microphone's reader callback."""
-        if self.writer is not None:
+        if self.writer is None:
+            return
+        try:
             self._out.put_nowait((etype, data, payload))
+        except asyncio.QueueFull:
+            # A peer that has stopped reading. Audio is the only thing arriving
+            # faster than it leaves, so audio is what gives way: losing 20 ms of
+            # speech is a worse recording, while queueing it all is a dead box.
+            self._dropped += 1
+            if self._dropped % 50 == 1:
+                LOG.warning("outbound queue full - dropping audio (%d so far)", self._dropped)
 
     async def drain(self):
         """The only place anything is written, so the order queued is the order sent."""
@@ -691,6 +743,13 @@ def main():
     try:
         return asyncio.run(amain())
     except KeyboardInterrupt:
+        return 0
+    except Exception as e:
+        # A box without libopus, or a config with a port systemd cannot bind, fails
+        # the same way every time. Exiting 0 says "there is nothing to run here"
+        # rather than asking systemd to try again five times and give up with the
+        # unit in a failed state - the log line is what a person needs either way.
+        LOG.error("voice satellite cannot start: %s", e)
         return 0
 
 
