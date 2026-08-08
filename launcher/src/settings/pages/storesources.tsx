@@ -42,6 +42,10 @@ function SourceEditPage({
   });
   const [armed, setArmed] = useState(false); // adding a source is one press away from running its code
   const [armRemove, setArmRemove] = useState(false);
+  // Back during a save closes this page on its own. The write is already on its
+  // way and still worth finishing, but the pop that follows it would then close
+  // the page BELOW this one - so the pop is what gets skipped, not the write.
+  const closed = useRef(false);
   const [busy, setBusy] = useState(false);
   // A ref, not the state, is what refuses the second press: two presses inside
   // one render tick both read the same `busy` from their own closure, and the
@@ -65,7 +69,7 @@ function SourceEditPage({
     if (!r.ok) return setError(t("storeSources.saveFailed"));
     if (expect && !r.sources.some((s) => s.url === expect)) return setError(t("storeSources.badUrl"));
     onDone();
-    nav.pop();
+    if (!closed.current) nav.pop();
   };
 
   const save = () => {
@@ -86,7 +90,10 @@ function SourceEditPage({
       id="store-source-edit"
       title={existing ? sourceLabel(existing) : t("storeSources.add")}
       subtitle={t("storeSources.editHint")}
-      onBack={nav.pop}
+      onBack={() => {
+        closed.current = true;
+        nav.pop();
+      }}
       animate="push"
     >
       {error && <Note tone="warn">{error}</Note>}
@@ -162,6 +169,9 @@ export function StoreSourcesPage() {
   // toggle uses, for the same reason.
   const [saving, setSaving] = useState(false);
   const savingRef = useRef(false);
+  // A refused save must say so: reloading afterwards puts the switch back where
+  // it was, which on its own looks like the press never registered.
+  const [saveError, setSaveError] = useState(false);
 
   // The list comes from the store itself rather than from the config: it is the
   // only answer that also carries what each registry ANSWERED (how many apps, or
@@ -217,11 +227,13 @@ export function StoreSourcesPage() {
     if (savingRef.current) return;
     savingRef.current = true;
     setSaving(true);
+    setSaveError(false);
     try {
-      await saveStoreSources(
+      const r = await saveStoreSources(
         extras.map((s) => ({ url: s.url, name: s.name, autoUpdate: !!s.autoUpdate })),
         on,
       );
+      if (!r.ok) setSaveError(true);
       await load();
     } finally {
       savingRef.current = false;
@@ -237,6 +249,8 @@ export function StoreSourcesPage() {
       onBack={nav.pop}
       animate="push"
     >
+      {saveError && <Note tone="warn">{t("storeSources.saveFailed")}</Note>}
+
       <Group title={primary.official ? t("storeSources.official") : t("storeSources.primary")}>
         <InfoRow label={sourceLabel(primary)} value={status(primary)} />
         <ToggleRow

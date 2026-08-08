@@ -38,7 +38,7 @@ export interface PushedPage {
   render: () => ReactNode;
 }
 
-interface StackEntry extends PushedPage {
+export interface StackEntry extends PushedPage {
   returnFocus: string;
 }
 
