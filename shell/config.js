@@ -453,8 +453,43 @@ function setAppConfig(key, val) {
   return true;
 }
 
-// App-store registry override: { registry: "<index.json url>" }. Default is the
-// official tvbox-apps index (store.js); self-hosters point this elsewhere.
+// App-store registries: { registry?: "<index.json url>", sources?: [{url, name?}] }.
+// `registry` replaces the official tvbox-apps index (store.js) for a self-hoster;
+// `sources` are extra registries merged into the same catalogue after it. The cap
+// matches store.js's MAX_EXTRA_SOURCES, and the url is only shape-checked here -
+// which schemes and hosts are allowed is store.js's call, made when it reads them,
+// so a config file edited by hand meets the same rule as this form.
+const MAX_STORE_SOURCES = 10;
+function setStore(store) {
+  const c = load();
+  const next = { ...(typeof c.store === "object" && c.store ? c.store : {}) };
+  if (store && typeof store.registry === "string") {
+    const r = store.registry.trim();
+    if (r) next.registry = r;
+    else delete next.registry; // "" is how the form hands the official index back
+  }
+  // Unattended updates from the primary registry. Per added source the same flag
+  // lives on its own entry below; store.js owns what each one defaults to.
+  if (store && store.autoUpdate !== undefined) next.autoUpdate = store.autoUpdate !== false;
+  if (store && Array.isArray(store.sources)) {
+    const seen = new Set();
+    next.sources = store.sources
+      .map((s) => (typeof s === "string" ? { url: s } : s))
+      .filter((s) => s && typeof s.url === "string" && s.url.trim())
+      .map((s) => {
+        const name = typeof s.name === "string" && s.name.trim() ? s.name.trim().slice(0, 60) : null;
+        const e = { url: s.url.trim() };
+        if (name) e.name = name;
+        if (s.autoUpdate === true) e.autoUpdate = true;
+        return e;
+      })
+      .filter((s) => !seen.has(s.url) && seen.add(s.url))
+      .slice(0, MAX_STORE_SOURCES);
+  }
+  c.store = next;
+  save(c);
+  return next;
+}
 function rawStore() {
   return load().store || null;
 }
@@ -741,6 +776,7 @@ module.exports = {
   rawSpotify,
   appConfig,
   setAppConfig,
+  setStore,
   rawStore,
   setUi,
   uiLocale,

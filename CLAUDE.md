@@ -148,6 +148,31 @@ Launcher (launcher/) is React+TS+Vite+Tailwind, spatial nav via
    tile; shell API down → retry screen (not onboarding); renderer crash →
    ErrorBoundary reload button. Never leave a dead end that needs a keyboard.
 
+### The store has more than one registry, and the merge order is the contract
+
+`shell/store.js` builds ONE catalogue out of the primary registry plus up to ten
+the owner added (`config.store.sources`). Three things about it are load-bearing:
+
+- **An added registry is trusted like the official one.** There is deliberately
+  no sandboxed tier: a manifest-only remote app already gets an origin on the box
+  and the `fetch` broker, so a weaker install path would promise a safety it
+  cannot deliver. `trustErrors()` is therefore unchanged and source-independent,
+  the one hard line still being `requires.aptRepo`. The consent is the warning on
+  the add screen, once, per source.
+- **An installed app is PINNED to the registry it came from**
+  (`~/.tvbox/apps-data/.registry/<id>.json`), and the pin beats configured order
+  when two registries offer one id. Without it a second registry could publish a
+  higher version under an installed app's id and `maintenance.js`'s nightly run
+  would install it unattended, through the same path as the Update button.
+- **Unattended updates are per source** (primary on, added off by default), which
+  is why `listForUi` returns both `updates` (what a person may press) and
+  `autoUpdates` (what the box may install alone). The nightly run reads the
+  second one. `update.appsAuto` still turns the whole thing off.
+
+A failed registry costs its own apps and nothing else: `error` at the top level
+means NO source answered, and per-source failures travel in `sources[]`. Full
+design plus the local-registry dev loop: [docs/app-store-sources.md](docs/app-store-sources.md).
+
 ## Dev / deploy / verify
 
 ```sh

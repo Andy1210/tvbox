@@ -106,12 +106,27 @@ export interface StoreEntry {
   // moves through `flatpak update` - the nightly timer or the manual button.
   flatpaks?: { ref: string; name: string; version: string | null }[];
   flatpakStatus?: { ok: boolean; changed: boolean; version: string | null } | null; // last manual flatpak update
+  source?: StoreSource; // the registry this entry came from
+  alsoIn?: string[]; // other configured registries offering the same id (not used for this entry)
+}
+// A configured registry. The first one the box returns is the primary (the
+// official index unless it was replaced); the rest were added by the owner.
+export interface StoreSource {
+  url: string;
+  official: boolean; // the index this release ships - the only one that arrived reviewed
+  name: string | null; // the owner's label for it
+  autoUpdate: boolean; // may the box install this registry's updates unattended
+  error?: string | null; // why this registry did not answer (the others still did)
+  count?: number; // apps it contributed to the catalogue
 }
 export interface StoreList {
   registry: string;
   apps: StoreEntry[];
-  error: string | null;
+  error: string | null; // no registry at all answered
   updates: string[]; // ids with an update available - for a HOME "updates" hint
+  autoUpdates?: string[]; // the subset the nightly run may install by itself
+  sources?: StoreSource[]; // every configured registry, primary first
+  maxSources?: number; // how many the box will take beyond the primary
   installing?: string[]; // ids currently installing (mirrors entry.installing)
 }
 
@@ -142,6 +157,27 @@ async function post(url: string, body: unknown): Promise<boolean> {
 
 export const storeInstall = (id: string) => post("/tvbox/api/store/install", { id });
 export const storeUninstall = (id: string) => post("/tvbox/api/store/uninstall", { id });
+// The added registries, saved as a whole list (an add, a rename and a removal are
+// the same edit to the same array). `autoUpdate` is the PRIMARY registry's flag;
+// each added source carries its own inside the array. The box answers with what it
+// stored, so a refused entry - a bad url, a duplicate, one over the cap - comes
+// back missing rather than being shown as saved.
+export async function saveStoreSources(
+  sources: { url: string; name?: string | null; autoUpdate?: boolean }[],
+  autoUpdate?: boolean,
+): Promise<{ ok: boolean; sources: { url: string; name?: string; autoUpdate?: boolean }[] }> {
+  try {
+    const res = await fetch("/tvbox/api/store/sources", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ sources, ...(autoUpdate === undefined ? {} : { autoUpdate }) }),
+    });
+    const d = await res.json();
+    return { ok: !!d.ok, sources: Array.isArray(d.sources) ? d.sources : [] };
+  } catch {
+    return { ok: false, sources: [] };
+  }
+}
 // Move the app's flatpak now instead of waiting for the nightly timer. Returns as
 // soon as the update is running; the store polls /store/list for the outcome.
 // The reason matters here: "busy" is a refusal to start, not a failed update.
