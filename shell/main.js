@@ -1822,9 +1822,16 @@ function refreshSinkState() {
 // is gated - it spawns nmcli and gdbus, which a box nobody watches should not pay.
 function publishDiag() {
   if (!mqttCtl) return;
+  // Guarded on both sides of the asynchronous hop: this catch only ever sees a
+  // synchronous failure, because collect answers through execFile callbacks, and an
+  // exception raised there would reach the Electron main process rather than here.
   try {
     diag.collect({ system, updater }, (payload) => {
-      if (mqttCtl) mqttCtl.publish("diag", payload, { retain: true });
+      try {
+        if (mqttCtl) mqttCtl.publish("diag", payload, { retain: true });
+      } catch (e) {
+        console.warn("[diag] publish:", e.message);
+      }
     });
   } catch (e) {
     console.warn("[diag] collect:", e.message);

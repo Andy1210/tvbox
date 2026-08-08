@@ -19,9 +19,19 @@ minutes.
 
 ## What is in it
 
-Published at boot and every 5 minutes, retained, only while MQTT is configured
-(see [mqtt-integration.md](mqtt-integration.md) for the broker setup). Collected
-by [shell/diag.js](../shell/diag.js).
+Published when the box's MQTT client connects and every 5 minutes after that,
+retained, and only while MQTT is configured at all (see
+[mqtt-integration.md](mqtt-integration.md) for the broker setup). "On connect"
+rather than "at boot" because MQTT may be configured long after the box came up,
+and because a broker that was unreachable at boot produces the first payload when
+it comes back. Collected by [shell/diag.js](../shell/diag.js).
+
+Retained also means **the last thing a box said, not necessarily what is true
+now**: a box that has been unplugged since yesterday still answers with
+yesterday's payload. Whether it is online is a different topic, `status`, which is
+the box's retained last will - so anything reading `diag` should read `status`
+alongside it. The Home Assistant sensors below do exactly that, and go unavailable
+rather than showing a stale temperature.
 
 ```jsonc
 {
@@ -174,7 +184,16 @@ mosquitto_sub -h <broker> -u <user> -P <pass> -t 'tvbox/+/diag' -v | while read 
 done
 ```
 
-Retained means every box answers immediately, not at its next tick.
+Retained means every box answers immediately, not at its next tick. It also means
+a box that is switched off still answers, with whatever it last said, so subscribe
+to `status` too when that matters:
+
+```sh
+mosquitto_sub -h <broker> -u <user> -P <pass> -t 'tvbox/+/status' -v
+```
+
+A box whose `status` reads `offline` (its last will, published by the broker when
+the connection dropped) is showing you history, not the present.
 
 ## What it deliberately does not do
 

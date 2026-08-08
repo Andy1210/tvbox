@@ -10,6 +10,7 @@ const assert = require("node:assert");
 const fs = require("fs");
 const os = require("os");
 const path = require("path");
+const { execFileSync } = require("child_process");
 
 const diag = require("./diag");
 
@@ -194,26 +195,63 @@ test("collect assembles one box's answer from system + updater", (t, done) => {
   });
 });
 
-// The rollback marker is read from the real filesystem, so the test writes one
-// where the module looks for it and puts back whatever was there.
+// By the time the payload is assembled we are three execFile callbacks deep, so a
+// TypeError here would NOT reach the caller's try/catch: it would reach the Electron
+// main process as an uncaught exception. A box's diagnostics must not be able to do
+// that, so a half-answer costs its fields and nothing else.
+test("a system or updater that answers half a shape still yields a payload", (t, done) => {
+  diag.init({
+    execFile: (cmd, args, opts, cb) => {
+      const line = [cmd].concat(args).join(" ");
+      if (line.includes("nmcli")) return cb(null, NMCLI_WIFI);
+      return cb(new Error("nothing else answers"));
+    },
+  });
+  diag.collect(
+    {
+      system: { systemInfo: (cb) => cb({ hostname: "tvbox-spare" }) }, // no wifi, no mem, no disk
+      updater: { status: () => null }, // and nothing at all from the updater
+    },
+    (p) => {
+      assert.equal(p.hostname, "tvbox-spare");
+      assert.equal(p.net.ssid, ""); // the field that used to throw
+      assert.equal(p.release, null);
+      assert.deepEqual(p.update.unmet, []);
+      assert.equal(p.update.os, null);
+      done();
+    },
+  );
+});
+
+// The marker is read off the real filesystem at a path the module resolved from
+// os.homedir() when it was imported, so this runs in a CHILD PROCESS with its own
+// HOME (the pattern integration.test.js uses, and for the same reason). Writing to
+// the developer's real ~/.tvbox/update/failed would destroy the mtime of an actual
+// rollback, which is the one thing about it that cannot be reconstructed.
 test("a real update/failed marker is picked up with its own mtime", () => {
-  const dir = path.join(os.homedir(), ".tvbox", "update");
-  const file = path.join(dir, "failed");
-  let had;
-  try {
-    had = fs.readFileSync(file);
-  } catch (e) {
-    had = null;
-  }
-  fs.mkdirSync(dir, { recursive: true });
-  fs.writeFileSync(file, "2.1.0 2.2.0\n");
-  try {
-    const r = diag.rollback();
-    assert.equal(r.from, "2.2.0");
-    assert.equal(r.to, "2.1.0");
-    assert.ok(r.at, "the marker's mtime is the only record of when it happened");
-  } finally {
-    if (had === null) fs.rmSync(file, { force: true });
-    else fs.writeFileSync(file, had);
-  }
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), "tvbox-diag-"));
+  fs.mkdirSync(path.join(home, ".tvbox", "update"), { recursive: true });
+  fs.writeFileSync(path.join(home, ".tvbox", "update", "failed"), "2.1.0 2.2.0\n");
+  const out = execFileSync(process.execPath, ["-e", 'console.log(JSON.stringify(require("./diag").rollback()))'], {
+    cwd: __dirname,
+    env: { ...process.env, HOME: home },
+    encoding: "utf8",
+  });
+  const r = JSON.parse(out);
+  assert.equal(r.from, "2.2.0");
+  assert.equal(r.to, "2.1.0");
+  assert.ok(r.at, "the marker's mtime is the only record of when it happened");
+  fs.rmSync(home, { recursive: true, force: true });
+});
+
+test("no marker at all is the normal case, not an error", () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), "tvbox-diag-"));
+  fs.mkdirSync(path.join(home, ".tvbox"), { recursive: true });
+  const out = execFileSync(process.execPath, ["-e", 'console.log(JSON.stringify(require("./diag").rollback()))'], {
+    cwd: __dirname,
+    env: { ...process.env, HOME: home },
+    encoding: "utf8",
+  });
+  assert.equal(JSON.parse(out), null);
+  fs.rmSync(home, { recursive: true, force: true });
 });

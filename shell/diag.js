@@ -91,9 +91,11 @@ function parseCompositorVersion(out) {
   return m ? m[1] : "";
 }
 
-// update/failed is "<prev> <new>": the release that could not boot and the one it
-// was rolled back to. Its mtime is when the rollback ran, which is the only record
-// of WHEN, so it travels with it.
+// update/failed is written by run-shell.sh as "<prev> <new>", i.e. the release the
+// box was rolled back TO first and the one that could not boot second - the
+// opposite order to how anyone reads it out loud, which is why it is spelled out
+// here. Its mtime is when the rollback ran, and the only record of WHEN, so it
+// travels with the versions.
 function parseRollback(text, mtimeMs) {
   const parts = String(text || "")
     .trim()
@@ -206,38 +208,51 @@ function link(cb) {
 
 // One box's answer. `system` and `updater` are injected rather than required so
 // this module stays loadable (and testable) without the shell's wiring.
+//
+// Nothing in here may throw: by the time the payload is assembled we are several
+// execFile callbacks deep, so a TypeError would not reach the caller's try/catch -
+// it would reach the Electron main process as an uncaught exception, and a
+// diagnostics feature must not be able to take the box down.
 function collect(deps, cb) {
   const { system, updater } = deps || {};
   const started = Date.now() - Math.round(os.uptime()) * 1000;
   system.systemInfo((info) => {
     link((net) => {
       run("tvbox-wc", ["--version"], (wcOut) => {
-        const upd = updater.status();
-        cb({
-          at: new Date().toISOString(),
-          hostname: info.hostname,
-          model: info.model,
-          ip: info.ip,
-          version: info.version,
-          release: upd.release, // null = a dev deploy, not an OTA release
-          compositor: parseCompositorVersion(wcOut),
-          bootedAt: new Date(started).toISOString(),
-          uptimeSec: info.uptimeSec,
-          cpuTempC: info.cpuTempC,
-          mem: info.mem,
-          disk: info.disk,
-          net: { ...net, ssid: net.kind === "wifi" ? info.wifi.ssid : "" },
-          update: {
-            state: upd.state,
-            auto: upd.auto,
-            available: upd.available,
-            latest: upd.latest ? upd.latest.version : null,
-            unmet: upd.unmet,
-            lastCheckAt: upd.lastCheckAt,
-            rollback: rollback(),
-            os: upd.os,
-          },
-        });
+        let payload;
+        try {
+          const upd = updater.status() || {};
+          const wifi = info.wifi || {};
+          payload = {
+            at: new Date().toISOString(),
+            hostname: info.hostname,
+            model: info.model,
+            ip: info.ip,
+            version: info.version,
+            release: upd.release ?? null, // null = a dev deploy, not an OTA release
+            compositor: parseCompositorVersion(wcOut),
+            bootedAt: new Date(started).toISOString(),
+            uptimeSec: info.uptimeSec,
+            cpuTempC: info.cpuTempC,
+            mem: info.mem,
+            disk: info.disk,
+            net: { ...net, ssid: net.kind === "wifi" ? wifi.ssid || "" : "" },
+            update: {
+              state: upd.state ?? null,
+              auto: upd.auto ?? null,
+              available: upd.available ?? null,
+              latest: upd.latest ? upd.latest.version : null,
+              unmet: upd.unmet || [],
+              lastCheckAt: upd.lastCheckAt ?? null,
+              rollback: rollback(),
+              os: upd.os || null,
+            },
+          };
+        } catch (e) {
+          console.warn("[diag] could not assemble the payload:", e.message);
+          return;
+        }
+        cb(payload);
       });
     });
   });

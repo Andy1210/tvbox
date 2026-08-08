@@ -87,6 +87,12 @@ retained topic. What they are for, and a card that shows every box at once:
 A box on a release older than the topic simply leaves them unavailable, rather
 than showing a screenful of `unknown`.
 
+The values come from the retained `diag` topic, but whether they are shown comes
+from `status`: a retained payload outlives the box that published it, so an
+unplugged box would otherwise display yesterday's temperature as if it were
+current. The sensors go **unavailable** when the last will says `offline`, which
+is the same rule the media player already follows.
+
 ## Automation examples
 
 ```yaml
