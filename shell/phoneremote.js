@@ -29,6 +29,8 @@ const http = require("http");
 const fs = require("fs");
 const path = require("path");
 
+const screenframe = require("./screenframe");
+
 const PORT = 8100;
 const PAGE = path.join(__dirname, "pairing", "pages", "remote.html");
 
@@ -37,6 +39,11 @@ const PAGE = path.join(__dirname, "pairing", "pages", "remote.html");
 // own, and the lockout plus the short window is what makes it not.
 const ADOPT_TTL_MS = 5 * 60 * 1000;
 const ADOPT_MAX_FAILS = 8;
+
+// How stale a picture a phone will be handed before a new one is taken. The
+// readback is half a second, so anything under this would spend the box's time
+// rather than save the phone's.
+const FRAME_MAX_AGE_MS = 1500;
 
 const MAX_BODY = 4096; // a keypress is a few dozen bytes
 const MAX_PHONES = 16;
@@ -100,6 +107,32 @@ let adopt = null; // { code, expires, fails } while the TV is showing one
 let seenAt = new Map(); // token hash -> when its lastSeen was last written
 
 // ------------------------------------------------------------------ the store
+
+// Seeing the screen is a SECOND permission, not part of the remote. A frame shows
+// whatever is on the TV - a wifi password on the on-screen keyboard, the pairing
+// code itself - so it is asked for separately and it runs out on its own. A
+// switch left on is the failure mode here, not a switch nobody found.
+function screenUntil() {
+  return Number(deps.rawPhoneRemote().screenUntil) || 0;
+}
+// Reading this is also where an expiry is NOTICED, since nothing else ticks: the
+// files are the sensitive part, so they go the moment the window has closed.
+function screenOn() {
+  const on = screenUntil() > Date.now();
+  if (!on && screenUntil()) {
+    deps.setPhoneRemote({ screenUntil: 0 });
+    screenframe.forget();
+  }
+  return on;
+}
+
+function shareScreen(minutes) {
+  const mins = Math.max(0, Math.min(120, Number(minutes) || 0));
+  const until = mins ? Date.now() + mins * 60000 : 0;
+  deps.setPhoneRemote({ screenUntil: until });
+  if (!until) screenframe.forget();
+  return until;
+}
 
 const phones = () => {
   const p = deps.rawPhoneRemote().phones;
@@ -287,6 +320,36 @@ function handle(req, res) {
   } catch (e) {
     return json(res, 400, { ok: false });
   }
+  // The frame is a GET so the phone can point an <img> at it. That puts the token
+  // in a URL rather than a body, which is the trade: a query string is the only
+  // thing an <img> can carry, and the alternative - base64 in a POST answer - is
+  // the same secret through a worse pipe. It never leaves the LAN and the phone
+  // builds it from its own storage each time.
+  if (req.method === "GET" && u.pathname === "/screen") {
+    if (!phoneFor(u.searchParams.get("t"))) return json(res, 403, { ok: false, error: "token" });
+    if (!screenOn()) return json(res, 403, { ok: false, error: "off" });
+    // `w` is what the phone is showing it at: pinching into a 960-wide JPEG
+    // magnifies its artefacts rather than the screen, so a zoomed page asks for
+    // the larger one. It snaps to a size the box offers - the capture is shared
+    // either way, so this costs an encode and not another readback.
+    return screenframe.frame(FRAME_MAX_AGE_MS, Number(u.searchParams.get("w")) || 0, (err, file) => {
+      if (err) return json(res, err === "no_ffmpeg" ? 501 : 503, { ok: false, error: err });
+      // Checked again on the way out. Taking a picture is half a second, and the
+      // window can close - by hand or by running out - inside it; a frame that
+      // arrives after that is exactly the picture nobody agreed to send.
+      if (!screenOn()) return json(res, 403, { ok: false, error: "off" });
+      // Never cached: the whole point is that the next request is a new picture.
+      res.writeHead(200, { "Content-Type": "image/jpeg", "Cache-Control": "no-store" });
+      const stream = fs.createReadStream(file);
+      stream.on("error", () => {
+        try {
+          res.end();
+        } catch (e) {}
+      });
+      res.on("close", () => stream.destroy());
+      stream.pipe(res);
+    });
+  }
   if (req.method === "GET" && (u.pathname === "/" || u.pathname === "/index.html")) {
     let html;
     try {
@@ -329,7 +392,7 @@ function handle(req, res) {
     }
     if (u.pathname === "/ping") {
       touch(phone);
-      return json(res, 200, { ok: true, name: phone.name });
+      return json(res, 200, { ok: true, name: phone.name, screen: screenOn() });
     }
     return json(res, 404, { ok: false });
   });
@@ -337,6 +400,9 @@ function handle(req, res) {
 
 module.exports = {
   PORT,
+  screenOn,
+  screenUntil,
+  shareScreen,
   boundPort,
   ACTIONS,
   isAction,

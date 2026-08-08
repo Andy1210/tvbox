@@ -10,6 +10,7 @@ import { PinGate } from "@sdk/PinGate";
 import { TimezonePicker } from "../../components/TimezonePicker";
 import { KeymapPicker, keymapLabel } from "../../components/KeymapPicker";
 import { BackupSettings } from "../../components/BackupSettings";
+import { DevToolsPage } from "./devtools";
 import { SettingsPage } from "../SettingsPage";
 import { ChoicePage } from "../ChoicePage";
 import { Group, InfoRow, Note, Row, TextRow, ToggleRow } from "../Rows";
@@ -154,13 +155,15 @@ function RegionPage() {
 // The box has ONE central PIN (stored salted + hashed by the shell); every app
 // checks it through the SDK, so setting it here covers an app's locked content too.
 // This page manages the PIN itself - what gets locked lives in each app's settings.
-function ParentalPage() {
+export function ParentalPage() {
   const { t } = useI18n();
   const nav = useSettingsNav();
   const pinSet = useConfigStore((s) => !!s.config?.parental.pinSet);
   const requirePin = useConfigStore((s) => !!s.config?.parental.requirePin);
   const saveParental = useConfigStore((s) => s.setParental);
-  const [step, setStep] = useState<null | "verify-change" | "verify-clear" | "new" | "confirm">(null);
+  const [step, setStep] = useState<null | "verify-change" | "verify-clear" | "verify-require" | "new" | "confirm">(
+    null,
+  );
   const [firstPin, setFirstPin] = useState("");
   const [confirmError, setConfirmError] = useState<string | undefined>();
   const [msg, setMsg] = useState("");
@@ -173,6 +176,20 @@ function ParentalPage() {
   };
 
   if (step === "verify-change") return <PinGate onSuccess={() => setStep("new")} onCancel={() => done("")} />;
+  // Turning the requirement OFF is the one press that unlocks everything the PIN
+  // was protecting, so it asks for the PIN - changing and clearing it already did,
+  // and this was the way past both. Turning it ON stays free: raising a guard
+  // needs no permission, and asking would only make people leave it down.
+  if (step === "verify-require")
+    return (
+      <PinGate
+        onSuccess={async () => {
+          await saveParental({ requirePin: false });
+          done("");
+        }}
+        onCancel={() => done("")}
+      />
+    );
   if (step === "verify-clear")
     return (
       <PinGate
@@ -233,7 +250,7 @@ function ParentalPage() {
               label={t("parental.require")}
               hint={t("parental.requireHint")}
               on={requirePin}
-              onToggle={() => void saveParental({ requirePin: !requirePin })}
+              onToggle={() => (requirePin ? setStep("verify-require") : void saveParental({ requirePin: true }))}
               onWord={t("common.on")}
               offWord={t("common.off")}
             />
@@ -498,6 +515,18 @@ export function SystemPane() {
           label={t("backup.title")}
           hint={t("system.backupHint")}
           onEnter={() => nav.push({ id: "backup", title: t("backup.title"), render: () => <BackupPage /> })}
+        />
+      </Group>
+      {/* Last, and its own group: nothing behind this door is for someone
+          watching television. */}
+      <Group>
+        <Row
+          id="dev"
+          label={t("system.devTools")}
+          hint={t("system.devToolsHint")}
+          onEnter={() =>
+            nav.push({ id: "dev", title: t("dev.title"), render: () => <DevToolsPage onBack={nav.pop} /> })
+          }
         />
       </Group>
     </SettingsPage>

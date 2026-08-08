@@ -38,6 +38,48 @@ function init(d) {
   deps = { ...deps, ...d };
 }
 
+// Chromium's DevTools endpoint, for ONE boot.
+//
+// deploy/run-shell.sh reads ~/.tvbox/debug-port at start and DELETES it, so the
+// endpoint lives for that session only. That deletion is the whole safety story
+// and the reason this is a marker rather than a setting: the endpoint is
+// arbitrary code in the launcher window, which has Node in its preload and so
+// reaches config.json and everything in it. A setting that survived reboots
+// would be a back door with nothing on the TV to show for it.
+//
+// It binds loopback - run-shell.sh passes no --remote-debugging-address on
+// purpose - so reaching it means an SSH tunnel, which is one more thing an
+// attacker would need and one more thing the person debugging already has.
+//
+// Writing it does nothing until the shell restarts, which is why this restarts
+// it. A port of 0 clears the marker instead, for someone who changed their mind
+// before the reboot.
+const DEBUG_PORT_FILE = path.join(os.homedir(), ".tvbox", "debug-port");
+function setDebugPort(port, cb) {
+  const n = Number(port) || 0;
+  if (!n) {
+    try {
+      fs.unlinkSync(DEBUG_PORT_FILE);
+    } catch (e) {
+      // Not there is the outcome asked for. Anything else means the marker is
+      // still on disk and the NEXT restart would open the endpoint, so saying
+      // "off" would be a lie with a debugger behind it.
+      if (e.code !== "ENOENT") return cb({ ok: false, error: "failed" });
+    }
+    return cb({ ok: true, port: 0, restarting: false });
+  }
+  if (!Number.isInteger(n) || n < 1024 || n > 65535) return cb({ ok: false, error: "bad port" });
+  try {
+    fs.writeFileSync(DEBUG_PORT_FILE, String(n), { mode: 0o600 });
+  } catch (e) {
+    return cb({ ok: false, error: "failed" });
+  }
+  cb({ ok: true, port: n, restarting: true });
+  // After the answer is out: the caller is a page in the window that is about to
+  // go away, and it should hear the yes first.
+  setTimeout(() => deps.restartShell("devtools port " + n), 1200);
+}
+
 const installing = new Set(); // app ids whose bundle is being installed on-demand (UI)
 // Per-app install progress for the store UI: id -> { phase }. `phase` is a
 // coarse, reliable stage the launcher turns into "Downloading.../Installing..."
@@ -400,6 +442,7 @@ function installingIds() {
 
 module.exports = {
   init,
+  setDebugPort,
   busy,
   progressFor,
   flatpakStatusFor,

@@ -15,6 +15,9 @@ export interface PhoneRemoteState {
   enabled: boolean;
   phones: PairedPhone[];
   port: number;
+  // Epoch ms until which a paired phone may see the TV, or 0. Separate from
+  // `enabled`: pressing buttons and watching the screen are two permissions.
+  screenUntil: number;
 }
 
 // A 404 and a socket that went away are not the same answer, and telling them
@@ -31,7 +34,12 @@ export async function fetchPhoneRemote(): Promise<PhoneRemoteResult> {
     const d = await res.json();
     return {
       kind: "ok",
-      state: { enabled: !!d.enabled, phones: Array.isArray(d.phones) ? d.phones : [], port: Number(d.port) || 0 },
+      state: {
+        enabled: !!d.enabled,
+        phones: Array.isArray(d.phones) ? d.phones : [],
+        port: Number(d.port) || 0,
+        screenUntil: Number(d.screenUntil) || 0,
+      },
     };
   } catch {
     return { kind: "error" };
