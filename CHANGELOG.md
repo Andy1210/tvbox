@@ -5,6 +5,18 @@ updates). `scripts/make-release.sh` lifts the current version's `hu`/`en`
 blocks into the OTA feed's `notes` - keep both languages, keep it short, and
 write for the person on the couch (what changes for THEM), not for developers.
 
+## 2.5.1
+
+### hu
+
+- Az értesítés sávja olvasható méretben jelenik meg, és nem duplázódik: eddig a
+  főképernyő is kirajzolta a magáét.
+
+### en
+
+- The notification strip is drawn at a readable size, and no longer doubled: the
+  home screen used to draw its own copy as well.
+
 ## 2.5.0
 
 ### hu
