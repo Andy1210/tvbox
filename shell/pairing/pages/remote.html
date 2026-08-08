@@ -92,6 +92,40 @@
         font-size: 14px;
         color: #aab4c2;
       }
+      /* The screen view. Only ever appears when the TV is sharing it, so its
+         absence is the honest signal that nothing is being watched. */
+      #screen {
+        width: min(86vw, 320px);
+        display: none;
+        flex-direction: column;
+        gap: 8px;
+      }
+      /* The frame is the ONE thing here that zooms. The page itself must not:
+         a D-pad that pinches when a thumb slips is worse than no zoom at all,
+         which is why the viewport stays user-scalable=no and the gesture is
+         handled here instead. touch-action:none is what stops the browser
+         claiming the pinch before this code sees it. */
+      #frame {
+        position: relative;
+        overflow: hidden;
+        border-radius: 12px;
+        background: #171f29;
+        aspect-ratio: 16 / 9;
+        touch-action: none;
+      }
+      #screen img {
+        width: 100%;
+        height: 100%;
+        display: block;
+        object-fit: contain;
+        transform-origin: 0 0;
+        will-change: transform;
+      }
+      #screen .cap {
+        font-size: 12px;
+        color: #7d8a99;
+        text-align: center;
+      }
       #setup {
         width: min(86vw, 320px);
         display: none;
@@ -161,6 +195,10 @@
         <button data-key="rewind">◀◀</button>
         <button data-key="settings">Settings</button>
         <button data-key="fastforward">▶▶</button>
+      </div>
+      <div id="screen">
+        <div id="frame"><img id="shot" alt="" /></div>
+        <div class="cap" id="shotcap"></div>
       </div>
       <p class="hint" id="msg"></p>
     </div>
@@ -235,12 +273,7 @@
           if (r.status === 403) {
             // The box forgot this phone (or was reset). Say so and ask again,
             // rather than leaving a pad that silently does nothing.
-            try {
-              localStorage.removeItem(KEY);
-            } catch (e) {}
-            token = null;
-            show(false);
-            say(setupMsg, "This phone is no longer paired with the box.", true);
+            unpair();
           } else if (!r.body.ok) {
             say(msg, "The box could not send that.", true);
           } else {
@@ -261,21 +294,155 @@
         });
       });
 
+      // The TV's screen, when the box is sharing it. Pull, never a stream: each
+      // frame is a request, and a frame costs the box about half a second - so
+      // this is "a picture every few seconds", not a mirror. The cache-buster is
+      // what stops the browser handing back the previous one.
+      var screenBox = document.getElementById("screen"),
+        shot = document.getElementById("shot"),
+        shotcap = document.getElementById("shotcap"),
+        screenTimer = null;
+      function stopScreen() {
+        if (screenTimer) clearInterval(screenTimer);
+        screenTimer = null;
+        screenBox.style.display = "none";
+        shot.removeAttribute("src");
+        zoom = 1;
+        panX = 0;
+        panY = 0;
+        shot.style.transform = "";
+      }
+      // Pinch to zoom, drag to move, double-tap to go back. Written here rather
+      // than left to the browser because the page as a whole must NOT zoom - a
+      // D-pad that pinches when a thumb slips is worse than no zoom at all.
+      var frameBox = document.getElementById("frame"),
+        wantWidth = 960, // which size the box is asked for; raised while zoomed in
+        zoom = 1,
+        panX = 0,
+        panY = 0,
+        points = new Map(),
+        pinchFrom = 0,
+        zoomFrom = 1,
+        lastTap = 0;
+      var MAX_ZOOM = 4;
+
+      function applyZoom() {
+        // Clamped so the picture can always be let go of: past 1x it may be moved
+        // by its overflow and no further, and at 1x it sits still.
+        var r = frameBox.getBoundingClientRect();
+        var maxX = Math.max(0, r.width * (zoom - 1));
+        var maxY = Math.max(0, r.height * (zoom - 1));
+        panX = Math.min(0, Math.max(-maxX, panX));
+        panY = Math.min(0, Math.max(-maxY, panY));
+        shot.style.transform = "translate(" + panX + "px," + panY + "px) scale(" + zoom + ")";
+        // Above 1x the box is asked for the bigger picture: magnifying a 960-wide
+        // JPEG magnifies its artefacts, not the screen.
+        wantWidth = zoom > 1.2 ? 1440 : 960;
+      }
+      function setZoom(next, cx, cy) {
+        var before = zoom;
+        zoom = Math.min(MAX_ZOOM, Math.max(1, next));
+        // Keep whatever is under the fingers under the fingers.
+        var k = zoom / before;
+        panX = cx - k * (cx - panX);
+        panY = cy - k * (cy - panY);
+        if (zoom === 1) {
+          panX = 0;
+          panY = 0;
+        }
+        applyZoom();
+      }
+      function pointFrom(ev) {
+        var r = frameBox.getBoundingClientRect();
+        return { x: ev.clientX - r.left, y: ev.clientY - r.top };
+      }
+      frameBox.addEventListener("pointerdown", function (ev) {
+        frameBox.setPointerCapture(ev.pointerId);
+        points.set(ev.pointerId, pointFrom(ev));
+        if (points.size === 2) {
+          var p = [...points.values()];
+          pinchFrom = Math.hypot(p[0].x - p[1].x, p[0].y - p[1].y);
+          zoomFrom = zoom;
+        } else if (points.size === 1) {
+          var now = Date.now();
+          if (now - lastTap < 300) {
+            var here = pointFrom(ev);
+            setZoom(zoom > 1 ? 1 : 2.5, here.x, here.y);
+            lastTap = 0;
+          } else lastTap = now;
+        }
+      });
+      frameBox.addEventListener("pointermove", function (ev) {
+        if (!points.has(ev.pointerId)) return;
+        var prev = points.get(ev.pointerId);
+        var now = pointFrom(ev);
+        points.set(ev.pointerId, now);
+        if (points.size === 2) {
+          var p = [...points.values()];
+          var dist = Math.hypot(p[0].x - p[1].x, p[0].y - p[1].y);
+          if (pinchFrom > 0) {
+            var mid = { x: (p[0].x + p[1].x) / 2, y: (p[0].y + p[1].y) / 2 };
+            setZoom(zoomFrom * (dist / pinchFrom), mid.x, mid.y);
+          }
+        } else if (zoom > 1) {
+          panX += now.x - prev.x;
+          panY += now.y - prev.y;
+          applyZoom();
+        }
+      });
+      function liftPointer(ev) {
+        points.delete(ev.pointerId);
+        if (points.size < 2) pinchFrom = 0;
+      }
+      frameBox.addEventListener("pointerup", liftPointer);
+      frameBox.addEventListener("pointercancel", liftPointer);
+
+      function startScreen() {
+        if (screenTimer || !token) return;
+        screenBox.style.display = "flex";
+        shotcap.textContent = "Pinch to zoom, double-tap to reset";
+        var tick = function () {
+          if (document.hidden) return; // a phone in a pocket should not keep asking
+          shot.src = "/screen?t=" + encodeURIComponent(token) + "&w=" + wantWidth + "&n=" + Date.now();
+        };
+        shot.onerror = function () {
+          // The box stopped sharing (it runs out on its own), or it could not
+          // take a picture. Either way there is nothing to show.
+          stopScreen();
+          say(msg, "The TV is no longer sharing its screen.");
+        };
+        tick();
+        screenTimer = setInterval(tick, 2500);
+      }
+
       show(!!token);
-      if (token) {
-        // Confirm the box still knows this phone, so a stale bookmark says so
-        // before someone presses at it.
+
+      // Asked repeatedly, not once: the TV is where sharing is turned on, so a
+      // page that only looked at startup would sit there showing nothing until
+      // somebody thought to reload it. Also how a forgotten phone finds out.
+      function watch() {
+        if (!token || document.hidden) return;
         post("/ping", { token: token })
           .then(function (r) {
-            if (r.status !== 403) return;
-            try {
-              localStorage.removeItem(KEY);
-            } catch (e) {}
-            token = null;
-            show(false);
-            say(setupMsg, "This phone is no longer paired with the box.", true);
+            if (r.status === 403) return unpair();
+            if (r.status !== 200) return;
+            if (r.body.screen) startScreen();
+            else stopScreen();
           })
           .catch(function () {});
+      }
+      function unpair() {
+        try {
+          localStorage.removeItem(KEY);
+        } catch (e) {}
+        token = null;
+        stopScreen();
+        show(false);
+        say(setupMsg, "This phone is no longer paired with the box.", true);
+      }
+      if (token) {
+        watch();
+        setInterval(watch, 5000);
       }
     </script>
   </body>

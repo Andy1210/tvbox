@@ -478,7 +478,7 @@
     "enterPin": "Enter the PIN",
     "wrongPin": "Wrong PIN",
     "require": "Require PIN for sensitive actions",
-    "requireHint": "Installing and uninstalling apps asks for the PIN.",
+    "requireHint": "Installing and uninstalling apps, and the developer tools, ask for the PIN. Turning this off asks for it too.",
     "pinSet": "PIN set",
     "pinNotSet": "no PIN"
   },
@@ -677,7 +677,9 @@
   },
   "system": {
     "updateHint": "Version and automatic updates",
-    "backupHint": "Copy the settings to your phone, or put them back"
+    "backupHint": "Copy the settings to your phone, or put them back",
+    "devTools": "Developer tools",
+    "devToolsHint": "Debugger, screen on your phone"
   },
   "shares": {
     "title": "Network shares",
@@ -760,5 +762,25 @@
     "title": "Phone as a remote",
     "unreachable": "The box did not answer. Try again.",
     "unsupported": "This box's software is too old for it."
+  },
+  "dev": {
+    "debugFailed": "That did not start.",
+    "debugGroup": "Chromium debugger",
+    "debugNote": "This boot only: the box closes it again on the next restart. It listens on the box itself, so reaching it from elsewhere needs an SSH tunnel: ssh -L {port}:127.0.0.1:{port} <box>, then chrome://inspect.",
+    "debugPort": "Start the debugger and restart",
+    "debugPortHint": "The box restarts and accepts Chromium DevTools on port {port}",
+    "debugStarting": "Restarting…",
+    "off": "Off",
+    "screenFailed": "That did not work.",
+    "screenGroup": "Screen on your phone",
+    "screenHint": "Your paired phone can see what is on the TV",
+    "screenLeft": "{n} minutes left",
+    "screenNote": "A still picture every few seconds, not a live view - it is for testing. A separate switch from the remote, because a picture shows everything that is on screen.",
+    "screenOnNote": "Your paired phone can see the TV right now, including anything you type. It stops on its own, and you can stop it any time.",
+    "screenStart": "Share the screen for {n} minutes",
+    "screenStop": "Stop sharing",
+    "screenUnsupported": "This box's software is too old for it.",
+    "screenWatching": "Your screen is shared",
+    "title": "Developer tools"
   }
 }
