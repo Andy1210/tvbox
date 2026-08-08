@@ -53,6 +53,12 @@ One config entry per box - which is also how several boxes stay apart, since the
 device id is per box by construction
 ([updates-and-backup.md](updates-and-backup.md#setting-up-a-second-box-from-this-one)).
 
+**Updating it later is the same copy plus a restart**, and the restart is not
+optional: reloading the integration re-runs the config entry, it does not re-import
+changed Python. A version that adds a platform (the diagnostics below did) only
+appears once Home Assistant has started again. Nothing else has to be touched - the
+config entries, and the entity ids already in dashboards and automations, survive.
+
 ## What the entity does
 
 | Home Assistant                    | On the box                                                                                                                     |
