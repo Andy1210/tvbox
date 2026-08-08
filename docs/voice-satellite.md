@@ -134,6 +134,12 @@ A note with a `message` is drawn in a strip at the bottom of the screen that sit
 over whatever is running, including a fullscreen app, without taking the remote
 from it (`tvbox-overlay`, see the compositor's `docs/ipc.md`).
 
+**On a box whose compositor predates that** (tvbox-wc 0.1.7), the strip is not used
+at all and the note stays in the launcher, visible only while the launcher is what
+is on screen. That is deliberate: without the compositor's placement the window
+would map fullscreen, and a fullscreen translucent surface over a film costs more
+than the note is worth.
+
 **One kind of note stays in the launcher**: the structured ones the shell sends
 with a `kind` and no text - a remote's low battery, for instance - because the
 sentence around the name and the percentage is a localized string that lives in

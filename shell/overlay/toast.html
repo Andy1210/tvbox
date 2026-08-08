@@ -74,21 +74,30 @@
       const title = document.getElementById("title");
       const message = document.getElementById("message");
       let hideTimer = null;
+      // Which note is on screen. A note that arrives while the previous one is
+      // fading out would otherwise be hidden by that one's "I am done" - the
+      // window belongs to the shell, and it would take the new note down with it.
+      let showing = 0;
 
       // The shell shows and hides the window itself, so this only draws. It tells
       // the shell when the note is finished rather than hiding a window it does not
       // own - a hidden window still costs the compositor a surface.
       window.tvboxOverlay?.onNote((note) => {
         clearTimeout(hideTimer);
+        const mine = ++showing;
         title.textContent = note.title || "";
         title.hidden = !note.title;
         message.textContent = note.message || "";
         box.classList.add("up");
         const ms = Math.max(1500, Math.min(60000, Number(note.duration) || 6000));
         hideTimer = setTimeout(() => {
+          if (mine !== showing) return;
           box.classList.remove("up");
-          // After the fade, not during it.
-          setTimeout(() => window.tvboxOverlay?.done(), 220);
+          // After the fade, not during it - and only if nothing newer arrived in
+          // the meantime, or this note would close the window over the next one.
+          setTimeout(() => {
+            if (mine === showing) window.tvboxOverlay?.done();
+          }, 220);
         }, ms);
       });
     </script>

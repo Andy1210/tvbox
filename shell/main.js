@@ -1684,6 +1684,21 @@ function ensureOverlayWindow() {
   overlayWin.on("closed", () => {
     overlayWin = null;
   });
+  // A renderer that died or never loaded is a window that will never show a note
+  // again, and one that may be sitting on screen while it fails. Drop it: the next
+  // note builds a fresh one, which is the whole cost of recovering here.
+  const scrap = (why) => {
+    console.warn("[notify] overlay renderer gone (" + why + ") - it will be rebuilt");
+    clearTimeout(overlayHideTimer);
+    overlayHideTimer = null;
+    const dying = overlayWin;
+    overlayWin = null;
+    try {
+      if (dying && !dying.isDestroyed()) dying.destroy();
+    } catch (e) {}
+  };
+  overlayWin.webContents.on("render-process-gone", (_e, details) => scrap((details && details.reason) || "crashed"));
+  overlayWin.webContents.on("did-fail-load", (_e, code, description) => scrap(description || String(code)));
   return overlayWin;
 }
 
