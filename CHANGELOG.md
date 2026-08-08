@@ -5,6 +5,25 @@ updates). `scripts/make-release.sh` lifts the current version's `hu`/`en`
 blocks into the OTA feed's `notes` - keep both languages, keep it short, and
 write for the person on the couch (what changes for THEM), not for developers.
 
+## 2.7.0
+
+### hu
+
+- **A képernyő-billentyűzeten már van vessző - és ékezet is.** A `#+=` gomb
+  átvált írásjelekre és azokra a betűkre, amiket a sima billentyűsor nem tud.
+  Kereséshez (RetroArch, Plex, Jellyfin) eddig hiányzott mindkettő.
+- Hogy melyik betűk jelennek meg, azt a Beállítások → Rendszer → Régió alatt
+  megadott **billentyűzetkiosztás** dönti el, ugyanaz, amit egy bedugott
+  billentyűzet is használ.
+
+### en
+
+- **The on-screen keyboard has a comma now - and accents.** The `#+=` key
+  switches to punctuation and to the letters a plain keyboard row cannot
+  produce. Searching (RetroArch, Plex, Jellyfin) was missing both.
+- Which letters you get follows the **keyboard layout** set in Settings →
+  System → Region, the same one a plugged-in keyboard uses.
+
 ## 2.6.0
 
 ### hu
