@@ -1,31 +1,69 @@
-// tvbox app store - a curated registry: one index.json of vetted app manifests,
-// BUILT AND PUBLISHED by the tvbox-apps repo's CI (it compiles every app from
-// source on merge and deploys the result; nothing there is a committed
-// snapshot). "Installing" a store app just
-// writes its manifest to ~/.tvbox/apps/<id>.json - the tile appears live via
-// the manifest reload on /tvbox/api/apps; bundles/deps then follow the normal
-// opt-in paths (UI install, `tvbox deps`).
+// tvbox app store - one or more registries of app manifests, merged into a
+// single catalogue. The official index.json is BUILT AND PUBLISHED by the
+// tvbox-apps repo's CI (it compiles every app from source on merge and deploys
+// the result; nothing there is a committed snapshot). "Installing" a store app
+// just writes its manifest to ~/.tvbox/apps/<id>.json - the tile appears live
+// via the manifest reload on /tvbox/api/apps; bundles/deps then follow the
+// normal opt-in paths (UI install, `tvbox deps`).
+//
+// An added registry is trusted like the official one, because the box has no way
+// to make it safer: a manifest-only remote webclient already gets an origin on
+// the box and the `fetch` broker, so a second, weaker install path would promise
+// a safety it cannot deliver. The trust decision is therefore made ONCE, by the
+// owner, when the source is added (the launcher warns there), the same contract
+// an apt source or a Kodi repository has. What the box still owes that owner is
+// bookkeeping, and that is what the pins below are for.
 const fs = require("fs");
 const path = require("path");
 const apps = require("./install");
 const flatpak = require("./flatpak");
 const { isAllowedFetchUrl, guardedFetch } = require("./netguard"); // https anywhere, or LAN http; re-guards redirects
 
-// The registry's own https URL. Package files are fetched RELATIVE to it
-// (`new URL("apps/<id>/", url)` in install()), so the whole registry moves by
-// changing this one string - which is how it moved off GitHub raw and onto the
-// repo's Pages site, where CI publishes what it built rather than what someone
-// remembered to commit.
+// The official registry's own https URL. Package files are fetched RELATIVE to
+// the index they came from (`new URL("apps/<id>/", sourceUrl)` in install()), so
+// a registry moves by changing its URL alone - which is how this one moved off
+// GitHub raw and onto the repo's Pages site, where CI publishes what it built
+// rather than what someone remembered to commit.
 const DEFAULT_REGISTRY = "https://andy1210.github.io/tvbox-apps/index.json";
+// Extra registries beyond the primary one. Bounded because every source is a
+// fetch on every store open, and a TV panel that waits on eleven of them reads
+// as a broken store rather than a slow one.
+const MAX_EXTRA_SOURCES = 10;
 const CACHE_MS = 5 * 60 * 1000;
-let cache = { at: 0, url: null, entries: null, error: null };
+const cache = new Map(); // url -> { at, entries, error }
 
-function registryUrl(config) {
-  // The override is the box owner's own config.json entry: https anywhere, or
-  // plain http ONLY to a self-hosted LAN registry (never a public http host).
-  // The shipped default is https.
-  const s = config.rawStore() || {};
-  return typeof s.registry === "string" && isAllowedFetchUrl(s.registry) ? s.registry : DEFAULT_REGISTRY;
+// The configured registries in precedence order. The primary is the official
+// index unless `config.store.registry` replaces it (a self-hoster pointing the
+// box at their own), and `config.store.sources` are merged after it.
+// Both are held to the same rule as the OTA feed: https anywhere, or plain http
+// ONLY to a LAN registry, never a public http host that anyone in the path could
+// answer for.
+function sources(config) {
+  const s = (config.rawStore && config.rawStore()) || {};
+  const primary = typeof s.registry === "string" && isAllowedFetchUrl(s.registry) ? s.registry : DEFAULT_REGISTRY;
+  // `official` is what the launcher warns on, so it means "the index this
+  // release ships", not "the primary one" - a self-hosted replacement of the
+  // primary is somebody's own registry and is labelled as such.
+  // Unattended updates are per source, and the two defaults differ on purpose.
+  // The nightly run installs whatever a registry publishes, without anyone
+  // present, so it is the one place where "I trusted this source once" turns
+  // into "this source may replace code on the box tonight". The primary keeps
+  // the box's existing behaviour; an ADDED source has to be turned on by hand,
+  // which is what lets an owner run the official catalogue unattended and still
+  // review what a homebrew registry ships.
+  const out = [
+    { url: primary, official: primary === DEFAULT_REGISTRY, name: null, autoUpdate: s.autoUpdate !== false },
+  ];
+  const seen = new Set([primary]);
+  for (const e of Array.isArray(s.sources) ? s.sources : []) {
+    const url = typeof e === "string" ? e : e && typeof e.url === "string" ? e.url : "";
+    if (!url || seen.has(url) || !isAllowedFetchUrl(url)) continue;
+    seen.add(url);
+    const name = e && typeof e.name === "string" && e.name.trim() ? e.name.trim().slice(0, 60) : null;
+    out.push({ url, official: false, name, autoUpdate: (e && e.autoUpdate) === true });
+    if (out.length > MAX_EXTRA_SOURCES) break;
+  }
+  return out;
 }
 
 // The registry is CURATED (every app is merge-reviewed - the review is the
@@ -92,16 +130,102 @@ async function fetchIndex(url, bust) {
   }
 }
 
-async function getEntries(config, refresh) {
-  const url = registryUrl(config);
-  if (!refresh && cache.url === url && Date.now() - cache.at < CACHE_MS && cache.entries) return cache;
+async function fetchSource(src, refresh) {
+  const c = cache.get(src.url);
+  if (!refresh && c && Date.now() - c.at < CACHE_MS && c.entries) return c;
+  let next;
   try {
-    cache = { at: Date.now(), url, entries: await fetchIndex(url, !!refresh), error: null };
+    next = { at: Date.now(), entries: await fetchIndex(src.url, !!refresh), error: null };
   } catch (e) {
-    console.warn("[store] registry fetch failed:", e.message);
-    cache = { at: Date.now(), url, entries: null, error: String(e.message || e).slice(0, 120) };
+    console.warn("[store] registry fetch failed:", src.url, "-", e.message);
+    next = { at: Date.now(), entries: null, error: String(e.message || e).slice(0, 120) };
   }
-  return cache;
+  cache.set(src.url, next);
+  return next;
+}
+
+// Every configured source, fetched in parallel and reported one by one: a
+// registry that is slow, gone or serving nonsense must cost the catalogue its
+// own apps and nothing else. The panel showing a partial list with a named
+// failure beats an empty screen that blames the whole store.
+async function loadAll(config, refresh) {
+  const srcs = sources(config);
+  const states = await Promise.all(srcs.map((s) => fetchSource(s, refresh)));
+  return srcs.map((s, i) => ({ ...s, entries: states[i].entries, error: states[i].error }));
+}
+
+// ---- which source an installed app came from ----
+// Recorded next to the app's data rather than in its manifest: a package app's
+// manifest.json is the registry's file, byte for byte, and is replaced whole on
+// every update. Same directory and shape as install.js's bundle-source record.
+const PIN_DIR = path.join(apps.APPS_DATA, ".registry");
+function pinPath(id) {
+  return path.join(PIN_DIR, id + ".json");
+}
+function readPin(id) {
+  try {
+    const p = JSON.parse(fs.readFileSync(pinPath(id), "utf8"));
+    return p && typeof p.url === "string" ? p.url : null;
+  } catch (e) {
+    return null; // an app installed before this bookkeeping, or removed since
+  }
+}
+function writePin(id, url) {
+  try {
+    fs.mkdirSync(PIN_DIR, { recursive: true });
+    fs.writeFileSync(pinPath(id), JSON.stringify({ v: 1, url, at: Date.now() }));
+  } catch (e) {
+    console.warn("[store]", id, "could not record which registry it came from:", e.message);
+  }
+}
+
+// One catalogue out of several registries. An id that more than one source
+// offers resolves in a fixed order, and the order is the contract:
+//
+//   1. the source the app was INSTALLED from, while that source is still
+//      configured. This is what keeps an id from changing hands: a second
+//      registry publishing a higher version under an installed app's id would
+//      otherwise be picked up by the nightly auto-update, which re-installs
+//      through this very list without anyone pressing anything.
+//   2. otherwise the configured order, primary first.
+//
+// The losing candidates are not hidden: `alsoIn` names their sources, so the
+// detail view can say that another registry carries the same app.
+function mergeSources(loaded) {
+  const candidates = new Map(); // id -> [{ entry, source }]
+  for (const s of loaded) {
+    for (const m of s.entries || []) {
+      const list = candidates.get(m.id) || [];
+      list.push({ entry: m, source: s });
+      candidates.set(m.id, list);
+    }
+  }
+  const chosen = new Map();
+  for (const [id, list] of candidates) {
+    const pin = readPin(id);
+    const c = (pin && list.find((x) => x.source.url === pin)) || list[0];
+    chosen.set(id, {
+      ...c,
+      alsoIn: list.filter((x) => x !== c).map((x) => x.source.url),
+      // The app was installed from a registry that is no longer configured, and
+      // what is on offer here comes from a different one. Removing a source does
+      // not remove its apps, so this is an ordinary state - but it must not be an
+      // unattended handover: whoever presses Update accepts the new origin, and
+      // the install re-pins to it.
+      pinnedElsewhere: !!pin && pin !== c.source.url,
+    });
+  }
+  // Emit in source order, and within a source in the order its index lists them:
+  // the official catalogue keeps the order it publishes, and an added registry's
+  // apps follow it instead of being interleaved by name.
+  const out = [];
+  for (const s of loaded) {
+    for (const m of s.entries || []) {
+      const c = chosen.get(m.id);
+      if (c && c.source.url === s.url && c.entry === m) out.push(c);
+    }
+  }
+  return out;
 }
 
 // Is version a > b? Semver-ish precedence: numeric major.minor.patch first,
@@ -172,7 +296,14 @@ function installedFromStore(id) {
 // (not installable, would be shadowed anyway).
 function listForUi(config) {
   return async (refresh) => {
-    const { entries, error, url } = await getEntries(config, refresh);
+    const loaded = await loadAll(config, refresh);
+    const entries = mergeSources(loaded);
+    // `error` is the whole catalogue failing, not one registry of several: the
+    // launcher swaps the list for a retry screen on it, and it must not do that
+    // while there are apps to show. A single source's failure travels in
+    // `sources` instead, next to the name of the source it belongs to.
+    const failed = loaded.find((s) => s.error);
+    const error = failed && !loaded.some((s) => s.entries) ? failed.error : null;
     apps.loadManifests();
     // One `flatpak list` for the whole panel: a flatpak-backed app carries a
     // second version that the registry knows nothing about, and its update path
@@ -184,7 +315,7 @@ function listForUi(config) {
         .filter((m) => !m._dir && !installedFromStore(m.id))
         .map((m) => m.id),
     );
-    const out = (entries || []).map((m) => {
+    const out = entries.map(({ entry: m, source, alsoIn, pinnedElsewhere }) => {
       const rt = m.runtime || {};
       const { missing } = apps.appDeps(m);
       const installed = installedFromStore(m.id);
@@ -218,10 +349,38 @@ function listForUi(config) {
         urlConfig: rt.urlConfig || null,
         baseUrl: rt.urlConfig ? (config.appConfig(rt.urlConfig) || {}).baseUrl || "" : "",
         missing,
+        // Where this entry came from, and which other registries carry the same
+        // id. Both are shown: an app from an added source is the owner's own
+        // trust decision, and it has to stay visible after the moment they made it.
+        source: { url: source.url, official: source.official, name: source.name, autoUpdate: source.autoUpdate },
+        alsoIn,
+        pinnedElsewhere: !!pinnedElsewhere,
       };
     });
+    // Two lists, because they answer different questions. `updates` is what the
+    // UI offers a person to press, and every pending update belongs in it
+    // whatever it came from. `autoUpdates` is what the box may install while
+    // nobody is watching, which is the source's own setting.
     const updates = out.filter((a) => a.updateAvailable).map((a) => a.id);
-    return { registry: url, apps: out, error, updates };
+    const autoUpdates = out
+      .filter((a) => a.updateAvailable && a.source.autoUpdate && !a.pinnedElsewhere)
+      .map((a) => a.id);
+    return {
+      registry: loaded[0].url,
+      apps: out,
+      error,
+      updates,
+      autoUpdates,
+      maxSources: MAX_EXTRA_SOURCES, // the UI's Add row asks the box rather than repeating the cap
+      sources: loaded.map((s) => ({
+        url: s.url,
+        official: s.official,
+        name: s.name,
+        autoUpdate: s.autoUpdate,
+        error: s.error,
+        count: (s.entries || []).length,
+      })),
+    };
   };
 }
 
@@ -233,14 +392,20 @@ async function install(config, id) {
   // Measured on a box: a registry published between the store listing and the
   // install did exactly that. An install is deliberate and rare; one fetch to
   // make the two agree is the cheapest correctness there is.
-  const { entries, url, error } = await getEntries(config, true);
-  // Say WHY when the refresh itself failed. Forcing a refresh means an install
-  // needs the registry to answer - it needed the network for the files anyway -
-  // and reporting an unreachable registry as "not in registry" sends whoever
-  // debugs a failed auto-update looking for a missing app.
-  if (!entries) return { ok: false, error: "registry unreachable: " + (error || "unknown") };
-  const m = entries.find((x) => x.id === id);
-  if (!m) return { ok: false, error: "not in registry" };
+  const loaded = await loadAll(config, true);
+  const hit = mergeSources(loaded).find((c) => c.entry.id === id);
+  // Say WHY when a refresh failed. Forcing a refresh means the registries have to
+  // answer - the files needed the network anyway - and reporting an unreachable
+  // one as "not in registry" sends whoever debugs a failed auto-update looking
+  // for a missing app. With several sources configured the distinction is the
+  // same one: the app is only missing if every source answered and none had it.
+  if (!hit) {
+    const failed = loaded.find((s) => s.error);
+    if (failed) return { ok: false, error: "registry unreachable: " + (failed.error || "unknown") };
+    return { ok: false, error: "not in registry" };
+  }
+  const m = hit.entry;
+  const url = hit.source.url;
   const errs = trustErrors(m);
   if (errs.length) return { ok: false, error: errs.join("; ") };
   apps.loadManifests();
@@ -270,6 +435,10 @@ async function install(config, id) {
     fs.rmSync(packageDir(id), { recursive: true, force: true }); // ...and the other way round
     console.log("[store] installed manifest:", id);
   }
+  // Written after the files, so a failed install leaves no claim on the id, and
+  // on every install rather than the first: an app REinstalled from a different
+  // source has moved, and the pin is meant to record where it stands now.
+  writePin(id, url);
   // The tile appears live (manifests reload per /apps request), but a `service`
   // plugin only loads at boot - the caller restarts (gated) to activate it. Read
   // the flag from the INSTALLED manifest (a package's own manifest.json is
@@ -286,8 +455,18 @@ function uninstall(id) {
   fs.rmSync(storeManifestPath(id), { force: true }); // single-manifest form
   fs.rmSync(packageDir(id), { recursive: true, force: true }); // package-dir form
   apps.removeApp(id); // drop any downloaded bundle too
+  fs.rmSync(pinPath(id), { force: true }); // ...and the claim on which registry it came from
   console.log("[store] removed:", id);
   return { ok: true };
 }
 
-module.exports = { listForUi, install, uninstall, trustErrors, verGt, DEFAULT_REGISTRY };
+module.exports = {
+  listForUi,
+  install,
+  uninstall,
+  trustErrors,
+  verGt,
+  sources,
+  DEFAULT_REGISTRY,
+  MAX_EXTRA_SOURCES,
+};

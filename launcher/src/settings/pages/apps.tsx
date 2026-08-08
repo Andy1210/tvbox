@@ -3,6 +3,7 @@ import { useI18n } from "../../lib/i18n";
 import { useConfigStore } from "../../stores/config";
 import { StoreSettings } from "../../components/StoreSettings";
 import { AppOrderSettings } from "../../components/AppOrderSettings";
+import { StoreSourcesPage } from "./storesources";
 import { SettingsPage } from "../SettingsPage";
 import { Group, Row, ToggleRow } from "../Rows";
 import { useSettingsNav } from "../nav";
@@ -69,6 +70,14 @@ export function AppsPane() {
           label={t("store.title")}
           hint={t("store.hint")}
           onEnter={() => nav.push({ id: "store", title: t("store.title"), wide: true, render: () => <StorePage /> })}
+        />
+        <Row
+          id="store-sources"
+          label={t("storeSources.title")}
+          hint={t("storeSources.hint")}
+          onEnter={() =>
+            nav.push({ id: "store-sources", title: t("storeSources.title"), render: () => <StoreSourcesPage /> })
+          }
         />
         <Row
           id="order"

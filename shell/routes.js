@@ -370,6 +370,18 @@ function post(p, data, res, ctx) {
       .catch((e) => httpserver.jsonRes(res, { ok: false, error: String(e.message || e).slice(0, 120) }));
     return;
   }
+  if (p === "/tvbox/api/store/sources") {
+    // The whole list in one write, the way the shares form works: an add, a
+    // rename and a removal are the same edit to the same array, and a per-entry
+    // route would need its own idea of identity for a list whose only key is a URL.
+    // What comes back is what was stored, so the form can show a refused entry
+    // (a bad url, a duplicate, or one over the cap) as gone rather than silently
+    // dropping it.
+    const patch = { sources: Array.isArray(data.sources) ? data.sources : [] };
+    if (data.autoUpdate !== undefined) patch.autoUpdate = data.autoUpdate !== false; // the primary registry's own flag
+    const saved = config.setStore(patch);
+    return httpserver.jsonRes(res, { ok: true, sources: saved.sources || [], autoUpdate: saved.autoUpdate !== false });
+  }
   if (p === "/tvbox/api/store/flatpak-update") {
     return maintenance.startFlatpakUpdate(String(data.id || ""), res);
   }

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { setFocus } from "@noriginmedia/norigin-spatial-navigation";
 import { fetchStore, storeInstall, storeUninstall, storeFlatpakUpdate, saveAppUrl, type StoreEntry } from "../lib/api";
 import { useI18n } from "../lib/i18n";
+import { sourceLabel } from "../lib/storesource";
 import { useInstalls } from "../stores/installs";
 import { FocusButton } from "./FocusButton";
 import { Icon } from "./Icon";
@@ -246,6 +247,10 @@ export function StoreSettings() {
           const subtitle = [
             e.tagline ? loc(e.tagline) : null,
             t("store.vShort", { v: shownVersion }),
+            // Only for an added registry: naming the official one on every row
+            // would be noise, while an app from somewhere else is exactly what a
+            // person scrolling the catalogue needs to see without opening it.
+            e.source && !e.source.official ? t("store.fromSource", { name: sourceLabel(e.source) }) : null,
             e.urlConfig && e.installed && !e.baseUrl ? t("store.urlMissing") : null,
           ]
             .filter(Boolean)
