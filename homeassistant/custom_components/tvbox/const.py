@@ -7,6 +7,8 @@ The topic layout is the box's, not ours - shell/mqtt.js owns it. Everything unde
     announce    retained {id, base, name, hostname, version, commands}
     state       retained player state (shell/mediastate.js composes it)
     nowplaying  retained, the older metadata-only topic (the voice assistant reads it)
+    diag        retained fleet payload (shell/diag.js): version, update/rollback,
+                link rate, temperature, disk - see docs/fleet-view.md
     cmd         commands in
 """
 

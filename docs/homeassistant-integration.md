@@ -53,6 +53,12 @@ One config entry per box - which is also how several boxes stay apart, since the
 device id is per box by construction
 ([updates-and-backup.md](updates-and-backup.md#setting-up-a-second-box-from-this-one)).
 
+**Updating it later is the same copy plus a restart**, and the restart is not
+optional: reloading the integration re-runs the config entry, it does not re-import
+changed Python. A version that adds a platform (the diagnostics below did) only
+appears once Home Assistant has started again. Nothing else has to be touched - the
+config entries, and the entity ids already in dashboards and automations, survive.
+
 ## What the entity does
 
 | Home Assistant                    | On the box                                                                                                                     |
@@ -74,6 +80,24 @@ to `_FEATURE_FOR_COMMAND` in `media_player.py`.
 `play_media` is deliberately **not** implemented. The box plays what an app
 resolved (a Plex stream, an IPTV channel), and handing the broker an arbitrary-URL
 player is a far wider surface than transport control. Select the source instead.
+
+## Diagnostics
+
+The same device also carries what the box knows about itself: version, whether an
+update is waiting or was rolled back, when it booted, its wifi link rate and
+signal, temperature, free disk and memory. They are diagnostic entities, so they
+sit under the device rather than in the room's card, and they are all fed by one
+retained topic. What they are for, and a card that shows every box at once:
+[fleet-view.md](fleet-view.md).
+
+A box on a release older than the topic simply leaves them unavailable, rather
+than showing a screenful of `unknown`.
+
+The values come from the retained `diag` topic, but whether they are shown comes
+from `status`: a retained payload outlives the box that published it, so an
+unplugged box would otherwise display yesterday's temperature as if it were
+current. The sensors go **unavailable** when the last will says `offline`, which
+is the same rule the media player already follows.
 
 ## Automation examples
 

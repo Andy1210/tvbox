@@ -40,6 +40,7 @@ const browse = require("./browse"); // local + USB media: which roots exist, and
 const shares = require("./shares"); // network shares (SMB over rclone, no root), mounted per config
 const miracast = require("./miracast"); // screen mirroring: the unprivileged half of a Wi-Fi Display sink
 const firetvir = require("./firetvir"); // Fire TV remote IR programming (venv deps + irdb codesets + BLE tool)
+const diag = require("./diag"); // what this box says about itself to the fleet (version, rollback, link, heat)
 const apps = require("./install"); // manifests + install-recipe runner (shared with the tvbox CLI)
 const store = require("./store"); // app-store registry client (manifest-only apps -> ~/.tvbox/apps)
 const appfetch = require("./appfetch"); // capability: scoped server-side fetch (data proxy), origin-locked + SSRF-guarded
@@ -1775,6 +1776,10 @@ function mediaSources() {
 // don't wait for this - they publish immediately.
 const MEDIA_TICK_MS = 5000;
 const SINK_TICK_MS = 20000; // wpctl is a process spawn; the volume is not urgent
+// Nothing in the fleet payload changes by the second (a version, a link rate, a
+// temperature), and it costs three spawns, so it is published slowly. The topic is
+// retained, so a subscriber never waits for the next one.
+const DIAG_TICK_MS = 5 * 60 * 1000;
 
 // The sink's volume/mute, refreshed on a timer rather than per publish: wpctl is a
 // process spawn, and nothing else on the box changes the volume between ticks
@@ -1811,6 +1816,28 @@ function refreshSinkState() {
   });
 }
 
+// What this box looks like to whoever is watching all of them (docs/fleet-view.md).
+// Retained, so a dashboard that subscribes tomorrow still sees last night's
+// rollback; and only while MQTT is configured, for the same reason refreshSinkState
+// is gated - it spawns nmcli and gdbus, which a box nobody watches should not pay.
+function publishDiag() {
+  if (!mqttCtl) return;
+  // Guarded on both sides of the asynchronous hop: this catch only ever sees a
+  // synchronous failure, because collect answers through execFile callbacks, and an
+  // exception raised there would reach the Electron main process rather than here.
+  try {
+    diag.collect({ system, updater }, (payload) => {
+      try {
+        if (mqttCtl) mqttCtl.publish("diag", payload, { retain: true });
+      } catch (e) {
+        console.warn("[diag] publish:", e.message);
+      }
+    });
+  } catch (e) {
+    console.warn("[diag] collect:", e.message);
+  }
+}
+
 // (Re)start the MQTT bridge from the saved config. mqtt.js stop() publishes a
 // best-effort retained "offline" and force-ends the module-level client, so
 // calling it before init is safe (and a no-op when not started). rawMqtt() is
@@ -1835,6 +1862,7 @@ function applyMqttConfig() {
     // reads as broken.
     refreshSinkState();
     publishMediaState({ force: true });
+    publishDiag(); // the fleet payload, now rather than at the first tick
   }
   // re-seed retained now-playing on the (possibly new) broker; the mqtt client
   // queues QoS-0 publishes made before "connect", so this is safe immediately
@@ -2797,6 +2825,7 @@ app.whenReady().then(async () => {
   setInterval(() => publishMediaState(), MEDIA_TICK_MS);
   refreshSinkState();
   setInterval(refreshSinkState, SINK_TICK_MS);
+  setInterval(publishDiag, DIAG_TICK_MS);
   console.log("[main] window up");
 });
 
