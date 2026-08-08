@@ -45,6 +45,7 @@ import glob
 import json
 import logging
 import os
+import re
 import shutil
 import socket
 import subprocess
@@ -352,6 +353,8 @@ class Player:
         self._proc = None
         self._duck = duck
         self._restore = None
+        self._node = None  # the stream we ducked, if we found one
+        self._written = 0
 
     def _wpctl(self, *args):
         if not shutil.which("wpctl"):
@@ -361,23 +364,53 @@ class Player:
         except (OSError, subprocess.SubprocessError):
             return None
 
+    def _playing_node(self):
+        """The id of whatever is playing right now - the film, not us.
+
+        Ducking the SINK was wrong and silent-looking: the answer comes out of the
+        same sink, so pulling that down pulls the answer down with it. What has to
+        drop is the other stream, so find it by name in `wpctl status`.
+        """
+        got = self._wpctl("status")
+        if not got or got.returncode != 0:
+            return None
+        in_streams = False
+        for line in got.stdout.splitlines():
+            if "Streams:" in line:
+                in_streams = True
+                continue
+            if in_streams:
+                if not line.strip(" │└├─"):
+                    break
+                m = re.search(r"(\d+)\.\s+(.+)", line)
+                if m and "pw-cat" not in m.group(2):
+                    return int(m.group(1))
+        return None
+
     def _duck_start(self):
+        self._node = None
+        self._restore = None
         if self._duck >= 1.0:
             return
-        got = self._wpctl("get-volume", "@DEFAULT_AUDIO_SINK@")
+        node = self._playing_node()
+        if node is None:
+            return  # nothing else is playing, so nothing to get out of the way of
+        got = self._wpctl("get-volume", str(node))
         if not got or got.returncode != 0:
             return
         try:
-            self._restore = float(got.stdout.strip().split()[-1])
+            self._restore = float(got.stdout.strip().split()[1])
         except (ValueError, IndexError):
             self._restore = None
             return
-        self._wpctl("set-volume", "@DEFAULT_AUDIO_SINK@", str(round(self._restore * self._duck, 3)))
+        self._node = node
+        self._wpctl("set-volume", str(node), str(round(self._restore * self._duck, 3)))
 
     def _duck_end(self):
-        if self._restore is not None:
-            self._wpctl("set-volume", "@DEFAULT_AUDIO_SINK@", str(self._restore))
-            self._restore = None
+        if self._node is not None and self._restore is not None:
+            self._wpctl("set-volume", str(self._node), str(self._restore))
+        self._node = None
+        self._restore = None
 
     def start(self, rate, width, channels):
         self.stop()
@@ -396,7 +429,14 @@ class Player:
         ]
         try:
             self._duck_start()
-            self._proc = subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            # bufsize=0: the chunks are the answer arriving in real time, and
+            # Python's default buffering would hold the first seconds of it back.
+            # stderr is KEPT: throwing it away is what made a silent player look
+            # like nothing happening at all.
+            self._proc = subprocess.Popen(
+                cmd, stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, bufsize=0
+            )
+            self._written = 0
         except OSError as e:
             LOG.error("cannot play audio: %s", e)
             self._proc = None
@@ -407,21 +447,36 @@ class Player:
             return
         try:
             self._proc.stdin.write(chunk)
-        except (BrokenPipeError, OSError):
-            self._proc = None
+            self._written += len(chunk)
+        except (BrokenPipeError, OSError) as e:
+            LOG.warning("playback pipe closed after %d bytes: %s", self._written, e)
+            self._reap()
+
+    def _reap(self):
+        proc, self._proc = self._proc, None
+        if not proc:
+            return
+        try:
+            if proc.stdin:
+                proc.stdin.close()
+        except OSError:
+            pass
+        try:
+            err = proc.stderr.read() if proc.stderr else b""
+            proc.wait(timeout=10)
+        except (OSError, subprocess.SubprocessError):
+            err = b""
+            try:
+                proc.kill()
+            except OSError:
+                pass
+        if proc.returncode not in (0, None) or err.strip():
+            LOG.warning("player exited %s: %s", proc.returncode, err.decode("utf-8", "replace").strip()[:300])
 
     def stop(self):
-        proc, self._proc = self._proc, None
-        if proc:
-            try:
-                if proc.stdin:
-                    proc.stdin.close()
-                proc.wait(timeout=10)
-            except (OSError, subprocess.SubprocessError):
-                try:
-                    proc.kill()
-                except OSError:
-                    pass
+        if self._proc:
+            LOG.info("played %d bytes", self._written)
+        self._reap()
         self._duck_end()
 
 
