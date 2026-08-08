@@ -5,6 +5,38 @@ updates). `scripts/make-release.sh` lifts the current version's `hu`/`en`
 blocks into the OTA feed's `notes` - keep both languages, keep it short, and
 write for the person on the couch (what changes for THEM), not for developers.
 
+## 2.3.0
+
+### hu
+
+- **Több box egy helyen.** Ha be van állítva az MQTT, a box mostantól magáról is
+  jelent: melyik verzió fut rajta, mikor indult, mennyire meleg, mennyi hely van
+  rajta, és milyen gyors a wifi kapcsolata. Egy boxnál ez nem újdonság, a
+  Beállításokban eddig is látszott; több boxnál viszont eddig mindegyiket külön
+  kellett megnézni.
+- **Megmarad, ami éjjel történt.** Ha egy frissítés nem tudott elindulni és a box
+  visszaállt az előző verzióra, ezt reggel is látod: melyik verzió bukott el, mire
+  állt vissza, és mikor. Eddig ez az információ nyomtalanul eltűnt.
+- **Kiderül, ha a wifi lassul.** Nem a jelerősséget mutatja (az sokszor jó marad),
+  hanem a tényleges kapcsolati sebességet, ami ilyenkor beesik.
+- Home Assistantban ehhez nem kell semmit felvenni: a box eddigi eszközére
+  kerülnek rá az új adatok.
+
+### en
+
+- **Several boxes in one place.** With MQTT configured, a box now also reports on
+  itself: which version it runs, when it booted, how warm it is, how much space it
+  has left, and how fast its wifi link is. On one box this was already in
+  Settings; with more than one, each had to be visited separately.
+- **What happened overnight is still there in the morning.** If an update could
+  not boot and the box went back to the previous version, you can see which
+  version failed, what it returned to, and when. That was lost without trace
+  before.
+- **A wifi link that has slowed down shows up.** Not the signal strength, which
+  often stays fine, but the negotiated link rate, which is what collapses.
+- Nothing to add in Home Assistant: the new values appear on the box's existing
+  device.
+
 ## 2.2.0
 
 ### hu

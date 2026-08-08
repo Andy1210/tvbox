@@ -33,6 +33,7 @@ retained last-will on the status topic.
 | `tvbox/<id>/announce`   | box → (retained)     | `{ id, base, name, hostname, version, commands[] }` |
 | `tvbox/<id>/state`      | box → (retained)     | the whole player state (below)                      |
 | `tvbox/<id>/nowplaying` | box → (retained)     | `{ app, state, title?, artist?, image? }`           |
+| `tvbox/<id>/diag`       | box → (retained)     | the fleet payload ([fleet-view.md](fleet-view.md))  |
 | `tvbox/<id>/cmd`        | → box                | `{ action, app? }` - control                        |
 | `tvbox/<id>/notify`     | → box                | `{ title?, message?, image?, duration?, raise? }`   |
 

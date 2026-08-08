@@ -75,6 +75,18 @@ to `_FEATURE_FOR_COMMAND` in `media_player.py`.
 resolved (a Plex stream, an IPTV channel), and handing the broker an arbitrary-URL
 player is a far wider surface than transport control. Select the source instead.
 
+## Diagnostics
+
+The same device also carries what the box knows about itself: version, whether an
+update is waiting or was rolled back, when it booted, its wifi link rate and
+signal, temperature, free disk and memory. They are diagnostic entities, so they
+sit under the device rather than in the room's card, and they are all fed by one
+retained topic. What they are for, and a card that shows every box at once:
+[fleet-view.md](fleet-view.md).
+
+A box on a release older than the topic simply leaves them unavailable, rather
+than showing a screenful of `unknown`.
+
 ## Automation examples
 
 ```yaml
