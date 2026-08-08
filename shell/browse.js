@@ -173,4 +173,28 @@ function list(deps, target, cb) {
   });
 }
 
-module.exports = { MAX_ENTRIES, contained, roots, sources, list };
+// One FILE inside one of the roots, for a caller that is going to open it.
+//
+// Same boundary as list(), for a stronger reason: this answer is used to READ, and
+// a stick can carry `holiday.jpg -> /home/tv/.tvbox/config.json`. Both sides are
+// resolved with realpath before they are compared, so what comes back is a path
+// that really does live inside a root the box offered - and a symlink pointing out
+// of one is `forbidden` rather than followed.
+function file(deps, target, cb) {
+  const wanted = String(target || "");
+  if (!path.isAbsolute(wanted)) return cb({ ok: false, error: "bad_path" });
+  realpath(wanted).then((real) => {
+    if (!real) return cb({ ok: false, error: "not_found" });
+    roots(deps, async (rs) => {
+      if (!rs.some((r) => contained(real, r.real))) return cb({ ok: false, error: "forbidden" });
+      try {
+        if (!(await fsp.stat(real)).isFile()) return cb({ ok: false, error: "not_a_file" });
+      } catch (e) {
+        return cb({ ok: false, error: "not_found" });
+      }
+      cb({ ok: true, path: real });
+    });
+  });
+}
+
+module.exports = { MAX_ENTRIES, contained, roots, sources, list, file };
