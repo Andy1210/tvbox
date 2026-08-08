@@ -81,8 +81,24 @@ module.exports = {
           res.writeHead(err === "not_found" ? 404 : 500);
           return res.end();
         }
-        res.writeHead(200, { "Content-Type": "image/jpeg", "Cache-Control": "no-store" });
-        fs.createReadStream(tile).pipe(res);
+        // The headers wait for the file to open, and an `error` is handled: the
+        // cache entry can be pruned between the callback above and this read, and
+        // an unhandled stream error takes the whole shell down with it.
+        const stream = fs.createReadStream(tile);
+        stream.on("open", () => {
+          res.writeHead(200, { "Content-Type": "image/jpeg", "Cache-Control": "no-store" });
+          stream.pipe(res);
+        });
+        stream.on("error", (e) => {
+          console.warn("[photoshare] tile read failed:", tile, e.message);
+          if (!res.headersSent) res.writeHead(500);
+          try {
+            res.end();
+          } catch (e2) {}
+        });
+        // `pipe` unpipes on a closed response but does not close the file, and a
+        // phone scrolling a grid abandons tiles it has moved past.
+        res.on("close", () => stream.destroy());
       });
     },
     "POST /pshare-delete": (req, res, ctx) => ctx.json(res, { ok: photoshare.remove(String(ctx.body.name || "")) }),

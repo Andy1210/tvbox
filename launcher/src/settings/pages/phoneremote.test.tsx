@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, vi, afterEach } from "vitest";
 import { act, cleanup, render } from "@testing-library/react";
 import { PhoneRemoteSubPage } from "./phoneremote";
 import { getCurrentFocusKey } from "@noriginmedia/norigin-spatial-navigation";
@@ -50,7 +50,6 @@ function stubShell(initial: { enabled: boolean; phones: Phone[] }) {
 const settle = () => act(async () => await new Promise((r) => setTimeout(r, 20)));
 
 describe("the phone-remote settings page", () => {
-  beforeEach(() => setupRemote());
   afterEach(() => {
     cleanup();
     vi.unstubAllGlobals();

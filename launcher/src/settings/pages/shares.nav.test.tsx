@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, vi, afterEach } from "vitest";
 import { act, cleanup, render } from "@testing-library/react";
 import { updateAllLayouts, getCurrentFocusKey } from "@noriginmedia/norigin-spatial-navigation";
 import { SharesPage } from "./shares";
@@ -61,7 +61,6 @@ async function walk(keys: string[], dir: "down" | "up") {
 }
 
 describe("walking the shares list", () => {
-  beforeEach(() => setupRemote());
   afterEach(() => {
     cleanup();
     vi.unstubAllGlobals();
