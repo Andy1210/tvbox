@@ -5,6 +5,41 @@ updates). `scripts/make-release.sh` lifts the current version's `hu`/`en`
 blocks into the OTA feed's `notes` - keep both languages, keep it short, and
 write for the person on the couch (what changes for THEM), not for developers.
 
+## 2.10.0
+
+### hu
+
+- **Saját alkalmazásforrások.** Beállítások → Alkalmazások → Store források:
+  a hivatalos kínálat mellé felvehetsz továbbiakat is (legfeljebb tízet), és a
+  bolt egyben mutatja mindet. Minden appnál látszik, melyik forrásból való.
+- A hozzáadott források appjait **nem mi ellenőrizzük**, és ugyanazt tudják a
+  boxon, mint a hivatalosak. Ezért a hozzáadás előtt a képernyő figyelmeztet, és
+  kétszer kell megnyomni. Csak olyan forrást vegyél fel, amelynek az
+  üzemeltetőjében megbízol.
+- **Az éjszakai frissítés forrásonként állítható.** A hivatalos forrás alapból
+  magától frissül, amit te veszel fel, az alapból nem: ott te döntöd el, mikor
+  frissüljön.
+- A box megjegyzi, melyik forrásból telepítettél egy appot, így egy másik forrás
+  nem veheti át magától azzal, hogy ugyanazon a néven ad ki újabb verziót.
+- Ha egy forrás nem válaszol, csak az ő appjai hiányoznak, a bolt többi része
+  megmarad, és a Források oldalon látod, melyik néma.
+
+### en
+
+- **Your own app sources.** Settings → Apps → Store sources: add more registries
+  next to the official one (up to ten), and the store shows them as one
+  catalogue. Every app says which source it came from.
+- Apps from an added registry are **not reviewed by us**, and they can do
+  everything an official one's apps can. So the screen warns you before you add
+  one, and the press has to be repeated. Only add a source whose owner you trust.
+- **Overnight updates are per source.** The official registry keeps updating
+  itself; anything you add does not, until you turn it on for that source.
+- The box remembers which registry each app was installed from, so another one
+  cannot take an app over on its own by publishing a higher version under the
+  same name.
+- If a source does not answer, only its apps are missing. The rest of the store
+  stays, and the Sources screen names the one that went quiet.
+
 ## 2.9.1
 
 ### hu
