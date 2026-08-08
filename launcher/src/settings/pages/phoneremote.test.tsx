@@ -22,7 +22,7 @@ function stubShell(initial: { enabled: boolean; phones: Phone[] }) {
     const json = (o: unknown) =>
       Promise.resolve(new Response(JSON.stringify(o), { headers: { "Content-Type": "application/json" } }));
     if (!init || init.method !== "POST") {
-      return json({ enabled: state.enabled, phones: state.phones, port: 8100 });
+      return json({ enabled: state.enabled, phones: state.phones, port: 8100, url: "http://192.168.1.9:8100" });
     }
     const body = JSON.parse(String(init.body || "{}"));
     posted.push({ path, body });
@@ -144,6 +144,28 @@ describe("the phone-remote settings page", () => {
       await settle();
       expect(getCurrentFocusKey()).toBe("phoneremote:pair");
     }
+  });
+
+  it("the address can be shown again without issuing a code", async () => {
+    // A phone that is already paired needs the address, not a code - and minting
+    // one to show it would replace the code another phone is halfway through
+    // typing. So this row must reach the QR having posted nothing.
+    const shell = stubShell({
+      enabled: true,
+      phones: [{ id: "a1", name: "Andy's phone", addedAt: 1, lastSeenAt: null }],
+    });
+    const { getByText, queryByText } = render(<PhoneRemoteSubPage onBack={() => {}} />);
+    await settle();
+    expect(getByText("192.168.1.9:8100")).toBeTruthy();
+    await setFocus("phoneremote:address");
+    await remote.ok();
+    await settle();
+    expect(getByText("The remote's address")).toBeTruthy();
+    expect(shell.posted).toEqual([]);
+    expect(queryByText(/^Code:/)).toBeNull(); // none was issued, so none is shown
+    await remote.back();
+    await settle();
+    expect(getCurrentFocusKey()).toBe("phoneremote:address");
   });
 
   it("a blip offers a retry rather than claiming the box is too old", async () => {

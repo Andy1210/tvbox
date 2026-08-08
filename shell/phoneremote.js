@@ -235,6 +235,14 @@ function arm(cb) {
   });
 }
 
+// The plain address, with no code on it. Empty while the listener is down or the
+// box has no LAN address - the same two reasons arm() refuses.
+function address() {
+  const ip = deps.lanIp();
+  const p = boundPort();
+  return enabled() && ip && ip !== "127.0.0.1" && p ? `http://${ip}:${p}` : "";
+}
+
 function disarm() {
   adopt = null;
 }
@@ -400,6 +408,7 @@ function handle(req, res) {
 
 module.exports = {
   PORT,
+  address,
   screenOn,
   screenUntil,
   shareScreen,

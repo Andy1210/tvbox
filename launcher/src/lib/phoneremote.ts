@@ -18,6 +18,9 @@ export interface PhoneRemoteState {
   // Epoch ms until which a paired phone may see the TV, or 0. Separate from
   // `enabled`: pressing buttons and watching the screen are two permissions.
   screenUntil: number;
+  // Where a phone goes - the same address for every paired one, and with no
+  // pairing code on it. Empty when there is nothing to point anyone at.
+  url: string;
 }
 
 // A 404 and a socket that went away are not the same answer, and telling them
@@ -39,6 +42,7 @@ export async function fetchPhoneRemote(): Promise<PhoneRemoteResult> {
         phones: Array.isArray(d.phones) ? d.phones : [],
         port: Number(d.port) || 0,
         screenUntil: Number(d.screenUntil) || 0,
+        url: typeof d.url === "string" ? d.url : "",
       },
     };
   } catch {
