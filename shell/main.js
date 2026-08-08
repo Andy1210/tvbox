@@ -1680,7 +1680,12 @@ function ensureOverlayWindow() {
   // Electron sets the Wayland title from the window title, and a page's <title>
   // would otherwise win: set it again after load so the compositor's rule holds.
   overlayWin.on("page-title-updated", (e) => e.preventDefault());
-  overlayWin.loadFile(path.join(__dirname, "overlay", "toast.html"));
+  // The page sizes its text against the SCREEN, not against this strip: a strip is
+  // a fraction of the screen, so a size expressed in the window's own units comes
+  // out a fraction of a fraction - the first attempt drew a four-pixel letter.
+  overlayWin.loadFile(path.join(__dirname, "overlay", "toast.html"), {
+    query: { sh: String(screen.getPrimaryDisplay().size.height) },
+  });
   overlayWin.on("closed", () => {
     overlayWin = null;
   });
@@ -1718,11 +1723,29 @@ function handleTvNotify(payload) {
   // string that lives there, not here. Drawing it in the overlay would put an empty
   // dark bar over the film - worse than the note staying where it can be read.
   const hasText = !!(String(note.message || "").trim() || String(note.title || "").trim());
+  // The launcher draws it only when the strip will not: a compositor that cannot
+  // place the strip, or a note the launcher itself writes. Both at once would be
+  // two notes on one screen.
+  const toLauncher = () => {
+    if (win && !win.isDestroyed()) {
+      try {
+        win.webContents.send("tv-notify", note);
+      } catch (e) {}
+    }
+  };
   claimOverlayPlacement((placeable) => {
-    if (!placeable || !hasText) return; // the launcher's own note is all there is
+    if (!placeable || !hasText) return toLauncher();
     try {
       const w = ensureOverlayWindow();
       const show = () => {
+        // Re-assert the title, and force it to CHANGE so it is actually sent.
+        // Hiding a window tears its xdg_toplevel down; showing it builds a new one,
+        // and Chromium does not repeat a title it believes is unchanged - so the
+        // second note of a session arrived on a nameless window, which the
+        // compositor rightly treated as an ordinary one. Measured: the note then
+        // sat in front of the app AND took the remote from it.
+        w.setTitle(OVERLAY_TITLE + " ");
+        w.setTitle(OVERLAY_TITLE);
         w.showInactive(); // never takes focus, even for a moment
         w.webContents.send("overlay-note", note);
         clearTimeout(overlayHideTimer);
@@ -1737,13 +1760,6 @@ function handleTvNotify(payload) {
       console.warn("[notify] overlay:", e.message);
     }
   });
-  // The launcher keeps drawing its own copy: it is what a person sees when the
-  // launcher is what is on screen, and it costs nothing when it is not.
-  if (win && !win.isDestroyed()) {
-    try {
-      win.webContents.send("tv-notify", note);
-    } catch (e) {}
-  }
   if (note.raise) raiseWindow();
 }
 
