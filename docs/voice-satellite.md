@@ -130,10 +130,20 @@ Both go through the same cap (title 120 characters, message 400, duration a
 minute) because the launcher draws whatever it is handed, and neither an app nor a
 language model has promised a length.
 
-**One limit worth knowing**: the note is drawn by the launcher, so while an app is
-in the foreground it is not visible unless the note asks to `raise` the launcher -
-which covers the app. Making a note appear over a running app needs a surface of
-its own, and that is not built yet.
+A note with a `message` is drawn in a strip at the bottom of the screen that sits
+over whatever is running, including a fullscreen app, without taking the remote
+from it (`tvbox-overlay`, see the compositor's `docs/ipc.md`).
+
+**On a box whose compositor predates that** (tvbox-wc 0.1.7), the strip is not used
+at all and the note stays in the launcher, visible only while the launcher is what
+is on screen. That is deliberate: without the compositor's placement the window
+would map fullscreen, and a fullscreen translucent surface over a film costs more
+than the note is worth.
+
+**One kind of note stays in the launcher**: the structured ones the shell sends
+with a `kind` and no text - a remote's low battery, for instance - because the
+sentence around the name and the percentage is a localized string that lives in
+the launcher. Putting those in the strip would mean an empty bar over the film.
 
 ## What it deliberately does not do
 

@@ -168,7 +168,19 @@ function setFocus(owner, app, cb) {
 // Set it BEFORE the client starts: a window is placed as it maps, so a player
 // launched into a rectangle never appears fullscreen first.
 function placeWindow(appId, rect, cb) {
-  const payload = { request: "place_window", app_id: appId };
+  place({ app_id: appId }, rect, cb);
+}
+
+// The same, for ONE window named by its title. An app id covers every window a
+// client has, and every window of this process carries the shell's - so the title
+// is the only way to place the notification overlay without moving the launcher
+// into the same little rectangle.
+function placeWindowByTitle(title, rect, cb) {
+  place({ title: String(title) }, rect, cb);
+}
+
+function place(named, rect, cb) {
+  const payload = { request: "place_window", ...named };
   if (rect && rect.w > 0 && rect.h > 0) {
     payload.x = Math.round(rect.x);
     payload.y = Math.round(rect.y);
@@ -195,6 +207,7 @@ module.exports = {
   setHdr,
   setFocus,
   placeWindow,
+  placeWindowByTitle,
   typeText,
   toDisplayInfo,
   SOCKET,

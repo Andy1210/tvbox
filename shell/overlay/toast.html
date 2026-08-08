@@ -1,0 +1,105 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <!-- The compositor recognises the overlay window by this title, so it is not
+         decoration: change it here and it stops being drawn over a running app.
+         (See stacking.rs - every window of this process shares one app id, and the
+         title is the only thing that varies per window.) -->
+    <title>tvbox-overlay</title>
+    <style>
+      /* A page of its own rather than the launcher's bundle: a note has to be on
+         screen the moment it is asked for, and booting a React app to draw one line
+         of text is the kind of delay a person reads as the box being slow. */
+      html,
+      body {
+        margin: 0;
+        height: 100%;
+        overflow: hidden;
+        background: transparent;
+        /* The window is placed at the bottom of the screen, and the note sits at the
+           bottom of the window: everything above it stays see-through, so the film
+           behind is untouched. */
+        display: flex;
+        align-items: flex-end;
+        justify-content: center;
+        font-family:
+          system-ui,
+          -apple-system,
+          "Segoe UI",
+          Roboto,
+          sans-serif;
+        color: #eef2f7;
+        /* Nothing in here is clickable, and the box has no pointer anyway. */
+        pointer-events: none;
+        user-select: none;
+      }
+      #toast {
+        max-width: 80vw;
+        margin-bottom: 2vh;
+        padding: 1.6vh 3vw;
+        border-radius: 1.2vh;
+        background: rgba(20, 26, 36, 0.96);
+        box-shadow: 0 1vh 3vh rgba(0, 0, 0, 0.5);
+        font-size: 2vh;
+        font-weight: 600;
+        line-height: 1.35;
+        text-align: center;
+        opacity: 0;
+        translate: 0 2vh;
+        transition:
+          opacity 180ms ease,
+          translate 180ms ease;
+      }
+      #toast.up {
+        opacity: 1;
+        translate: 0 0;
+      }
+      #title {
+        display: block;
+        font-size: 1.7vh;
+        font-weight: 700;
+        opacity: 0.72;
+        margin-bottom: 0.4vh;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="toast" role="status" aria-live="polite">
+      <span id="title" hidden></span>
+      <span id="message"></span>
+    </div>
+    <script>
+      const box = document.getElementById("toast");
+      const title = document.getElementById("title");
+      const message = document.getElementById("message");
+      let hideTimer = null;
+      // Which note is on screen. A note that arrives while the previous one is
+      // fading out would otherwise be hidden by that one's "I am done" - the
+      // window belongs to the shell, and it would take the new note down with it.
+      let showing = 0;
+
+      // The shell shows and hides the window itself, so this only draws. It tells
+      // the shell when the note is finished rather than hiding a window it does not
+      // own - a hidden window still costs the compositor a surface.
+      window.tvboxOverlay?.onNote((note) => {
+        clearTimeout(hideTimer);
+        const mine = ++showing;
+        title.textContent = note.title || "";
+        title.hidden = !note.title;
+        message.textContent = note.message || "";
+        box.classList.add("up");
+        const ms = Math.max(1500, Math.min(60000, Number(note.duration) || 6000));
+        hideTimer = setTimeout(() => {
+          if (mine !== showing) return;
+          box.classList.remove("up");
+          // After the fade, not during it - and only if nothing newer arrived in
+          // the meantime, or this note would close the window over the next one.
+          setTimeout(() => {
+            if (mine === showing) window.tvboxOverlay?.done();
+          }, 220);
+        }, ms);
+      });
+    </script>
+  </body>
+</html>
