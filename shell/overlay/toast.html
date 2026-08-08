@@ -35,18 +35,21 @@
         user-select: none;
       }
       #toast {
+        /* Sized in em against a root the shell sets from the SCREEN height. The
+           window is a short strip, so vh here would be a fraction of a fraction:
+           2vh of a 215px strip is a 4px letter, which is what the first try drew. */
         max-width: 80vw;
-        margin-bottom: 2vh;
-        padding: 1.6vh 3vw;
-        border-radius: 1.2vh;
+        margin-bottom: 0.7em;
+        padding: 0.7em 1.2em;
+        border-radius: 0.5em;
         background: rgba(20, 26, 36, 0.96);
-        box-shadow: 0 1vh 3vh rgba(0, 0, 0, 0.5);
-        font-size: 2vh;
+        box-shadow: 0 0.3em 1em rgba(0, 0, 0, 0.5);
+        font-size: 1em;
         font-weight: 600;
         line-height: 1.35;
         text-align: center;
         opacity: 0;
-        translate: 0 2vh;
+        translate: 0 0.7em;
         transition:
           opacity 180ms ease,
           translate 180ms ease;
@@ -57,10 +60,10 @@
       }
       #title {
         display: block;
-        font-size: 1.7vh;
+        font-size: 0.82em;
         font-weight: 700;
         opacity: 0.72;
-        margin-bottom: 0.4vh;
+        margin-bottom: 0.2em;
       }
     </style>
   </head>
@@ -70,6 +73,12 @@
       <span id="message"></span>
     </div>
     <script>
+      // The shell hands over the SCREEN height, because this window is only a
+      // strip of it and every size here should read against the television, not
+      // against the strip.
+      const screenHeight = Number(new URLSearchParams(location.search).get("sh")) || 1080;
+      document.documentElement.style.fontSize = Math.max(14, Math.round(screenHeight * 0.026)) + "px";
+
       const box = document.getElementById("toast");
       const title = document.getElementById("title");
       const message = document.getElementById("message");
