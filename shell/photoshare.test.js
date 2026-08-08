@@ -127,6 +127,18 @@ test("only the session's own files are served, and only by name", () => {
   assert.equal(photoshare.pathFor("stray.jpg"), "");
 });
 
+test("a name the session could not find again is refused rather than written", () => {
+  // The numbering is four digits wide, so a prefix that ran past it would build a
+  // name list()/clear()/pathFor() all skip - a photo on the box that nothing can
+  // show and nothing will ever delete. Unreachable through the item cap today,
+  // which is exactly why it is checked rather than reasoned about.
+  fs.mkdirSync(photoshare.DIR, { recursive: true });
+  fs.writeFileSync(path.join(photoshare.DIR, "9999-last.jpg"), PNG);
+  const before = fs.readdirSync(photoshare.DIR).sort();
+  assert.throws(() => photoshare.save("one-more.jpg", b64(PNG)), /failed/);
+  assert.deepEqual(fs.readdirSync(photoshare.DIR).sort(), before, "and nothing was written");
+});
+
 test("the session is capped", () => {
   // Not to ration an ordinary use - it is a thousand photos' worth of headroom -
   // but so that a runaway upload cannot fill the boot medium.

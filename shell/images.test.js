@@ -259,6 +259,11 @@ test("a photo edited under the same name is not served from the old entry", (t, 
     assert.equal(err, null);
     const replacement = jpeg(640, 360);
     fs.writeFileSync(file, photo({ w: 1280, h: 720, orientation: 1, thumb: replacement }));
+    // These fixtures are a fixed length whatever their dimensions, so mtime is the
+    // only part of the key that differs - and two writes one callback apart can
+    // land on the same one where the filesystem's clock is coarse.
+    const later = new Date(Date.now() + 2000);
+    fs.utimesSync(file, later, later);
     images.thumb(file, (err2, second) => {
       assert.equal(err2, null);
       assert.notEqual(second, first, "size and mtime are part of the key");
@@ -310,6 +315,24 @@ test("a jpeg with no usable embedded copy needs a renderer", (t, done) => {
   images.thumb(file, (err, out) => {
     if (err) assert.ok(["no_ffmpeg", "failed", "timeout"].includes(err), "unexpected reason: " + err);
     else assert.ok(fs.existsSync(out));
+    done();
+  });
+});
+
+test("a render that fails leaves nothing behind", (t, done) => {
+  // ffmpeg opens its output before it decodes, so a file it cannot read leaves a
+  // partial one. Nothing else would collect it - the prune counter only advances
+  // on success - so a folder of undecodable files would drop one orphan per
+  // request and never trigger the sweep that would clear them.
+  fs.mkdirSync(images.CACHE_DIR, { recursive: true });
+  const before = fs.readdirSync(images.CACHE_DIR).length;
+  const file = path.join(TMP, "undecodable.jpg");
+  fs.writeFileSync(file, jpeg(4000, 2252)); // a frame header and no pixels
+  images.thumb(file, (err) => {
+    // Without ffmpeg on this machine the render never starts, and there is nothing
+    // to clean up either - both answers leave the directory as it was.
+    assert.ok(err, "it cannot be rendered");
+    assert.equal(fs.readdirSync(images.CACHE_DIR).length, before, "no orphan left in the cache");
     done();
   });
 });

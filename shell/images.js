@@ -460,13 +460,20 @@ function produce(file, kind, cb) {
             return done("failed");
           }
           const tmp = tmpName(key);
+          // ffmpeg opens its output before it decodes, so a file it cannot read -
+          // or one it was killed part way through - usually leaves a partial `tmp`
+          // behind. Nothing else would ever collect it: `commit` only unlinks when
+          // the rename fails, and the prune counter only advances on success, so a
+          // folder of undecodable files would drop one orphan per request and
+          // never trigger the sweep that would clear them.
+          const fail = (err) => fs.unlink(tmp, () => done(err));
           if (kind === "thumb") {
             return embedded(file, (thumb) => {
-              if (!thumb) return render(file, THUMB_WIDTH, tmp, (err) => (err ? done(err) : commit(tmp, dest, done)));
-              fs.writeFile(tmp, thumb, (we) => (we ? done("failed") : commit(tmp, dest, done)));
+              if (!thumb) return render(file, THUMB_WIDTH, tmp, (err) => (err ? fail(err) : commit(tmp, dest, done)));
+              fs.writeFile(tmp, thumb, (we) => (we ? fail("failed") : commit(tmp, dest, done)));
             });
           }
-          render(file, Number(kind), tmp, (err) => (err ? done(err) : commit(tmp, dest, done)));
+          render(file, Number(kind), tmp, (err) => (err ? fail(err) : commit(tmp, dest, done)));
         },
         cb,
       );

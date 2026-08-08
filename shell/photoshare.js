@@ -86,6 +86,12 @@ function save(name, base64) {
   // shell that reloaded mid-session does not start writing over the first photos.
   const last = names.length ? parseInt(names[names.length - 1].slice(0, 4), 10) : 0;
   const file = String(last + 1).padStart(4, "0") + "-" + safe;
+  // The invariant, checked rather than assumed. Everything that finds a photo
+  // again - list(), pathFor(), clear() and the sweep at boot - goes through
+  // NAME_RE, so a name this function builds but that pattern would not match is a
+  // file on the box that nothing can show and nothing will ever delete. Refusing
+  // is the safe half: the phone is told, and the disk stays clean.
+  if (!NAME_RE.test(file)) throw new Error("failed");
   fs.writeFileSync(path.join(DIR, file), buf);
   return file;
 }

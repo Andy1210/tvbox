@@ -213,21 +213,29 @@ const browseDeps = { onPath: apps.onPath, shares: () => config.rawShares() };
 // the answer can never change - which is what lets a grid re-use a tile it has
 // already scrolled past instead of asking for it again.
 function sendImage(res, file) {
-  res.writeHead(200, {
-    "Content-Type": "image/jpeg",
-    "Cache-Control": "public, max-age=31536000, immutable",
-    // The fast path forwards a JPEG a stranger's camera wrote, so the declared
-    // type is the only thing that should decide how it is treated.
-    "X-Content-Type-Options": "nosniff",
-  });
+  // The headers wait for the file to actually open. They promise the answer is
+  // good for a year, so writing them first and failing afterwards would put an
+  // empty response in Chromium's cache under a URL it will not ask about again -
+  // and the entry CAN be gone by now, because the prune runs between the check
+  // that found it and this read.
   const stream = fs.createReadStream(file);
+  stream.on("open", () => {
+    res.writeHead(200, {
+      "Content-Type": "image/jpeg",
+      "Cache-Control": "public, max-age=31536000, immutable",
+      // The fast path forwards a JPEG a stranger's camera wrote, so the declared
+      // type is the only thing that should decide how it is treated.
+      "X-Content-Type-Options": "nosniff",
+    });
+    stream.pipe(res);
+  });
   stream.on("error", (e) => {
     console.warn("[images] read failed:", file, e.message);
+    if (!res.headersSent) return imageError(res, "not_found");
     try {
-      res.end();
+      res.end(); // it broke half way; the status is already out there
     } catch (e2) {}
   });
-  stream.pipe(res);
 }
 
 // Why there is no picture, as a status the UI can tell apart: a missing box
