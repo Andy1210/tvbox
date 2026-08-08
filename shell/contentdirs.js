@@ -25,6 +25,7 @@ const MACHINERY = new Set([
   "current", // OTA symlink
   "fileserver", // where the share root used to live (boxes that ran an early build)
   "librespot-cache",
+  "photoshare", // photos a phone cast at the viewer; emptied when it closes, not a folder
   "pyenv",
   "__pycache__",
   "shares", // network-share mount points; offered as sources in their own right

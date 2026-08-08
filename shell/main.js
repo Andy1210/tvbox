@@ -37,6 +37,8 @@ const appwins = require("./appwindows"); // background-apps window registry + hi
 const nativeapp = require("./native"); // native (non-Electron) apps: RetroArch et al own the screen AND the input
 const fileserver = require("./fileserver"); // the box's folders over WebDAV (rclone, no root)
 const browse = require("./browse"); // local + USB media: which roots exist, and listing one
+const images = require("./images"); // photo thumbnails + view renders, and their cache
+const photoshare = require("./photoshare"); // photos a phone cast at the viewer
 const shares = require("./shares"); // network shares (SMB over rclone, no root), mounted per config
 const miracast = require("./miracast"); // screen mirroring: the unprivileged half of a Wi-Fi Display sink
 const firetvir = require("./firetvir"); // Fire TV remote IR programming (venv deps + irdb codesets + BLE tool)
@@ -205,6 +207,49 @@ const fileserverDeps = { onPath: apps.onPath, childEnv: () => ({ ...process.env 
 // so browse.js asks before it runs anything. `shares` is a function rather than a
 // list because a share can be added while the box is running.
 const browseDeps = { onPath: apps.onPath, shares: () => config.rawShares() };
+
+// A rendered photo, out of the thumbnail cache. The entry is keyed on the source
+// file's size and mtime, so for one URL (which the caller stamps with that mtime)
+// the answer can never change - which is what lets a grid re-use a tile it has
+// already scrolled past instead of asking for it again.
+function sendImage(res, file) {
+  // The headers wait for the file to actually open. They promise the answer is
+  // good for a year, so writing them first and failing afterwards would put an
+  // empty response in Chromium's cache under a URL it will not ask about again -
+  // and the entry CAN be gone by now, because the prune runs between the check
+  // that found it and this read.
+  const stream = fs.createReadStream(file);
+  stream.on("open", () => {
+    res.writeHead(200, {
+      "Content-Type": "image/jpeg",
+      "Cache-Control": "public, max-age=31536000, immutable",
+      // The fast path forwards a JPEG a stranger's camera wrote, so the declared
+      // type is the only thing that should decide how it is treated.
+      "X-Content-Type-Options": "nosniff",
+    });
+    stream.pipe(res);
+  });
+  stream.on("error", (e) => {
+    console.warn("[images] read failed:", file, e.message);
+    if (!res.headersSent) return imageError(res, "not_found");
+    try {
+      res.end(); // it broke half way; the status is already out there
+    } catch (e2) {}
+  });
+  // A grid scrolling quickly abandons tiles it has moved past, and `pipe` only
+  // unpipes on a closed response - it does not close the file. Without this each
+  // abandoned tile would leave a descriptor open until the process exits.
+  res.on("close", () => stream.destroy());
+}
+
+// Why there is no picture, as a status the UI can tell apart: a missing box
+// dependency is something a person can fix, and a file this box cannot decode is
+// not. The body stays empty - the caller is an <img>.
+const IMAGE_ERROR_STATUS = { no_ffmpeg: 501, unsupported: 415, timeout: 504, failed: 500 };
+function imageError(res, reason) {
+  res.writeHead(IMAGE_ERROR_STATUS[reason] || 404, { "X-Tvbox-Reason": String(reason || "not_found") });
+  res.end();
+}
 const sharesDeps = {
   onPath: apps.onPath,
   childEnv: () => ({ ...process.env }),
@@ -670,8 +715,13 @@ function serve() {
     // process (lsblk), so they are not the side-effect-free reads the open-GET
     // policy assumes. The cache in removable.js is what actually bounds the cost -
     // an <img> or <iframe> request carries no Origin header for this to catch.
+    // photoshare's reads are on the list for the ffmpeg half of the same reason:
+    // a thumbnail that is not in the cache yet forks a process to make one.
     const guardedGet =
-      p === "/tvbox/api/tv/standby" || p.startsWith("/tvbox/api/firetvir/") || p.startsWith("/tvbox/api/browse/");
+      p === "/tvbox/api/tv/standby" ||
+      p.startsWith("/tvbox/api/firetvir/") ||
+      p.startsWith("/tvbox/api/browse/") ||
+      p.startsWith("/tvbox/api/photoshare");
     if ((req.method !== "GET" || guardedGet) && httpserver.foreignOrigin(req, OWN_ORIGINS)) {
       console.warn("[main] rejected cross-origin", req.method, p, "from", req.headers.origin);
       res.writeHead(403, { "Content-Type": "text/plain" });
@@ -898,6 +948,41 @@ function serve() {
       const q = (req.url || "").split("?")[1];
       const target = q ? new URLSearchParams(q).get("path") || "" : "";
       browse.list(browseDeps, target, (r) => httpserver.jsonRes(res, r));
+      return;
+    }
+    // A photo, at a size a TV can hold: `thumb` for a grid tile, `image` for the
+    // viewer. Neither ever returns the source file - images.js re-encodes, or
+    // hands back the thumbnail the camera itself wrote - so a path that gets past
+    // the containment check below still cannot spill the contents of a file that
+    // is not an image.
+    //
+    // The caller appends the entry's mtime as `v`, which nothing here reads: it is
+    // what makes each answer immutable for its URL, so a grid scrolling back over
+    // a tile takes it from Chromium's cache instead of asking again.
+    if (p === "/tvbox/api/browse/thumb" || p === "/tvbox/api/browse/image") {
+      const q = new URLSearchParams((req.url || "").split("?")[1] || "");
+      const wantView = p.endsWith("/image");
+      browse.file(browseDeps, q.get("path") || "", (r) => {
+        if (!r.ok) return imageError(res, r.error);
+        const done = (err, out) => (err ? imageError(res, err) : sendImage(res, out));
+        if (wantView) images.view(r.path, Number(q.get("w")) || 0, done);
+        else images.thumb(r.path, done);
+      });
+      return;
+    }
+    // The same two, for photos a phone cast at the viewer. A different containment
+    // rule - one flat directory, and a name pattern with no separator in it - so
+    // this does not need to be a browse root to be readable.
+    if (p === "/tvbox/api/photoshare") {
+      return httpserver.jsonRes(res, { names: photoshare.list(), max: photoshare.MAX_ITEMS });
+    }
+    if (p === "/tvbox/api/photoshare/thumb" || p === "/tvbox/api/photoshare/image") {
+      const q = new URLSearchParams((req.url || "").split("?")[1] || "");
+      const file = photoshare.pathFor(q.get("name") || "");
+      if (!file) return imageError(res, "not_found");
+      const done = (err, out) => (err ? imageError(res, err) : sendImage(res, out));
+      if (p.endsWith("/image")) images.view(file, Number(q.get("w")) || 0, done);
+      else images.thumb(file, done);
       return;
     }
     // App-store registry (Settings → Store). ?refresh=1 bypasses the 5-min cache.
@@ -2722,8 +2807,18 @@ app.whenReady().then(async () => {
   // keyboard) are registered by their package plugin's factory via
   // host.pairing.register - they ship in the app package, not the shell.
   pairing.register("photos", require("./pairing/photos"));
+  pairing.register("photoshare", require("./pairing/photoshare"));
   pairing.register("backup", backupPairing);
   pairing.register("text", require("./pairing/text"));
+  // Whatever a previous session was showing outlived the TV being switched off.
+  // The viewer empties this when it closes; boot is what covers everything else.
+  // Wrapped because this runs during startup, where an exception does not fail a
+  // feature - it fails the shell, and the respawn loop then does it again.
+  try {
+    photoshare.sweep();
+  } catch (e) {
+    console.warn("[photoshare] boot sweep:", e.message);
+  }
   // Adding a share is the one form here where every field is somebody else's
   // string - an address, a share name, a password - so it gets a phone page too.
   const sharesPairing = require("./pairing/shares");

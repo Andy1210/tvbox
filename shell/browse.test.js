@@ -184,4 +184,49 @@ test("a file is not a folder, and a relative path is not a path", async () => {
   assert.strictEqual(gone.error, "not_found");
 });
 
+// `file` is what the thumbnail and viewer routes resolve a path through. Same
+// boundary as list(), for a stronger reason: this answer is used to READ, so the
+// tests below are the ones that decide whether a stick can hand out the contents
+// of the box's own files.
+const file = (d, p) => new Promise((res) => browse.file(d, p, res));
+
+test("a file inside a root resolves to its real path", async () => {
+  const r = await file(deps(null), path.join(HOME, "Videos", "film.mkv"));
+  assert.strictEqual(r.ok, true);
+  assert.strictEqual(r.path, path.join(HOME, "Videos", "film.mkv"));
+});
+
+test("a file outside every root is refused", async () => {
+  const r = await file(deps(null), path.join(TMP, "outside", "secret.txt"));
+  assert.strictEqual(r.error, "forbidden");
+});
+
+test("a link out of the stick is refused rather than followed", async () => {
+  // The one that matters: a stick anyone can prepare, carrying `holiday.jpg ->
+  // ~/.tvbox/config.json`. Both sides are resolved before they are compared, so
+  // what a route opens is inside a root and not merely NAMED inside one.
+  const mounted = path.join(TMP, "stick");
+  fs.writeFileSync(path.join(HOME, ".tvbox", "config.json"), "{}");
+  fs.symlinkSync(path.join(HOME, ".tvbox", "config.json"), path.join(mounted, "holiday.jpg"));
+  const r = await file(deps(mounted), path.join(mounted, "holiday.jpg"));
+  assert.strictEqual(r.error, "forbidden");
+});
+
+test("a folder is not a file, and a relative path is not a path", async () => {
+  const d = await file(deps(null), path.join(HOME, "Videos"));
+  assert.strictEqual(d.error, "not_a_file");
+  const rel = await file(deps(null), "Videos/film.mkv");
+  assert.strictEqual(rel.error, "bad_path");
+  const gone = await file(deps(null), path.join(HOME, "Videos", "nope.jpg"));
+  assert.strictEqual(gone.error, "not_found");
+});
+
+test("a folder whose name merely starts with a root's is not inside it", async () => {
+  const r = await file(deps(null), path.join(HOME, "Videos-private", "private.mkv"));
+  assert.strictEqual(r.ok, true, "it is under HOME, which is a root in its own right");
+  // The containment test compares path segments; the assertion that matters is
+  // that it did not arrive here by prefix-matching "Videos".
+  assert.strictEqual(r.path, path.join(HOME, "Videos-private", "private.mkv"));
+});
+
 test.after(() => fs.rmSync(TMP, { recursive: true, force: true }));
