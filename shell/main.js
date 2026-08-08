@@ -39,6 +39,7 @@ const fileserver = require("./fileserver"); // the box's folders over WebDAV (rc
 const browse = require("./browse"); // local + USB media: which roots exist, and listing one
 const images = require("./images"); // photo thumbnails + view renders, and their cache
 const photoshare = require("./photoshare"); // photos a phone cast at the viewer
+const phoneremote = require("./phoneremote"); // a phone acting as the remote, on the LAN
 const shares = require("./shares"); // network shares (SMB over rclone, no root), mounted per config
 const miracast = require("./miracast"); // screen mirroring: the unprivileged half of a Wi-Fi Display sink
 const firetvir = require("./firetvir"); // Fire TV remote IR programming (venv deps + irdb codesets + BLE tool)
@@ -973,6 +974,11 @@ function serve() {
     // The same two, for photos a phone cast at the viewer. A different containment
     // rule - one flat directory, and a name pattern with no separator in it - so
     // this does not need to be a browse root to be readable.
+    if (p === "/tvbox/api/phoneremote") {
+      // The paired phones live here rather than in publicConfig: their rows carry
+      // a token hash, and this list is names and times only.
+      return httpserver.jsonRes(res, { phones: phoneremote.list(), port: phoneremote.PORT });
+    }
     if (p === "/tvbox/api/photoshare") {
       return httpserver.jsonRes(res, { names: photoshare.list(), max: photoshare.MAX_ITEMS });
     }
@@ -2810,6 +2816,21 @@ app.whenReady().then(async () => {
   pairing.register("photoshare", require("./pairing/photoshare"));
   pairing.register("backup", backupPairing);
   pairing.register("text", require("./pairing/text"));
+  // A phone acting as the remote. The FIFO write goes ONLY to the remote bridge:
+  // the CEC one forwards what it does not recognise to cec-client's stdin, so a
+  // key would arrive there as a CEC command.
+  phoneremote.init({
+    press: (action) => fifoCmd(REMOTE_CMD_FIFO, "key " + action, "remote"),
+    lanIp: () => netguard.lanIp(),
+    rawPhoneRemote: config.rawPhoneRemote,
+    setPhoneRemote: config.setPhoneRemote,
+  });
+  try {
+    phoneremote.apply(); // off unless the setting says otherwise
+  } catch (e) {
+    console.warn("[phoneremote] start:", e.message);
+  }
+
   // Whatever a previous session was showing outlived the TV being switched off.
   // The viewer empties this when it closes; boot is what covers everything else.
   // Wrapped because this runs during startup, where an exception does not fail a

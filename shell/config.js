@@ -100,6 +100,14 @@ function publicConfig() {
       // would hide the one field that must differ between two boxes.
       deviceId: (c.mqtt && c.mqtt.deviceId) || identity.defaultDeviceId(),
     },
+    phoneRemote: {
+      // Off until someone turns it on - this is the one surface that injects
+      // keys into whatever is on screen. The paired phones themselves come from
+      // /tvbox/api/phoneremote, never from here: a token hash has no business in
+      // the config the launcher reads.
+      enabled: !!(c.phoneRemote && c.phoneRemote.enabled),
+      paired: Array.isArray(c.phoneRemote && c.phoneRemote.phones) ? c.phoneRemote.phones.length : 0,
+    },
     update: {
       // OTA self-update (updater.js); feed URL itself stays box-local
       auto: !(c.update && c.update.auto === false), // default on
@@ -394,6 +402,19 @@ function rawFileserver() {
 // whether a password is set. The list is replaced whole: `name` is the mount point
 // and therefore the identity, so shares.js resolves what an edit means before the
 // list gets here.
+// The phone remote (phoneremote.js): whether the LAN listener runs at all, and
+// the adopted phones. Raw because the rows carry a token HASH - publicConfig
+// below shows names and times only.
+function setPhoneRemote(patch) {
+  const c = load();
+  c.phoneRemote = { ...c.phoneRemote, ...patch };
+  save(c);
+  return c.phoneRemote;
+}
+function rawPhoneRemote() {
+  return load().phoneRemote || {};
+}
+
 function setShares(shares) {
   const c = load();
   c.shares = (Array.isArray(shares) ? shares : []).slice(0, 32);
@@ -687,6 +708,8 @@ module.exports = {
   rawFileserver,
   setShares,
   rawShares,
+  setPhoneRemote,
+  rawPhoneRemote,
   setSetupDone,
   publicConfig,
   setIptv,

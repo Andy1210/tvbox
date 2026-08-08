@@ -20,6 +20,7 @@ const ir = require("./ir");
 const maintenance = require("./maintenance");
 const apps = require("./install");
 const pairing = require("./pairing");
+const phoneremote = require("./phoneremote"); // a phone acting as the remote, on the LAN
 const photoshare = require("./photoshare"); // photos a phone cast at the viewer
 const removable = require("./removable"); // the USB stick: mount on open, unmount before it is pulled
 const shares = require("./shares"); // network shares (SMB over rclone)
@@ -464,6 +465,27 @@ function post(p, data, res, ctx) {
   }
   if (p === "/tvbox/api/browse/unmount") {
     return removable.unmount(browseDeps, String(data.device || ""), (r) => httpserver.jsonRes(res, r));
+  }
+  // The phone remote. Turning it on is what opens the LAN listener at all, so the
+  // toggle and the socket are the same decision - `apply` is not a hint.
+  if (p === "/tvbox/api/phoneremote/enable") {
+    config.setPhoneRemote({ enabled: !!data.enabled });
+    if (!data.enabled) phoneremote.forgetAll(); // off means the paired phones go too
+    phoneremote.apply();
+    return httpserver.jsonRes(res, { ok: true, enabled: !!data.enabled, phones: phoneremote.list() });
+  }
+  // Show a code on the TV so a phone can be adopted. Returns what the QR carries.
+  if (p === "/tvbox/api/phoneremote/arm") {
+    const info = phoneremote.arm();
+    return httpserver.jsonRes(res, info ? { ok: true, ...info } : { ok: false, error: "disabled" });
+  }
+  if (p === "/tvbox/api/phoneremote/disarm") {
+    phoneremote.disarm();
+    return httpserver.jsonRes(res, { ok: true, phones: phoneremote.list() });
+  }
+  if (p === "/tvbox/api/phoneremote/forget") {
+    const ok = phoneremote.forget(String(data.id || ""));
+    return httpserver.jsonRes(res, { ok, phones: phoneremote.list() });
   }
   // The viewer, saying it is done with the photos a phone cast at it. This is the
   // ordinary way the session ends; the sweep at boot is only for the times the TV
