@@ -82,6 +82,34 @@ test("a name without a usable extension becomes a jpeg", () => {
   assert.ok(photoshare.save("archive.zip", b64(PNG)).endsWith(".jpg"));
 });
 
+test("anything save accepts, the session can also see and delete", () => {
+  // The invariant, not a list of extensions: whatever `save` decides to store has
+  // to be visible to list(), servable by pathFor() and removed by clear(). A file
+  // that only half-matches would be a photo nobody can look at and nothing ever
+  // deletes, on a box whose whole promise is that these do not stay - which is
+  // exactly what an upper-case extension did, because a camera writes IMG_0001.JPG
+  // and only the accepting half of the pair was case-insensitive.
+  const names = [
+    "IMG_0001.JPG",
+    "shot.PNG",
+    "x.Jpeg",
+    "y.JPEG",
+    "z.WebP",
+    "holiday.jpg",
+    "a.webp",
+    "no-extension",
+    "weird name (1).jpeg",
+    "árvíztűrő.jpg",
+  ];
+  for (const n of names) {
+    const stored = photoshare.save(n, b64(PNG));
+    assert.ok(photoshare.list().includes(stored), n + " is not listed");
+    assert.equal(photoshare.pathFor(stored), path.join(photoshare.DIR, stored), n + " cannot be served");
+  }
+  assert.equal(photoshare.clear(), names.length, "every one of them goes");
+  assert.deepEqual(fs.readdirSync(photoshare.DIR), [], "and nothing is left behind");
+});
+
 test("an empty body is refused", () => {
   assert.throws(() => photoshare.save("empty.jpg", ""), /empty/);
   assert.throws(() => photoshare.save("empty.jpg", "data:image/jpeg;base64,"), /empty/);

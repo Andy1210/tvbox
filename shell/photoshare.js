@@ -24,7 +24,13 @@ const DIR = path.join(os.homedir(), ".tvbox", "photoshare");
 const MAX_ITEMS = 300;
 const MAX_BYTES = 200e6;
 
-const NAME_RE = /^\d{4}-[A-Za-z0-9._-]+\.(jpe?g|png|webp)$/;
+// Every name `save` produces has to match this, and the case-insensitivity is the
+// load-bearing part: a camera writes IMG_0001.JPG, and a pattern that admitted only
+// lower case would accept the upload and then hide the file from list(), clear()
+// AND the boot sweep - a photo nobody can see and nothing ever deletes, on a box
+// whose whole promise is that these do not stay. The test below pins the two
+// against each other rather than against a list of extensions.
+const NAME_RE = /^\d{4}-[A-Za-z0-9._-]+\.(jpe?g|png|webp)$/i;
 
 function ensure() {
   try {

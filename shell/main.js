@@ -216,6 +216,9 @@ function sendImage(res, file) {
   res.writeHead(200, {
     "Content-Type": "image/jpeg",
     "Cache-Control": "public, max-age=31536000, immutable",
+    // The fast path forwards a JPEG a stranger's camera wrote, so the declared
+    // type is the only thing that should decide how it is treated.
+    "X-Content-Type-Options": "nosniff",
   });
   const stream = fs.createReadStream(file);
   stream.on("error", (e) => {
