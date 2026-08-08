@@ -489,9 +489,27 @@ function post(p, data, res, ctx) {
     phoneremote.disarm();
     return httpserver.jsonRes(res, { ok: true, phones: phoneremote.list() });
   }
+  // Letting a paired phone SEE the screen. Separate from the remote on purpose,
+  // and it carries its own clock: `minutes` of 0 turns it off now.
+  if (p === "/tvbox/api/phoneremote/screen") {
+    const until = phoneremote.shareScreen(data.minutes);
+    return httpserver.jsonRes(res, { ok: true, until, on: phoneremote.screenOn() });
+  }
   if (p === "/tvbox/api/phoneremote/forget") {
     const ok = phoneremote.forget(String(data.id || ""));
     return httpserver.jsonRes(res, { ok, phones: phoneremote.list() });
+  }
+  // Developer tools. Everything here is for someone working ON the box, which is
+  // why it is one screen behind its own door rather than options scattered
+  // through Settings.
+  //
+  // The DevTools endpoint is arbitrary code in the launcher window, and that
+  // window has Node in its preload - so it reaches config.json and everything in
+  // it. deploy/run-shell.sh consumes this marker on the next start and deletes
+  // it, which is what keeps it to ONE boot: a forgotten `touch` surviving every
+  // reboot would be a back door with nothing on the TV to show for it.
+  if (p === "/tvbox/api/devtools/debugport") {
+    return maintenance.setDebugPort(Number(data.port) || 0, (r) => httpserver.jsonRes(res, r));
   }
   // The viewer, saying it is done with the photos a phone cast at it. This is the
   // ordinary way the session ends; the sweep at boot is only for the times the TV

@@ -981,6 +981,9 @@ function serve() {
         enabled: !!config.rawPhoneRemote().enabled,
         phones: phoneremote.list(),
         port: phoneremote.PORT,
+        // When the screen share runs out, so Settings can count it down rather
+        // than just say "on".
+        screenUntil: phoneremote.screenUntil(),
       });
     }
     if (p === "/tvbox/api/photoshare") {

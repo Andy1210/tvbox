@@ -677,7 +677,9 @@
   },
   "system": {
     "updateHint": "Verzió és automatikus frissítés",
-    "backupHint": "Beállítások mentése telefonra, vagy visszaállítás"
+    "backupHint": "Beállítások mentése telefonra, vagy visszaállítás",
+    "devTools": "Fejlesztői eszközök",
+    "devToolsHint": "Hibakereső, kép a telefonra"
   },
   "shares": {
     "title": "Hálózati megosztások",
@@ -760,5 +762,25 @@
     "title": "Telefon távirányítóként",
     "unreachable": "A box nem válaszolt. Próbáld újra.",
     "unsupported": "Ehhez a box szoftvere túl régi."
+  },
+  "dev": {
+    "debugFailed": "Nem sikerült elindítani.",
+    "debugGroup": "Chromium hibakereső",
+    "debugNote": "Csak erre az indulásra: a box a következő újraindításkor magától bezárja. Csak a boxról érhető el, kívülről SSH-alagút kell hozzá: ssh -L {port}:127.0.0.1:{port} <box>, majd chrome://inspect.",
+    "debugPort": "Hibakereső indítása és újraindítás",
+    "debugPortHint": "A box újraindul, és a {port}-es porton fogadja a Chromium DevToolst",
+    "debugStarting": "Indul újra…",
+    "off": "Kikapcsolva",
+    "screenFailed": "Nem sikerült.",
+    "screenGroup": "Kép a telefonra",
+    "screenHint": "A párosított telefonod láthatja, mi van a TV-n",
+    "screenLeft": "még {n} perc",
+    "screenNote": "Néhány másodpercenként egy állókép, nem élő kép - teszteléshez. Külön kapcsoló a távirányítótól, mert a kép mindent megmutat, ami a képernyőn van.",
+    "screenOnNote": "A párosított telefonod most látja a TV képét - benne mindent, amit épp beírsz. Magától leáll, de bármikor leállíthatod.",
+    "screenStart": "Kép megosztása {n} percre",
+    "screenStop": "Megosztás leállítása",
+    "screenUnsupported": "Ehhez a box szoftvere túl régi.",
+    "screenWatching": "A képed megosztva",
+    "title": "Fejlesztői eszközök"
   }
 }

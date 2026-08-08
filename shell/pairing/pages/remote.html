@@ -92,6 +92,27 @@
         font-size: 14px;
         color: #aab4c2;
       }
+      /* The screen view. Only ever appears when the TV is sharing it, so its
+         absence is the honest signal that nothing is being watched. */
+      #screen {
+        width: min(86vw, 320px);
+        display: none;
+        flex-direction: column;
+        gap: 8px;
+      }
+      #screen img {
+        width: 100%;
+        border-radius: 12px;
+        background: #171f29;
+        display: block;
+        aspect-ratio: 16 / 9;
+        object-fit: contain;
+      }
+      #screen .cap {
+        font-size: 12px;
+        color: #7d8a99;
+        text-align: center;
+      }
       #setup {
         width: min(86vw, 320px);
         display: none;
@@ -161,6 +182,10 @@
         <button data-key="rewind">◀◀</button>
         <button data-key="settings">Settings</button>
         <button data-key="fastforward">▶▶</button>
+      </div>
+      <div id="screen">
+        <img id="shot" alt="" />
+        <div class="cap" id="shotcap"></div>
       </div>
       <p class="hint" id="msg"></p>
     </div>
@@ -261,12 +286,45 @@
         });
       });
 
+      // The TV's screen, when the box is sharing it. Pull, never a stream: each
+      // frame is a request, and a frame costs the box about half a second - so
+      // this is "a picture every few seconds", not a mirror. The cache-buster is
+      // what stops the browser handing back the previous one.
+      var screenBox = document.getElementById("screen"),
+        shot = document.getElementById("shot"),
+        shotcap = document.getElementById("shotcap"),
+        screenTimer = null;
+      function stopScreen() {
+        if (screenTimer) clearInterval(screenTimer);
+        screenTimer = null;
+        screenBox.style.display = "none";
+        shot.removeAttribute("src");
+      }
+      function startScreen() {
+        if (screenTimer || !token) return;
+        screenBox.style.display = "flex";
+        shotcap.textContent = "";
+        var tick = function () {
+          if (document.hidden) return; // a phone in a pocket should not keep asking
+          shot.src = "/screen?t=" + encodeURIComponent(token) + "&n=" + Date.now();
+        };
+        shot.onerror = function () {
+          // The box stopped sharing (it runs out on its own), or it could not
+          // take a picture. Either way there is nothing to show.
+          stopScreen();
+          say(msg, "The TV is no longer sharing its screen.");
+        };
+        tick();
+        screenTimer = setInterval(tick, 2500);
+      }
+
       show(!!token);
       if (token) {
         // Confirm the box still knows this phone, so a stale bookmark says so
         // before someone presses at it.
         post("/ping", { token: token })
           .then(function (r) {
+            if (r.status === 200 && r.body.screen) startScreen();
             if (r.status !== 403) return;
             try {
               localStorage.removeItem(KEY);

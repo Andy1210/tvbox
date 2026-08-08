@@ -10,6 +10,7 @@ import { PinGate } from "@sdk/PinGate";
 import { TimezonePicker } from "../../components/TimezonePicker";
 import { KeymapPicker, keymapLabel } from "../../components/KeymapPicker";
 import { BackupSettings } from "../../components/BackupSettings";
+import { DevToolsPage } from "./devtools";
 import { SettingsPage } from "../SettingsPage";
 import { ChoicePage } from "../ChoicePage";
 import { Group, InfoRow, Note, Row, TextRow, ToggleRow } from "../Rows";
@@ -498,6 +499,18 @@ export function SystemPane() {
           label={t("backup.title")}
           hint={t("system.backupHint")}
           onEnter={() => nav.push({ id: "backup", title: t("backup.title"), render: () => <BackupPage /> })}
+        />
+      </Group>
+      {/* Last, and its own group: nothing behind this door is for someone
+          watching television. */}
+      <Group>
+        <Row
+          id="dev"
+          label={t("system.devTools")}
+          hint={t("system.devToolsHint")}
+          onEnter={() =>
+            nav.push({ id: "dev", title: t("dev.title"), render: () => <DevToolsPage onBack={nav.pop} /> })
+          }
         />
       </Group>
     </SettingsPage>
