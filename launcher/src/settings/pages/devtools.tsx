@@ -107,15 +107,28 @@ function Tools() {
 
 export function DevToolsPage({ onBack }: { onBack: () => void }) {
   const { t } = useI18n();
-  // The same PIN that locks app categories - and only when one EXISTS. With none
-  // set, verifyPin refuses every code, so gating unconditionally would lock this
-  // screen away from every box that never set a PIN. This gates what exists; it
-  // is not the place to invent a lock.
-  const pinSet = useConfigStore((s) => s.config?.parental?.pinSet) ?? false;
+  // The same condition every other sensitive action uses (usePinGuard): a PIN is
+  // set AND "require PIN for sensitive actions" is on. Not merely "a PIN exists" -
+  // that would make this the one screen ignoring the switch that says whether the
+  // lock is in use at all. And with no PIN stored, verifyPin refuses every code,
+  // so gating regardless of that would put this screen permanently out of reach.
+  // It gates what exists and what was asked for.
+  const need = useConfigStore((s) => !!(s.config?.parental?.pinSet && s.config?.parental?.requirePin));
   const [allowed, setAllowed] = useState(false);
+  const locked = need && !allowed;
   return (
-    <SettingsPage id="dev" title={t("dev.title")} onBack={onBack} animate="push">
-      {allowed || !pinSet ? <Tools /> : <PinGate onSuccess={() => setAllowed(true)} onCancel={onBack} />}
+    <SettingsPage
+      id="dev"
+      title={t("dev.title")}
+      onBack={onBack}
+      animate="push"
+      // The PIN pad brings its OWN focusables, which are not this page's rows -
+      // and the default policy only knows about rows, so the pad rendered but
+      // the D-pad could not move inside it. Same reason the remap screen asks
+      // for "legacy": the page becomes a plain container and hands focus over.
+      focusPolicy={locked ? "legacy" : "own"}
+    >
+      {locked ? <PinGate onSuccess={() => setAllowed(true)} onCancel={onBack} /> : <Tools />}
     </SettingsPage>
   );
 }

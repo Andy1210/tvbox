@@ -155,13 +155,15 @@ function RegionPage() {
 // The box has ONE central PIN (stored salted + hashed by the shell); every app
 // checks it through the SDK, so setting it here covers an app's locked content too.
 // This page manages the PIN itself - what gets locked lives in each app's settings.
-function ParentalPage() {
+export function ParentalPage() {
   const { t } = useI18n();
   const nav = useSettingsNav();
   const pinSet = useConfigStore((s) => !!s.config?.parental.pinSet);
   const requirePin = useConfigStore((s) => !!s.config?.parental.requirePin);
   const saveParental = useConfigStore((s) => s.setParental);
-  const [step, setStep] = useState<null | "verify-change" | "verify-clear" | "new" | "confirm">(null);
+  const [step, setStep] = useState<null | "verify-change" | "verify-clear" | "verify-require" | "new" | "confirm">(
+    null,
+  );
   const [firstPin, setFirstPin] = useState("");
   const [confirmError, setConfirmError] = useState<string | undefined>();
   const [msg, setMsg] = useState("");
@@ -174,6 +176,20 @@ function ParentalPage() {
   };
 
   if (step === "verify-change") return <PinGate onSuccess={() => setStep("new")} onCancel={() => done("")} />;
+  // Turning the requirement OFF is the one press that unlocks everything the PIN
+  // was protecting, so it asks for the PIN - changing and clearing it already did,
+  // and this was the way past both. Turning it ON stays free: raising a guard
+  // needs no permission, and asking would only make people leave it down.
+  if (step === "verify-require")
+    return (
+      <PinGate
+        onSuccess={async () => {
+          await saveParental({ requirePin: false });
+          done("");
+        }}
+        onCancel={() => done("")}
+      />
+    );
   if (step === "verify-clear")
     return (
       <PinGate
@@ -234,7 +250,7 @@ function ParentalPage() {
               label={t("parental.require")}
               hint={t("parental.requireHint")}
               on={requirePin}
-              onToggle={() => void saveParental({ requirePin: !requirePin })}
+              onToggle={() => (requirePin ? setStep("verify-require") : void saveParental({ requirePin: true }))}
               onWord={t("common.on")}
               offWord={t("common.off")}
             />

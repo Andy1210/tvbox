@@ -32,9 +32,11 @@ function stubShell(initial: { screenUntil: number }) {
 }
 
 const settle = () => act(async () => await new Promise((r) => setTimeout(r, 20)));
-const setPin = (pinSet: boolean) =>
+// The gate follows the SAME switch every other sensitive action does: a PIN set
+// AND "require PIN for sensitive actions" on.
+const setPin = (pinSet: boolean, requirePin = pinSet) =>
   act(() => {
-    useConfigStore.setState({ config: { parental: { pinSet } } as never });
+    useConfigStore.setState({ config: { parental: { pinSet, requirePin } } as never });
   });
 
 describe("developer tools", () => {
@@ -51,6 +53,17 @@ describe("developer tools", () => {
     await settle();
     expect(getByText("Enter the PIN")).toBeTruthy();
     expect(queryByText("Chromium debugger")).toBeNull();
+  });
+
+  it("a PIN that exists but is not required does not lock this screen", async () => {
+    // Otherwise this would be the one screen ignoring the switch that says
+    // whether the lock is in use at all.
+    stubShell({ screenUntil: 0 });
+    setPin(true, false);
+    const { getByText, queryByText } = render(<DevToolsPage onBack={() => {}} />);
+    await settle();
+    expect(queryByText("Enter the PIN")).toBeNull();
+    expect(getByText("Chromium debugger")).toBeTruthy();
   });
 
   it("does not invent a lock on a box that has none", async () => {

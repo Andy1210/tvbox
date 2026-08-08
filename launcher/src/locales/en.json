@@ -478,7 +478,7 @@
     "enterPin": "Enter the PIN",
     "wrongPin": "Wrong PIN",
     "require": "Require PIN for sensitive actions",
-    "requireHint": "Installing and uninstalling apps asks for the PIN.",
+    "requireHint": "Installing and uninstalling apps, and the developer tools, ask for the PIN. Turning this off asks for it too.",
     "pinSet": "PIN set",
     "pinNotSet": "no PIN"
   },

@@ -60,7 +60,12 @@ function setDebugPort(port, cb) {
   if (!n) {
     try {
       fs.unlinkSync(DEBUG_PORT_FILE);
-    } catch (e) {}
+    } catch (e) {
+      // Not there is the outcome asked for. Anything else means the marker is
+      // still on disk and the NEXT restart would open the endpoint, so saying
+      // "off" would be a lie with a debugger behind it.
+      if (e.code !== "ENOENT") return cb({ ok: false, error: "failed" });
+    }
     return cb({ ok: true, port: 0, restarting: false });
   }
   if (!Number.isInteger(n) || n < 1024 || n > 65535) return cb({ ok: false, error: "bad port" });

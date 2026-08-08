@@ -478,7 +478,7 @@
     "enterPin": "Add meg a PIN-kódot",
     "wrongPin": "Hibás PIN",
     "require": "PIN kérése kényes műveletekhez",
-    "requireHint": "Alkalmazás telepítése és törlése PIN-t kér.",
+    "requireHint": "Alkalmazás telepítése és törlése, valamint a fejlesztői eszközök PIN-t kérnek. Kikapcsolni is csak PIN-nel lehet.",
     "pinSet": "PIN beállítva",
     "pinNotSet": "nincs PIN"
   },

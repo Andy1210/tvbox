@@ -115,7 +115,16 @@ let seenAt = new Map(); // token hash -> when its lastSeen was last written
 function screenUntil() {
   return Number(deps.rawPhoneRemote().screenUntil) || 0;
 }
-const screenOn = () => screenUntil() > Date.now();
+// Reading this is also where an expiry is NOTICED, since nothing else ticks: the
+// files are the sensitive part, so they go the moment the window has closed.
+function screenOn() {
+  const on = screenUntil() > Date.now();
+  if (!on && screenUntil()) {
+    deps.setPhoneRemote({ screenUntil: 0 });
+    screenframe.forget();
+  }
+  return on;
+}
 
 function shareScreen(minutes) {
   const mins = Math.max(0, Math.min(120, Number(minutes) || 0));
@@ -319,8 +328,16 @@ function handle(req, res) {
   if (req.method === "GET" && u.pathname === "/screen") {
     if (!phoneFor(u.searchParams.get("t"))) return json(res, 403, { ok: false, error: "token" });
     if (!screenOn()) return json(res, 403, { ok: false, error: "off" });
-    return screenframe.frame(FRAME_MAX_AGE_MS, (err, file) => {
+    // `w` is what the phone is showing it at: pinching into a 960-wide JPEG
+    // magnifies its artefacts rather than the screen, so a zoomed page asks for
+    // the larger one. It snaps to a size the box offers - the capture is shared
+    // either way, so this costs an encode and not another readback.
+    return screenframe.frame(FRAME_MAX_AGE_MS, Number(u.searchParams.get("w")) || 0, (err, file) => {
       if (err) return json(res, err === "no_ffmpeg" ? 501 : 503, { ok: false, error: err });
+      // Checked again on the way out. Taking a picture is half a second, and the
+      // window can close - by hand or by running out - inside it; a frame that
+      // arrives after that is exactly the picture nobody agreed to send.
+      if (!screenOn()) return json(res, 403, { ok: false, error: "off" });
       // Never cached: the whole point is that the next request is a new picture.
       res.writeHead(200, { "Content-Type": "image/jpeg", "Cache-Control": "no-store" });
       const stream = fs.createReadStream(file);
