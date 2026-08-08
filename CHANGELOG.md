@@ -5,6 +5,30 @@ updates). `scripts/make-release.sh` lifts the current version's `hu`/`en`
 blocks into the OTA feed's `notes` - keep both languages, keep it short, and
 write for the person on the couch (what changes for THEM), not for developers.
 
+## 2.8.0
+
+### hu
+
+- **A telefonod is lehet távirányító.** Beállítások → Távirányítók és eszközök →
+  Telefon távirányítóként: kapcsold be, olvasd be a TV-n megjelenő kódot, és a
+  telefonod ugyanazokat a gombokat nyomja, mint a távirányító. Alapból ki van
+  kapcsolva, és amíg ki van, a box semmit nem fogad a hálózatról. A párosított
+  telefonokat itt látod és bármelyiket törölheted.
+- **A billentyűzetkiosztás végre megmarad.** Eddig újraindítás után visszaállt -
+  most a kiválasztott kiosztás túléli a bekapcsolást, és a képernyő-billentyűzet
+  is követi (magyarnál QWERTZ, ékezetekkel).
+
+### en
+
+- **Your phone can be the remote.** Settings → Remotes and devices → Phone as a
+  remote: turn it on, scan the code shown on the TV, and your phone presses the
+  same buttons the remote does. It is off by default, and while it is off the box
+  accepts nothing from the network. Paired phones are listed here and any of them
+  can be removed.
+- **The keyboard layout is finally remembered.** It used to revert on every
+  restart; the layout you pick now survives, and the on-screen keyboard follows
+  it (QWERTZ with accents for Hungarian).
+
 ## 2.7.0
 
 ### hu
