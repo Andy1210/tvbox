@@ -977,7 +977,11 @@ function serve() {
     if (p === "/tvbox/api/phoneremote") {
       // The paired phones live here rather than in publicConfig: their rows carry
       // a token hash, and this list is names and times only.
-      return httpserver.jsonRes(res, { phones: phoneremote.list(), port: phoneremote.PORT });
+      return httpserver.jsonRes(res, {
+        enabled: !!config.rawPhoneRemote().enabled,
+        phones: phoneremote.list(),
+        port: phoneremote.PORT,
+      });
     }
     if (p === "/tvbox/api/photoshare") {
       return httpserver.jsonRes(res, { names: photoshare.list(), max: photoshare.MAX_ITEMS });

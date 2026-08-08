@@ -668,7 +668,8 @@
   "peripherals": {
     "btHint": "Speakers, remotes, controllers",
     "remoteHint": "Teach a remote one of its other buttons",
-    "irHint": "TV volume for a TV that takes none over CEC"
+    "irHint": "TV volume for a TV that takes none over CEC",
+    "phoneRemoteHint": "Press the buttons from your phone"
   },
   "apps": {
     "orderTitle": "Home screen order",
@@ -731,5 +732,31 @@
       "rclone_missing": "The network tool is missing - install it first.",
       "failed": "That didn't work."
     }
+  },
+  "phoneRemote": {
+    "code": "Code",
+    "done": "Done",
+    "enable": "Phone remote",
+    "enableHint": "Let a paired phone press this box's buttons over your local network",
+    "forget": "Remove",
+    "neverUsed": "Never used",
+    "nonePaired": "None yet",
+    "note": "While this is off the box accepts nothing from the network. Turned on, a paired phone can press the same buttons the remote does.",
+    "off": "Off",
+    "on": "On",
+    "onNote": "The box is listening on your local network. Only a paired phone can press anything, and you can remove any of them here. Turning this off removes the pairings too.",
+    "pair": "Pair a phone",
+    "pairFailed": "Turn the phone remote on first.",
+    "pairHint": "Scan this with your phone and enter the four digits below. You need to be on the same wifi.",
+    "pairRowHint": "Shows a code on the TV for your phone to scan",
+    "pairTitle": "Pair a phone",
+    "paired": "Paired phones",
+    "pairedCount": "{n} phones",
+    "seenDays": "{n} days ago",
+    "seenHours": "{n} hours ago",
+    "seenMinutes": "{n} minutes ago",
+    "seenNow": "Just now",
+    "title": "Phone as a remote",
+    "unsupported": "This box's software is too old for it."
   }
 }
