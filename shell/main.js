@@ -641,6 +641,10 @@ function serve() {
     setWidget,
     showLauncher,
     switchApp,
+    // The same on-screen note MQTT can push, reachable locally: the voice
+    // satellite is a separate process on this box and an answer belongs on the
+    // TV, but a spoken one interrupts a film in a way a toast does not.
+    notify: handleTvNotify,
   };
 
   const server = http.createServer((req, res) => {
@@ -2417,6 +2421,16 @@ const host = {
   audioSink: () => audioSink, // detected HDMI sink node.name (set by ensureAudio)
   showLauncher, // (hash) -> stop other playback + bring launcher forward
   navTo, // (id) -> open an app by id (e.g. a plugin foregrounds its app on a cast)
+  // One note on screen, for anyone on the box: the same toast MQTT pushes and the
+  // voice satellite uses for a spoken answer's text. A plugin gets it here; a
+  // local app's page can POST /tvbox/api/notify, which is the same door.
+  notify: (n) =>
+    handleTvNotify({
+      title: String((n && n.title) || "").slice(0, 120),
+      message: String((n && n.message) || "").slice(0, 400),
+      duration: Math.max(0, Math.min(60000, Number(n && n.duration) || 0)),
+      raise: !!(n && n.raise),
+    }),
   onConfigChange: (cb) => {
     if (typeof cb === "function") configListeners.push(cb);
   },

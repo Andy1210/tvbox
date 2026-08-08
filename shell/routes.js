@@ -163,6 +163,20 @@ function post(p, data, res, ctx) {
       httpserver.jsonRes(res, err ? { ok: false, error: String((err && err.message) || err) } : { ok: true }),
     );
   }
+  if (p === "/tvbox/api/notify") {
+    // The on-screen note, for a caller ON this box (the voice satellite). MQTT's
+    // notify topic reaches the same place; this is the local door, and the HTTP
+    // server only listens on loopback. Capped rather than trusted: the launcher
+    // draws whatever arrives, and an answer from a language model is not a length
+    // anyone has promised.
+    ctx.notify({
+      title: String(data.title || "").slice(0, 120),
+      message: String(data.message || "").slice(0, 400),
+      duration: Math.max(0, Math.min(60000, Number(data.duration) || 0)),
+      raise: !!data.raise,
+    });
+    return httpserver.jsonRes(res, { ok: true });
+  }
   if (p === "/tvbox/api/nav") {
     // Any navigation ends a typing session: with ctx.foregroundApp() === null (the typing
     // screen backgrounds its app) the branches below wouldn't touch it, leaving a

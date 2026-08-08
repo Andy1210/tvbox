@@ -5,6 +5,39 @@ updates). `scripts/make-release.sh` lifts the current version's `hu`/`en`
 blocks into the OTA feed's `notes` - keep both languages, keep it short, and
 write for the person on the couch (what changes for THEM), not for developers.
 
+## 2.4.0
+
+### hu
+
+- **Beszélhetsz a távirányítóhoz.** Tartsd nyomva a mikrofon gombot, mondd meg mit
+  szeretnél, engedd el: a Home Assistant válaszol, és a válasz a TV-n szólal meg.
+  Nem kell ébresztőszó, mert a gomb az.
+- **Azt a szobát vezérli, ahol ülsz.** Ha a boxot hozzárendeled egy szobához a Home
+  Assistantban, a „kapcsold le a lámpát" ott kapcsol le, nem máshol.
+- Film közben nem kell leállítani semmit: a hang halkul a válasz idejére, aztán
+  visszaáll.
+- Alapból ki van kapcsolva, mert a bekapcsolásával a box nyit egy portot a helyi
+  hálózaton. A Beállítások → Hálózat menüben nincs kapcsoló hozzá, a
+  `config.json`-ban kapcsolható be (lásd a dokumentációt).
+
+> **Kell hozzá egy rendszerbeállítás, amit a frissítés nem tud telepíteni.** Friss
+> telepítésű boxon megy; csak frissítéssel érkező boxon a mikrofon néma marad.
+
+### en
+
+- **Talk to your remote.** Hold the mic key, say what you want, let go: Home
+  Assistant answers and the answer comes out of the TV. No wake word - the button
+  is the wake word.
+- **It acts in the room you are in.** Assign the box to an area in Home Assistant
+  and "turn off the light" means the light in that room.
+- Nothing has to be stopped mid-film: the box's audio dips while the answer plays
+  and comes back afterwards.
+- Off by default, because turning it on opens a port on your local network. There
+  is no switch in Settings yet; it is enabled in `config.json` (see the docs).
+
+> **It needs a system setting an update cannot install.** Freshly flashed boxes
+> have it; on a box that only ever updated over the air the microphone stays silent.
+
 ## 2.3.0
 
 ### hu
