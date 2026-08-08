@@ -222,7 +222,9 @@ SENSORS: tuple[TvboxSensorDescription, ...] = (
         key="memory_free",
         name="Memory free",
         device_class=SensorDeviceClass.DATA_SIZE,
-        native_unit_of_measurement=UnitOfInformation.MEGABYTES,
+        # MEBIbytes, not megabytes: /proc/meminfo counts in KiB, so dividing by 1024
+        # gives MiB, and labelling that MB would overstate it by 5%.
+        native_unit_of_measurement=UnitOfInformation.MEBIBYTES,
         state_class=SensorStateClass.MEASUREMENT,
         # MemAvailable, which is the free that matters: "free" alone reads as nearly
         # nothing on a box that is using its RAM as cache, exactly as it should.
