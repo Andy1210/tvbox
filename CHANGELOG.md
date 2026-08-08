@@ -5,6 +5,30 @@ updates). `scripts/make-release.sh` lifts the current version's `hu`/`en`
 blocks into the OTA feed's `notes` - keep both languages, keep it short, and
 write for the person on the couch (what changes for THEM), not for developers.
 
+## 2.5.0
+
+### hu
+
+- **Az értesítés mostantól minden fölött látszik.** Eddig csak akkor, ha épp a
+  főképernyőn voltál; ha egy app futott, elbújt mögötte. Most egy külön kis sáv
+  jelenik meg a képernyő alján, bármi is megy éppen.
+- **Nem szakítja félbe, amit nézel.** Csak a sáv jelenik meg, nem ugrik elő a
+  főképernyő, és a távirányító végig annál marad, amit használsz.
+
+> Ehhez a box képkezelőjének frissülnie kell (a frissítés hozza). Régebbi
+> képkezelőn minden a régiben marad, nem romlik el semmi.
+
+### en
+
+- **A notification is now seen over everything.** Until now it only showed while
+  you were on the home screen; with an app running it was hidden behind it. It
+  appears in a small strip at the bottom instead, whatever is playing.
+- **It does not interrupt what you are watching.** Only the strip appears, the home
+  screen does not jump in front, and the remote stays with whatever you are using.
+
+> This needs the box's window manager to update too (the update brings it). On an
+> older one everything behaves as before; nothing breaks.
+
 ## 2.4.0
 
 ### hu

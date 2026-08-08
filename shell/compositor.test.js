@@ -185,6 +185,18 @@ test("a placement goes out as pixels, and a null one puts the window back", asyn
   // as "the whole output".
   assert.deepEqual(seen[1], { id: seen[1].id, request: "place_window", app_id: "mpv" });
 
+  // One window of a client that has several: named by title, and NEVER carrying an
+  // app id as well. Every window of this process shares the shell's, so an app id
+  // here would drag the launcher into the note's little rectangle.
+  await new Promise((resolve) =>
+    client.placeWindowByTitle("tvbox-overlay", { x: 0, y: 900, w: 1920, h: 180 }, resolve),
+  );
+  assert.deepEqual(
+    { ...seen[2], id: undefined },
+    { id: undefined, request: "place_window", title: "tvbox-overlay", x: 0, y: 900, w: 1920, h: 180 },
+  );
+  assert.equal("app_id" in seen[2], false);
+
   server.close();
   fs.rmSync(dir, { recursive: true, force: true });
   delete process.env.TVBOX_WC_SOCKET;
