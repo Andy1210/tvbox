@@ -5,6 +5,28 @@ updates). `scripts/make-release.sh` lifts the current version's `hu`/`en`
 blocks into the OTA feed's `notes` - keep both languages, keep it short, and
 write for the person on the couch (what changes for THEM), not for developers.
 
+## 2.10.1
+
+### hu
+
+- **A távirányítós hangvezérlés nem akad be többé.** Ha a mikrofon gombot túl
+  röviden nyomtad meg, a box utána néma maradt: a kérdéseidre nem jött válasz, és
+  csak a szolgáltatás újraindítása segített. A túl rövid nyomás most egyszerűen
+  nem indít semmit.
+- Ha a Home Assistant egy kérdést válasz nélkül hagy, a box egy perc után magától
+  újrakapcsolódik hozzá, ahelyett hogy némán várna. Egy újracsatlakozó Home
+  Assistantot sem utasít vissza többé.
+
+### en
+
+- **Voice through the remote no longer gets stuck.** A mic key pressed too
+  briefly used to leave the box silent afterwards, with no answer to anything and
+  nothing short of restarting the service to fix it. A press that catches no
+  speech now starts nothing.
+- If Home Assistant leaves a request unanswered, the box reconnects to it after a
+  minute instead of waiting silently, and it no longer turns away a Home
+  Assistant that is reconnecting.
+
 ## 2.10.0
 
 ### hu
