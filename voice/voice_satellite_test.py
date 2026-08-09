@@ -252,16 +252,42 @@ async def test_a_displaced_handler_stops_acting_on_its_events():
     assert satellite.writer is fresh
 
 
+def stop_reading(satellite):
+    """Fill the outbound queue, as a peer that stopped reading would."""
+    while not satellite._out.full():
+        satellite._out.put_nowait(("audio-chunk", None, b""))
+
+
 async def test_an_end_of_recording_that_cannot_be_queued_ends_the_session():
     satellite, writer = connected()
     satellite.on_press()
     satellite.on_audio(FRAME)
-    while not satellite._out.full():  # a peer that stopped reading
-        satellite._out.put_nowait(("audio-chunk", None, b""))
+    stop_reading(satellite)
     satellite.on_release()
     assert satellite.writer is None, "a run with no end must not sit out the watchdog"
     assert writer.closed
     assert satellite._awaiting_since is None
+
+
+async def test_a_dropped_control_event_ends_the_session():
+    """Losing run-pipeline or audio-start leaves Home Assistant waiting too."""
+    satellite, writer = connected()
+    stop_reading(satellite)
+    satellite.on_press()
+    satellite.on_audio(FRAME)
+    assert satellite.writer is None
+    assert writer.closed
+    assert satellite._run_open is False
+
+
+async def test_a_dropped_audio_chunk_keeps_the_session():
+    satellite, writer = connected()
+    satellite.on_press()
+    satellite.on_audio(FRAME)  # opens the run while there is still room
+    stop_reading(satellite)
+    satellite.on_audio(FRAME)
+    assert satellite.writer is writer, "speech gives way, the session does not"
+    assert not writer.closed
 
 
 async def test_anything_home_assistant_says_clears_the_debt():

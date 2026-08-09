@@ -711,6 +711,8 @@ class Satellite:
             self._out.put_nowait((etype, data, payload))
             return True
         except asyncio.QueueFull:
+            pass
+        if etype == "audio-chunk":
             # A peer that has stopped reading. Audio is the only thing arriving
             # faster than it leaves, so audio is what gives way: losing 20 ms of
             # speech is a worse recording, while queueing it all is a dead box.
@@ -718,6 +720,13 @@ class Satellite:
             if self._dropped % 50 == 1:
                 LOG.warning("outbound queue full - dropping audio (%d so far)", self._dropped)
             return False
+        # Every other event carries the shape of a run - where it begins, where it
+        # ends - so dropping one leaves Home Assistant waiting on something that
+        # can no longer arrive. A full queue already means a peer that stopped
+        # reading, so end the session and let it reconnect.
+        LOG.warning("outbound queue full - dropping the connection rather than %s", etype)
+        self._end_session()
+        return False
 
     async def drain(self):
         """The only place anything is written, so the order queued is the order sent."""
@@ -819,11 +828,10 @@ class Satellite:
         self._run_open = False
         LOG.info("mic key up")
         if not self.send("audio-stop", {"timestamp": int(time.monotonic() * 1000)}):
-            # The end of the recording is the one event that cannot be dropped: a
-            # run without it never finishes. Waiting out the watchdog would work
-            # and take a minute; the answer is already lost either way.
-            LOG.warning("could not send the end of the recording - dropping the connection")
-            self._end_session()
+            # A run without its end never finishes, and `send` has already dropped
+            # the session if there was one to drop. Not arming the watchdog is the
+            # point: there is nothing left to wait a minute for.
+            LOG.warning("the end of the recording could not be sent")
             return
         self._awaiting_since = time.monotonic()
 
