@@ -91,6 +91,14 @@ MAX_PAYLOAD = 1 << 20
 # queue is bounded and chunks are what gets dropped when a peer stops reading.
 MAX_QUEUED = 256
 
+# How long a run may owe an answer before the connection is dropped. Home
+# Assistant sends nothing at all while a pipeline is stuck - no transcript, no
+# error, not even a ping - so silence for this long means the run is lost, and
+# closing our side is what lets its satellite reconnect into a working one.
+# Generously above a real turn, which is seconds even with a local model.
+RUN_TIMEOUT = 60.0
+WATCHDOG_INTERVAL = 5.0
+
 
 def _number(value, default, cast):
     """A config value is hand-edited JSON: a typo must not take the service down."""
@@ -514,12 +522,38 @@ class Player:
 # ---------------------------------------------------------------- satellite
 
 
+def _keepalive(writer):
+    """Ask the kernel to notice a peer that vanishes without closing.
+
+    A box that loses power mid-run leaves a socket nothing will ever close, and
+    the session is single: without this the port stays claimed by a machine that
+    is no longer there.
+    """
+    sock = writer.get_extra_info("socket")
+    if sock is None:
+        return
+    try:
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)
+        for name, value in (("TCP_KEEPIDLE", 30), ("TCP_KEEPINTVL", 10), ("TCP_KEEPCNT", 3)):
+            option = getattr(socket, name, None)
+            if option is not None:
+                sock.setsockopt(socket.IPPROTO_TCP, option, value)
+    except OSError as e:
+        LOG.warning("could not set keepalive: %s", e)
+
+
 class Satellite:
     """One Home Assistant connection at a time, which is all it ever opens."""
 
     def __init__(self, config):
         self.config = config
         self.writer = None
+        self._peer_host = None
+        # A run is open from the first audio chunk sent to the audio-stop that
+        # ends it; `_awaiting_since` is when that stop went out, and is cleared by
+        # the next thing Home Assistant says.
+        self._run_open = False
+        self._awaiting_since = None
         self.player = Player(duck=config["duck"])
         # Everything we send goes through one queue and one writer task. Audio is
         # fifty chunks a second and their ORDER is the recording: firing a task per
@@ -533,19 +567,35 @@ class Satellite:
 
     async def handle_client(self, reader, writer):
         peer = writer.get_extra_info("peername")
+        host = peer[0] if peer else "?"
         if self.writer is not None:
-            # One session at a time, and the FIRST one keeps it. The port has no
-            # authentication, so replacing the live connection would let anything on
-            # the LAN take the microphone away from Home Assistant mid-sentence -
-            # and tearing down the displaced one would stop the answer playing.
-            LOG.warning("refusing a second connection from %s", peer[0] if peer else "?")
-            try:
-                writer.close()
-            except OSError:
-                pass
-            return
-        LOG.info("Home Assistant connected from %s", peer[0] if peer else "?")
+            if host != self._peer_host:
+                # One session at a time, and a STRANGER never takes it. The port
+                # has no authentication, so letting any address displace the live
+                # connection would let anything on the LAN take the microphone
+                # away from Home Assistant mid-sentence.
+                LOG.warning("refusing a second connection from %s", host)
+                try:
+                    writer.close()
+                except OSError:
+                    pass
+                return
+            # The address that already holds the session is Home Assistant
+            # reconnecting. Its previous connection can be alive at the TCP level
+            # while the task behind it is not - a pipeline that never ended leaves
+            # exactly that - and refusing the new one then keeps the box unusable
+            # until the service is restarted by hand.
+            LOG.info("Home Assistant reconnected from %s - dropping the previous connection", host)
+            self._end_session()
+        _keepalive(writer)
+        LOG.info("Home Assistant connected from %s", host)
         self.writer = writer
+        self._peer_host = host
+        # A new connection owes nothing and is owed nothing: state left by a run
+        # the previous one lost would otherwise be charged to this one, and an
+        # expired debt would have the watchdog drop it the moment it arrived.
+        self._run_open = False
+        self._awaiting_since = None
         try:
             while True:
                 event, payload = await read_event(reader)
@@ -557,18 +607,55 @@ class Satellite:
         except Exception as e:  # a satellite that dies on one bad event is worse
             LOG.exception("event loop error: %s", e)
         finally:
-            LOG.info("Home Assistant disconnected")
+            # Only if this connection still owns the session: on a takeover the
+            # replacement already holds it, and tearing its state down here would
+            # silence the connection that just arrived.
             if self.writer is writer:
-                self.writer = None
-            self.player.stop()
+                LOG.info("Home Assistant disconnected")
+                self._end_session()
             try:
                 writer.close()
             except OSError:
                 pass
 
+    def _end_session(self):
+        """Forget the current connection and everything a run left behind."""
+        writer = self.writer
+        self.writer = None
+        self._run_open = False
+        self._awaiting_since = None
+        self.player.stop()
+        if writer is not None:
+            try:
+                writer.close()
+            except OSError:
+                pass
+
+    async def watchdog(self):
+        """Drop a connection that owes an answer and has gone quiet.
+
+        This is the only lever this side has over a pipeline stuck in Home
+        Assistant, and it is enough: its satellite reconnects on its own once the
+        socket is gone.
+        """
+        while True:
+            await asyncio.sleep(WATCHDOG_INTERVAL)
+            since = self._awaiting_since
+            if since is None or self.writer is None:
+                continue
+            if time.monotonic() - since < RUN_TIMEOUT:
+                continue
+            LOG.warning(
+                "no answer in %.0f s - dropping the connection so Home Assistant can reconnect",
+                RUN_TIMEOUT,
+            )
+            self._end_session()
+
     async def _on_event(self, event, payload):
         etype = event["type"]
         data = event["data"]
+        # Anything at all means the run is still being worked on.
+        self._awaiting_since = None
         if etype == "describe":
             await self._send_info()
         elif etype == "ping":
@@ -627,7 +714,9 @@ class Satellite:
             try:
                 await write_event(writer, etype, data, payload)
             except (ConnectionResetError, BrokenPipeError, OSError):
-                self.writer = None
+                # The whole session goes, not just the writer: a half-dropped one
+                # leaves a run open that nothing will ever close.
+                self._end_session()
 
     async def _send(self, etype, data=None, payload=b""):
         self.send(etype, data, payload)
@@ -680,13 +769,22 @@ class Satellite:
     # ---- microphone side
 
     def on_press(self):
+        # The run deliberately does NOT start here. A key tapped too briefly to
+        # produce a frame would open one with no audio in it, and a Wyoming ASR
+        # service asked to transcribe an empty stream has nothing to answer with:
+        # wyoming-faster-whisper raises out of its event handler, so the pipeline
+        # waits for a transcript that can never arrive and the satellite is stuck
+        # listening until something drops the connection.
         if self.writer is None:
             LOG.warning("no Home Assistant connection - nothing to listen")
             return
-        LOG.info("mic key down - starting a pipeline")
-        self._start_pipeline()
+        LOG.info("mic key down")
 
     def on_audio(self, pcm):
+        if self.writer is None:
+            return
+        if not self._run_open:
+            self._start_pipeline()
         self.send(
             "audio-chunk",
             {"rate": MIC_RATE, "width": MIC_WIDTH, "channels": MIC_CHANNELS, "timestamp": int(time.monotonic() * 1000)},
@@ -694,6 +792,15 @@ class Satellite:
         )
 
     def on_release(self):
+        if not self._run_open:
+            # Which of the two it was decides where to look next, so say it.
+            if self.writer is None:
+                LOG.info("mic key up - no Home Assistant connection")
+            else:
+                LOG.info("mic key up - the remote sent no audio, so nothing was started")
+            return
+        self._run_open = False
+        self._awaiting_since = time.monotonic()
         LOG.info("mic key up")
         self.send("audio-stop", {"timestamp": int(time.monotonic() * 1000)})
 
@@ -709,6 +816,8 @@ class Satellite:
         }
         if self.config["pipeline"]:
             run["name"] = self.config["pipeline"]
+        self._run_open = True
+        LOG.info("speech on the way - starting a pipeline")
         self.send("run-pipeline", run)
         self.send("audio-start", {"rate": MIC_RATE, "width": MIC_WIDTH, "channels": MIC_CHANNELS})
 
@@ -731,7 +840,9 @@ async def amain():
     server = await asyncio.start_server(satellite.handle_client, "0.0.0.0", config["port"])
     LOG.info("wyoming satellite '%s' on port %d", config["name"], config["port"])
     try:
-        await asyncio.gather(server.serve_forever(), mic.run(), satellite.drain())
+        await asyncio.gather(
+            server.serve_forever(), mic.run(), satellite.drain(), satellite.watchdog()
+        )
     finally:
         mic.close()
         satellite.player.stop()
