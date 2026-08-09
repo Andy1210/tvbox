@@ -14,6 +14,7 @@ simply has this switched off.
 - [Turning it on](#turning-it-on)
 - [Which room it acts in](#which-room-it-acts-in)
 - [How the remote's microphone works](#how-the-remotes-microphone-works)
+- [A run, and who holds the connection](#a-run-and-who-holds-the-connection)
 - [What it deliberately does not do](#what-it-deliberately-does-not-do)
 - [When it does not work](#when-it-does-not-work)
 
@@ -108,6 +109,37 @@ Two consequences worth knowing:
   than silence. If a recording comes back choppy, that is the link, not the codec:
   compare the frames received against the seconds they cover.
 
+## A run, and who holds the connection
+
+**A run starts on the first decoded frame, not on the key press.** A key tapped
+too briefly to produce one would otherwise open a run with no audio in it, and a
+Wyoming speech-to-text service asked to transcribe an empty stream has nothing to
+answer with - wyoming-faster-whisper raises out of its event handler, which ends
+the request without a reply. The pipeline then waits for a transcript that cannot
+arrive, and the satellite entity sits in `listening` for as long as that lasts. So
+a tap that captured nothing sends nothing, and the log says
+`the remote sent no audio, so nothing was started`.
+
+**The session is single, and the address that holds it may take it back.** The
+port has no authentication, so a connection from an unknown address is refused
+rather than allowed to take the microphone away mid-sentence. Home Assistant
+reconnecting is not that: it comes from the address that already holds the
+session, and its previous connection can be alive at the TCP level while the task
+behind it is not. That one displaces the old connection instead of being turned
+away, because refusing it leaves the box unusable until the service is restarted
+by hand. Sockets also carry TCP keepalive, so a peer that disappears without
+closing is reaped by the kernel rather than holding the session for ever.
+
+**A run that is never answered drops the connection.** Home Assistant sends
+nothing at all while a pipeline is stuck, not even a ping, so a minute of silence
+after `audio-stop` is taken as a lost run: the satellite closes the socket and its
+Wyoming integration reconnects on its own. It is the only lever this side has, and
+the log line is `no answer in 60 s`. **Audio is also the only thing that gives way
+when the outbound queue fills.** Everything else carries the shape of a run -
+where it begins, where it ends - so an event that cannot be queued drops the
+connection at once rather than leaving Home Assistant waiting for something that
+can no longer arrive.
+
 ## The answer on the screen
 
 `voice.answer` decides how an answer reaches the room:
@@ -167,7 +199,12 @@ the launcher. Putting those in the strip would mean an empty bar over the film.
   `voice.enabled` unset the service exits 0 by design.
 - **Home Assistant shows the satellite as unavailable.** It connects to the box, so
   check the port is reachable from Home Assistant's host and that the box's
-  address has not changed.
+  address has not changed. `refusing a second connection` in the log means the
+  address it is connecting from is not the one holding the session.
+- **The satellite is stuck in `listening`.** The pipeline is waiting on a stage
+  that will not finish - speech to text is the usual one. Look at that service's
+  log rather than the box's: the run reached it, which is why `heard:` never
+  appeared here. The connection drops itself after a minute either way.
 - **The answer plays but the light is wrong.** The box has no area, or has the
   wrong one - see [Which room it acts in](#which-room-it-acts-in).
 - **The remote's microphone itself can be faulty.** A dead microphone still sends
