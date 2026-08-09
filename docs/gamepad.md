@@ -78,12 +78,35 @@ binds the kernel's `playstation` driver and maps as standard), Nintendo, Valve,
 Logitech, 8BitDo - are **left alone**, so a working mapping is never replaced by
 a guess.
 
-A stick is told from a trigger by **where the axis rests**, not by its code: an
-Android-style pad's right stick is `Z`/`RZ` resting mid-range, while a trigger rests
-at its minimum. Going by the code alone pinned the virtual right stick to full
-deflection on pads whose `Z`/`RZ` are triggers. A D-pad reported as buttons
-(`BTN_DPAD_*`) becomes the hat, and digital shoulder triggers become full-scale
-analog ones - without that, a grabbed pad could lose its D-pad entirely.
+`Z`/`RZ` is the one pair whose code says nothing - it is the right stick on an
+Android-style pad and the triggers on an Xbox-style one - so the shim settles it from
+the pad's **shape** first and its resting values only when nothing else can:
+
+- `RX`/`RY` present → that is the stick, so `Z`/`RZ` is the trigger pair.
+- a **pedal** axis present (`BRAKE`/`GAS`, `THROTTLE`/…) → those are the triggers, so
+  `Z`/`RZ` is the stick. A pedal axis is never a stick, whatever it currently reads.
+- digital `BTN_TL2`/`BTN_TR2` present → those are the triggers, so `Z`/`RZ` is the stick.
+- otherwise, and only then: **where the axis rests** decides. A stick rests mid-range,
+  a trigger at its minimum.
+
+That last rule cannot be applied to a pad that has not reported yet. The shim grabs a
+pad the instant it appears, and until its first report every axis reads the zero the
+kernel created it with - so a Bluetooth Nacon's centred right stick looked like a
+released trigger pair and **took the triggers' place**: both triggers went dead, and
+the virtual pad's sat half-pressed because a centred stick scales to the middle of a
+trigger's range. `X`/`Y` reading centred is the check that says a report has arrived
+(the left stick is a stick on every pad), and until it does the pad's axes stay
+unmapped - silent rather than wrong - for up to five seconds, buttons passing through
+throughout. Watch it settle:
+
+```console
+[gamepad-shim] 'Some Pad' axes idle at zero - waiting for its first report
+[gamepad-shim] 'Some Pad' vendor=…  right-stick=ABS_Z/ABS_RZ triggers=none
+```
+
+A D-pad reported as buttons (`BTN_DPAD_*`) becomes the hat, and digital shoulder
+triggers become full-scale analog ones - without that, a grabbed pad could lose its
+D-pad entirely.
 
 When the last shimmed pad disconnects the virtual pad is **neutralised and removed**:
 uinput remembers its last state, so a pad that dies mid-direction would otherwise

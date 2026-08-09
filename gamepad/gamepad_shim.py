@@ -21,6 +21,12 @@ TRIGGERS live - Xbox-style pads use RX/RY + Z/RZ, Android-style ones (most phone
 controllers, including the Nacon) use Z/RZ for the stick and BRAKE/GAS or
 THROTTLE/RUDDER for the triggers - so those are resolved per device and logged.
 
+That resolution asks the pad's SHAPE first and its resting values only as a last
+resort (`plan_axes`), because a resting value is worth nothing until the pad has
+actually reported one: a pad grabbed the instant Bluetooth registers it has every
+axis sitting at the zero the kernel created it with, and a right stick that reads
+zero looks exactly like a pair of released triggers.
+
 No root: /dev/input comes from the `input` group, /dev/uinput from the udev rule
 provision.sh installs (same as the CEC and remote bridges).
 """
@@ -79,20 +85,22 @@ OUT_ABS = [
     (e.ABS_HAT0Y, HAT),
 ]
 
-# Candidate source pairs, most specific first. A pad that has RX/RY uses the Xbox
-# convention (Z/RZ are then the triggers); one without it is Android-style, where
-# Z/RZ IS the right stick and the triggers are analog pedals.
-RIGHT_STICK_PAIRS = [(e.ABS_RX, e.ABS_RY), (e.ABS_Z, e.ABS_RZ)]
-# Left trigger first in each pair. BRAKE/GAS is the Android convention (brake =
-# left); THROTTLE/GAS is what the Nacon MG-X PRO reports and the left/right
-# assignment there is a guess - the picked pair is logged, so a swap is one line.
-TRIGGER_PAIRS = [
-    (e.ABS_Z, e.ABS_RZ),
+# A pedal axis is never a stick, so a pad that reports one has told us where its
+# triggers are without us reading a single value. Left trigger first in each pair:
+# BRAKE/GAS is the Android convention (brake = left) and is what the Nacon MG-X PRO
+# reports; the picked pair is logged, so a swap is one line.
+PEDAL_PAIRS = [
     (e.ABS_BRAKE, e.ABS_GAS),
     (e.ABS_THROTTLE, e.ABS_GAS),
     (e.ABS_THROTTLE, e.ABS_RUDDER),
-    (e.ABS_HAT2Y, e.ABS_HAT2X),  # some HID pads report triggers on hat2
 ]
+# The pair no name can settle: Z/RZ is the right STICK on an Android-style pad and
+# the TRIGGERS on an Xbox-style one.
+ZRZ = (e.ABS_Z, e.ABS_RZ)
+# Some HID pads report their triggers on the second hat, and some report a hat.
+HAT2 = (e.ABS_HAT2Y, e.ABS_HAT2X)
+# How long a pad may stay unmapped while we wait for it to report a resting value.
+PLAN_SETTLE_SEC = 5.0
 
 
 # Buttons that aren't in the xpad set but mean something we CAN express: a D-pad
@@ -176,15 +184,52 @@ def centred(info):
     return abs(info.value - mid) < (info.max - info.min) * 0.25
 
 
-def pick_pair(axes, candidates, used, absinfo=None, want=None):
-    for lo, hi in candidates:
-        if lo in axes and hi in axes and lo not in used and hi not in used:
-            if want == "stick" and absinfo and not (centred(absinfo[lo]) and centred(absinfo[hi])):
-                continue  # a pair resting at its ends is a trigger pair, not a stick
-            if want == "trigger" and absinfo and (centred(absinfo[lo]) or centred(absinfo[hi])):
-                continue  # a pair resting mid-range is a stick (or a hat), not a trigger
-            return lo, hi
-    return None
+def rest_reported(absinfo):
+    """Do this pad's resting values mean anything yet? The LEFT stick is a stick on
+    every pad there is, so X/Y reading centred is the one check that says the kernel
+    has had a real report: a device grabbed the moment it appears has every axis at
+    the zero it was created with, and zero is a perfectly plausible resting value
+    for a trigger."""
+    return centred(absinfo.get(e.ABS_X)) and centred(absinfo.get(e.ABS_Y))
+
+
+def plan_axes(axes, keys, absinfo, force=False):
+    """Which source axes are the right stick, and which are the triggers.
+
+    Shape decides wherever it can, and resting values only settle what is left -
+    `decided` comes back False when that remainder needs values the pad has not
+    reported yet, and the caller retries instead of guessing. Both wrong answers
+    are actively broken, not merely wrong: a stick taken for triggers holds them
+    half-pressed for as long as it rests centred, and triggers taken for a stick
+    pin it into a corner. `force` spends the wait and takes what is there.
+    """
+    right = (e.ABS_RX, e.ABS_RY) if set((e.ABS_RX, e.ABS_RY)) <= axes else None
+    pedals = next((p for p in PEDAL_PAIRS if set(p) <= axes), None)
+    has_zrz = set(ZRZ) <= axes
+    triggers = None
+    # A pad has one right stick and one trigger pair, so whatever names either of
+    # them has answered for Z/RZ as well.
+    if right:
+        triggers = ZRZ if has_zrz else pedals  # the Xbox convention, in full
+    elif pedals:
+        triggers = pedals
+        right = ZRZ if has_zrz else None  # Android-style: the stick is what is left
+    elif has_zrz:
+        if {e.BTN_TL2, e.BTN_TR2} & keys:
+            right = ZRZ  # digital L2/R2 ARE the triggers
+        elif not rest_reported(absinfo) and not force:
+            return None, None, False
+        elif centred(absinfo.get(e.ABS_Z)) and centred(absinfo.get(e.ABS_RZ)):
+            right = ZRZ
+        else:
+            triggers = ZRZ
+    if triggers is None and set(HAT2) <= axes:
+        if not rest_reported(absinfo) and not force:
+            return right, None, False
+        # A second hat rests centred; a trigger pair rests at its ends.
+        if not (centred(absinfo.get(HAT2[0])) or centred(absinfo.get(HAT2[1]))):
+            triggers = HAT2
+    return right, triggers, True
 
 
 class Pad:
@@ -194,15 +239,30 @@ class Pad:
         self.dev = dev
         caps = dev.capabilities()
         self.absinfo = {a: info for a, info in caps.get(e.EV_ABS, [])}
+        self.keys = set(caps.get(e.EV_KEY, []))
+        self.has_hat = e.ABS_HAT0X in self.absinfo or e.ABS_HAT0Y in self.absinfo
+        # source code -> (target code, is_trigger). Empty until the plan settles,
+        # so an axis is silent rather than wrong; buttons pass through either way.
+        self.axis_map = {}
+        self.has_analog_triggers = False
+        self.decided = False
+        self.deadline = time.monotonic() + PLAN_SETTLE_SEC
+        self.replan()
+        if not self.decided:
+            log(f"{dev.name!r} axes idle at zero - waiting for its first report")
+
+    def replan(self, force=False):
+        """Settle the axis plan against the kernel's CURRENT resting values. Called
+        again after every batch of events until it succeeds, because the pad's first
+        report is what makes those values mean anything."""
+        if self.decided:
+            return
+        caps = self.dev.capabilities()  # re-reads absinfo from the device
+        self.absinfo = {a: info for a, info in caps.get(e.EV_ABS, [])}
         axes = set(self.absinfo)
-        used = {e.ABS_X, e.ABS_Y}
-        right = pick_pair(axes, RIGHT_STICK_PAIRS, used, self.absinfo, "stick")
-        if right:
-            used |= set(right)
-        triggers = pick_pair(axes, TRIGGER_PAIRS, used, self.absinfo, "trigger")
-        if triggers:
-            used |= set(triggers)
-        # source code -> (target code, is_trigger)
+        right, triggers, decided = plan_axes(axes, self.keys, self.absinfo, force)
+        if not decided:
+            return
         self.axis_map = {e.ABS_X: (e.ABS_X, False), e.ABS_Y: (e.ABS_Y, False)}
         if right:
             self.axis_map[right[0]] = (e.ABS_RX, False)
@@ -210,17 +270,17 @@ class Pad:
         if triggers:
             self.axis_map[triggers[0]] = (e.ABS_Z, True)
             self.axis_map[triggers[1]] = (e.ABS_RZ, True)
-        if e.ABS_HAT0X in axes:
-            self.axis_map[e.ABS_HAT0X] = (e.ABS_HAT0X, False)
-        if e.ABS_HAT0Y in axes:
-            self.axis_map[e.ABS_HAT0Y] = (e.ABS_HAT0Y, False)
-        self.keys = set(caps.get(e.EV_KEY, []))
-        self.has_hat = e.ABS_HAT0X in axes or e.ABS_HAT0Y in axes
+        for hat in (e.ABS_HAT0X, e.ABS_HAT0Y):
+            if hat in axes:
+                self.axis_map[hat] = (hat, False)
         self.has_analog_triggers = triggers is not None
+        self.decided = True
+        dev = self.dev
+        guessed = " (guessed - no report came)" if force else ""
         log(
             f"{dev.name!r} vendor={dev.info.vendor:04x}:{dev.info.product:04x}",
             "right-stick=" + (self.name_pair(right) if right else "none"),
-            "triggers=" + (self.name_pair(triggers) if triggers else "none"),
+            "triggers=" + (self.name_pair(triggers) if triggers else "none") + guessed,
         )
 
     @staticmethod
@@ -325,6 +385,10 @@ def main():
                     except Exception:
                         pass
                     dev.close()
+            # A pad that reports nothing at all still has to end up mapped.
+            for pad in pads.values():
+                if not pad.decided and now >= pad.deadline:
+                    pad.replan(force=True)
         if not pads:
             time.sleep(max(0.05, next_scan - time.monotonic()))  # nothing to read until the next scan
             continue
@@ -347,6 +411,10 @@ def main():
                 if not pads and ui is not None:
                     ui = release_virtual(ui)
                 continue
+            # These events are the report the plan was waiting for, and the kernel has
+            # already applied them - so settle it BEFORE translating them.
+            if not pad.decided:
+                pad.replan(force=time.monotonic() >= pad.deadline)
             wrote = False
             for ev in events:
                 out = pad.translate(ev)

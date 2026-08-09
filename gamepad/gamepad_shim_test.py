@@ -221,9 +221,9 @@ if fails:
 print("gamepad_shim: all checks passed")
 
 # ---- a trigger pair must never be adopted as the right stick --------------------
-# The bug this pins: RIGHT_STICK_PAIRS falls back to Z/RZ whenever RX/RY are absent,
-# so a pad whose Z/RZ are TRIGGERS (resting at 0) had them mapped to the right stick -
-# and scale() then reported that stick pinned hard up+left forever.
+# The bug this pins: the right-stick candidates fall back to Z/RZ whenever RX/RY are
+# absent, so a pad whose Z/RZ are TRIGGERS (resting at 0) had them mapped to the right
+# stick - and scale() then reported that stick pinned hard up+left forever.
 trigpad = dev("Triggers on Z/RZ", [e.ABS_X, e.ABS_Y, e.ABS_Z, e.ABS_RZ, e.ABS_HAT0X, e.ABS_HAT0Y], PAD_KEYS)
 pt = gs.Pad(trigpad)
 check("Z/RZ resting at zero are triggers", pt.axis_map.get(e.ABS_Z), (e.ABS_Z, True))
@@ -254,6 +254,84 @@ check("BTN_TL2 -> full-scale Z", gs.Pad(digi).translate(Ev(e.EV_KEY, e.BTN_TL2, 
 # ---- out-of-range values are clamped ------------------------------------------
 check("over-range stick clamps", p.scale(e.ABS_X, 9999), (e.ABS_X, 32767))
 check("under-range trigger clamps", pw.scale(e.ABS_BRAKE, -50), (e.ABS_Z, 0))
+
+
+# ---- a pad grabbed BEFORE its first report -------------------------------------
+# Measured on a Bluetooth Nacon MG-X PRO: the shim grabs a pad the moment it appears,
+# and until the pad reports, every axis reads the zero the kernel created it with. Its
+# right stick then looked like a released trigger pair and TOOK the triggers' place -
+# both triggers went dead and the virtual pad's sat half-pressed, because a centred
+# stick scales to the middle of a trigger's range. The pedals settle this on their own.
+def report(device, values):
+    """The pad finally sends a report: the driver's absinfo starts carrying values."""
+    for code, info in device.capabilities()[e.EV_ABS]:
+        if code in values:
+            info.value = values[code]
+
+
+COLD_NACON_RANGES = {a: (0, 65535) for a in (e.ABS_X, e.ABS_Y, e.ABS_Z, e.ABS_RZ)}
+COLD_NACON_RANGES.update({a: (0, 1023) for a in (e.ABS_BRAKE, e.ABS_GAS)})
+cold = dev(
+    "Nacon MG-X PRO",
+    [e.ABS_X, e.ABS_Y, e.ABS_Z, e.ABS_RZ, e.ABS_BRAKE, e.ABS_GAS, e.ABS_HAT0X, e.ABS_HAT0Y],
+    PAD_KEYS + [e.BTN_THUMBL, e.BTN_THUMBR],
+    vendor=0x3285,
+    product=0x0312,
+    ranges=COLD_NACON_RANGES,
+    rest={a: 0 for a in (e.ABS_X, e.ABS_Y, e.ABS_Z, e.ABS_RZ, e.ABS_BRAKE, e.ABS_GAS)},
+)
+pc = gs.Pad(cold)
+check("a cold pad with pedals needs no resting value", pc.decided, True)
+check("cold nacon right stick -> RX", pc.axis_map.get(e.ABS_Z), (e.ABS_RX, False))
+check("cold nacon left trigger -> Z", pc.axis_map.get(e.ABS_BRAKE), (e.ABS_Z, True))
+check("cold nacon right trigger -> RZ", pc.axis_map.get(e.ABS_GAS), (e.ABS_RZ, True))
+# RX/RY is the same kind of answer from the other side.
+cold_x = dev(
+    "Cold X-style",
+    [e.ABS_X, e.ABS_Y, e.ABS_RX, e.ABS_RY, e.ABS_Z, e.ABS_RZ],
+    PAD_KEYS,
+    rest={a: 0 for a in (e.ABS_X, e.ABS_Y, e.ABS_RX, e.ABS_RY)},
+)
+check("a cold X-style pad keeps Z/RZ as triggers", gs.Pad(cold_x).axis_map.get(e.ABS_Z), (e.ABS_Z, True))
+# A pad listing BOTH conventions keeps the Xbox one - RX/RY is the stick, so Z/RZ is
+# the trigger pair and the pedal axes it also advertises are duplicates.
+both = dev(
+    "Both conventions",
+    [e.ABS_X, e.ABS_Y, e.ABS_RX, e.ABS_RY, e.ABS_Z, e.ABS_RZ, e.ABS_BRAKE, e.ABS_GAS],
+    PAD_KEYS,
+)
+pb = gs.Pad(both)
+check("Z/RZ wins over pedals when RX/RY is the stick", pb.axis_map.get(e.ABS_Z), (e.ABS_Z, True))
+check("…and the pedal axes are left unmapped", pb.axis_map.get(e.ABS_GAS), None)
+# So does a digital L2/R2: those ARE the triggers, so Z/RZ is the stick.
+cold_digi = dev(
+    "Cold, digital L2/R2",
+    [e.ABS_X, e.ABS_Y, e.ABS_Z, e.ABS_RZ],
+    PAD_KEYS + [e.BTN_TL2, e.BTN_TR2],
+    rest={e.ABS_X: 0, e.ABS_Y: 0},
+)
+pdg = gs.Pad(cold_digi)
+check("digital L2/R2 makes Z/RZ the stick", pdg.axis_map.get(e.ABS_RZ), (e.ABS_RY, False))
+check("…and the triggers stay digital", pdg.translate(Ev(e.EV_KEY, e.BTN_TR2, 1)), (e.EV_ABS, e.ABS_RZ, 255))
+
+# ---- when only a resting value can answer, wait for one ------------------------
+amb = dev("Cold ambiguous", [e.ABS_X, e.ABS_Y, e.ABS_Z, e.ABS_RZ], PAD_KEYS, rest={e.ABS_X: 0, e.ABS_Y: 0})
+pa = gs.Pad(amb)
+check("undecided while every axis reads zero", pa.decided, False)
+check("…so nothing is mapped yet", pa.axis_map, {})
+check("…an axis event is dropped, not mis-sent", pa.translate(Ev(e.EV_ABS, e.ABS_Z, 200)), None)
+check("…and buttons still pass through", pa.translate(Ev(e.EV_KEY, e.BTN_A, 1)), (e.EV_KEY, e.BTN_A, 1))
+report(amb, {e.ABS_X: 128, e.ABS_Y: 128, e.ABS_Z: 128, e.ABS_RZ: 128})
+pa.replan()
+check("the first report settles it", pa.decided, True)
+check("centred Z/RZ is the right stick", pa.axis_map.get(e.ABS_Z), (e.ABS_RX, False))
+# A pad that never reports still has to end up mapped - at the deadline the shim
+# spends the wait and reads the values as they are.
+mute = dev("Never reports", [e.ABS_X, e.ABS_Y, e.ABS_Z, e.ABS_RZ], PAD_KEYS, rest={e.ABS_X: 0, e.ABS_Y: 0})
+pm = gs.Pad(mute)
+pm.replan(force=True)
+check("a forced plan lands", pm.decided, True)
+check("a forced plan reads zeros as triggers", pm.axis_map.get(e.ABS_Z), (e.ABS_Z, True))
 
 if fails:
     print("FAIL")
