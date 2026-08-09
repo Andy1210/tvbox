@@ -284,6 +284,45 @@ test("backup.paths must be relative in-app paths", () => {
   }
 });
 
+// `shares.paths` decide what a peer box can read over the LAN, so the validator is
+// the review surface: what a manifest may offer is readable before it is installed,
+// and there is no runtime call that could widen it afterwards.
+test("shares.paths must be relative in-app paths", () => {
+  const withShares = (shares) => ({ id: "x", name: "X", type: "webclient", status: "ready", shares });
+  assert.ok(apps.validateManifest(withShares({ paths: ["config/retroarch/saves"] }), "x.json"));
+  for (const bad of [
+    { paths: [] },
+    { paths: "saves" },
+    { paths: ["/etc/passwd"] },
+    { paths: ["../../.ssh"] },
+    { paths: ["saves/../../.ssh"] },
+    { paths: ["./saves"] },
+    { paths: ["saves//x"] },
+    { paths: [123] },
+    { paths: new Array(9).fill("a") },
+    { paths: ["a"], flatpak: "not a ref" },
+    [],
+    "saves",
+  ]) {
+    assert.equal(apps.validateManifest(withShares(bad), "x.json"), null, JSON.stringify(bad));
+  }
+});
+
+test("a share resolves against the app's own root, and only its own", () => {
+  const own = { id: "x", name: "X", shares: { paths: ["saves"] } };
+  assert.equal(apps.appShareRoot(own), apps.appDataDir("x"), "no flatpak named: the app's own bundle dir");
+  const ra = {
+    id: "retroarch",
+    name: "RetroArch",
+    requires: { flatpak: ["org.libretro.RetroArch"] },
+    shares: { flatpak: "org.libretro.RetroArch", paths: ["config/retroarch/saves"] },
+  };
+  assert.equal(apps.appShareRoot(ra), path.join(TMP, ".var", "app", "org.libretro.RetroArch"));
+  const foreign = { id: "x", name: "X", shares: { flatpak: "org.libretro.RetroArch", paths: ["saves"] } };
+  assert.equal(apps.appShareRoot(foreign), null, "a ref the app doesn't declare is refused");
+  assert.equal(apps.appShareRoot({ id: "x" }), null, "nothing declared, nothing to offer");
+});
+
 // backup.js reads the shell's own ~/.tvbox sidecars into every backup; install.js
 // decides which names an APP may claim. The two lists have to agree, or a new
 // sidecar added to one is claimable through the other.

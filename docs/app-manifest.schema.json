@@ -148,6 +148,28 @@
         }
       }
     },
+    "shares": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["paths"],
+      "description": "Folders of the app's OWN that this box may offer, READ-ONLY, to another tvbox on the LAN - the save files an emulator keeps, so a game started in one room can be continued in another. The shell builds the served directory from this list; there is no runtime call that takes a path, so an app can only ever offer what its manifest declares. Off until someone turns it on in Settings, served on its own credential (never the file server's), and a peer pulls - nothing on the LAN can write back.",
+      "properties": {
+        "flatpak": {
+          "type": "string",
+          "description": "Resolve `paths` against this flatpak's per-user data dir (~/.var/app/<ref>/) instead of the app's own bundle dir. Must be a ref the app already declares in requires.flatpak or install.source."
+        },
+        "paths": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 8,
+          "items": {
+            "type": "string",
+            "maxLength": 200
+          },
+          "description": "Relative in-app directories. No absolute paths and no `..`: they are joined onto the app's own root, and the last segment becomes the share's name - which is also a URL segment on the peer that fetches it. A path whose resolved target leaves the app's root (a symlink) is listed but never served."
+        }
+      }
+    },
     "requires": {
       "type": "object",
       "additionalProperties": false,
