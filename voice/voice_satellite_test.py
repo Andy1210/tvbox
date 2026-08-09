@@ -9,6 +9,7 @@ connection, which is where a stuck pipeline and a locked-out Home Assistant both
 come from. The microphone and the decoder need real hardware and are not touched.
 """
 import asyncio
+import contextlib
 import os
 import sys
 import time
@@ -52,6 +53,23 @@ class BlockingReader:
         await asyncio.Event().wait()
 
 
+class ScriptedReader:
+    """Lines held back until the test releases them, then silence."""
+
+    def __init__(self, lines):
+        self._lines = list(lines)
+        self._gate = asyncio.Event()
+
+    def deliver(self):
+        self._gate.set()
+
+    async def readline(self):
+        await self._gate.wait()
+        if self._lines:
+            return self._lines.pop(0)
+        await asyncio.Event().wait()
+
+
 def sent(satellite):
     """The event types queued so far, oldest first."""
     out = []
@@ -66,6 +84,27 @@ def connected():
     satellite.writer = writer
     satellite._peer_host = HA
     return satellite, writer
+
+
+async def stop(*tasks):
+    for task in tasks:
+        task.cancel()
+    for task in tasks:
+        with contextlib.suppress(asyncio.CancelledError):
+            await task
+
+
+@contextlib.asynccontextmanager
+async def watchdog_running(satellite, interval=0.01):
+    """The watchdog, ticking fast enough for a test and put back afterwards."""
+    was = vs.WATCHDOG_INTERVAL
+    vs.WATCHDOG_INTERVAL = interval
+    task = asyncio.create_task(satellite.watchdog())
+    try:
+        yield task
+    finally:
+        await stop(task)
+        vs.WATCHDOG_INTERVAL = was
 
 
 async def test_a_tap_with_no_audio_starts_nothing():
@@ -120,7 +159,7 @@ async def test_home_assistant_reconnecting_takes_the_session_over():
         await asyncio.sleep(0)
     assert stale.closed, "the connection that stopped answering must be dropped"
     assert satellite.writer is fresh, "the reconnect must own the session"
-    task.cancel()
+    await stop(task)
 
 
 async def test_a_stranger_is_still_refused():
@@ -146,8 +185,7 @@ async def test_the_takeover_leaves_the_new_connection_usable():
     satellite.on_press()
     satellite.on_audio(FRAME)
     assert sent(satellite)[:2] == ["run-pipeline", "audio-start"]
-    stale_task.cancel()
-    fresh_task.cancel()
+    await stop(stale_task, fresh_task)
 
 
 async def test_a_fresh_connection_inherits_no_debt():
@@ -162,21 +200,17 @@ async def test_a_fresh_connection_inherits_no_debt():
         await asyncio.sleep(0)
     assert satellite._awaiting_since is None
     assert satellite._run_open is False
-    vs.WATCHDOG_INTERVAL = 0.01
-    watchdog = asyncio.create_task(satellite.watchdog())
-    await asyncio.sleep(0.05)
-    watchdog.cancel()
-    task.cancel()
-    assert satellite.writer is fresh, "the reconnect must survive the old run's debt"
+    async with watchdog_running(satellite):
+        await asyncio.sleep(0.05)
+        assert satellite.writer is fresh, "the reconnect must survive the old run's debt"
+    await stop(task)
 
 
 async def test_the_watchdog_drops_a_run_that_is_never_answered():
     satellite, writer = connected()
     satellite._awaiting_since = time.monotonic() - vs.RUN_TIMEOUT - 1
-    vs.WATCHDOG_INTERVAL = 0.01
-    task = asyncio.create_task(satellite.watchdog())
-    await asyncio.sleep(0.05)
-    task.cancel()
+    async with watchdog_running(satellite):
+        await asyncio.sleep(0.05)
     assert satellite.writer is None, "a run nobody answers must not hold the session"
     assert writer.closed
 
@@ -184,12 +218,50 @@ async def test_the_watchdog_drops_a_run_that_is_never_answered():
 async def test_the_watchdog_leaves_a_run_in_progress_alone():
     satellite, writer = connected()
     satellite._awaiting_since = time.monotonic()
-    vs.WATCHDOG_INTERVAL = 0.01
-    task = asyncio.create_task(satellite.watchdog())
-    await asyncio.sleep(0.05)
-    task.cancel()
+    async with watchdog_running(satellite):
+        await asyncio.sleep(0.05)
     assert satellite.writer is writer
     assert not writer.closed
+
+
+async def test_ending_a_session_drops_what_it_had_queued():
+    """The writer task may not run before a replacement connection arrives."""
+    satellite, _ = connected()
+    satellite.on_press()
+    satellite.on_audio(FRAME)
+    assert not satellite._out.empty()
+    satellite._end_session()
+    assert satellite._out.empty(), "a reconnect must not be handed the old run's audio"
+
+
+async def test_a_displaced_handler_stops_acting_on_its_events():
+    """An event buffered before the takeover must not reach the new session."""
+    satellite = vs.Satellite(CONFIG)
+    stale, fresh = FakeWriter(), FakeWriter()
+    reader = ScriptedReader([b'{"type": "describe"}\n'])
+    task = asyncio.create_task(satellite.handle_client(reader, stale))
+    for _ in range(5):
+        await asyncio.sleep(0)
+    assert satellite.writer is stale
+    satellite.writer = fresh  # a reconnect took the session mid-read
+    reader.deliver()
+    for _ in range(5):
+        await asyncio.sleep(0)
+    await stop(task)
+    assert sent(satellite) == [], "the displaced handler must answer nothing"
+    assert satellite.writer is fresh
+
+
+async def test_an_end_of_recording_that_cannot_be_queued_ends_the_session():
+    satellite, writer = connected()
+    satellite.on_press()
+    satellite.on_audio(FRAME)
+    while not satellite._out.full():  # a peer that stopped reading
+        satellite._out.put_nowait(("audio-chunk", None, b""))
+    satellite.on_release()
+    assert satellite.writer is None, "a run with no end must not sit out the watchdog"
+    assert writer.closed
+    assert satellite._awaiting_since is None
 
 
 async def test_anything_home_assistant_says_clears_the_debt():

@@ -601,6 +601,11 @@ class Satellite:
                 event, payload = await read_event(reader)
                 if event is None:
                     break
+                if self.writer is not writer:
+                    # Displaced while this read was in flight. Whatever was still
+                    # buffered here belongs to a session that is over, and acting
+                    # on it would reach into the one that replaced it.
+                    break
                 await self._on_event(event, payload)
         except (asyncio.IncompleteReadError, ConnectionResetError):
             pass
@@ -624,6 +629,11 @@ class Satellite:
         self.writer = None
         self._run_open = False
         self._awaiting_since = None
+        # Queued events belong to the connection that is going. The writer task
+        # may not run before a replacement arrives, and a reconnect that is handed
+        # the previous run's audio is worse than one handed nothing.
+        while not self._out.empty():
+            self._out.get_nowait()
         self.player.stop()
         if writer is not None:
             try:
@@ -691,11 +701,15 @@ class Satellite:
             LOG.info("event: %s %s", etype, {k: v for k, v in data.items() if k != "audio"})
 
     def send(self, etype, data=None, payload=b""):
-        """Queue one event. Safe to call from the microphone's reader callback."""
+        """Queue one event, reporting whether it got in.
+
+        Safe to call from the microphone's reader callback.
+        """
         if self.writer is None:
-            return
+            return False
         try:
             self._out.put_nowait((etype, data, payload))
+            return True
         except asyncio.QueueFull:
             # A peer that has stopped reading. Audio is the only thing arriving
             # faster than it leaves, so audio is what gives way: losing 20 ms of
@@ -703,6 +717,7 @@ class Satellite:
             self._dropped += 1
             if self._dropped % 50 == 1:
                 LOG.warning("outbound queue full - dropping audio (%d so far)", self._dropped)
+            return False
 
     async def drain(self):
         """The only place anything is written, so the order queued is the order sent."""
@@ -715,12 +730,14 @@ class Satellite:
                 await write_event(writer, etype, data, payload)
             except (ConnectionResetError, BrokenPipeError, OSError):
                 # The whole session goes, not just the writer: a half-dropped one
-                # leaves a run open that nothing will ever close.
-                self._end_session()
+                # leaves a run open that nothing will ever close. Unless the write
+                # was already stale - a reconnect during the await - in which case
+                # ending the session would kill the connection that replaced it.
+                if self.writer is writer:
+                    self._end_session()
 
     async def _send(self, etype, data=None, payload=b""):
-        self.send(etype, data, payload)
-        return True
+        return self.send(etype, data, payload)
 
     async def _send_info(self):
         """What this box is, in Wyoming's vocabulary.
@@ -800,9 +817,15 @@ class Satellite:
                 LOG.info("mic key up - the remote sent no audio, so nothing was started")
             return
         self._run_open = False
-        self._awaiting_since = time.monotonic()
         LOG.info("mic key up")
-        self.send("audio-stop", {"timestamp": int(time.monotonic() * 1000)})
+        if not self.send("audio-stop", {"timestamp": int(time.monotonic() * 1000)}):
+            # The end of the recording is the one event that cannot be dropped: a
+            # run without it never finishes. Waiting out the watchdog would work
+            # and take a minute; the answer is already lost either way.
+            LOG.warning("could not send the end of the recording - dropping the connection")
+            self._end_session()
+            return
+        self._awaiting_since = time.monotonic()
 
     def _start_pipeline(self):
         run = {

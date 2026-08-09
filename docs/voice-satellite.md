@@ -134,7 +134,10 @@ closing is reaped by the kernel rather than holding the session for ever.
 nothing at all while a pipeline is stuck, not even a ping, so a minute of silence
 after `audio-stop` is taken as a lost run: the satellite closes the socket and its
 Wyoming integration reconnects on its own. It is the only lever this side has, and
-the log line is `no answer in 60 s`.
+the log line is `no answer in 60 s`. The end of a recording is also the one event
+that is never dropped when the outbound queue is full - audio gives way, that does
+not - and a run whose end could not be sent closes the connection at once rather
+than waiting the minute out.
 
 ## The answer on the screen
 
