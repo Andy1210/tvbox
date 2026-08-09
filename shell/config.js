@@ -396,6 +396,45 @@ function rawFileserver() {
   return (load() || {}).fileserver || {};
 }
 
+// App shares: the folders installed apps declare (appshares.js), offered read-only
+// to another box, and the boxes this one has been paired with. Two credentials live
+// here, and neither is the user's: `token` is what this box hands a peer, and a
+// peer entry carries the one that box handed us. config.json is chmod 600 like the
+// rest, and the launcher only ever learns whether a token is set.
+//
+// `enabled` is the list of share ids that are actually offered - an empty list is
+// how the whole thing is off, so there is no second switch to disagree with it.
+function peerOk(p) {
+  return (
+    p &&
+    typeof p === "object" &&
+    typeof p.id === "string" &&
+    typeof p.name === "string" &&
+    typeof p.host === "string" &&
+    typeof p.token === "string" &&
+    Number.isInteger(Number(p.port))
+  );
+}
+function setAppshares(appshares) {
+  const c = load();
+  const cur = c.appshares || {};
+  const a = appshares || {};
+  const next = {
+    enabled: Array.isArray(a.enabled) ? a.enabled.filter((x) => typeof x === "string").slice(0, 64) : cur.enabled || [],
+    port: Number(a.port === undefined ? cur.port : a.port) || 0,
+    token: a.token === undefined ? cur.token || "" : String(a.token),
+    // Replaced whole, like the share list: a peer is removed by sending the list
+    // without it, so there is one way in and one way out.
+    peers: Array.isArray(a.peers) ? a.peers.filter(peerOk).slice(0, 8) : cur.peers || [],
+  };
+  c.appshares = next;
+  save(c);
+  return next;
+}
+function rawAppshares() {
+  return (load() || {}).appshares || {};
+}
+
 // Network shares (SMB), the other direction of the same idea: the file server hands
 // the box's folders OUT, these bring someone else's IN. Credentials live here for
 // the same reason - config.json is chmod 600 - and the launcher only ever learns
@@ -760,6 +799,8 @@ function replaceAll(cfg) {
 module.exports = {
   setFileserver,
   rawFileserver,
+  setAppshares,
+  rawAppshares,
   setShares,
   rawShares,
   setPhoneRemote,
