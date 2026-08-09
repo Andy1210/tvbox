@@ -218,7 +218,8 @@ if fails:
     for f in fails:
         print(" -", f)
     sys.exit(1)
-print("gamepad_shim: all checks passed")
+# No success line here: the checks below are part of the same run, and announcing
+# a pass before them would leave a green line in the log above a failure.
 
 # ---- a trigger pair must never be adopted as the right stick --------------------
 # The bug this pins: the right-stick candidates fall back to Z/RZ whenever RX/RY are
@@ -332,6 +333,55 @@ pm = gs.Pad(mute)
 pm.replan(force=True)
 check("a forced plan lands", pm.decided, True)
 check("a forced plan reads zeros as triggers", pm.axis_map.get(e.ABS_Z), (e.ABS_Z, True))
+
+# A signed range is the trap in "wait for a resting value": its centre IS zero, so a
+# left stick over -32768..32767 reads centred before the pad has said anything, and a
+# check for a centred X/Y would call that a report and decide on nothing.
+signed = dev(
+    "Signed ranges",
+    [e.ABS_X, e.ABS_Y, e.ABS_Z, e.ABS_RZ],
+    PAD_KEYS,
+    ranges={a: (-32768, 32767) for a in (e.ABS_X, e.ABS_Y, e.ABS_Z, e.ABS_RZ)},
+    rest={a: 0 for a in (e.ABS_X, e.ABS_Y, e.ABS_Z, e.ABS_RZ)},
+)
+ps = gs.Pad(signed)
+check("a centred signed stick is not a report", ps.decided, False)
+# An event from the device is the other kind of evidence, and it needs no value to
+# have changed: the read loop sets this the moment an EV_ABS arrives.
+ps.reported = True
+ps.replan()
+check("an EV_ABS from the pad settles it", ps.decided, True)
+
+# One digital shoulder does not make a trigger pair: a pad with BTN_TL2 alone and
+# analog Z/RZ triggers had those mapped as the right stick, which pins it into a
+# corner. Both buttons or neither.
+half = dev("One digital shoulder", [e.ABS_X, e.ABS_Y, e.ABS_Z, e.ABS_RZ], PAD_KEYS + [e.BTN_TL2])
+ph = gs.Pad(half)
+check("one digital trigger leaves Z/RZ analog", ph.axis_map.get(e.ABS_Z), (e.ABS_Z, True))
+check("…and does not claim the right stick", ph.axis_map.get(e.ABS_RZ), (e.ABS_RZ, True))
+
+# A pad that vanishes while its plan is still being settled must not take the daemon
+# with it: replan() re-reads capabilities, and that raises on a device that is gone.
+class Gone:
+    name = "Vanished"
+    path = "/dev/input/event9"
+
+    def capabilities(self):
+        raise OSError(19, "No such device")
+
+    def close(self):
+        pass
+
+
+gone = gs.Pad.__new__(gs.Pad)  # no __init__: it would raise in the same place
+gone.dev = Gone()
+gone.decided = False
+gone.reported = False
+gone.absinfo = {}
+gone.keys = set()
+pads = {Gone.path: gone}
+check("a pad lost while mapping is dropped", gs.replan(gone, pads, force=True), False)
+check("…and taken off the list rather than crashing", pads, {})
 
 if fails:
     print("FAIL")

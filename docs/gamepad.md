@@ -94,10 +94,12 @@ pad the instant it appears, and until its first report every axis reads the zero
 kernel created it with - so a Bluetooth Nacon's centred right stick looked like a
 released trigger pair and **took the triggers' place**: both triggers went dead, and
 the virtual pad's sat half-pressed because a centred stick scales to the middle of a
-trigger's range. `X`/`Y` reading centred is the check that says a report has arrived
-(the left stick is a stick on every pad), and until it does the pad's axes stay
-unmapped - silent rather than wrong - for up to five seconds, buttons passing through
-throughout. Watch it settle:
+trigger's range. What counts as a report having arrived is an axis resting at
+anything other than that zero, or an `EV_ABS` event actually turning up. A centred
+axis is not evidence: on a signed range (`-32768..32767`, which is most pads) the
+centre _is_ zero, so the left stick reads centred before the pad has said anything.
+Until one of those comes the pad's axes stay unmapped - silent rather than wrong -
+for up to five seconds, while buttons pass through. Watch it settle:
 
 ```console
 [gamepad-shim] 'Some Pad' axes idle at zero - waiting for its first report

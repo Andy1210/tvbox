@@ -184,16 +184,22 @@ def centred(info):
     return abs(info.value - mid) < (info.max - info.min) * 0.25
 
 
-def rest_reported(absinfo):
-    """Do this pad's resting values mean anything yet? The LEFT stick is a stick on
-    every pad there is, so X/Y reading centred is the one check that says the kernel
-    has had a real report: a device grabbed the moment it appears has every axis at
-    the zero it was created with, and zero is a perfectly plausible resting value
-    for a trigger."""
-    return centred(absinfo.get(e.ABS_X)) and centred(absinfo.get(e.ABS_Y))
+def values_reported(absinfo):
+    """Do this pad's resting values mean anything yet? A device grabbed the moment it
+    appears has every axis at the zero the kernel created it with, and zero is a
+    perfectly plausible resting value for a trigger - so the values say nothing until
+    the pad has spoken.
+
+    A centred axis is NOT that evidence: on a signed range (-32768..32767, which is
+    most pads) the centre IS zero, so the left stick reads centred before any report
+    arrives. An axis resting at anything else is a value only the device could have
+    put there - which is what an Android-style 0..255 stick resting at ~128 gives us,
+    and it is why such a pad still settles immediately. Everything else waits for a
+    real event (Pad.reported) or for the deadline."""
+    return any(info and info.value != 0 for info in absinfo.values())
 
 
-def plan_axes(axes, keys, absinfo, force=False):
+def plan_axes(axes, keys, absinfo, reported=False, force=False):
     """Which source axes are the right stick, and which are the triggers.
 
     Shape decides wherever it can, and resting values only settle what is left -
@@ -215,16 +221,19 @@ def plan_axes(axes, keys, absinfo, force=False):
         triggers = pedals
         right = ZRZ if has_zrz else None  # Android-style: the stick is what is left
     elif has_zrz:
-        if {e.BTN_TL2, e.BTN_TR2} & keys:
+        # BOTH digital triggers, not either: a pad with one digital shoulder and an
+        # analog Z/RZ trigger pair would otherwise have its triggers taken for the
+        # right stick, which pins that stick into a corner.
+        if {e.BTN_TL2, e.BTN_TR2} <= keys:
             right = ZRZ  # digital L2/R2 ARE the triggers
-        elif not rest_reported(absinfo) and not force:
+        elif not reported and not force:
             return None, None, False
         elif centred(absinfo.get(e.ABS_Z)) and centred(absinfo.get(e.ABS_RZ)):
             right = ZRZ
         else:
             triggers = ZRZ
     if triggers is None and set(HAT2) <= axes:
-        if not rest_reported(absinfo) and not force:
+        if not reported and not force:
             return right, None, False
         # A second hat rests centred; a trigger pair rests at its ends.
         if not (centred(absinfo.get(HAT2[0])) or centred(absinfo.get(HAT2[1]))):
@@ -246,6 +255,9 @@ class Pad:
         self.axis_map = {}
         self.has_analog_triggers = False
         self.decided = False
+        # An EV_ABS event actually seen from this device. The read loop sets it, and
+        # it is the only unambiguous proof that the resting values are the pad's own.
+        self.reported = False
         self.deadline = time.monotonic() + PLAN_SETTLE_SEC
         self.replan()
         if not self.decided:
@@ -260,7 +272,8 @@ class Pad:
         caps = self.dev.capabilities()  # re-reads absinfo from the device
         self.absinfo = {a: info for a, info in caps.get(e.EV_ABS, [])}
         axes = set(self.absinfo)
-        right, triggers, decided = plan_axes(axes, self.keys, self.absinfo, force)
+        reported = self.reported or values_reported(self.absinfo)
+        right, triggers, decided = plan_axes(axes, self.keys, self.absinfo, reported, force)
         if not decided:
             return
         self.axis_map = {e.ABS_X: (e.ABS_X, False), e.ABS_Y: (e.ABS_Y, False)}
@@ -321,6 +334,27 @@ class Pad:
             target, value = self.scale(ev.code, ev.value)
             return (e.EV_ABS, target, value)
         return None
+
+
+def replan(pad, pads, force=False):
+    """Settle one pad's plan, and survive a pad that goes away while doing it.
+
+    replan() re-reads the device's capabilities, which raises if it disappeared
+    between the select and the read (Bluetooth drops, a stick pulled). Unhandled
+    that ends the daemon, and with it EVERY pad's input until systemd restarts it -
+    so the pad is dropped the same way a failed read drops one. Returns False when
+    the pad is gone."""
+    try:
+        pad.replan(force=force)
+        return True
+    except Exception as ex:
+        log("lost", pad.dev.name, "while mapping it -", ex)
+        try:
+            pad.dev.close()
+        except Exception:
+            pass
+        pads.pop(pad.dev.path, None)
+        return False
 
 
 def main():
@@ -385,16 +419,26 @@ def main():
                     except Exception:
                         pass
                     dev.close()
-            # A pad that reports nothing at all still has to end up mapped.
-            for pad in pads.values():
-                if not pad.decided and now >= pad.deadline:
-                    pad.replan(force=True)
+        # A pad that reports nothing at all still has to end up mapped. Checked every
+        # pass rather than inside the rescan branch above: tied to the rescan, a quiet
+        # pad would sit unmapped for up to RESCAN_SEC past its own deadline.
+        now = time.monotonic()
+        for pad in list(pads.values()):
+            if not pad.decided and now >= pad.deadline:
+                if not replan(pad, pads, force=True):
+                    if not pads and ui is not None:
+                        ui = release_virtual(ui)
         if not pads:
             time.sleep(max(0.05, next_scan - time.monotonic()))  # nothing to read until the next scan
             continue
         # Read whatever is ready. A pad that disappears (BT off, unplug) raises on
         # read and is dropped; the virtual pad stays up for the others.
-        r, _, _ = select.select([p.dev.fd for p in pads.values()], [], [], 0.2)
+        #
+        # The wait ends at the nearest pending deadline as well, so a pad that never
+        # reports is forced on time instead of at the next rescan.
+        waits = [p.deadline - now for p in pads.values() if not p.decided]
+        timeout = max(0.01, min([0.2] + [w for w in waits if w > 0])) if waits else 0.2
+        r, _, _ = select.select([p.dev.fd for p in pads.values()], [], [], timeout)
         for fd in r:
             pad = next((p for p in pads.values() if p.dev.fd == fd), None)
             if pad is None:
@@ -414,7 +458,12 @@ def main():
             # These events are the report the plan was waiting for, and the kernel has
             # already applied them - so settle it BEFORE translating them.
             if not pad.decided:
-                pad.replan(force=time.monotonic() >= pad.deadline)
+                if any(ev.type == e.EV_ABS for ev in events):
+                    pad.reported = True  # the pad's resting values are its own now
+                if not replan(pad, pads, force=time.monotonic() >= pad.deadline):
+                    if not pads and ui is not None:
+                        ui = release_virtual(ui)
+                    continue
             wrote = False
             for ev in events:
                 out = pad.translate(ev)
