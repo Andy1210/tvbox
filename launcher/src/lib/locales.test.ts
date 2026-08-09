@@ -22,10 +22,11 @@ const DYNAMIC = [
   "ir.backend.",
   "firetvir.key.",
   "fileserver.err.",
+  "appshares.err.",
   "shares.err.",
   "mirroring.err.",
   "restore.step.",
-]; // built at runtime (Clock, Ambient weather, Settings categories, remap actions, power options, keyboard-layout names, IR blaster actions/backends, Fire TV IR key names, the box's file-server, network-share and screen-mirroring error codes, restore-reconciliation step kinds)
+]; // built at runtime (Clock, Ambient weather, Settings categories, remap actions, power options, keyboard-layout names, IR blaster actions/backends, Fire TV IR key names, the box's file-server, saves-sharing, network-share and screen-mirroring error codes, restore-reconciliation step kinds)
 
 function flatten(obj: Record<string, unknown>, prefix = ""): string[] {
   return Object.entries(obj).flatMap(([k, v]) => {
