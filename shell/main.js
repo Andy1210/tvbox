@@ -425,7 +425,10 @@ function issueShareKey(box) {
   const cred = appshares.newCredential();
   // The hostname is what makes a box itself here, the same source the MQTT device
   // id is derived from - so a peer list names the rooms, not addresses.
-  const id = String((box && box.id) || "") || "box-" + cred.user;
+  // Until the answer names the box, the key is filed under its own user name -
+  // unique already, and adoptShareKey renames the row the moment the box says who
+  // it is.
+  const id = String((box && box.id) || "") || cred.user;
   const kept = (cfg.issued || []).filter((x) => x.id !== id);
   config.setAppshares({
     issued: [
