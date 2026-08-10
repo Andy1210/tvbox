@@ -182,6 +182,54 @@ test("a fork can point its boxes at its own build, over https only", () => {
   assert.equal(base(), DEFAULT_BASE);
 });
 
+test("a cached answer is checked again, not trusted because it is ours", () => {
+  // The caches are files in a writable directory, and what comes out of them names
+  // fetch URLs and paints rows. A slug that is not a slug, or a device with a code
+  // this box could not send, must not survive a trip through the disk.
+  const { home, out } = inBox(`
+    const fs = require("fs");
+    const path = require("path");
+    const cache = path.join(require("os").homedir(), ".tvbox", "cache");
+    fs.writeFileSync(path.join(cache, "ir-index-v1.json"), JSON.stringify({
+      ts: Date.now(),
+      index: { format: 1, revision: "cached00", generated: "", notice: "", brands: [
+        { brand: "Samsung", slug: "samsung-000002", devices: 3 },
+        { brand: "Evil", slug: "../../etc/passwd", devices: 1 },
+      ] },
+    }));
+    fs.writeFileSync(path.join(cache, "ir-brand-cached00-samsung-000002.json"), JSON.stringify({
+      devices: [${JSON.stringify(device())}, { id: "abcabcabcabc", label: "bad", keys: { Power: { protocol: "raw", entry: { raw: [1, 2], frequency: 38000 } } } }],
+    }));
+    serve({});
+    ix.fetchIndex((err, index) => {
+      ix.fetchBrand("samsung-000002", (e2, answer) => say({
+        err: err && err.message,
+        slugs: index.brands.map((b) => b.slug),
+        devices: answer && answer.devices.length,
+        asked,
+      }));
+    });
+  `);
+  assert.equal(out.err, null, "a good cached index is still used - no network here at all");
+  assert.deepEqual(out.slugs, ["samsung-000002"], "the path-traversal slug is dropped on the way out of the cache");
+  assert.equal(out.devices, 1, "and so is the cached device whose code is too short to be a frame");
+  assert.deepEqual(out.asked, [], "nothing was fetched");
+  assert.ok(fs.existsSync(path.join(home, ".tvbox", "cache", "ir-index-v1.json")));
+});
+
+test("a cache file bigger than the fetch cap is not read at all", () => {
+  const { out } = inBox(`
+    const fs = require("fs");
+    const path = require("path");
+    const file = path.join(require("os").homedir(), ".tvbox", "cache", "ir-index-v1.json");
+    fs.writeFileSync(file, "[" + "0,".repeat(3e6) + "0]");
+    serve({ "index.json": ${JSON.stringify(index())} });
+    ix.fetchIndex((err, i) => say({ err: err && err.message, revision: i && i.revision, asked }));
+  `);
+  assert.equal(out.revision, "abc123abc123", "it went to the network instead");
+  assert.equal(out.asked.length, 1);
+});
+
 test("a brand answer is cached per index revision, and the old generation is swept", () => {
   // Brand files are named after the revision so a rebuild retires them; without the
   // sweep a box that browses often would keep every generation of every brand.

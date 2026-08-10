@@ -16,7 +16,7 @@
 const fs = require("fs");
 const path = require("path");
 const config = require("./config");
-const { CACHE_DIR, httpsGet, writeCache } = require("./irhttp");
+const { CACHE_DIR, httpsGet, readCache, writeCache } = require("./irhttp");
 
 const DEFAULT_BASE = "https://andy1210.github.io/tvbox/ir/";
 const INDEX_CACHE = path.join(CACHE_DIR, "ir-index-v1.json");
@@ -46,17 +46,20 @@ const validSlug = (s) => typeof s === "string" && /^[a-z0-9][a-z0-9-]{0,45}$/.te
 
 let indexMemo = null;
 
+// The cached copy goes through the SAME check a fresh answer does. It is a file in a
+// writable directory, so "we already checked this once" is not a property it has -
+// and what comes out of it names fetch URLs and paints rows.
 function loadIndexCache() {
   if (indexMemo && Date.now() - indexMemo.ts < TTL_MS) return indexMemo;
-  try {
-    const c = JSON.parse(fs.readFileSync(INDEX_CACHE, "utf8"));
-    if (c && Date.now() - c.ts < TTL_MS && c.index && Array.isArray(c.index.brands)) return (indexMemo = c);
-  } catch (e) {}
-  return null;
+  const c = readCache(INDEX_CACHE, MAX_INDEX_BYTES);
+  if (!c || !(Date.now() - c.ts < TTL_MS)) return null;
+  const index = sanitizeIndex(c.index);
+  return index ? (indexMemo = { ts: c.ts, index }) : null;
 }
 
 // A published index is a file off the internet, so every field the UI or a fetch URL
-// is built from is checked here rather than downstream.
+// is built from is checked here rather than downstream. The answer carries `format`
+// so that re-checking a cached copy is the same call, not a second rule.
 function sanitizeIndex(raw) {
   if (!raw || typeof raw !== "object" || raw.format !== FORMAT) return null;
   const brands = [];
@@ -73,6 +76,7 @@ function sanitizeIndex(raw) {
   }
   if (!brands.length) return null;
   return {
+    format: FORMAT,
     revision: String(raw.revision || "").slice(0, 40) || "0",
     generated: String(raw.generated || "").slice(0, 40),
     notice: String(raw.notice || "").slice(0, 2000),
@@ -186,6 +190,9 @@ function sanitizeDevice(raw) {
   };
 }
 
+// How many codesets carried none of the four keys, as a number the screen can print.
+const count = (v) => Math.max(0, Math.min(9999, Math.round(Number(v) || 0)));
+
 const brandCacheFile = (revision, slug) => path.join(CACHE_DIR, "ir-brand-" + revision + "-" + slug + ".json");
 
 function fetchBrand(slug, cb) {
@@ -194,11 +201,13 @@ function fetchBrand(slug, cb) {
     if (err) return cb(err);
     const listed = index.brands.find((b) => b.slug === slug);
     if (!listed) return cb(new Error("unknown brand"));
+    // Same rule as the index cache: a stored answer is re-checked device by device.
     const file = brandCacheFile(index.revision, slug);
-    try {
-      const c = JSON.parse(fs.readFileSync(file, "utf8"));
-      if (c && Array.isArray(c.devices)) return cb(null, c);
-    } catch (e) {}
+    const cached = readCache(file, MAX_BRAND_BYTES);
+    if (cached && Array.isArray(cached.devices)) {
+      const devices = cached.devices.slice(0, MAX_DEVICES).map(sanitizeDevice).filter(Boolean);
+      if (devices.length) return cb(null, { brand: listed.brand, slug, devices, skipped: count(cached.skipped) });
+    }
     get(base() + "brands/" + encodeURIComponent(slug) + ".json", MAX_BRAND_BYTES, (e2, body) => {
       if (e2) return cb(e2);
       let parsed;
@@ -211,12 +220,7 @@ function fetchBrand(slug, cb) {
         .map(sanitizeDevice)
         .filter(Boolean);
       if (!devices.length) return cb(new Error("brand carries no usable device"));
-      const answer = {
-        brand: listed.brand,
-        slug,
-        devices,
-        skipped: Math.max(0, Math.round(Number(parsed.skipped) || 0)),
-      };
+      const answer = { brand: listed.brand, slug, devices, skipped: count(parsed.skipped) };
       writeCache(file, answer);
       cb(null, answer);
     });

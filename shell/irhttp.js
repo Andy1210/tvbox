@@ -72,4 +72,16 @@ function writeCache(file, value) {
   } catch (e) {}
 }
 
-module.exports = { CACHE_DIR, ALLOWED_HOSTS, httpsGet, writeCache };
+// A cache file is a copy of an answer off the internet sitting in a writable
+// directory, so it is read under the same cap the fetch had and its contents are
+// checked by the caller exactly as a fresh answer is. `null` for anything unusable.
+function readCache(file, maxBytes) {
+  try {
+    if (fs.statSync(file).size > maxBytes) return null;
+    return JSON.parse(fs.readFileSync(file, "utf8"));
+  } catch (e) {
+    return null;
+  }
+}
+
+module.exports = { CACHE_DIR, ALLOWED_HOSTS, httpsGet, writeCache, readCache };
