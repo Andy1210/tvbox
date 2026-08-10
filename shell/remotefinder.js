@@ -217,8 +217,14 @@ function makeFinder(deps) {
       if (err) return cb(err);
       write(path, RING_ON, (e) => {
         if (e) return cb(e);
+        // Replace the tracked ring only once the new one is really ringing: a
+        // start that failed after we had cancelled the old timer would leave a
+        // buzzing remote with no auto-stop armed.
+        if (state) clearTimer(state.timer);
         const entry = { mac: String(mac).toLowerCase(), retries: 0, timer: null };
-        entry.timer = setTimer(() => doStop(() => {}), MAX_RING_MS);
+        // Through the queue, like the retry: a timer firing beside an in-flight
+        // start would have two operations writing at once.
+        entry.timer = setTimer(() => serial((fin) => doStop(fin)), MAX_RING_MS);
         state = entry;
         cb(null);
       });
@@ -242,8 +248,7 @@ function makeFinder(deps) {
       if (state && state.mac !== String(mac).toLowerCase()) {
         return doStop((err) => (err ? finish(err) : doStart(mac, finish)));
       }
-      if (state) clearTimer(state.timer); // same remote again: restart its clock
-      doStart(mac, finish);
+      doStart(mac, finish); // same remote again: doStart restarts its clock
     }).then((err) => {
       done(err);
       return err; // callers may await instead of passing a callback

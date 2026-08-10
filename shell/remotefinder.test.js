@@ -213,6 +213,21 @@ test("the documented one-minute cap is the constant the code uses", () => {
   assert.equal(rf.MAX_RING_MS, 60000);
 });
 
+test("a re-ring that fails leaves the running one's auto-stop armed", async () => {
+  // Cancelling the old timer before the new start succeeded would leave a
+  // buzzing remote with nothing left to stop it.
+  let allow = true;
+  const h = harness({ failWrite: () => !allow });
+  await h.finder.ring(MAC, true);
+  const armed = h.live()[0];
+  allow = false;
+  const err = await h.finder.ring(MAC, true);
+  assert.ok(err, "the second start failed");
+  assert.equal(h.finder.isRinging(), MAC);
+  assert.equal(h.live().length, 1, "still exactly one timer");
+  assert.equal(h.live()[0], armed, "and it is the original one, not a cancelled stub");
+});
+
 test("a stop that never gets through gives up rather than arming timers forever", async () => {
   const h = harness({ failWrite: (c) => c.includes(OFF) });
   await h.finder.ring(MAC, true);

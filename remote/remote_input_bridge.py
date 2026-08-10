@@ -191,6 +191,10 @@ PANIC_EXEMPT_ACTIONS = frozenset(
 # report id -> (virtual code base, slot width in bytes, slot count, band size)
 APP_BTN_REPORTS = {0xEF: (0x300, 1, 3, 0x100), 0x02: (0x400, 2, 2, 0x400)}
 APP_BTN_VIRT_BASE = 0x300  # floor of the virtual bands
+# How many distinct out-of-range usages are worth naming in the log per node.
+# A 16-bit field can carry 64k of them, and remembering each one to de-duplicate
+# its log line would be a slow leak fed by whatever the remote sends.
+OUT_OF_BAND_LOGGED = 32
 
 
 def hidraw_nodes_for(remote_ids):
@@ -633,10 +637,13 @@ class Bridge:
             if usage >= size:
                 # outside the band this report id was given: folding it in would
                 # land on another button's code (the debug flag shows the report).
-                # Logged once per usage - a held button repeats its report.
+                # Logged once per usage - a held button repeats its report - and
+                # only for the first few: the set is there to keep the journal
+                # readable, not to remember every value a noisy device invents.
                 if usage not in h["out_of_band"]:
-                    h["out_of_band"].add(usage)
-                    log("hidraw %02x: usage %04x out of range" % (data[0], usage))
+                    if len(h["out_of_band"]) < OUT_OF_BAND_LOGGED:
+                        h["out_of_band"].add(usage)
+                        log("hidraw %02x: usage %04x out of range" % (data[0], usage))
                 continue
             now.add(base + usage)
         held = {vk for vk in h["down"] if base <= vk < base + size}
