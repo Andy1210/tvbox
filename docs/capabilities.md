@@ -152,8 +152,26 @@ emulator's saves are the obvious one, but nothing here knows that. The split is:
 const { peers, shares } = await window.tvbox.shares.list();
 // peers:  [{ id, name }]           - boxes this one has been paired with
 // shares: [{ id, name, present, on }] - THIS app's, as Settings sees them
+
+// What a pull would do, before doing it:
+const c = await window.tvbox.shares.compare(peers[0].id, shares[0].id);
+// { here: {newest, files}, there: {newest, files}, newerThere, olderThere }
+
 await window.tvbox.shares.pull(peers[0].id, shares[0].id);
 ```
+
+`compare` exists because a pull is one press and it replaces what is here.
+`newerThere` is what would arrive; **`olderThere` is what would be replaced by an
+older copy** - rclone copies whatever differs in the direction it was asked for, it
+does not prefer the newer file, and that count is the difference between a useful
+pull and a regret. `newest` is a timestamp in milliseconds, or null for a side that
+holds nothing.
+
+Both sides are listed through rclone with the share's **own `exclude` patterns**,
+which is not a detail: an emulator rewrites its config on every exit, so an
+unfiltered comparison reports the other box as newer forever. Each call costs a
+listing over the network (measured: 0.25-0.8 s for a save folder), so ask on opening
+a screen, not on every render.
 
 Everything is scoped to the calling app: another app's shares are not in the list
 and are refused if named. There is no destination argument - the box resolves where

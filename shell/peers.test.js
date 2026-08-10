@@ -205,3 +205,76 @@ test("what a box says about itself is checked once, wherever it arrives", () => 
   assert.equal(peers.callerAddress({ socket: { remoteAddress: "::ffff:192.168.1.7" } }), "192.168.1.7");
   assert.equal(peers.callerAddress({}), "");
 });
+
+test("a listing asks both sides the same question, with the copy's own filters", () => {
+  // The filters are the point. An emulator rewrites its own config on every exit,
+  // so an unfiltered comparison says "the other box is newer" forever and the
+  // answer means nothing - measured on a real pair of boxes, where every file under
+  // Dolphin's User/Config carried the same fresh timestamp.
+  const exclude = ["**/Cache/**", "**/Config/**"];
+  const local = peers.lsArgv("/home/tv/.var/app/x/saves", exclude, null);
+  const remote = peers.lsArgv(":webdav:retroarch/saves", exclude, {
+    host: "192.168.1.7",
+    port: 8096,
+    user: "box-a1",
+    token: "secret-token",
+  });
+  assert.deepStrictEqual(local.slice(0, 3), ["rclone", "lsjson", "/home/tv/.var/app/x/saves"]);
+  assert.ok(local.includes("--files-only") && local.includes("--recursive"));
+  assert.deepStrictEqual(
+    local.filter((a, i) => local[i - 1] === "--exclude"),
+    exclude,
+    "the same list on this box",
+  );
+  assert.deepStrictEqual(
+    remote.filter((a, i) => remote[i - 1] === "--exclude"),
+    exclude,
+    "and on the other one",
+  );
+  assert.ok(!local.includes("--webdav-url"), "a local path is not a remote");
+  assert.deepStrictEqual(
+    remote.filter((a, i) => remote[i - 1] === "--webdav-user"),
+    ["box-a1"],
+  );
+  assert.ok(!remote.join(" ").includes("secret-token"), "the key goes through the environment");
+});
+
+test("the comparison answers what a pull would do, not what differs", () => {
+  const t = (iso) => ({ Path: iso[0], ModTime: iso[1] });
+  const here = [
+    t(["a.sav", "2026-08-10T09:00:00Z"]), // newer here
+    t(["b.sav", "2026-08-09T09:00:00Z"]), // newer there
+    t(["c.sav", "2026-08-08T09:00:00Z"]), // same
+  ];
+  const there = [
+    t(["a.sav", "2026-08-09T09:00:00Z"]),
+    t(["b.sav", "2026-08-10T09:00:00Z"]),
+    t(["c.sav", "2026-08-08T09:00:00Z"]),
+    t(["d.sav", "2026-08-07T09:00:00Z"]), // only there
+  ];
+  const r = peers.compareListings(here, there);
+  assert.equal(r.newerThere, 2, "b is newer there and d is missing here - both would arrive");
+  assert.equal(r.olderThere, 1, "a would be replaced by an older copy, which is the regret");
+  assert.equal(r.here.files, 3);
+  assert.equal(r.there.files, 4);
+  assert.equal(new Date(r.here.newest).toISOString(), "2026-08-10T09:00:00.000Z");
+  assert.equal(new Date(r.there.newest).toISOString(), "2026-08-10T09:00:00.000Z");
+});
+
+test("a second's difference is not a difference", () => {
+  // WebDAV carries a modification time to the second, and a copy lands a moment
+  // after the file it came from. Without slack every pull would report the box it
+  // just copied from as newer again.
+  const here = [{ Path: "a.sav", ModTime: "2026-08-10T09:00:00Z" }];
+  const there = [{ Path: "a.sav", ModTime: "2026-08-10T09:00:01Z" }];
+  const r = peers.compareListings(here, there);
+  assert.equal(r.newerThere, 0);
+  assert.equal(r.olderThere, 0);
+});
+
+test("nothing here yet means everything there is worth bringing", () => {
+  const r = peers.compareListings([], [{ Path: "a.sav", ModTime: "2026-08-10T09:00:00Z" }]);
+  assert.equal(r.here.newest, null, "a box that has never played has no date to show");
+  assert.equal(r.newerThere, 1);
+  assert.equal(r.olderThere, 0);
+});

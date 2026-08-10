@@ -5,6 +5,22 @@ updates). `scripts/make-release.sh` lifts the current version's `hu`/`en`
 blocks into the OTA feed's `notes` - keep both languages, keep it short, and
 write for the person on the couch (what changes for THEM), not for developers.
 
+## 2.13.0
+
+### hu
+
+- **A mentések áthozása előtt látod, melyik az újabb.** A RetroArch Mentések fülén
+  minden összekötött box mellett ott a két dátum - mikor írták ott, mikor itt -, és
+  hogy hány fájl újabb odaát. Ha valami ITT újabb, azt külön kiírja: a másolás azt
+  is felülírná.
+
+### en
+
+- **Before you bring saves over, you can see which side is newer.** RetroArch's
+  Saves tab now shows both dates next to each connected box - when it was last
+  written there, and here - and how many files are newer over there. If something
+  here is newer, it says so separately: a copy would replace that too.
+
 ## 2.12.0
 
 ### hu

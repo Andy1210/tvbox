@@ -11,7 +11,8 @@ is sharing.
 
 **Settings → Network → App sharing** is the permission surface: what is offered,
 which boxes are let in, and forget. **The action lives in the app**, through the
-`shares` [capability](capabilities.md) - so an emulator can say "continue in the
+`shares` [capability](capabilities.md) - which also lets it say which side is newer
+before anything is copied - so an emulator can say "continue in the
 other room" in its own screen, and a box without one never sees the sentence.
 
 ## The one rule
