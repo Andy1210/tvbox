@@ -227,7 +227,7 @@
     "learnBody": "Point the {remote} at the box and press the button you want to use for this.",
     "learnWarn": "Every press on this remote gets recorded, even an arrow. Cancel with a different remote (e.g. the TV's own), or it times out after about 10s.",
     "panicHint": "Emergency fallback: if the remote becomes unusable because of its mapping, press the same remapped button 8 times fast and the box resets that remote's buttons.",
-    "devicesCount": "{n} remotes",
+    "devicesCount": "remotes: {n}",
     "resetTitle": "Reset this remote's buttons?",
     "resetBody": "\"{remote}\" has {n} buttons you taught it. Resetting clears all of them and every button goes back to what it does by default. This cannot be undone.",
     "resetConfirm": "Reset",
