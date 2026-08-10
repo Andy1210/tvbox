@@ -240,7 +240,7 @@ test("a listing asks both sides the same question, with the copy's own filters",
 });
 
 test("the comparison answers what a pull would do, not what differs", () => {
-  const t = (iso) => ({ Path: iso[0], ModTime: iso[1] });
+  const t = (iso) => ({ Path: iso[0], ModTime: iso[1], Size: 10 });
   const here = [
     t(["a.sav", "2026-08-10T09:00:00Z"]), // newer here
     t(["b.sav", "2026-08-09T09:00:00Z"]), // newer there
@@ -254,6 +254,7 @@ test("the comparison answers what a pull would do, not what differs", () => {
   ];
   const r = peers.compareListings(here, there);
   assert.equal(r.newerThere, 2, "b is newer there and d is missing here - both would arrive");
+  assert.equal(r.sameTimeDiffers, 0);
   assert.equal(r.olderThere, 1, "a would be replaced by an older copy, which is the regret");
   assert.equal(r.here.files, 3);
   assert.equal(r.there.files, 4);
@@ -270,6 +271,21 @@ test("a second's difference is not a difference", () => {
   const r = peers.compareListings(here, there);
   assert.equal(r.newerThere, 0);
   assert.equal(r.olderThere, 0);
+});
+
+test("the same second is not the same file, and the copy knows it", () => {
+  // rclone's default check is size AND modification time, so a file written in the
+  // same second on both boxes but of a different length is copied. A verdict built
+  // on timestamps alone would answer "nothing to do" for a pull that replaces it.
+  const here = [{ Path: "a.sav", ModTime: "2026-08-10T09:00:00Z", Size: 100 }];
+  const there = [{ Path: "a.sav", ModTime: "2026-08-10T09:00:01Z", Size: 220 }];
+  const r = peers.compareListings(here, there);
+  assert.equal(r.newerThere, 0, "one second apart is not newer");
+  assert.equal(r.olderThere, 0);
+  assert.equal(r.sameTimeDiffers, 1, "but it would still be replaced");
+
+  const same = peers.compareListings(here, [{ Path: "a.sav", ModTime: "2026-08-10T09:00:00Z", Size: 100 }]);
+  assert.equal(same.sameTimeDiffers, 0, "identical size and time is the one case rclone skips");
 });
 
 test("nothing here yet means everything there is worth bringing", () => {

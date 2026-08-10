@@ -328,10 +328,17 @@ function lsArgv(target, exclude, peer) {
 //               differs, in the direction asked for; it does not prefer the newer
 //               file. This is the count that turns a pull into a regret, so it is
 //               counted separately rather than folded into "differences".
+//   sameTimeDiffers - written in the same second on both sides but not the same
+//               size. rclone's default check is size AND modification time, so
+//               these WOULD be copied; counting only timestamps would report
+//               "nothing to do" for a pull that replaces files.
 const MTIME_SLACK_MS = 2000; // WebDAV's second-resolution, plus a second of slack
 
 function compareListings(here, there) {
   const at = (row) => Date.parse((row && row.ModTime) || "") || 0;
+  // A size that is not a number is not a difference. rclone always reports one; a
+  // listing that somehow does not would otherwise make every file look changed.
+  const sized = (row) => (row && Number.isFinite(Number(row.Size)) ? Number(row.Size) : null);
   const byPath = (rows) => {
     const m = new Map();
     for (const r of Array.isArray(rows) ? rows : []) if (r && r.Path) m.set(r.Path, r);
@@ -346,6 +353,7 @@ function compareListings(here, there) {
   };
   let newerThere = 0;
   let olderThere = 0;
+  let sameTimeDiffers = 0;
   for (const [p, r] of b) {
     const mine = a.get(p);
     if (!mine) {
@@ -355,12 +363,14 @@ function compareListings(here, there) {
     const d = at(r) - at(mine);
     if (d > MTIME_SLACK_MS) newerThere++;
     else if (d < -MTIME_SLACK_MS) olderThere++;
+    else if (sized(r) !== null && sized(mine) !== null && sized(r) !== sized(mine)) sameTimeDiffers++;
   }
   return {
     here: { newest: newestOf(a), files: a.size },
     there: { newest: newestOf(b), files: b.size },
     newerThere,
     olderThere,
+    sameTimeDiffers,
   };
 }
 

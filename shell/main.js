@@ -556,7 +556,11 @@ function compareAppshare(peerId, shareId) {
     listing(peers.lsArgv(":webdav:" + shareId, entry.exclude, peer), true),
   ]).then(([here, there]) => {
     if (!there) return { ok: false, error: "unreachable" };
-    return { ok: true, ...peers.compareListings(here || [], there) };
+    // A local listing that FAILED is not an empty folder. Read as one it would
+    // report everything on the other box as worth bringing, which is the most
+    // dangerous answer this call can give - it is the one that invites the press.
+    if (!here) return { ok: false, error: "compare_failed" };
+    return { ok: true, ...peers.compareListings(here, there) };
   });
 }
 

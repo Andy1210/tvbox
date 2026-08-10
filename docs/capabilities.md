@@ -155,7 +155,12 @@ const { peers, shares } = await window.tvbox.shares.list();
 
 // What a pull would do, before doing it:
 const c = await window.tvbox.shares.compare(peers[0].id, shares[0].id);
-// { here: {newest, files}, there: {newest, files}, newerThere, olderThere }
+// { ok: true, here: {newest, files}, there: {newest, files},
+//   newerThere, olderThere, sameTimeDiffers }
+// or { ok: false, error } - "unreachable" when the other box did not answer,
+// "compare_failed" when THIS box could not read its own side. A failure is never
+// reported as an empty folder: that would read as "everything there is worth
+// bringing", which is the answer most likely to be acted on.
 
 await window.tvbox.shares.pull(peers[0].id, shares[0].id);
 ```
@@ -164,8 +169,11 @@ await window.tvbox.shares.pull(peers[0].id, shares[0].id);
 `newerThere` is what would arrive; **`olderThere` is what would be replaced by an
 older copy** - rclone copies whatever differs in the direction it was asked for, it
 does not prefer the newer file, and that count is the difference between a useful
-pull and a regret. `newest` is a timestamp in milliseconds, or null for a side that
-holds nothing.
+pull and a regret. `sameTimeDiffers` is the third case: written in the same second
+on both sides but not the same size. rclone's default check is size AND modification
+time, so those are copied too - a verdict built on timestamps alone would report
+"nothing to do" for a pull that replaces files. `newest` is a timestamp in
+milliseconds, or null for a side that holds nothing.
 
 Both sides are listed through rclone with the share's **own `exclude` patterns**,
 which is not a detail: an emulator rewrites its config on every exit, so an
