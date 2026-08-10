@@ -2,6 +2,7 @@ import { Fragment, useCallback, useEffect, useRef, useState } from "react";
 import { useI18n } from "../../lib/i18n";
 import { fetchBtStatus, fetchBtDevices, btScan, btAction, type BtDevice, type BtStatus } from "../../lib/bluetooth";
 import { fetchIrStatus } from "../../lib/ir";
+import { fetchRemoteDevices } from "../../lib/remote";
 import { fetchPhoneRemote } from "../../lib/phoneremote";
 import { useConfigStore } from "../../stores/config";
 import { PhoneRemoteSubPage } from "./phoneremote";
@@ -276,7 +277,12 @@ export function PeripheralsPane() {
   const bt = useSummary("bt", fetchBtDevices);
   const ir = useSummary("ir", fetchIrStatus);
   const phone = useSummary("phoneremote", fetchPhoneRemote);
-  const remoteCount = useConfigStore((s) => Object.keys(s.config?.remote?.devices || {}).length);
+  // The remotes the BRIDGE can see, which is exactly what the page behind the row
+  // lists. Counting `config.remote.devices` instead counted saved KEYMAPS, and the
+  // two answer differently in both directions: a remote removed from Bluetooth
+  // leaves its keymap behind (so the row went on counting a remote that is gone),
+  // and a remote nobody has remapped has no entry at all (so it was never counted).
+  const remotes = useSummary("remotes", fetchRemoteDevices);
 
   const btValue = !bt
     ? undefined
@@ -299,7 +305,9 @@ export function PeripheralsPane() {
           label={t("remote.title")}
           hint={t("peripherals.remoteHint")}
           // Not remote.customCount - that one counts remapped BUTTONS on one remote.
-          value={remoteCount ? t("remote.devicesCount", { n: remoteCount }) : undefined}
+          // `undefined` while the answer is still coming, so the row shows nothing
+          // rather than "0 remotes" for a moment on every pass down the rail.
+          value={remotes ? t("remote.devicesCount", { n: remotes.length }) : undefined}
           onEnter={() => nav.push({ id: "remote", title: t("remote.title"), render: () => <RemoteButtonsPage /> })}
         />
         <Row
