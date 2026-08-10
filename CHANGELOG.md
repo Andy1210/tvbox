@@ -5,6 +5,31 @@ updates). `scripts/make-release.sh` lifts the current version's `hu`/`en`
 blocks into the OTA feed's `notes` - keep both languages, keep it short, and
 write for the person on the couch (what changes for THEM), not for developers.
 
+## 2.15.0
+
+### hu
+
+- **A távirányító két programozható gombja és a fejhallgatós gombja is
+  használható.** Eddig nem történt tőlük semmi. Most ugyanúgy betaníthatók, mint
+  bármelyik másik gomb (Beállítások → Távirányítók és kiegészítők), és bármelyik
+  alkalmazásra ráköthetők.
+- **Megkerested már a kanapé alatt a távirányítót?** Most szólni tud magáért:
+  megcsörgeted, és a hang elvezet hozzá. Ott van a távirányító beállításai közt,
+  de telefonról és Home Assistantból is elindítható - hiszen a gomb, amit
+  megnyomnál, épp azon a távirányítón van, amit keresel. Egy perc után magától
+  elhallgat. Csak az újabb, csipogóval szerelt távirányítóknál jelenik meg.
+
+### en
+
+- **The remote's two customizable buttons and its headphone button work.**
+  Nothing happened when you pressed them before. They can now be taught like any
+  other button (Settings → Remotes & accessories) and bound to any app.
+- **Looked under the sofa lately?** The remote can call out now: ring it and
+  follow the sound. It is in the remote's own settings, and it can be started
+  from a phone or from Home Assistant too - because the button you would press
+  is on the very thing you are looking for. It stops by itself after a minute.
+  Only newer remotes with a buzzer show it.
+
 ## 2.14.0
 
 ### hu
