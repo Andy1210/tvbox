@@ -326,6 +326,25 @@ test("a file lying loose in a share belongs to no emulator", () => {
   assert.deepStrictEqual(r.groups, [], "but there is nothing to ask for by name");
 });
 
+test("a group nobody could ask for is not offered as one", () => {
+  // The screen turns each group into a row with a copy button. A name a pull would
+  // refuse - a dot-name, a stray space - would be a row that answers unknown_group
+  // every time it is pressed, so it is left out of the list and kept in the totals.
+  const f = (p) => ({ Path: p, ModTime: "2026-08-10T09:00:00Z", Size: 1 });
+  const r = peers.compareListings([], [f("../escape/x.srm"), f(" odd /x.srm"), f("Snes9x/x.srm")]);
+  assert.deepStrictEqual(
+    r.groups.map((g) => g.name),
+    ["Snes9x"],
+  );
+  assert.equal(r.newerThere, 3, "all three would still arrive with the whole share");
+});
+
+test("a path that is not a string does not take the comparison down with it", () => {
+  assert.equal(peers.groupOf(undefined), "");
+  assert.equal(peers.groupOf(42), "");
+  assert.equal(peers.groupOf("Snes9x/x.srm"), "Snes9x");
+});
+
 test("the folder a pull may name is one folder, and not a way out of the share", () => {
   // Emulator folders carry spaces and dashes ("Beetle PSX HW"), so the rule cannot
   // be a tidy identifier - it is "one segment, nothing that traverses".

@@ -344,8 +344,9 @@ const MTIME_SLACK_MS = 2000; // WebDAV's second-resolution, plus a second of sla
 // list of emulators and no knowledge of what a core is. A file lying directly in
 // the share belongs to no group and is counted in the totals only.
 function groupOf(p) {
-  const i = String(p || "").indexOf("/");
-  return i > 0 ? p.slice(0, i) : "";
+  const s = String(p || "");
+  const i = s.indexOf("/");
+  return i > 0 ? s.slice(0, i) : "";
 }
 
 function compareListings(here, there) {
@@ -421,9 +422,11 @@ function compareListings(here, there) {
     newerThere,
     olderThere,
     sameTimeDiffers,
-    // Named groups only: the unnamed one is the share's own loose files, which
-    // nothing can ask for on their own.
-    groups: [...groups.values()].filter((g) => g.name),
+    // Only groups that can actually be ASKED for: the unnamed one is the share's
+    // own loose files, and a name a pull would refuse (a dot-name, a stray space)
+    // would be a row on the screen that answers unknown_group every time it is
+    // pressed. What cannot be pulled is not offered; it still counts in the totals.
+    groups: [...groups.values()].filter((g) => groupNameOk(g.name)),
   };
 }
 
