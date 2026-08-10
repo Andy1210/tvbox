@@ -242,6 +242,13 @@ function post(p, data, res, ctx) {
     );
     return;
   }
+  // The devices a remote drives + which button goes to which. Stored rather than
+  // derived, because the keymap on the remote cannot be read back. The answer is
+  // the SANITIZED plan, so the screen shows what was really kept.
+  if (p === "/tvbox/api/firetvir/plan") {
+    const plan = firetvir.writePlan(String(data.mac || ""), data.plan || {});
+    return httpserver.jsonRes(res, plan ? { ok: true, plan } : { ok: false, error: "could not save" });
+  }
   if (p === "/tvbox/api/nowplaying") {
     // launcher pushes the current now-playing (Spotify / Live TV); bridge it to
     // MQTT (retained) for HA, and remember it for the auto-update idle gate.

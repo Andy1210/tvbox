@@ -27,32 +27,64 @@ write it.
 
 ### The easy way: Settings → Remotes & accessories → "Fire TV remote → TV IR"
 
-The guided on-TV flow does all of the below for you, no SSH:
+The guided on-TV flow does all of the below for you, no SSH. It is built around
+**devices**, not codesets: you add what is in the room, then say which button
+drives which.
 
 1. **Install Bluetooth support** - one tap creates a user-space venv at
    `~/.tvbox/pyenv` and installs `bleak` (+ `dbus-fast`) into it (needs internet;
    `python3-venv`/`pip` come from `provision.sh`). No root, nothing global.
-2. **Pick the remote** - any BLE-paired remote (it needs a MAC to reach over
-   BLE; pair it under Bluetooth first).
-3. **Pick your TV brand + codeset** - pulled live from the community **irdb**
-   database ([github.com/probonopd/irdb](https://github.com/probonopd/irdb),
-   cached ~30 days under `~/.tvbox/cache/`). tvbox converts the irdb
+2. **Add a device** - brand (search, or step in by first letter), then the codes
+   that brand offers. Codes come from the community **irdb** database
+   ([github.com/probonopd/irdb](https://github.com/probonopd/irdb), cached ~30
+   days under `~/.tvbox/cache/`); tvbox converts the irdb
    `(protocol, device, subdevice, function)` row into raw IR timings on the box
    (`remote/ir_protocols.py`: NEC/NECx/RC5/RC6/Sony SIRC/Panasonic; anything
-   else is greyed out honestly instead of blasting garbage).
+   else is offered as unpressable instead of blasting garbage). The brand the
+   box read off the TV's HDMI EDID is offered first.
+3. **Assign the buttons** - Volume ±, Mute and Power each name a device, and
+   optionally a **second** one so a single press blasts both. A device whose code
+   has no row for a button cannot be assigned to it, and says so.
 4. **Test** - a per-key InstantFire blast (nothing saved yet); point the remote
-   at the TV and confirm it reacts, brand codesets vary.
+   at the device and confirm it reacts. The test blasts exactly what saving would
+   write, second device included.
 5. **Save to the remote** - programs the keymap; then tvbox sets
    `remote.devices[<mac>].irPassthrough = true` so the bridge stops diverting
    that remote's BT volume keys to the box's own IR blaster (no double volume).
+   Erasing sets it back to false.
 
-Per key, you can override that choice with **another brand entirely** ("Other
-brand" on the row) - e.g. a soundbar on Volume/Mute while the TV keeps Power -
-and add a **second device** to a key so one press blasts both. The per-key
-picker lists every irdb device type, not just TVs (irdb has no tidy "Soundbar"
-folder; Samsung's audio codes live under `Unknown_AH59-*` remote model numbers).
-The row's **Test** button blasts exactly what would be programmed, second device
-included, without saving anything.
+The setup is stored per remote in `~/.tvbox/firetv_ir_plan.json` and carried by a
+backup. It has to be: the keymap lives on the REMOTE and cannot be read back, so
+without it a second visit would show a fully programmed remote as unconfigured.
+A button may only name a device whose codeset really carries it - the box enforces
+that when it stores the plan, because a key with no row is programmed as nothing
+and would read on screen as set up.
+
+Two operational notes. A **test** writes `firetv_tv_codes.test.json` and a
+**program** writes `firetv_tv_codes.json`; only the second is what "last written to
+the remote" reports, and erasing removes it. And a brand whose codesets did not all
+come down is cached for minutes rather than the usual 30 days, with the failure
+count on screen - a short list is otherwise indistinguishable from a brand that has
+little in it. `~/.tvbox/cache/irdb-brand-v2-*` are those caches; deleting them is
+always safe.
+
+### Why a brand's list is short
+
+A brand folder in irdb is a list of REMOTE MODELS, and the same codes are filed
+under every model number that ever carried them - so the box merges the codesets
+that send the same four keys into one row (`groupSets` in `shell/firetvir.js`).
+Measured against the live index: Samsung's 68 codesets are 25 distinct codes, 27
+of them byte-identical (NECx2 device 7,7 - the TV); Sony's 183 are 57; LG's 36
+are 16. Requiring the key being assigned shortens it again - Samsung goes to 13
+for volume, where the soundbar (NECx2 67,83) is then the only entry with volume
+and no power.
+
+A type filter cannot do that job: 1228 of irdb's 1476 type folders are
+`Unknown_<remote model>` (65 of Samsung's 68 sets), so grouping by type leaves 60
+groups of one. The type is kept as the row's label and a coarse kind (TV / audio
+/ set-top / player / climate), never as the thing that makes the list short. Two
+groups that end up with the same label carry the address they transmit on -
+brands do file two unrelated codes under "TV".
 
 Note the box already toggles the TV over HDMI-CEC, so "TV + soundbar on one
 button" usually needs only the soundbar's code on that key.

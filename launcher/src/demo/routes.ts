@@ -22,6 +22,9 @@ let updateLastCheck: number | null = null;
 // on a real box the phone's submit flips it; in the demo Back (pairing/stop)
 // restores it. The QR points at the static demo phone page (demo-public/pair/).
 let pairingKind: string | null = null;
+// Which devices each remote was set up to drive (Fire TV IR). Session-only, like
+// everything else here - a real box keeps it in ~/.tvbox/firetv_ir_plan.json.
+const irPlans: Record<string, unknown> = {};
 
 const ok = { ok: true };
 
@@ -108,7 +111,7 @@ function applyConfig(body: Record<string, unknown>): void {
 export async function handleApi(
   method: string,
   path: string,
-  _params: URLSearchParams,
+  params: URLSearchParams,
   body: unknown,
 ): Promise<unknown> {
   const b = (body ?? {}) as Record<string, unknown>;
@@ -294,19 +297,23 @@ export async function handleApi(
       return { macs: data.REMOTES.map((r) => r.id.toLowerCase()) };
     case "/tvbox/api/firetvir/brands":
       return { ok: true, brands: data.IR_BRANDS };
-    case "/tvbox/api/firetvir/codeset":
+    // A real box downloads a brand's codesets and answers `loading` until they are
+    // in; the demo has them already, so it only ever answers `ok`.
+    case "/tvbox/api/firetvir/brand":
       return {
         ok: true,
-        path: "codes/LG/TV/4,-1.csv",
-        keys: {
-          VolumeUp: { functionname: "VOLUME +", protocol: "NEC1" },
-          VolumeDown: { functionname: "VOLUME -", protocol: "NEC1" },
-          Mute: { functionname: "MUTE", protocol: "NEC1" },
-          Power: { functionname: "POWER TOGGLE", protocol: "NEC1" },
-        },
-        protocols: ["NEC1"],
-        supported: { NEC1: true },
+        state: "ok",
+        devices: data.IR_DEVICES[params.get("name") || ""] || [],
+        skipped: 0,
       };
+    case "/tvbox/api/firetvir/plan": {
+      if (method === "POST") {
+        const mac = String(b.mac ?? "");
+        irPlans[mac] = b.plan;
+        return { ok: true, plan: b.plan };
+      }
+      return { ok: true, plan: irPlans[params.get("mac") || ""] || { devices: [], assign: {}, ts: 0 } };
+    }
     case "/tvbox/api/ui/locale":
       return ok; // the demo has no shell state to mirror into
     case "/tvbox/api/firetvir/deps":

@@ -21,6 +21,7 @@ const DYNAMIC = [
   "ir.action.",
   "ir.backend.",
   "firetvir.key.",
+  "firetvir.kind.",
   "fileserver.err.",
   "appshares.err.",
   "shares.err.",

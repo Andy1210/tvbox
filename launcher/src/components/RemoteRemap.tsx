@@ -19,7 +19,8 @@ import {
 import { fetchApps } from "../lib/api";
 import { fetchProgrammableRemotes } from "../lib/firetvir";
 import { FocusButton } from "./FocusButton";
-import { FiretvIrSettings } from "./FiretvIrSettings";
+import { useSettingsNav } from "../settings/nav";
+import { FiretvIrPage } from "../settings/pages/firetvir";
 
 // Per-device button remap (Settings -> Peripherals). Lists the connected remotes;
 // pressing one expands its actions (drill-down), and picking an action then
@@ -172,8 +173,12 @@ function ReassignOverlay({
   );
 }
 
+// Which remote's actions were open, remembered across an unmount (see below).
+let lastExpanded: string | null = null;
+
 export function RemoteRemap() {
   const { t, loc } = useI18n();
+  const nav = useSettingsNav();
   const config = useConfigStore((s) => s.config);
   const setRemote = useConfigStore((s) => s.setRemote);
   const setRemotePower = useConfigStore((s) => s.setRemotePower);
@@ -184,7 +189,14 @@ export function RemoteRemap() {
   // null = first poll still in flight (renders nothing), [] = really no remotes -
   // so the "none connected" copy can't flash before the list arrives
   const [devices, setDevices] = useState<ConnectedRemote[] | null>(null);
-  const [expanded, setExpanded] = useState<string | null>(null);
+  // Survives a remount, because this screen now has a page ABOVE it (the TV IR
+  // flow): a push unmounts it, so a plain useState would bring the user back to a
+  // collapsed list with the row they came from gone - and with it the focus the
+  // settings stack recorded to return to.
+  const [expanded, setExpanded] = useState<string | null>(lastExpanded);
+  useEffect(() => {
+    lastExpanded = expanded;
+  }, [expanded]);
   const [learning, setLearning] = useState<{ id: string; action: RemoteAction } | null>(null);
   const learningRef = useRef(learning);
   learningRef.current = learning;
@@ -205,11 +217,9 @@ export function RemoteRemap() {
   const conflictRef = useRef(conflict);
   conflictRef.current = conflict;
   // MACs of connected remotes that are programmable Fire TV / Alexa remotes
-  // (expose the keymap GATT service). Only these show the "TV IR" sub-panel, so
-  // a non-Fire-TV remote's remap menu stays clean. `irOpen` = which device's
-  // IR panel is expanded (lazy: the heavy flow mounts only when opened).
+  // (expose the keymap GATT service). Only these get the "TV IR" row, so a
+  // non-Fire-TV remote's remap menu stays clean.
   const [ftirMacs, setFtirMacs] = useState<string[]>([]);
-  const [irOpen, setIrOpen] = useState<string | null>(null);
   useEffect(() => {
     fetchProgrammableRemotes().then(setFtirMacs);
   }, []);
@@ -575,23 +585,25 @@ export function RemoteRemap() {
 
                   {/* Fire TV / Alexa remote: teach its OWN IR blaster the TV's
                       volume/mute/power. Shown ONLY for remotes that expose the
-                      keymap service, so other remotes don't see it. */}
+                      keymap service, so other remotes don't see it. Its own pushed
+                      page rather than an expander here: it is a multi-step flow
+                      with a codeset picker under it, and this screen's wrapped
+                      buttons are the wrong vocabulary for a list that long. */}
                   {ftirMacs.includes(d.id.toLowerCase()) && (
-                    <div className="mt-[0.6vh]">
-                      <FocusButton
-                        focusKey={keyBase(d.id) + "-firetvir"}
-                        onEnter={() => setIrOpen(irOpen === d.id ? null : d.id)}
-                        className="px-[2vw] py-[1.3vh] rounded-[1.1vh] bg-white/5 flex items-center gap-[1.2vw] min-w-0"
-                      >
-                        <span className="text-[2vh] flex-1 text-left truncate">{t("firetvir.entry")}</span>
-                        <Chevron open={irOpen === d.id} />
-                      </FocusButton>
-                      {irOpen === d.id && (
-                        <div className="pl-[1.5vw]">
-                          <FiretvIrSettings device={{ id: d.id, name: d.name }} />
-                        </div>
-                      )}
-                    </div>
+                    <FocusButton
+                      focusKey={keyBase(d.id) + "-firetvir"}
+                      onEnter={() =>
+                        nav.push({
+                          id: "ftir-" + d.id,
+                          title: t("firetvir.title"),
+                          render: () => <FiretvIrPage device={{ id: d.id, name: d.name }} />,
+                        })
+                      }
+                      className="px-[2vw] py-[1.3vh] rounded-[1.1vh] bg-white/5 flex items-center gap-[1.2vw] min-w-0 mt-[0.6vh]"
+                    >
+                      <span className="text-[2vh] flex-1 text-left truncate">{t("firetvir.entry")}</span>
+                      <Chevron open={false} />
+                    </FocusButton>
                   )}
                 </div>
               )}

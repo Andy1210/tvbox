@@ -1203,15 +1203,27 @@ function serve() {
       );
       return;
     }
-    if (p === "/tvbox/api/firetvir/codeset") {
+    // One brand's codesets merged into the devices they really are. Answers
+    // `state: "loading"` with a count while they download, so the picker can say
+    // how far it is instead of freezing on the biggest brands.
+    if (p === "/tvbox/api/firetvir/brand") {
       const q = (req.url || "").split("?")[1];
-      const csPath = q ? new URLSearchParams(q).get("path") || "" : "";
-      firetvir.fetchCodeset(csPath, (err, cs) => {
-        if (err) return httpserver.jsonRes(res, { ok: false, error: String(err.message || err).slice(0, 200) });
-        firetvir.checkProtocols(cs.protocols, (perr, supported) =>
-          httpserver.jsonRes(res, { ok: true, ...cs, supported: perr ? null : supported }),
-        );
-      });
+      const brand = q ? new URLSearchParams(q).get("name") || "" : "";
+      firetvir.brandDevices(brand, (err, r) =>
+        httpserver.jsonRes(
+          res,
+          err ? { ok: false, error: String(err.message || err).slice(0, 200) } : { ok: true, ...r },
+        ),
+      );
+      return;
+    }
+    // What this remote was set up to drive. The remote's own keymap cannot be read
+    // back, so this file is the only record there is.
+    if (p === "/tvbox/api/firetvir/plan") {
+      const q = (req.url || "").split("?")[1];
+      const mac = q ? new URLSearchParams(q).get("mac") || "" : "";
+      const plan = firetvir.readPlan(mac);
+      httpserver.jsonRes(res, plan ? { ok: true, plan } : { ok: false, error: "invalid mac" });
       return;
     }
     if (p === "/tvbox/api/fileserver") {
