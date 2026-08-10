@@ -26,6 +26,8 @@ import { invalidateSummary } from "../summary";
 // code; the box that wants it sweeps the LAN for whoever is showing one. That is
 // why there is nothing to type but the code - no addresses, no passwords.
 const CODE_LEN = 4;
+// pairing/index.js TTL_MS - how long the code on screen is worth anything.
+const PAIRING_TTL_MS = 5 * 60 * 1000;
 
 // The box's error codes are a moving set behind a dynamic locale prefix, so the
 // parity test cannot catch one with no sentence behind it. translate() hands back
@@ -85,8 +87,14 @@ export function AppSharesPage() {
           body: JSON.stringify({ locale, kind: "peer" }),
         })
       ).json();
-      if (d && d.code) setCode(String(d.code));
-      else setMsg({ tone: "warn", text: t("appshares.err.unknown") });
+      if (d && d.code) {
+        setCode(String(d.code));
+        // The pairing server stops itself after five minutes (and as soon as a box
+        // has taken the token), so the code stops being true without anything
+        // telling this page. Put the action back rather than leave a dead number
+        // on screen that a second box can never use.
+        setTimeout(() => setCode(null), PAIRING_TTL_MS);
+      } else setMsg({ tone: "warn", text: t("appshares.err.unknown") });
     } catch {
       setMsg({ tone: "warn", text: t("appshares.err.unknown") });
     }
@@ -98,6 +106,14 @@ export function AppSharesPage() {
     setPicked(null);
     const r = await scanForBoxes();
     setScanning(false);
+    // A sweep that FAILED is not a sweep that found nothing: showing the empty
+    // result would tell the user to go and start the other box, which is not the
+    // problem they have.
+    if (!r.ok) {
+      setFound(null);
+      setMsg({ tone: "warn", text: errText(t, r.error || "unknown") });
+      return;
+    }
     setFound(r.found || []);
   };
 
@@ -232,7 +248,7 @@ export function AppSharesPage() {
                 hint={t("appshares.fromBox").replace("{name}", p.name)}
                 value={busy === s.id + "@" + p.id ? t("appshares.pulling") : t("appshares.pull")}
                 trailing="none"
-                disabled={!!busy}
+                disabled={!!busy || !st?.rclone}
                 onEnter={() => void pull(p.id, s.id)}
               />
             )),

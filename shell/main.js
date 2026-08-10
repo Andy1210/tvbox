@@ -365,8 +365,15 @@ function applyAppshares() {
   }
 }
 function applyAppsharesInner() {
-  const cfg = config.rawAppshares();
-  const enabled = Array.isArray(cfg.enabled) ? cfg.enabled : [];
+  let cfg = config.rawAppshares();
+  // Drop ids no installed app declares any more. Without this an app that was
+  // uninstalled leaves its share in the list, the server refuses to start with
+  // "nothing shared", and the screen offers nothing to switch off - the stale
+  // entry is invisible there, because the list is built from the manifests.
+  const known = new Set(appsharesDeps.entries().map((e) => e.id));
+  const kept = (Array.isArray(cfg.enabled) ? cfg.enabled : []).filter((id) => known.has(id));
+  if (kept.length !== (cfg.enabled || []).length) cfg = config.setAppshares({ enabled: kept });
+  const enabled = kept;
   if (!enabled.length) {
     appshares.stop(appsharesDeps);
     return { ok: true, stopped: true };
@@ -393,6 +400,10 @@ function pullAppshare(peerId, shareId) {
   if (!peer) return { ok: false, error: "unknown_peer" };
   const entry = appsharesDeps.entries().find((x) => x.id === shareId);
   if (!entry) return { ok: false, error: "unknown_share" };
+  // `present` is what says the folder exists AND still resolves inside the app's
+  // own root. Refused here rather than only in the UI: this destination is handed
+  // to rclone, and a direct call must not reach past a symlink the screen greys out.
+  if (!entry.present) return { ok: false, error: "unknown_share" };
   if (!apps.onPath("rclone")) return { ok: false, error: "rclone_missing" };
   // A replaced file goes here rather than into the void, and the stamp is what
   // makes two pulls of the same game distinguishable afterwards.

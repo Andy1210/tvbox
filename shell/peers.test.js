@@ -48,6 +48,35 @@ test("the sweep never asks the box about itself", async () => {
   assert.ok(!asked.includes("192.168.1.24"));
 });
 
+test("only an address the sweep could have produced counts as a peer", () => {
+  const ifaces = { wlan0: [{ family: "IPv4", internal: false, address: "192.168.1.24", netmask: "255.255.255.0" }] };
+  assert.equal(peers.onLocalSubnet("192.168.1.7", ifaces), true);
+  assert.equal(peers.onLocalSubnet("192.168.1.24", ifaces), false, "this box is not its own peer");
+  assert.equal(peers.onLocalSubnet("192.168.2.7", ifaces), false, "another subnet never came from a sweep");
+  assert.equal(peers.onLocalSubnet("8.8.8.8", ifaces), false);
+  for (const junk of ["192.168.1.999", "192.168.1", "192.168.1.7.7", "", "evil.example", null])
+    assert.equal(peers.onLocalSubnet(junk, ifaces), false, JSON.stringify(junk));
+});
+
+test("an answer that does not fit is refused here, not dropped later", async () => {
+  const answer = (obj) =>
+    peers.pairWith("192.168.1.7", "1234", { get: async () => ({ status: 200, body: JSON.stringify(obj) }) });
+  // Each of these used to come back ok and then vanish in the config store, which
+  // told the user they were paired with a box that was not there.
+  for (const bad of [
+    { name: "x", token: "t", port: "not a number" },
+    { name: "x", token: "t", port: 0 },
+    { name: "x", token: "t", port: 70000 },
+    { name: "x", token: 5, port: 8096 },
+    { name: "", token: "t", port: 8096 },
+    { name: "x", token: "t".repeat(300), port: 8096 },
+  ]) {
+    assert.deepStrictEqual(await answer(bad), { ok: false, error: "not_a_box" }, JSON.stringify(bad));
+  }
+  const ok = await answer({ name: "gaming", token: "t", port: 8096 });
+  assert.equal(ok.peer.id, "gaming", "a box that sends no id is known by its name");
+});
+
 test("a wrong code, an unreachable box and a stranger are each their own failure", async () => {
   const answer = (r) => peers.pairWith("192.168.1.7", "1234", { get: async () => r });
   assert.deepStrictEqual(await answer(null), { ok: false, error: "unreachable" });

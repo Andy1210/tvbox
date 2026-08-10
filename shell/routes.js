@@ -438,7 +438,11 @@ function post(p, data, res, ctx) {
   if (p === "/tvbox/api/appshares/pair") {
     const host = String(data.host || "");
     const code = String(data.code || "");
-    if (!/^[0-9.]{7,15}$/.test(host)) return httpserver.jsonRes(res, { ok: false, error: "bad_host" });
+    // Only an address the sweep could have produced. Pairing always follows one,
+    // so anything else - another subnet, a public address, this box - is not a
+    // peer, and taking it would make this route a way to have the box fetch an
+    // address of someone else's choosing.
+    if (!peers.onLocalSubnet(host)) return httpserver.jsonRes(res, { ok: false, error: "bad_host" });
     return peers
       .pairWith(host, code)
       .then((r) => {

@@ -291,8 +291,15 @@ function validateManifest(m, src) {
   const sh = m.shares;
   if (sh !== undefined) {
     if (!sh || typeof sh !== "object" || Array.isArray(sh)) return bad("shares must be an object");
-    if (sh.flatpak !== undefined && !nativeapp.flatpakRefOk(sh.flatpak))
-      return bad("shares.flatpak must be a flatpak ref the app declares");
+    // Membership, not just syntax. A well-formed ref the app does not depend on
+    // passes the shape check and is then refused by appShareRoot, so the manifest
+    // loads and its shares silently disappear from a screen that offers them -
+    // which reads as the feature being broken rather than as a bad manifest.
+    if (sh.flatpak !== undefined) {
+      if (!nativeapp.flatpakRefOk(sh.flatpak)) return bad("shares.flatpak must be a flatpak ref");
+      if (!flatpak.refsFor(m).some((f) => f.ref === sh.flatpak))
+        return bad("shares.flatpak must be a ref the app declares: " + JSON.stringify(sh.flatpak));
+    }
     if (!Array.isArray(sh.paths) || !sh.paths.length || sh.paths.length > 8)
       return bad("shares.paths must be 1-8 relative paths");
     for (const rel of sh.paths) {

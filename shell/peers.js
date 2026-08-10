@@ -48,6 +48,22 @@ function localSubnet(interfaces) {
   return null;
 }
 
+// Is this an address the sweep could have produced? Pairing only ever follows a
+// sweep, so a host outside the box's own /24 - or the box itself - did not come
+// from one, and honouring it would turn the route into a way to make this box
+// fetch an arbitrary address.
+function onLocalSubnet(host, interfaces) {
+  const sub = localSubnet(interfaces);
+  if (!sub || typeof host !== "string") return false;
+  if (host === sub.self) return false;
+  const parts = host.split(".");
+  if (parts.length !== 4) return false;
+  for (const p of parts) {
+    if (!/^\d{1,3}$/.test(p) || Number(p) > 255) return false;
+  }
+  return parts.slice(0, 3).join(".") === sub.prefix;
+}
+
 function portOpen(host, port, timeout) {
   return new Promise((resolve) => {
     const sock = new net.Socket();
@@ -66,19 +82,46 @@ function portOpen(host, port, timeout) {
   });
 }
 
+const MAX_BODY = 65536;
+
 function get(url, timeout) {
   return new Promise((resolve) => {
+    let done = false;
+    let deadline = null;
+    const finish = (v) => {
+      if (done) return;
+      done = true;
+      if (deadline) clearTimeout(deadline);
+      resolve(v);
+    };
     const req = http.get(url, { timeout: timeout || HTTP_TIMEOUT_MS }, (res) => {
       let body = "";
       res.setEncoding("utf8");
       res.on("data", (d) => {
-        // A peer answers in bytes, not megabytes; anything longer is not ours.
-        if (body.length < 65536) body += d;
+        // A peer answers in bytes, not megabytes. The cap has to END the response
+        // rather than just stop appending: a host that keeps a slow body open is
+        // never idle, so the socket timeout never fires and it would hold a sweep
+        // worker for as long as it liked.
+        body += d;
+        if (body.length > MAX_BODY) {
+          req.destroy();
+          finish({ status: res.statusCode, body: body.slice(0, MAX_BODY) });
+        }
       });
-      res.on("end", () => resolve({ status: res.statusCode, body }));
+      res.on("end", () => finish({ status: res.statusCode, body }));
+      res.on("error", () => finish(null));
     });
+    // The socket timeout measures inactivity, so a trickle keeps it alive forever.
+    // This is the whole-request one, and it is what bounds the sweep.
+    deadline = setTimeout(
+      () => {
+        req.destroy();
+        finish(null);
+      },
+      (timeout || HTTP_TIMEOUT_MS) * 2,
+    );
     req.on("timeout", () => req.destroy());
-    req.on("error", () => resolve(null));
+    req.on("error", () => finish(null));
   });
 }
 
@@ -128,17 +171,16 @@ async function pairWith(host, code, deps) {
   } catch (e) {
     return { ok: false, error: "not_a_box" };
   }
-  if (!out || !out.token || !out.port || !out.name) return { ok: false, error: "not_a_box" };
-  return {
-    ok: true,
-    peer: {
-      id: String(out.id || out.name),
-      name: String(out.name),
-      host,
-      port: Number(out.port),
-      token: String(out.token),
-    },
-  };
+  // Everything below came off the network, so it is checked here rather than being
+  // handed to the config store to quietly drop: a peer whose answer does not fit
+  // would otherwise be reported as paired and then not be there.
+  const port = Number(out && out.port);
+  const token = out && typeof out.token === "string" ? out.token : "";
+  const name = out && typeof out.name === "string" ? out.name.trim().slice(0, 64) : "";
+  const id = out && typeof out.id === "string" && out.id ? out.id : name;
+  if (!name || !token || token.length > 256 || !Number.isInteger(port) || port < 1 || port > 65535)
+    return { ok: false, error: "not_a_box" };
+  return { ok: true, peer: { id: id.slice(0, 64), name, host, port, token } };
 }
 
 // Pull one share from a peer into the SAME app's folder on this box. The
@@ -184,6 +226,7 @@ module.exports = {
   MARKER,
   REPLACED,
   localSubnet,
+  onLocalSubnet,
   scan,
   pairWith,
   pullArgv,

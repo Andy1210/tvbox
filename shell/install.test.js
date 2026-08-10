@@ -308,6 +308,27 @@ test("shares.paths must be relative in-app paths", () => {
   }
 });
 
+test("a shares.flatpak the app does not depend on is refused at load, not at use", () => {
+  // A well-formed foreign ref passes a syntax check and is then refused by
+  // appShareRoot, so the manifest loads and its shares silently disappear from the
+  // screen that offers them - which reads as the feature being broken.
+  const withShares = (m) => ({ id: "x", name: "X", type: "webclient", status: "ready", ...m });
+  assert.equal(
+    apps.validateManifest(withShares({ shares: { flatpak: "org.libretro.RetroArch", paths: ["saves"] } }), "x.json"),
+    null,
+    "not declared in requires.flatpak",
+  );
+  assert.ok(
+    apps.validateManifest(
+      withShares({
+        requires: { flatpak: ["org.libretro.RetroArch"] },
+        shares: { flatpak: "org.libretro.RetroArch", paths: ["saves"] },
+      }),
+      "x.json",
+    ),
+  );
+});
+
 test("a share resolves against the app's own root, and only its own", () => {
   const own = { id: "x", name: "X", shares: { paths: ["saves"] } };
   assert.equal(apps.appShareRoot(own), apps.appDataDir("x"), "no flatpak named: the app's own bundle dir");
