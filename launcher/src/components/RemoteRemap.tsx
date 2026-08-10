@@ -120,26 +120,37 @@ function LearnOverlay({ action, remote, onCancel }: { action: string; remote: st
   );
 }
 
-// Reassign-confirm as the same kind of modal (it interrupts a learn, so it must
-// be equally impossible to lose focus-wise).
-function ReassignOverlay({
-  from,
-  to,
+// A yes/no the user cannot lose focus-wise, for the two presses on this screen
+// that cannot be undone by pressing the same thing again: reassigning a button
+// that is already bound, and resetting a remote's whole keymap.
+//
+// Three things are deliberate and were each learned from a real press. It is a
+// FOCUS BOUNDARY, so a press from another remote mid-learn cannot wander onto the
+// Bluetooth scan row behind it. It defaults to CANCEL, because the press that
+// opened it may still be arriving (a taught remote sends its own stray events, and
+// a held OK repeats). And `destructive` colours the confirm as a warning rather
+// than as the accent, so the safe-looking bright button is never the one that
+// throws work away.
+function ConfirmOverlay({
+  title,
+  body,
+  confirmLabel,
+  destructive,
   onConfirm,
   onCancel,
 }: {
-  from: string;
-  to: string;
+  title: string;
+  body: string;
+  confirmLabel: string;
+  destructive?: boolean;
   onConfirm: () => void;
   onCancel: () => void;
 }) {
   const { t } = useI18n();
-  const { ref, focusKey } = useFocusable({ focusKey: "remote-reassign-overlay", isFocusBoundary: true });
+  const { ref, focusKey } = useFocusable({ focusKey: "remote-confirm-overlay", isFocusBoundary: true });
   const entryAnim = useEntryAnim();
   useEffect(() => {
-    // default to CANCEL: right after a capture the taught remote may still
-    // send a stray Enter-ish press, and that must not silently confirm
-    setTimeout(() => setFocus("remote-reassign-no"), 0);
+    setTimeout(() => setFocus("remote-confirm-no"), 0);
   }, []);
   useSwallowEnterRepeats();
   useBackspace(onCancel);
@@ -150,18 +161,21 @@ function ReassignOverlay({
         style={entryAnim}
         className="fixed inset-0 z-[55] bg-black/90 flex flex-col items-center justify-center text-center gap-[1.6vh] px-[6vw]"
       >
-        <div className="text-[2.8vh] font-bold">{t("remote.reassignTitle")}</div>
-        <div className="text-[2.1vh] text-fg-dim max-w-[56vw]">{t("remote.reassignBody", { from, to })}</div>
+        <div className="text-[2.8vh] font-bold">{title}</div>
+        <div className="text-[2.1vh] text-fg-dim max-w-[56vw]">{body}</div>
         <div className="flex gap-[1vw] mt-[1.2vh]">
           <FocusButton
-            focusKey="remote-reassign-yes"
+            focusKey="remote-confirm-yes"
             onEnter={onConfirm}
-            className="px-[2.4vw] py-[1.4vh] rounded-[1.1vh] bg-accent text-[#06090d] text-[2vh] font-semibold"
+            className={
+              "px-[2.4vw] py-[1.4vh] rounded-[1.1vh] text-[#06090d] text-[2vh] font-semibold " +
+              (destructive ? "bg-warn" : "bg-accent")
+            }
           >
-            {t("remote.reassignConfirm")}
+            {confirmLabel}
           </FocusButton>
           <FocusButton
-            focusKey="remote-reassign-no"
+            focusKey="remote-confirm-no"
             onEnter={onCancel}
             className="px-[2.4vw] py-[1.4vh] rounded-[1.1vh] bg-white/5 text-[2vh] font-semibold"
           >
@@ -208,6 +222,9 @@ export function RemoteRemap() {
   testingRef.current = testing;
   const [testKeys, setTestKeys] = useState<{ name: string; code: number; ts: number }[]>([]);
   // A learned button that's already bound to another action -> confirm reassign.
+  // The remote whose reset was asked for (null = nothing asked). Carries the name
+  // and the count so the question can say what is about to be lost.
+  const [resetting, setResetting] = useState<{ id: string; name: string; n: number } | null>(null);
   const [conflict, setConflict] = useState<{
     id: string;
     action: RemoteAction;
@@ -419,6 +436,8 @@ export function RemoteRemap() {
     dev.keymap = km;
     await setRemote(next);
   };
+  // Asked before it runs: it throws away every button the user taught, one press
+  // undoes nothing, and the row sits one line below the ordinary action rows.
   const resetDevice = async (id: string) => {
     // through the shell endpoint, which keeps irPassthrough (a client-side
     // delete of the entry would drop it and double every volume step on a
@@ -552,7 +571,7 @@ export function RemoteRemap() {
                     <>
                       <FocusButton
                         focusKey={keyBase(d.id) + "-reset"}
-                        onEnter={() => resetDevice(d.id)}
+                        onEnter={() => setResetting({ id: d.id, name: d.name, n: Object.keys(km).length })}
                         className="px-[2vw] py-[1.2vh] rounded-[1.1vh] bg-white/5 text-[1.8vh] text-warn font-semibold inline-flex mt-[0.4vh]"
                       >
                         {t("remote.resetDevice")}
@@ -638,15 +657,35 @@ export function RemoteRemap() {
         <LearnOverlay action={actionLabel(learning.action)} remote={learnRemoteName} onCancel={cancelLearn} />
       )}
       {conflict && (
-        <ReassignOverlay
-          from={actionLabel(conflict.from)}
-          to={actionLabel(conflict.action)}
+        <ConfirmOverlay
+          title={t("remote.reassignTitle")}
+          body={t("remote.reassignBody", { from: actionLabel(conflict.from), to: actionLabel(conflict.action) })}
+          confirmLabel={t("remote.reassignConfirm")}
           onConfirm={async () => {
             const c = conflict;
             await save(c.id, c.action, c.code);
             closeConflict();
           }}
           onCancel={closeConflict}
+        />
+      )}
+      {resetting && (
+        <ConfirmOverlay
+          title={t("remote.resetTitle")}
+          body={t("remote.resetBody", { remote: resetting.name, n: resetting.n })}
+          confirmLabel={t("remote.resetConfirm")}
+          destructive
+          onConfirm={() => {
+            const id = resetting.id;
+            setResetting(null);
+            void resetDevice(id);
+          }}
+          onCancel={() => {
+            const id = resetting.id;
+            setResetting(null);
+            // Back on the row that asked, not at the top of the list.
+            setTimeout(() => setFocus(keyBase(id) + "-reset"), 0);
+          }}
         />
       )}
     </div>
