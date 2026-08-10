@@ -352,13 +352,15 @@ function post(p, data, res, ctx) {
     const mac = String((data && data.mac) || "").trim();
     if (typeof data.on !== "boolean") return httpserver.jsonRes(res, { ok: false, error: "on must be a boolean" });
     const on = data.on;
+    // `ringing` goes out on the failure path too: a stop that could not be
+    // delivered leaves the remote buzzing with a retry armed, and a response
+    // without it would flip the UI back to "find" while the noise continues.
     return remotefinder.ring(mac, on, (err) =>
-      httpserver.jsonRes(
-        res,
-        err
-          ? { ok: false, error: String(err.message || err).slice(0, 200) }
-          : { ok: true, ringing: remotefinder.isRinging() },
-      ),
+      httpserver.jsonRes(res, {
+        ok: !err,
+        ...(err ? { error: String(err.message || err).slice(0, 200) } : {}),
+        ringing: remotefinder.isRinging(),
+      }),
     );
   }
   if (p === "/tvbox/api/parental/verify") {

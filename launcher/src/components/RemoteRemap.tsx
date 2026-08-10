@@ -229,7 +229,14 @@ export function RemoteRemap() {
   // has to run even when we believe nothing is ringing, just more slowly. The
   // shell caches the capability answer for 8 s, so the idle rate costs nothing.
   useEffect(() => {
-    const t = setInterval(() => fetchFinderCapable().then((f) => setRinging(f.ringing)), ringing ? 3000 : 10000);
+    const tick = () =>
+      fetchFinderCapable().then((f) => {
+        // Both halves: a remote that connects while this screen is open would
+        // otherwise never get its row until the user left and came back.
+        setFinderMacs(f.macs);
+        setRinging(f.ringing);
+      });
+    const t = setInterval(tick, ringing ? 3000 : 10000);
     return () => clearInterval(t);
   }, [ringing]);
   // Installed, ready apps become dynamic "app:<id>" launch actions (a remote's
