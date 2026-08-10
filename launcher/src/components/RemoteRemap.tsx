@@ -224,12 +224,12 @@ export function RemoteRemap() {
       setRinging(f.ringing);
     });
   }, []);
-  // While something rings, keep asking: the shell stops it by itself after a
-  // minute, and MQTT can start or stop one behind our back. Polling only while
-  // ringing keeps the idle screen quiet.
+  // Keep asking while this screen is up: the shell stops a ring by itself after
+  // a minute, and MQTT or the phone can start one behind our back - so the poll
+  // has to run even when we believe nothing is ringing, just more slowly. The
+  // shell caches the capability answer for 8 s, so the idle rate costs nothing.
   useEffect(() => {
-    if (!ringing) return;
-    const t = setInterval(() => fetchFinderCapable().then((f) => setRinging(f.ringing)), 3000);
+    const t = setInterval(() => fetchFinderCapable().then((f) => setRinging(f.ringing)), ringing ? 3000 : 10000);
     return () => clearInterval(t);
   }, [ringing]);
   // Installed, ready apps become dynamic "app:<id>" launch actions (a remote's
