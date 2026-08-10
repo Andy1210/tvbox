@@ -12,6 +12,8 @@ import {
   learnRemote,
   learnRemoteOff,
   resetRemote,
+  fetchFinderCapable,
+  findRemote,
   type ConnectedRemote,
 } from "../lib/remote";
 import { fetchApps } from "../lib/api";
@@ -211,6 +213,32 @@ export function RemoteRemap() {
   useEffect(() => {
     fetchProgrammableRemotes().then(setFtirMacs);
   }, []);
+  // Remotes with a buzzer, and which one is ringing. `ringing` is tracked so the
+  // row can turn into a stop - a ring that only the shell's timer ends would
+  // leave the user holding a beeping remote with no way to silence it.
+  const [finderMacs, setFinderMacs] = useState<string[]>([]);
+  const [ringing, setRinging] = useState<string | null>(null);
+  useEffect(() => {
+    fetchFinderCapable().then((f) => {
+      setFinderMacs(f.macs);
+      setRinging(f.ringing);
+    });
+  }, []);
+  // Keep asking while this screen is up: the shell stops a ring by itself after
+  // a minute, and MQTT or the phone can start one behind our back - so the poll
+  // has to run even when we believe nothing is ringing, just more slowly. The
+  // shell caches the capability answer for 8 s, so the idle rate costs nothing.
+  useEffect(() => {
+    const tick = () =>
+      fetchFinderCapable().then((f) => {
+        // Both halves: a remote that connects while this screen is open would
+        // otherwise never get its row until the user left and came back.
+        setFinderMacs(f.macs);
+        setRinging(f.ringing);
+      });
+    const t = setInterval(tick, ringing ? 3000 : 10000);
+    return () => clearInterval(t);
+  }, [ringing]);
   // Installed, ready apps become dynamic "app:<id>" launch actions (a remote's
   // dedicated app button -> any tile). Loaded once; installs are rare here.
   const [apps, setApps] = useState<{ id: string; name: string }[]>([]);
@@ -521,6 +549,28 @@ export function RemoteRemap() {
                       </FocusButton>
                       <div className="text-[1.7vh] text-fg-dim max-w-[60vw]">{t("remote.panicHint")}</div>
                     </>
+                  )}
+
+                  {/* Make this remote ring, for the remote that has a buzzer.
+                      Shown only for those - and it is here as well as on the
+                      phone and over MQTT, because the remote you are looking
+                      for is the one you cannot press a button on. */}
+                  {finderMacs.includes(d.id.toLowerCase()) && (
+                    <FocusButton
+                      focusKey={keyBase(d.id) + "-find"}
+                      onEnter={() => {
+                        // The box's answer decides the label, not the press:
+                        // a start that fails must not leave a "stop" the user
+                        // can only press to no effect.
+                        const on = ringing !== d.id.toLowerCase();
+                        findRemote(d.id, on).then(setRinging);
+                      }}
+                      className="mt-[0.6vh] px-[2vw] py-[1.3vh] rounded-[1.1vh] bg-white/5 flex items-center gap-[1.2vw] min-w-0"
+                    >
+                      <span className="text-[2vh] flex-1 text-left truncate">
+                        {ringing === d.id.toLowerCase() ? t("remote.findStop") : t("remote.find")}
+                      </span>
+                    </FocusButton>
                   )}
 
                   {/* Fire TV / Alexa remote: teach its OWN IR blaster the TV's

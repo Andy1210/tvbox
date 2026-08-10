@@ -76,3 +76,28 @@ export function learnRemoteOff(): Promise<void> {
 export function resetRemote(id: string): Promise<void> {
   return post("/tvbox/api/remote/reset", { id });
 }
+// MACs (lowercase) of connected remotes that carry a buzzer, plus which one is
+// ringing now. The remap UI offers "find this remote" ONLY for these, so a
+// remote without one never shows a row that could not work.
+export async function fetchFinderCapable(): Promise<{ macs: string[]; ringing: string | null }> {
+  const d = await getJson<{ macs?: string[]; ringing?: string | null }>("/tvbox/api/remote/finder/capable", {});
+  return { macs: d.macs || [], ringing: d.ringing || null };
+}
+// Returns what the box believes is ringing AFTER the call, so the button can
+// reflect the truth rather than the intent: a start that fails, or the shell's
+// own one-minute auto-stop, would otherwise leave the row saying "stop ringing"
+// with silence in the room.
+export async function findRemote(mac: string, on: boolean): Promise<string | null> {
+  try {
+    const r = await fetch("/tvbox/api/remote/find", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ mac, on }),
+    });
+    if (!r.ok) return null;
+    const d = (await r.json()) as { ok?: boolean; ringing?: string | null };
+    return d.ringing || null;
+  } catch {
+    return null; // shell down - nothing is ringing that we can act on
+  }
+}

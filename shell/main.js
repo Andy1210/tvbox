@@ -46,6 +46,7 @@ const phoneremote = require("./phoneremote"); // a phone acting as the remote, o
 const shares = require("./shares"); // network shares (SMB over rclone, no root), mounted per config
 const miracast = require("./miracast"); // screen mirroring: the unprivileged half of a Wi-Fi Display sink
 const firetvir = require("./firetvir"); // Fire TV remote IR programming (venv deps + irdb codesets + BLE tool)
+const remotefinder = require("./remotefinder"); // make a lost remote ring (Remote Pro's buzzer)
 const diag = require("./diag"); // what this box says about itself to the fleet (version, rollback, link, heat)
 const apps = require("./install"); // manifests + install-recipe runner (shared with the tvbox CLI)
 const store = require("./store"); // app-store registry client (manifest-only apps -> ~/.tvbox/apps)
@@ -1011,7 +1012,9 @@ function serve() {
       p === "/tvbox/api/tv/standby" ||
       p.startsWith("/tvbox/api/firetvir/") ||
       p.startsWith("/tvbox/api/browse/") ||
-      p.startsWith("/tvbox/api/photoshare");
+      p.startsWith("/tvbox/api/photoshare") ||
+      // Same reason as firetvir: it forks a bluetoothctl per connected device.
+      p === "/tvbox/api/remote/finder/capable";
     if ((req.method !== "GET" || guardedGet) && httpserver.foreignOrigin(req, OWN_ORIGINS)) {
       console.warn("[main] rejected cross-origin", req.method, p, "from", req.headers.origin);
       res.writeHead(403, { "Content-Type": "text/plain" });
@@ -1182,6 +1185,13 @@ function serve() {
     // the keymap GATT service). The remap UI shows the IR feature ONLY for these.
     if (p === "/tvbox/api/firetvir/programmable") {
       firetvir.programmableRemotes((macs) => httpserver.jsonRes(res, { macs }));
+      return;
+    }
+    // Which connected remotes carry a buzzer we can ring (the finder GATT
+    // service). Same shape as the IR one above: the remap UI offers "find this
+    // remote" ONLY for these, so a remote without one never shows a dead row.
+    if (p === "/tvbox/api/remote/finder/capable") {
+      remotefinder.capableRemotes((macs) => httpserver.jsonRes(res, { macs, ringing: remotefinder.isRinging() }));
       return;
     }
     if (p === "/tvbox/api/firetvir/brands") {
@@ -2273,6 +2283,8 @@ const TV_COMMANDS = [
   "mute",
   "tv_on",
   "tv_off",
+  "find_remote",
+  "find_remote_stop",
 ];
 let sinkState = { volume: null, muted: false };
 let lastMediaState = null;
@@ -2493,6 +2505,24 @@ function handleTvCommand(cmd) {
       const pos = cmd && typeof cmd.position === "number" ? cmd.position : NaN;
       if (player.media.active && Number.isFinite(pos) && pos >= 0) player.cmd({ command: ["seek", pos, "absolute"] });
       else if (!Number.isFinite(pos)) console.warn("[mqtt] seek: bad position", cmd && cmd.position);
+      break;
+    }
+    case "find_remote":
+    case "find_remote_stop": {
+      // The one control that CANNOT sensibly live on the remote: you are asking
+      // because you cannot find it. A phone, Home Assistant or a voice command
+      // is the whole point, so it is here rather than only in Settings.
+      const warn = (err) => err && console.warn("[mqtt] find_remote:", err.message || err);
+      const ring = (mac) => remotefinder.ring(mac, true, warn);
+      // A stop needs no mac - it targets whatever the box believes is ringing,
+      // which is also why an unvalidated payload can never reach a write here.
+      if (action !== "find_remote") remotefinder.stop(warn);
+      else if (cmd && typeof cmd.mac === "string") ring(cmd.mac);
+      else
+        remotefinder.capableRemotes((macs) => {
+          if (macs.length) ring(macs[0]);
+          else console.warn("[mqtt] find_remote: no remote here can ring");
+        });
       break;
     }
     default:

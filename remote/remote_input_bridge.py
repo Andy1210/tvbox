@@ -154,20 +154,47 @@ PANIC_EXEMPT_ACTIONS = frozenset(
 # are never written to uinput: unmapped ones do nothing (exactly as without
 # the bridge), mapped ones emit their action's canonical key.
 #
-# Report ids (observed on an AFTKA-era "AR" remote):
-#   0xEF - vendor app buttons (Netflix / Prime / Disney+ / Music): byte[1] =
-#          button code (0xA1..), 0x00 = release
-#   0x02 - consumer-control report carrying the hamburger / app-switcher
-#          style buttons (evdev shows them only as KEY_UNKNOWN): byte[1] =
-#          code (e.g. 0x33 hamburger, 0x02 app switcher), 0x00 = release
+# Both are declared Input(Array) - the report lists the usages currently down,
+# so a button is released by DISAPPEARING from it rather than by a code of its
+# own, and the slot width and count come from the report descriptor:
+#
+#   0xEF - vendor app buttons (Netflix / Prime / Disney+ / Music): Report
+#          Count 3, Size 8, vendor codes (0xA1..)
+#   0x02 - consumer control: Report Count 2, Size **16**, usage max 0x29C. A
+#          Remote Pro's two customizable buttons and its headphone button are
+#          usages 0x27E/0x27F/0x280, so a byte-wide read cannot reach them.
 #   0x01 - mirrors the ordinary keyboard keys evdev already delivers: MUST
 #          stay ignored or every arrow press would fire twice
+#
+# The COUNT is load-bearing, not decoration: these remotes send a report longer
+# than the descriptor declares (a 0xEF report reads 5 bytes for 3 slots), so a
+# loop bounded by what arrived turns the padding into a phantom button that
+# never releases.
+#
+# A usage the kernel DOES map arrives twice: once as its real key on evdev,
+# once here as a virtual code. Learn mode usually captures the evdev key, since
+# main()'s select list puts the evdev fds first - but only when both fds went
+# readable in the same round, so which one is offered is not guaranteed. The
+# duplicate is harmless while unmapped: it emits nothing. Binding it is what
+# costs, because the real key still passes through - and on a remote whose
+# consumer node carries no nav key AND captureAllNodes is off, that node is
+# never grabbed, so the virtual code is the only one the UI can offer.
+#
+# The bands must stay under the shell config's 2048 code cap (config.js
+# sanitizeDevices), which is what fixes the consumer band's size: 0x400 +
+# 0x3FF = 2047. A learnable code above the cap would be silently dropped when
+# the shell saved it.
 #
 # Reading hidraw needs the udev grant provision.sh adds for Amazon-VID
 # (0x0171) remotes; without it the feature is simply inert (the open fails
 # and is skipped).
-APP_BTN_REPORTS = {0xEF: 0x300, 0x02: 0x400}  # report id -> virtual code base
+# report id -> (virtual code base, slot width in bytes, slot count, band size)
+APP_BTN_REPORTS = {0xEF: (0x300, 1, 3, 0x100), 0x02: (0x400, 2, 2, 0x400)}
 APP_BTN_VIRT_BASE = 0x300  # floor of the virtual bands
+# How many distinct out-of-range usages are worth naming in the log per node.
+# A 16-bit field can carry 64k of them, and remembering each one to de-duplicate
+# its log line would be a slow leak fed by whatever the remote sends.
+OUT_OF_BAND_LOGGED = 32
 
 
 def hidraw_nodes_for(remote_ids):
@@ -215,7 +242,7 @@ INPUT_DEBUG = bool(os.environ.get("TVBOX_HIDRAW_DEBUG"))
 
 def key_name(code):
     if code >= 0x400:
-        return "CC_%02X" % (code - 0x400)  # hidraw consumer-report button (virtual code)
+        return "CC_%04X" % (code - 0x400)  # hidraw consumer-report usage (virtual code)
     if code >= APP_BTN_VIRT_BASE:
         return "APP_%02X" % (code - APP_BTN_VIRT_BASE)  # hidraw app button (virtual code)
     return next((n for n, c in vars(e).items() if n.startswith("KEY_") and c == code), str(code))
@@ -488,7 +515,7 @@ class Bridge:
                 fd = os.open(path, os.O_RDONLY | os.O_NONBLOCK)
             except OSError:
                 continue
-            self.hidraws[fd] = {"path": path, "mac": mac, "down": set()}
+            self.hidraws[fd] = {"path": path, "mac": mac, "down": set(), "out_of_band": set()}
             log("hidraw app-buttons on", path, "for", mac)
         for fd in list(self.hidraws):
             if self.hidraws[fd]["path"] not in want:
@@ -571,12 +598,13 @@ class Bridge:
             self.dispatch(did, ev.code, ev.value)
 
     def handle_hidraw(self, fd):
-        """A Fire TV remote's extra-button reports (APP_BTN_REPORTS): byte[1]
-        is the button code, 0x00 is the release. ANY nonzero byte becomes a
-        virtual keycode in the SAME remap pipeline, so every such button is
-        learnable/mappable - no per-button hardcoding. Presses can overlap and
-        a 0x00 report doesn't say which button it was, so it closes out ALL
-        held ones from that report's band."""
+        """A Fire TV remote's extra-button reports (APP_BTN_REPORTS). Every
+        usage in the report becomes a virtual keycode in the SAME remap
+        pipeline, so every such button is learnable/mappable - no per-button
+        hardcoding. The report is an array of what is currently down, so the
+        press/release edges come from diffing it against what we hold: that is
+        also what carries two buttons pressed at once, which a single "0x00
+        releases the band" rule cannot express."""
         h = self.hidraws.get(fd)
         if not h:
             return
@@ -586,30 +614,45 @@ class Bridge:
             self.drop_hidraw(fd)  # disconnected mid-read
             return
         if not data:
+            # EOF: the fd stays readable, so returning here spins select() at
+            # full tilt until the remote's evdev node happens to vanish too.
+            self.drop_hidraw(fd)
             return
         if INPUT_DEBUG:
             log("hidraw", h["path"], "report", " ".join("%02x" % b for b in data))
-        if len(data) < 2:
+        spec = APP_BTN_REPORTS.get(data[0])
+        if spec is None:
             return
-        base = APP_BTN_REPORTS.get(data[0])
-        if base is None:
+        base, width, count, size = spec
+        if len(data) < 1 + width * count:
+            # Short of the slots the descriptor declares, so it cannot say which
+            # buttons are up: acting on it would release ones still held. These
+            # remotes pad rather than truncate, so this is a malformed read.
             return
-        code = data[1] | ((data[2] << 8) if len(data) > 2 else 0)
-        if code == 0x00:
-            for vk in sorted(vk for vk in h["down"] if base <= vk < base + 0x100):
-                h["down"].discard(vk)
-                self.dispatch(h["mac"], vk, 0)
-            return
-        if code > 0xFF:
-            # a 16-bit code would collide across bytes when folded - surface it
-            # instead of guessing (never seen; the debug flag shows the raw report)
-            log("hidraw %02x: 16-bit code %04x ignored" % (data[0], code))
-            return
-        vk = base + code
-        if vk in h["down"]:
-            return  # repeated press report while held
-        h["down"].add(vk)
-        self.dispatch(h["mac"], vk, 1)
+        now = set()
+        for i in range(1, 1 + width * count, width):
+            usage = int.from_bytes(data[i : i + width], "little")
+            if not usage:
+                continue  # an empty slot, i.e. fewer buttons down than the report holds
+            if usage >= size:
+                # outside the band this report id was given: folding it in would
+                # land on another button's code (the debug flag shows the report).
+                # Logged once per usage - a held button repeats its report - and
+                # only for the first few: the set is there to keep the journal
+                # readable, not to remember every value a noisy device invents.
+                if usage not in h["out_of_band"]:
+                    if len(h["out_of_band"]) < OUT_OF_BAND_LOGGED:
+                        h["out_of_band"].add(usage)
+                        log("hidraw %02x: usage %04x out of range" % (data[0], usage))
+                continue
+            now.add(base + usage)
+        held = {vk for vk in h["down"] if base <= vk < base + size}
+        for vk in sorted(held - now):
+            h["down"].discard(vk)
+            self.dispatch(h["mac"], vk, 0)
+        for vk in sorted(now - held):
+            h["down"].add(vk)
+            self.dispatch(h["mac"], vk, 1)
 
     def dispatch(self, did, code, value):
         """One remap decision for a (device, keycode, value), shared by the evdev
