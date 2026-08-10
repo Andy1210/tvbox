@@ -120,19 +120,28 @@ evdev only as `KEY_UNKNOWN` (the same code 240 for all of them, useless). But
 they all DO show up on the remote's **hidraw** node:
 
 ```text
-ef a1 00 00 00   # report 0xEF: vendor app buttons (byte[1] = code, 0x00 = release)
-02 33 00 00 00   # report 0x02: consumer buttons (0x33 hamburger, 0x02 app switcher)
+ef a1 00 00 00   # report 0xEF: vendor app buttons, 3 slots of 8 bits
+02 33 00 00 00   # report 0x02: consumer control, 2 slots of 16 bits, little endian
+                 #   (0x0033 hamburger, 0x0002 app switcher, 0x027E/0x027F/0x0280
+                 #    a Remote Pro's customizable and headphone buttons)
 01 4f 00 00      # report 0x01: mirrors the NORMAL keys - ignored (evdev has them)
 ```
 
+Both are HID **arrays**: the report lists the usages currently down, so a
+button is released by disappearing from it rather than by a code of its own,
+and a report carries several at once. The slot width matters - a Remote Pro's
+extra buttons sit above 0xFF, so reading the consumer report a byte at a time
+does not reach them at all.
+
 (Observed on an AFTKA-era remote: 0xA1..0xA4 for the four app buttons; other
-generations use other bytes - the bridge doesn't care which.)
+generations use other usages - the bridge doesn't care which.)
 
 The remote bridge reads that hidraw node directly and injects a virtual
-keycode (a per-report band + the raw byte: 0xEF at 0x300, 0x02 at 0x400, above
-KEY_MAX so it can never collide with a real key) into the SAME per-device
-remap pipeline, so EVERY such button, whatever byte it sends, becomes
-learnable/mappable like any other button:
+keycode (a per-report band plus the usage: 0xEF at 0x300, 0x02 at 0x400, above
+KEY_MAX so it can never collide with a real key, and below the 2048 the shell
+accepts in a saved keymap) into the SAME per-device remap pipeline, so EVERY
+such button, whatever it sends, becomes learnable/mappable like any other
+button:
 **Settings → Remotes & accessories → (remote) → learn a button → pick an action** (launch
 any installed app, `settings`, `appswitcher`, `power`, media/nav, …).
 
