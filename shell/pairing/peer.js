@@ -1,32 +1,39 @@
-// Pairing provider: hand another tvbox a credential for this one's app shares.
+// Pairing provider: two tvboxes letting each other read what their apps offer.
 //
 // Unlike every other provider here, the client is not a phone - it is the box in
 // the other room (peers.js), which sweeps the LAN for a box holding the pairing
-// port open and then asks for the credential with the four digits on this box's
-// screen. The page exists anyway, for two reasons: the sweep reads its MARKER to
-// tell a box waiting to pair from anything else on that port, and a person who
-// opens the address in a browser deserves to be told what is going on rather
-// than a blank 404.
+// port open and then asks with the four digits on this box's screen. The page
+// exists anyway, for two reasons: the sweep reads its MARKER to tell a box waiting
+// to pair from anything else on that port, and a person who opens the address in a
+// browser deserves to be told what is going on rather than a blank 404.
+//
+// **One code pairs both ways.** The box that asks sends its own credentials in the
+// same request, so this one ends up knowing it too. The alternative - a second
+// walk to the other TV, a second code, typed the other way round - is ceremony for
+// a relationship that is symmetric anyway. It is also why this is a POST: the
+// exchange carries something now.
 //
 // What is handed over is the app-shares token, never the file server's password:
 // it reaches an app's declared folders read-only and can be revoked on its own.
 const peers = require("../peers");
 
 let credentialsHook = () => null;
+let rememberHook = () => {};
 
 // main.js owns the config and the shares server; this only asks for them.
-function init({ credentials }) {
+function init({ credentials, remember }) {
   if (credentials) credentialsHook = credentials;
+  if (remember) rememberHook = remember;
 }
 
 const STR = {
   hu: {
     title: "tvbox - Box összekötése",
-    body: "Ez a box éppen egy másik tvbox csatlakozására vár, hogy az elérhesse a megosztott mentéseket. A másik boxon add meg a képernyőn látható négyjegyű kódot.",
+    body: "Ez a box éppen egy másik tvbox csatlakozására vár, hogy elérhessék egymás megosztott mappáit. A másik boxon add meg a képernyőn látható négyjegyű kódot.",
   },
   en: {
     title: "tvbox - Connect a box",
-    body: "This box is waiting for another tvbox to connect so it can read the shared save files. Enter the four-digit code shown on this screen on the other box.",
+    body: "This box is waiting for another tvbox to connect so the two can read each other's shared folders. Enter the four-digit code shown on this screen on the other box.",
   },
 };
 
@@ -50,16 +57,28 @@ function page(ctx) {
 }
 
 const routes = {
-  // Gated by the pairing core: a data GET needs ?c=<code>, wrong codes count
-  // towards its lockout and never extend the window.
-  "GET /peer/credentials": (req, res, ctx) => {
-    const c = credentialsHook();
-    if (!c || !c.token) return ctx.json(res, { error: "not_sharing" });
-    // Handing the credential over is the end of this pairing session: leaving the
-    // window open would let a second box take the same token off the same code.
+  // Gated by the pairing core: the four digits travel in the body, a wrong one is
+  // refused there and counts towards its lockout.
+  "POST /peer/credentials": (req, res, ctx) => {
+    const mine = credentialsHook();
+    if (!mine || !mine.token) return ctx.json(res, { error: "not_sharing" });
+    // Remembered by the address the request ARRIVED from, never one it sent: a box
+    // does not get to say where it lives. A box that is offering nothing has no
+    // credentials to send, and pairing with it is simply one-way.
+    const theirs = peers.peerFrom(ctx.body, peers.callerAddress(req));
+    if (theirs) rememberHook(theirs);
+    // Handing the credential over ends this session: leaving the window open would
+    // let a second box take the same token off the same code.
     ctx.stopSoon(1000);
-    ctx.json(res, { id: c.id, name: c.name, port: c.port, token: c.token });
+    ctx.json(res, { id: mine.id, name: mine.name, port: mine.port, token: mine.token, mutual: !!theirs });
   },
 };
 
-module.exports = { init, page, routes, STR };
+// What this box hands a peer. Read by the pair ROUTE as well, so the credentials
+// this box offers are defined in exactly one place (main.js wires it) whichever
+// end of the exchange is running.
+function credentials() {
+  return credentialsHook();
+}
+
+module.exports = { init, page, routes, credentials, STR };

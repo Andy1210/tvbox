@@ -1,13 +1,18 @@
-# Saves sharing
+# App sharing
 
-Continue a game in another room. A box offers the folders its apps declare - an
-emulator's save files - read-only to another tvbox, and the other box brings a
-copy across when someone asks it to.
+An app's own folders, read by the tvbox in the other room. The app declares which
+folders those may be, a person switches them on, and the other box brings a copy
+across when someone asks it to.
 
-The household case this exists for has no NAS in it, and should not need one: two
-boxes, two rooms, one save.
+Saves are the obvious use - two boxes, two rooms, one save, and a household that
+has no NAS and should not need one - but nothing in the box knows that. The shell
+provides the mechanism and the permission; the words for it belong to whichever app
+is sharing.
 
-**Settings → Network → Saves sharing.** Off until someone turns it on.
+**Settings → Network → App sharing** is the permission surface: what is offered,
+which boxes are let in, and forget. **The action lives in the app**, through the
+`shares` [capability](capabilities.md) - so an emulator can say "continue in the
+other room" in its own screen, and a box without one never sees the sentence.
 
 ## The one rule
 

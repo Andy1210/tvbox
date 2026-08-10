@@ -229,7 +229,7 @@ Bounded, because the file travels through a phone: **8 MB total, 4 MB per file,
 the log, never silently dropped. So save files and settings, not ROMs, cover art
 or save states. Those go the other two ways: over the
 [file server](file-server.md) from a computer, or - between two boxes - with
-[saves sharing](saves-sharing.md), which is what an app's `shares` declaration is for.
+[app sharing](app-sharing.md), which is what an app's `shares` declaration is for.
 
 App files are placed in passes: an app whose manifest came back with the config
 gets them immediately, an app fetched from the registry gets them when its

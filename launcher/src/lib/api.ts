@@ -246,7 +246,7 @@ export async function saveFileServer(patch: {
 }
 export const installRclone = () => post("/tvbox/api/fileserver/install-rclone", {});
 
-// Saves sharing: the folders installed apps declare, offered read-only to another
+// App sharing: the folders installed apps declare, offered read-only to another
 // box, and the boxes this one has been paired with. No credential ever crosses
 // this boundary - the box says whether it HAS a token, never what it is.
 export interface AppShare {
@@ -306,15 +306,6 @@ export const pairWithBox = (host: string, code: string) =>
   );
 export const forgetBox = (id: string) =>
   postJson<{ ok: boolean }>("/tvbox/api/appshares/peer-remove", { id }, { ok: false });
-export const pullShare = (peerId: string, shareId: string) =>
-  postJson<{ ok: boolean; error?: string }>(
-    "/tvbox/api/appshares/pull",
-    { peerId, shareId },
-    {
-      ok: false,
-      error: "failed",
-    },
-  );
 
 // Screen mirroring (Wi-Fi Display). There is no stored setting to read: the box
 // is either mirroring right now or it is not, because a group owner holds the

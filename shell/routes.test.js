@@ -37,7 +37,6 @@ function fakeCtx(over = {}) {
     appIsRunning: () => false,
     applyAppshares: () => ({ ok: true }),
     appsharesStatus: () => ({ running: false, shares: [] }),
-    pullAppshare: () => Promise.resolve({ ok: true }),
     applyFileserver: () => ({ ok: true }),
     applyMqttConfig: () => {},
     notify: () => {},
@@ -160,21 +159,13 @@ test("a peer is dropped by name, and its token goes with it", () => {
   assert.deepStrictEqual(jsonOf(res).peers, [], "and the answer never carries a token");
 });
 
-test("a pull names a share and a box, never a path", async () => {
-  let asked = null;
-  const ctx = fakeCtx({
-    pullAppshare: (peerId, shareId) => {
-      asked = { peerId, shareId };
-      return Promise.resolve({ ok: true });
-    },
-  });
+test("the write API has no way to bring files across", () => {
+  // The only path is the `shares` capability, which is scoped to the calling app.
+  // An HTTP route would not be: every local app shares the shell's origin, so one
+  // could ask for another app's share.
   const res = fakeRes();
-  await routes.post("/tvbox/api/appshares/pull", { peerId: "b", shareId: "retroarch/saves", dest: "/etc" }, res, ctx);
-  assert.deepStrictEqual(
-    asked,
-    { peerId: "b", shareId: "retroarch/saves" },
-    "the destination is not the caller's to give",
-  );
+  routes.post("/tvbox/api/appshares/pull", { peerId: "b", shareId: "retroarch/saves" }, res, fakeCtx());
+  assert.strictEqual(res.status, 404);
 });
 
 test("every ctx member a route uses is one the shell actually provides", () => {

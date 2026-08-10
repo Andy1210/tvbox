@@ -72,6 +72,27 @@ if (caps.indexOf("storage") >= 0) {
   };
 }
 
+// ---- shares capability: this app's folders on the box in the other room ----
+// The app owns the screen for this, because it is the one that knows what its
+// files mean - "continue in the other room" is a sentence only an emulator can
+// write. What it does NOT own is the permission: which folders may be offered
+// comes from its manifest, switching them on is a person's job in Settings, and
+// the boxes are paired there too. So this is a small surface: what am I allowed
+// to see, and bring one of mine here.
+if (caps.indexOf("shares") >= 0) {
+  api.shares = {
+    // { peers: [{id, name}], shares: [{id, name, present, on}] } - this app's own.
+    list: function () {
+      return ipcRenderer.invoke("app:shares", "list");
+    },
+    // Bring one of this app's shares from a paired box. There is no push, and no
+    // destination argument: the box resolves where it goes from the manifest.
+    pull: function (peerId, shareId) {
+      return ipcRenderer.invoke("app:shares", "pull", { peerId: String(peerId), shareId: String(shareId) });
+    },
+  };
+}
+
 // ---- display capability: adaptive output mode for the app's OWN video ----
 // For an app that plays video itself (a <video> element) instead of handing a URL
 // to the shell's mpv: the output switches to a mode that matches the content and

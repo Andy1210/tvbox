@@ -83,6 +83,24 @@ function contained(root, target) {
   }
 }
 
+// A destination that does not exist yet. A box that has never started the app has
+// no saves folder, which is precisely the box someone wants their saves brought
+// to - so a pull creates it. Only ever below a folder that already exists INSIDE
+// the app's root: mkdir follows a symlink planted in the app's directory, and
+// building the rest of the chain past one would put the pull outside the app.
+function ensureDir(root, target) {
+  if (isDir(target)) return contained(root, target);
+  let up = path.dirname(target);
+  while (!isDir(up) && path.dirname(up) !== up) up = path.dirname(up);
+  if (!isDir(up) || !contained(root, up)) return false;
+  try {
+    fs.mkdirSync(target, { recursive: true });
+  } catch (e) {
+    return false;
+  }
+  return contained(root, target);
+}
+
 // Every share every installed app declares, with a stable id per share. The id is
 // what the enable list and a peer's bookmark store, so it must not move when the
 // list around it changes: `<app id>/<name>`, and the name comes from the declared
@@ -114,6 +132,9 @@ function entries(manifests, shareRootOf) {
         appName: m.name || m.id,
         name,
         path: dir,
+        // The anchor the path was resolved against, so a pull can re-check
+        // containment before creating a folder that is not there yet.
+        root,
         // Carried on the entry rather than looked up at pull time: the pull already
         // resolves the destination from the manifest, and both must come from the
         // same reading of it.
@@ -236,6 +257,7 @@ module.exports = {
   nameOk,
   newToken,
   contained,
+  ensureDir,
   entries,
   buildRoot,
   start,

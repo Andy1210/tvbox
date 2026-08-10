@@ -401,9 +401,13 @@ function pullAppshare(peerId, shareId) {
   const entry = appsharesDeps.entries().find((x) => x.id === shareId);
   if (!entry) return { ok: false, error: "unknown_share" };
   // `present` is what says the folder exists AND still resolves inside the app's
-  // own root. Refused here rather than only in the UI: this destination is handed
-  // to rclone, and a direct call must not reach past a symlink the screen greys out.
-  if (!entry.present) return { ok: false, error: "unknown_share" };
+  // own root. Checked here rather than only in the UI: this destination is handed
+  // to rclone, and a direct call must not reach past a symlink the screen greys
+  // out. A folder the app has simply not created yet is made - a box that has
+  // never started the app is the one most likely to want a save brought to it.
+  if (!entry.present && !appshares.ensureDir(entry.root, entry.path)) {
+    return { ok: false, error: "unknown_share" };
+  }
   if (!apps.onPath("rclone")) return { ok: false, error: "rclone_missing" };
   // A replaced file goes here rather than into the void, and the stamp is what
   // makes two pulls of the same game distinguishable afterwards.
@@ -747,7 +751,6 @@ function serve() {
     appIsRunning: (id) => !!appWindow(id),
     applyAppshares,
     appsharesStatus: () => appshares.status(config.rawAppshares(), appsharesDeps),
-    pullAppshare,
     applyFileserver,
     applyMqttConfig,
     audioSink: () => audioSink,
@@ -2615,6 +2618,42 @@ ipcMain.handle("app:storage", (e, action, key, value) => {
   return { ok: false, error: "unknown storage action" };
 });
 
+// ---- capability: an app's own shares, and bringing them from another box ----
+// The box owns the boundary and the app owns the screen. What an app may offer is
+// its manifest's business and switching it on is a person's, in Settings - an app
+// package is trusted Node code in the host process, so "the app asks nicely" would
+// not be a boundary at all. What belongs to the app is the ACTION: it knows what a
+// save is, when someone would want one, and how to say so.
+//
+// Everything here is therefore scoped to the sender's own app id. It can see the
+// boxes this one has paired with and its OWN shares, and it can pull its OWN
+// share; another app's is not in the list and is refused if named. The
+// destination is never sent - pullAppshare resolves it from the local manifest,
+// because a path from a renderer is a path somebody else chose.
+ipcMain.handle("app:shares", (e, action, payload) => {
+  const id = appIdForSender(e.sender);
+  if (!id || !capsFor(id).includes("shares")) return { ok: false, error: "no shares capability" };
+  const cfg = config.rawAppshares();
+  const enabled = new Set(Array.isArray(cfg.enabled) ? cfg.enabled : []);
+  const mine = appsharesDeps.entries().filter((x) => x.appId === id);
+  if (action === "list") {
+    return {
+      ok: true,
+      // Never the token: an app has no use for one, and the peer list is the only
+      // thing here that could carry a credential out of the shell.
+      peers: (cfg.peers || []).map((p) => ({ id: p.id, name: p.name })),
+      shares: mine.map((x) => ({ id: x.id, name: x.name, present: x.present, on: enabled.has(x.id) })),
+    };
+  }
+  if (action === "pull") {
+    const p = payload || {};
+    const shareId = String(p.shareId || "");
+    if (!mine.some((x) => x.id === shareId)) return { ok: false, error: "unknown_share" };
+    return pullAppshare(String(p.peerId || ""), shareId);
+  }
+  return { ok: false, error: "unknown shares action" };
+});
+
 // ---- capability: adaptive display mode ----
 // "I am about to show video this size at this framerate" - the shell switches the
 // output to a mode that suits it and puts the UI mode back on release. For apps
@@ -2941,6 +2980,14 @@ app.whenReady().then(async () => {
   // place and a share turned off between the code appearing and the peer asking
   // takes the answer with it.
   peerPairing.init({
+    // The box on the other side of the exchange, remembered the same way the box
+    // that asked remembers this one - replaced rather than appended, because a
+    // token is reissued each time and a stale entry would be tried first.
+    remember: (peer) => {
+      const kept = (config.rawAppshares().peers || []).filter((x) => x.id !== peer.id);
+      config.setAppshares({ peers: [...kept, peer] });
+      console.log("[appshares] paired with", peer.name);
+    },
     credentials: () => {
       const cfg = config.rawAppshares();
       if (!cfg.token || !(cfg.enabled || []).length) return null;

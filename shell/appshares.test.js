@@ -74,6 +74,22 @@ test("a folder the app has not created yet stays listed, but not present", () =>
   assert.equal(e[0].present, false);
 });
 
+test("a destination the app has not created yet is made, but never past a symlink", () => {
+  // The fresh-box case: nothing has run yet, so there is no saves folder to pull
+  // into - and refusing there would make a new box the one place saves cannot go.
+  const fresh = path.join(RA, "config", "retroarch", "fresh", "saves");
+  assert.equal(appshares.ensureDir(RA, fresh), true);
+  assert.ok(fs.statSync(fresh).isDirectory());
+  assert.equal(appshares.ensureDir(RA, fresh), true, "an existing folder is simply accepted");
+
+  const planted = path.join(RA, "config", "retroarch", "elsewhere");
+  fs.mkdirSync(path.join(HOME, "secrets"), { recursive: true });
+  fs.symlinkSync(path.join(HOME, "secrets"), planted);
+  assert.equal(appshares.ensureDir(RA, path.join(planted, "saves")), false, "the deepest existing folder is outside");
+  assert.ok(!fs.existsSync(path.join(HOME, "secrets", "saves")), "and nothing was created there");
+  fs.rmSync(planted);
+});
+
 test("a symlink out of the app's own root is not a share", () => {
   const escape = path.join(RA, "config", "retroarch", "escape");
   fs.symlinkSync(path.join(HOME, "secrets"), escape);

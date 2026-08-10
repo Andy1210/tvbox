@@ -214,7 +214,7 @@ writes). Requests are capped in size; a route that needs a bigger body says so
 
 The same idea as `backup`, pointed sideways instead of forwards in time: a second
 box in another room reading this one's save files, so a game started in the living
-room can be picked up in the bedroom. See [saves sharing](saves-sharing.md).
+room can be picked up in the bedroom. See [app sharing](app-sharing.md).
 
 ```jsonc
 "shares": {

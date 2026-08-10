@@ -322,7 +322,7 @@ function validateManifest(m, src) {
       }
     }
   }
-  const CAPS = ["nav", "player", "config", "fetch", "storage", "display", "input", "system"];
+  const CAPS = ["nav", "player", "config", "fetch", "storage", "display", "input", "shares", "system"];
   const caps = m.runtime && m.runtime.capabilities;
   if (caps != null) {
     if (!Array.isArray(caps)) return bad("runtime.capabilities must be an array");

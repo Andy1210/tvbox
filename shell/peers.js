@@ -125,6 +125,75 @@ function get(url, timeout) {
   });
 }
 
+function post(url, body, timeout) {
+  const payload = Buffer.from(JSON.stringify(body || {}));
+  const u = new URL(url);
+  return new Promise((resolve) => {
+    let done = false;
+    let deadline = null;
+    const finish = (v) => {
+      if (done) return;
+      done = true;
+      if (deadline) clearTimeout(deadline);
+      resolve(v);
+    };
+    const req = http.request(
+      {
+        hostname: u.hostname,
+        port: u.port,
+        path: u.pathname + u.search,
+        method: "POST",
+        timeout: timeout || HTTP_TIMEOUT_MS,
+        headers: { "Content-Type": "application/json", "Content-Length": payload.length },
+      },
+      (res) => {
+        let out = "";
+        res.setEncoding("utf8");
+        res.on("data", (d) => {
+          out += d;
+          if (out.length > MAX_BODY) {
+            req.destroy();
+            finish({ status: res.statusCode, body: out.slice(0, MAX_BODY) });
+          }
+        });
+        res.on("end", () => finish({ status: res.statusCode, body: out }));
+        res.on("error", () => finish(null));
+      },
+    );
+    deadline = setTimeout(
+      () => {
+        req.destroy();
+        finish(null);
+      },
+      (timeout || HTTP_TIMEOUT_MS) * 2,
+    );
+    req.on("timeout", () => req.destroy());
+    req.on("error", () => finish(null));
+    req.end(payload);
+  });
+}
+
+// The address a request actually came from, which is what a box is remembered by -
+// never the one it claims. Node reports an IPv4 peer on a dual-stack socket in the
+// mapped form.
+function callerAddress(req) {
+  const a = (req && req.socket && req.socket.remoteAddress) || "";
+  return a.startsWith("::ffff:") ? a.slice(7) : a;
+}
+
+// What a box says about itself, checked before any of it is believed. Shared by
+// both ends of the exchange: the same answer travels in both directions now, so
+// one copy of these rules is one thing to get right.
+function peerFrom(out, host) {
+  const port = Number(out && out.port);
+  const token = out && typeof out.token === "string" ? out.token : "";
+  const name = out && typeof out.name === "string" ? out.name.trim().slice(0, 64) : "";
+  const id = out && typeof out.id === "string" && out.id ? out.id : name;
+  if (!host || !name || !token || token.length > 256) return null;
+  if (!Number.isInteger(port) || port < 1 || port > 65535) return null;
+  return { id: id.slice(0, 64), name, host, port, token };
+}
+
 // Boxes on the LAN that are waiting to pair right now.
 async function scan(deps) {
   const d = deps || {};
@@ -155,13 +224,18 @@ async function scan(deps) {
   return found;
 }
 
-// Ask a box that is waiting to pair for a credential to its shares. The four
-// digits are the gate; a wrong one is refused by the peer, which also counts it
+// Pair with a box that is waiting. One code, both directions: this box sends its
+// OWN credentials in the same request, so the box on the other side ends up knowing
+// this one too. Doing it once per direction would mean walking to the other TV,
+// showing a second code and typing it here - for a relationship that is symmetric
+// anyway.
+//
+// The four digits are the gate; a wrong one is refused by the peer, and counts
 // towards its own lockout.
-async function pairWith(host, code, deps) {
-  const fetchUrl = (deps && deps.get) || get;
-  const url = "http://" + host + ":" + PAIRING_PORT + "/peer/credentials?c=" + encodeURIComponent(String(code || ""));
-  const r = await fetchUrl(url);
+async function pairWith(host, code, deps, own) {
+  const send = (deps && deps.post) || post;
+  const url = "http://" + host + ":" + PAIRING_PORT + "/peer/credentials";
+  const r = await send(url, { ...(own || {}), code: String(code || "") });
   if (!r) return { ok: false, error: "unreachable" };
   if (r.status === 403) return { ok: false, error: "bad_code" };
   if (r.status !== 200) return { ok: false, error: "refused" };
@@ -171,16 +245,12 @@ async function pairWith(host, code, deps) {
   } catch (e) {
     return { ok: false, error: "not_a_box" };
   }
-  // Everything below came off the network, so it is checked here rather than being
-  // handed to the config store to quietly drop: a peer whose answer does not fit
-  // would otherwise be reported as paired and then not be there.
-  const port = Number(out && out.port);
-  const token = out && typeof out.token === "string" ? out.token : "";
-  const name = out && typeof out.name === "string" ? out.name.trim().slice(0, 64) : "";
-  const id = out && typeof out.id === "string" && out.id ? out.id : name;
-  if (!name || !token || token.length > 256 || !Number.isInteger(port) || port < 1 || port > 65535)
-    return { ok: false, error: "not_a_box" };
-  return { ok: true, peer: { id: id.slice(0, 64), name, host, port, token } };
+  const peer = peerFrom(out, host);
+  if (!peer) return { ok: false, error: "not_a_box" };
+  // Whether the other box could take ours as well. It cannot if it is offering
+  // nothing - it has no credential of its own to hand over - and that is worth
+  // saying rather than quietly leaving the pairing one-way.
+  return { ok: true, peer, mutual: !!(out && out.mutual) };
 }
 
 // Pull one share from a peer into the SAME app's folder on this box. The
@@ -227,6 +297,8 @@ module.exports = {
   REPLACED,
   localSubnet,
   onLocalSubnet,
+  callerAddress,
+  peerFrom,
   scan,
   pairWith,
   pullArgv,

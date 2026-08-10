@@ -20,7 +20,8 @@ const ir = require("./ir");
 const maintenance = require("./maintenance");
 const apps = require("./install");
 const pairing = require("./pairing");
-const peers = require("./peers"); // the other box: found by a sweep, paired with, pulled from
+const peers = require("./peers");
+const peerPairing = require("./pairing/peer"); // also owns what this box hands a peer // the other box: found by a sweep, paired with, pulled from
 const phoneremote = require("./phoneremote"); // a phone acting as the remote, on the LAN
 const photoshare = require("./photoshare"); // photos a phone cast at the viewer
 const removable = require("./removable"); // the USB stick: mount on open, unmount before it is pulled
@@ -443,8 +444,10 @@ function post(p, data, res, ctx) {
     // peer, and taking it would make this route a way to have the box fetch an
     // address of someone else's choosing.
     if (!peers.onLocalSubnet(host)) return httpserver.jsonRes(res, { ok: false, error: "bad_host" });
+    // Our own credentials travel with the request, so one code pairs both
+    // directions: the box being asked ends up knowing this one too.
     return peers
-      .pairWith(host, code)
+      .pairWith(host, code, undefined, peerPairing.credentials() || {})
       .then((r) => {
         if (!r.ok) return httpserver.jsonRes(res, r);
         // Replaced rather than appended when the same box pairs again: a peer's
@@ -464,15 +467,6 @@ function post(p, data, res, ctx) {
       ok: true,
       peers: peersLeft.map((x) => ({ id: x.id, name: x.name, host: x.host })),
     });
-  }
-  if (p === "/tvbox/api/appshares/pull") {
-    const r = ctx.pullAppshare(String(data.peerId || ""), String(data.shareId || ""));
-    // A failure before rclone starts comes back as a plain object; the run itself
-    // is a promise.
-    if (!r || typeof r.then !== "function") return httpserver.jsonRes(res, r || { ok: false, error: "failed" });
-    return r
-      .then((out) => httpserver.jsonRes(res, out))
-      .catch((e) => httpserver.jsonRes(res, { ok: false, error: String(e.message || e).slice(0, 120) }));
   }
   if (p === "/tvbox/api/config/app") {
     // Set a urlConfig app's address: { key, baseUrl } (http/https or empty to clear).

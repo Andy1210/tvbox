@@ -50,6 +50,7 @@ capability must never grant it - the boundary fails closed.
 | `fetch` | `fetch(url, opts) → { ok, status, headers, body }` | Scoped server-side data proxy. **Only reaches the hosts in `runtime.origins`.** The sandbox-safe way to read a cross-origin JSON/M3U/XMLTV feed. See below. |
 | `storage` | `storage.get/set/remove(key[, value])` | A small, shell-owned, per-app key/value store (persisted, size-capped, never cross-app). |
 | `display` | `display.claimForVideo({width,height,fps})`, `display.release()` | Switches the OUTPUT mode to suit the app's OWN video (its `<video>`/player) and puts the UI mode back on release. Foreground-only. Not needed with `player` - the shell's `mpv` claims for itself. See below. |
+| `shares` | `shares.list()`, `shares.pull(peerId, shareId)` | This app's own folders on the tvbox in the other room: which boxes are paired, which of ITS shares exist, and bring one here. What may be offered is the manifest's business and switching it on is a person's, in Settings - this is only the action. Scoped to the calling app. See below. |
 | `config` | (launcher-internal) | First-party surface; not for third-party apps. |
 | `input` | (bridge-only) | Media/remote keys routed into a bridge app's own handlers (the bridge ships in the app package, e.g. Plex's `bridge.js`). No `window.tvbox` surface. |
 | `system` | (bridge-only) `system.exit` / `quit` / `close` / `closeApp` | Lets a bridge app ask the host to CLOSE it - its window is destroyed and the next launch starts fresh, unlike Home which only backgrounds it. This is what a Plex-style "Exit?" dialog calls. |
@@ -131,6 +132,39 @@ Enforced in the shell ([`shell/appfetch.js`](../shell/appfetch.js)):
 Because the manifest is user-visible and user-installed, and the box is a home
 LAN device, this mirrors the trust already granted to a remote app's declared
 navigation `origins` - with request/response hardening on top.
+
+
+## `shares` - this app's folders, from the box in the other room
+
+Two boxes in two rooms, and an app whose files a person would want in both: an
+emulator's saves are the obvious one, but nothing here knows that. The split is:
+
+- **What may be offered** is declared in the manifest (`shares.paths`, see
+  [the manifest reference](app-manifest.md)) and resolved against the app's own
+  root. There is no call that takes a path.
+- **Whether it is offered** is a person's decision, in Settings -> Network -> App
+  sharing, and so is which boxes are let in. An app package is trusted Node code in
+  the host process, so an app turning its own sharing on would not be a boundary at
+  all.
+- **Bringing files across** is the app's, because it is the one that knows what its
+  files mean. That is this capability.
+
+```js
+const { peers, shares } = await window.tvbox.shares.list();
+// peers:  [{ id, name }]           - boxes this one has been paired with
+// shares: [{ id, name, present, on }] - THIS app's, as Settings sees them
+await window.tvbox.shares.pull(peers[0].id, shares[0].id);
+```
+
+Everything is scoped to the calling app: another app's shares are not in the list
+and are refused if named. There is no destination argument - the box resolves where
+a share lands from the manifest, because a path chosen by a renderer is a path
+somebody else chose. And there is no push: a box brings files to itself, so two
+boxes cannot overwrite each other's copy behind the user's back.
+
+`pull` answers `{ ok, error? }`. `unknown_share` means this app does not declare it
+(or is not installed on the box that has it), `unknown_peer` that the box has been
+forgotten since.
 
 ## Where an app runs (the isolation model)
 
