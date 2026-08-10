@@ -56,7 +56,7 @@ test("the credentials reach rclone through the environment, never the command li
   assert.match(argv, /--read-only/, "this is a player: a mistyped delete over SMB is not recoverable");
 });
 
-// A film is streamed once; a disc image is seeked in for hours. Measured on a Pi 5
+// A film is streamed once; an emulator seeks around a disc image for hours. Measured
 // over SMB, a random 64 kB read from a GameCube image cost 79 ms at the median
 // against 1.1 ms locally - which is what the freezing mid-game was made of. So the
 // mount profile follows what the share HOLDS, and the two must not blur together.

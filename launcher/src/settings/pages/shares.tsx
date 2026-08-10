@@ -170,7 +170,7 @@ function ShareEditPage({ existing, onDone }: { existing?: ShareRow; onDone: () =
         />
         {/* What is on it, not how it is cached: the person setting this up knows
             what they put on the NAS. A film is streamed once and a disc image is
-            seeked in for hours, and over SMB that difference is a second of
+            read all over for hours, and over SMB that difference is a second of
             freezing in the middle of a game. */}
         <ToggleRow
           id="cache"

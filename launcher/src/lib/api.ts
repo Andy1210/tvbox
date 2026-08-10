@@ -362,7 +362,7 @@ export interface ShareRow {
   user: string;
   domain: string;
   // What is on it, which decides how it is mounted: a film is streamed once, a
-  // disc image is seeked in for hours and has to be cached to be playable.
+  // emulator seeks around a disc image for hours, so it has to be cached to play.
   cache: "media" | "games";
   hasPass: boolean;
   mountPoint: string;
