@@ -94,10 +94,27 @@ function makeFinder(deps) {
   let state = null; // { mac, timer, retries } - the remote we believe is ringing
   let queue = Promise.resolve(); // one operation at a time (see `serial`)
 
-  /** Run `fn` after whatever is already in flight, so no two writes interleave. */
+  /**
+   * Run `fn` after whatever is already in flight, so no two writes interleave.
+   * The tail swallows failures on purpose: a rejected chain would never call
+   * another `then`, so one throw would wedge the finder for the life of the
+   * shell and leave every later caller awaiting a promise that never settles.
+   */
   function serial(fn) {
     return new Promise((resolve) => {
-      queue = queue.then(() => new Promise((next) => fn((err) => (resolve(err || null), next()))));
+      queue = queue
+        .then(
+          () =>
+            new Promise((next) => {
+              try {
+                fn((err) => (resolve(err || null), next()));
+              } catch (e) {
+                resolve(e);
+                next();
+              }
+            }),
+        )
+        .catch(() => {});
     });
   }
 
@@ -114,7 +131,9 @@ function makeFinder(deps) {
       const found = [];
       let pending = macs.length;
       if (!pending) {
-        capable = { ts: now(), macs: found };
+        // A failed call must not be cached as "no remote can ring" - that would
+        // hide the Settings row and the MQTT fallback for the next 8 seconds.
+        if (!err) capable = { ts: now(), macs: found };
         return cb(found);
       }
       macs.forEach((mac) =>
@@ -174,8 +193,12 @@ function makeFinder(deps) {
         // timers.
         if (cur.retries < STOP_RETRIES) {
           cur.retries += 1;
-          cur.timer = setTimer(() => doStop(() => {}), STOP_RETRY_MS);
-        } else {
+          // Back through the queue: a retry that ran alongside a fresh start
+          // would write while that start was mid-flight.
+          cur.timer = setTimer(() => serial((fin) => doStop(fin)), STOP_RETRY_MS);
+        } else if (state === cur) {
+          // Give up only on the ring this chain owns. Another remote may have
+          // become the tracked one while these retries were running.
           state = null;
         }
         cb(e);
@@ -244,5 +267,7 @@ module.exports = {
   RING_ON,
   RING_OFF,
   MAX_RING_MS,
+  STOP_RETRY_MS,
+  STOP_RETRIES,
   ...makeFinder({}),
 };

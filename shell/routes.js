@@ -346,10 +346,12 @@ function post(p, data, res, ctx) {
     // Make a lost remote ring, and stop it. Reachable from the phone remote and
     // over MQTT as well as from Settings, because the obvious way to trigger it
     // - a button on the remote - is exactly what the user cannot find.
-    // `on` is read strictly: `on !== false` would turn {"on":"false"} and
-    // {"on":0} into a start, and a body-less POST into a silent stop.
+    // `on` must be an actual boolean. Read loosely, {"on":"false"} and
+    // {"on":0} would start a ring, and a body-less POST would silently stop
+    // one - so a caller that omits the field is told, not guessed at.
     const mac = String((data && data.mac) || "").trim();
-    const on = data.on === true;
+    if (typeof data.on !== "boolean") return httpserver.jsonRes(res, { ok: false, error: "on must be a boolean" });
+    const on = data.on;
     return remotefinder.ring(mac, on, (err) =>
       httpserver.jsonRes(
         res,

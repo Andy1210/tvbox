@@ -94,6 +94,7 @@ export async function findRemote(mac: string, on: boolean): Promise<string | nul
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ mac, on }),
     });
+    if (!r.ok) return null;
     const d = (await r.json()) as { ok?: boolean; ringing?: string | null };
     return d.ringing || null;
   } catch {

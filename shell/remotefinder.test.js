@@ -120,13 +120,19 @@ test("a mac that is not a mac is refused before anything is matched", () => {
 // --- ringing -----------------------------------------------------------------
 
 function harness(opts = {}) {
-  const { attrs = ATTRS, failWrite = () => false, devices = "Device 7C:ED:C6:12:E6:3C Amazon Remote\n" } = opts;
+  const {
+    attrs = ATTRS,
+    failWrite = () => false,
+    spawnThrows = () => false,
+    devices = "Device 7C:ED:C6:12:E6:3C Amazon Remote\n",
+  } = opts;
   const calls = [];
   const timers = [];
   const finder = rf.makeFinder({
     execFile: (cmd, args, o, cb) => {
       const line = [cmd, ...args].join(" ");
       calls.push(line);
+      if (spawnThrows(line)) throw new Error("spawn failed"); // execFile can throw, not only call back
       const reply = () => {
         if (cmd === "bluetoothctl" && args[0] === "gatt.list-attributes") return cb(null, attrs);
         if (cmd === "bluetoothctl" && args[0] === "devices") return cb(null, devices);
@@ -200,7 +206,64 @@ test("a stop that could not be delivered keeps the ring and retries", async () =
   assert.ok(err, "the caller is told");
   assert.equal(h.finder.isRinging(), MAC, "still believed to be ringing");
   assert.equal(h.live().length, 1, "a retry is armed");
-  assert.equal(h.live()[0].ms, 5000);
+  assert.equal(h.live()[0].ms, rf.STOP_RETRY_MS);
+});
+
+test("the documented one-minute cap is the constant the code uses", () => {
+  assert.equal(rf.MAX_RING_MS, 60000);
+});
+
+test("a stop that never gets through gives up rather than arming timers forever", async () => {
+  const h = harness({ failWrite: (c) => c.includes(OFF) });
+  await h.finder.ring(MAC, true);
+  for (let i = 0; i <= rf.STOP_RETRIES; i++) {
+    await h.finder.ring(MAC, false);
+    const t = h.live()[0];
+    if (t) t.fn(); // fire the retry the failure armed
+    await new Promise((r) => setTimeout(r, 5));
+  }
+  assert.equal(h.finder.isRinging(), null, "the chain stopped believing after its budget");
+  assert.equal(h.live().length, 0, "and left no timer behind");
+});
+
+test("a throw inside an operation does not wedge every later one", async () => {
+  // A rejected queue would never run another `then`: one throw would leave the
+  // finder dead for the life of the shell, with callers awaiting forever.
+  let boom = true;
+  const h = harness({
+    spawnThrows: () => {
+      if (!boom) return false;
+      boom = false;
+      return true;
+    },
+  });
+  const err = await h.finder.ring(MAC, true);
+  assert.ok(err, "the caller is told rather than left hanging");
+  assert.equal(await h.finder.ring(MAC, true), null, "the finder still works afterwards");
+  assert.equal(h.finder.isRinging(), MAC);
+});
+
+test("a failed device list is not cached as 'nothing can ring'", (t, done) => {
+  let calls = 0;
+  const finder = rf.makeFinder({
+    execFile: (cmd, args, o, cb) =>
+      setImmediate(() => {
+        if (args[0] === "devices") {
+          calls += 1;
+          return cb(new Error("bluetoothctl is busy"));
+        }
+        cb(null, "");
+      }),
+    now: () => 0,
+    setTimeout: () => 0,
+    clearTimeout: () => {},
+  });
+  finder.capableRemotes(() => {
+    finder.capableRemotes(() => {
+      assert.equal(calls, 2, "the second caller retried instead of reading a cached failure");
+      done();
+    });
+  });
 });
 
 test("switching remotes reports a failed stop instead of losing the first one", async () => {
