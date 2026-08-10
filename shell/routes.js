@@ -24,6 +24,7 @@ const peers = require("./peers"); // the other box: found by a sweep, paired wit
 const peerPairing = require("./pairing/peer"); // and what this box hands one when they pair
 const phoneremote = require("./phoneremote"); // a phone acting as the remote, on the LAN
 const photoshare = require("./photoshare"); // photos a phone cast at the viewer
+const remotefinder = require("./remotefinder"); // make a lost remote ring (Remote Pro's buzzer)
 const removable = require("./removable"); // the USB stick: mount on open, unmount before it is pulled
 const shares = require("./shares"); // network shares (SMB over rclone)
 const store = require("./store");
@@ -340,6 +341,23 @@ function post(p, data, res, ctx) {
     config.setRemote({ devices });
     ctx.remoteBridgeCmd("reload");
     return httpserver.jsonRes(res, { ok: true, cleared: id || "all" });
+  }
+  if (p === "/tvbox/api/remote/find") {
+    // Make a lost remote ring, and stop it. Reachable from the phone remote and
+    // over MQTT as well as from Settings, because the obvious way to trigger it
+    // - a button on the remote - is exactly what the user cannot find.
+    // `on` is read strictly: `on !== false` would turn {"on":"false"} and
+    // {"on":0} into a start, and a body-less POST into a silent stop.
+    const mac = String((data && data.mac) || "").trim();
+    const on = data.on === true;
+    return remotefinder.ring(mac, on, (err) =>
+      httpserver.jsonRes(
+        res,
+        err
+          ? { ok: false, error: String(err.message || err).slice(0, 200) }
+          : { ok: true, ringing: remotefinder.isRinging() },
+      ),
+    );
   }
   if (p === "/tvbox/api/parental/verify") {
     return httpserver.jsonRes(res, { ok: config.verifyPin(String(data.pin || "")) });

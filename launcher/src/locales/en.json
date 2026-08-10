@@ -217,6 +217,8 @@
     "testNone": "No button captured yet...",
     "testStop": "Stop",
     "cancel": "Cancel",
+    "find": "Find this remote",
+    "findStop": "Stop ringing",
     "resetDevice": "Reset this remote's buttons",
     "reassignTitle": "Button already mapped",
     "reassignBody": "That button is already assigned to “{from}”. Reassign it to “{to}”?",

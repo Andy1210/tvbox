@@ -63,6 +63,7 @@ test("every file in the infra source dirs is listed in infra.list or consciously
     "infra.list", // the list itself
     "ir_protocols_test.py", // unit test - runs in CI, never ships to a box
     "gamepad_shim_test.py", // ditto (stubs evdev, so CI needs no hardware)
+    "remote_input_bridge_test.py", // ditto (stubs evdev; decodes captured HID reports)
   ]);
   const listed = new Set(infraListBasenames());
   const repo = path.join(__dirname, "..");
