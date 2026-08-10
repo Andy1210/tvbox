@@ -49,7 +49,9 @@ jobs:
             node --check "$f"
           done
       - name: shell unit tests (node --test, no Electron)
-        run: node --test shell/*.test.js
+        # The pairing providers are tested too - one of them answers another box on
+        # the LAN, which is not a place to find out a test file was never run.
+        run: node --test shell/*.test.js shell/pairing/*.test.js
       # The root-side boot scripts (diagnostics + safe mode) are POSIX sh, and they
       # are tested the same way: each runs against a fake root with its commands
       # stubbed onto PATH, so no test touches the runner's real state.

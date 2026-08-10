@@ -6,25 +6,26 @@ import {
   scanForBoxes,
   pairWithBox,
   forgetBox,
-  pullShare,
   type AppSharesStatus,
 } from "../../lib/api";
 import { SettingsPage } from "../SettingsPage";
 import { Group, InfoRow, Note, Row, TextRow, ToggleRow } from "../Rows";
 import { invalidateSummary } from "../summary";
 
-// Settings -> Network -> Saves sharing: continue a game in another room.
+// Settings -> Network -> App sharing: what this box lets another box read.
 //
-// The shape of this page follows the one rule the feature is built on - a box
-// PULLS, it never pushes. So there is no "sync" button and no pairing that starts
-// copying: one box offers, the other asks, and asking is always something someone
-// did on purpose. Two boxes playing the same game can therefore never overwrite
-// each other's save behind the user's back.
+// This screen is deliberately about NOTHING in particular. An emulator's saves is
+// the first use anyone will have for it, but the shell must not know that: the box
+// is a platform, most of its apps are optional, and Settings is not the place to
+// learn what "continue in the other room" means. So this page is the permission
+// surface only - which app offers which of its folders, on or off, and which boxes
+// have been let in. The action, and the words for it, belong to the app: it gets
+// there through the `shares` capability, scoped to its own shares.
 //
-// The two halves of connecting are deliberately asymmetric, because only one of
-// them needs a person at the TV. The box that HAS the save shows a four-digit
-// code; the box that wants it sweeps the LAN for whoever is showing one. That is
-// why there is nothing to type but the code - no addresses, no passwords.
+// The two halves of connecting are asymmetric on purpose, because only one of them
+// needs a person at the TV. The box that HAS the files shows a four-digit code; the
+// box that wants them sweeps the LAN for whoever is showing one. That is why there
+// is nothing to type but the code - no addresses, no passwords.
 const CODE_LEN = 4;
 // pairing/index.js TTL_MS - how long the code on screen is worth anything.
 const PAIRING_TTL_MS = 5 * 60 * 1000;
@@ -46,7 +47,6 @@ export function AppSharesPage() {
   const [found, setFound] = useState<{ host: string }[] | null>(null);
   const [scanning, setScanning] = useState(false);
   const [picked, setPicked] = useState<string | null>(null); // the host being paired with
-  const [busy, setBusy] = useState<string | null>(null); // a share id being pulled
   const [msg, setMsg] = useState<{ tone: "ok" | "warn"; text: string } | null>(null);
 
   const load = useCallback(async () => {
@@ -124,21 +124,16 @@ export function AppSharesPage() {
     if (r.ok) {
       setFound(null);
       setPicked(null);
-      setMsg({ tone: "ok", text: t("appshares.paired").replace("{name}", r.peer?.name || host) });
+      // One code is meant to connect both directions. It only half works when the
+      // other box has nothing switched on - it has no key to give - and that is
+      // worth saying here rather than leaving it to be discovered from the other
+      // room.
+      const key = r.mutual === false ? "appshares.pairedOneWay" : "appshares.paired";
+      setMsg({ tone: r.mutual === false ? "warn" : "ok", text: t(key).replace("{name}", r.peer?.name || host) });
       await load();
     } else {
       setMsg({ tone: "warn", text: errText(t, r.error || "unknown") });
     }
-  };
-
-  const pull = async (peerId: string, shareId: string) => {
-    setBusy(shareId + "@" + peerId);
-    setMsg(null);
-    const r = await pullShare(peerId, shareId);
-    setBusy(null);
-    setMsg(
-      r.ok ? { tone: "ok", text: t("appshares.pulled") } : { tone: "warn", text: errText(t, r.error || "unknown") },
-    );
   };
 
   if (unreachable) {
@@ -175,6 +170,10 @@ export function AppSharesPage() {
           />
         ))}
         {st && !st.rclone && <Note tone="warn">{t("appshares.noRclone")}</Note>}
+        {/* Where the other half went. Without this the page reads as unfinished:
+            it can switch sharing on and name the boxes, and then appears to do
+            nothing with either. */}
+        {shares.length > 0 && <Note>{t("appshares.inApp")}</Note>}
         {code ? (
           <InfoRow label={t("appshares.codeLabel")} value={code} />
         ) : (
@@ -236,25 +235,6 @@ export function AppSharesPage() {
           ),
         )}
       </Group>
-
-      {peers.length > 0 && shares.length > 0 && (
-        <Group title={t("appshares.bring")} hint={t("appshares.bringHint")}>
-          {peers.map((p) =>
-            shares.map((s) => (
-              <Row
-                key={p.id + s.id}
-                id={"pull-" + p.id + "-" + s.id}
-                label={s.appName + " - " + s.name}
-                hint={t("appshares.fromBox").replace("{name}", p.name)}
-                value={busy === s.id + "@" + p.id ? t("appshares.pulling") : t("appshares.pull")}
-                trailing="none"
-                disabled={!!busy || !st?.rclone}
-                onEnter={() => void pull(p.id, s.id)}
-              />
-            )),
-          )}
-        </Group>
-      )}
     </SettingsPage>
   );
 }

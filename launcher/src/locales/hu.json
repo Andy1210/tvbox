@@ -651,19 +651,19 @@
     "groupAccess": "Belépés"
   },
   "appshares": {
-    "title": "Mentések megosztása",
+    "title": "Alkalmazások megosztásai",
     "on": "be",
     "off": "ki",
     "offering": "Amit ez a box kínál",
-    "offeringHint": "Csak olvashatóan, a hálózat másik tvboxa felé. Az alkalmazás előre megmondja, melyik saját mappáját kínálhatja - mást nem tud.",
+    "offeringHint": "Mappák, amiket egy telepített alkalmazás olvasásra átenged a hálózat másik tvboxának. Az alkalmazás előre megmondja, melyik saját mappáiról van szó - mást nem tud felkínálni -, és a másik box csak olvasni tudja őket.",
     "nothingToOffer": "Egyik telepített alkalmazás sem kínál semmit.",
-    "notYet": "ide még nem mentett semmit",
+    "notYet": "egyelőre üres",
     "noRclone": "rclone kell hozzá, amit a fájlszerver fel tud telepíteni.",
     "offer": "Engedélyezd egy másik box csatlakozását",
     "offerHint": "Öt percig mutat egy kódot. Azt kell beírni a másik boxon.",
     "codeLabel": "Kód",
     "boxes": "Boxok",
-    "boxesHint": "Egy box akkor jelenik meg itt, ha csatlakoztál hozzá. A kulcs a másik boxé, és bármikor visszavonhatja.",
+    "boxesHint": "Egy box akkor kerül ide, ha beengedted. Mindegyiknek saját kulcsa van, így ha egyet elfelejtesz, csak az ő kulcsa szűnik meg - a többi marad.",
     "scan": "Box keresése",
     "scanning": "Keresem…",
     "scanHint": "Azt a boxot találja meg, amelyik éppen kódot mutat.",
@@ -671,13 +671,8 @@
     "foundBox": "Talált box",
     "enterCode": "A másik boxon látható kód",
     "forget": "elfelejt",
-    "paired": "Csatlakozva: {name}.",
-    "bring": "Mentések áthozása",
-    "bringHint": "A másik box mentéseit másolja ide. Visszafelé soha nem küld semmit, így két szoba nem tudja felülírni egymásét.",
-    "fromBox": "innen: {name}",
-    "pull": "áthoz",
-    "pulling": "hozom…",
-    "pulled": "Kész - amit felülírt volna, azt megtartottam.",
+    "paired": "Összekötve: {name}. Mindkét box olvashatja a másik megosztásait.",
+    "inApp": "A fájlok áthozása magában az alkalmazásban történik.",
     "unreachable": "A box nem válaszol.",
     "retry": "Újra",
     "err": {
@@ -686,15 +681,12 @@
       "not_a_box": "Ez nem tvbox, vagy nem kínál semmit.",
       "refused": "A másik box elutasította.",
       "rclone_missing": "Hiányzik az rclone.",
-      "unknown_peer": "Az a box már nincs csatlakoztatva.",
-      "unknown_share": "Az az alkalmazás itt nincs telepítve.",
-      "pull_failed": "A mentések áthozása nem sikerült.",
       "nothing_shared": "Semmi nincs bekapcsolva megosztásra.",
-      "token_missing": "Ennek a boxnak még nincs kulcsa.",
       "bad_host": "Ez a cím nem használható.",
       "failed": "Ez nem sikerült.",
       "unknown": "Valami félrement."
-    }
+    },
+    "pairedOneWay": "Összekötve: {name}, de csak egy irányba: innen olvasható a másik, viszont ő még semmit nem kínál. Kapcsolj be ott egy mappát, és kösd össze újra."
   },
   "common": {
     "on": "Be",
@@ -710,7 +702,7 @@
     "mqttHint": "Most játszott tartalom, parancsok és értesítések MQTT-n",
     "sharesHint": "NAS mint forrás, hogy a filmek a hálózaton lehessenek",
     "mirroringHint": "A telefon képernyője a TV-n",
-    "appsharesHint": "Folytasd a játékot másik szobában: a mentések megosztása és áthozása a másik boxról."
+    "appsharesHint": "Egy alkalmazás mely mappáit olvashatja a hálózat másik tvboxa, és mely boxokat engedted be."
   },
   "mirroring": {
     "title": "Képernyőtükrözés",

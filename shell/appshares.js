@@ -15,9 +15,11 @@
 //     (install.appShareRoot), the same anchor `backup.paths` use.
 //   * Read-only, always. Pulling saves needs nothing more, and a writable share
 //     would let any peer on the LAN edit an app's data.
-//   * Its own credential, not the file server's. The file server's password
-//     unlocks everything that box offers, read AND write; a peer that only needs
-//     saves gets a token that reaches nothing else and can be revoked on its own.
+//   * Its own credential, not the file server's - and one PER PEER. The file
+//     server's password unlocks everything that box offers, read AND write; a
+//     peer that only needs saves gets a key that reaches nothing else. Per peer,
+//     because "forget this box" has to mean the key it holds stops working, and
+//     one shared password can only be revoked by breaking every other box too.
 //
 // What this does NOT do: contain a hostile app. An installed app runs with full
 // trust and has the network, so it never needed a share to send data anywhere.
@@ -32,6 +34,9 @@ const HOME = os.homedir();
 // Not under ~/.tvbox: that directory is itself offered by the file server, and a
 // share root inside a shared folder makes a client walking it recurse.
 const ROOT = path.join(HOME, ".cache", "tvbox", "appshares-root");
+// Not under ROOT either - rclone serves that directory, and the file of keys
+// must not be one of the things it can hand out.
+const HTPASSWD = path.join(HOME, ".cache", "tvbox", "appshares.htpasswd");
 const SERVICE = "appshares"; // supervisor key
 const DEFAULT_PORT = 8096;
 const MIN_PORT = 1024;
@@ -40,7 +45,6 @@ const MAX_PORT = 65535;
 // are already here; binding onto one of them would leave rclone respawning under
 // the supervisor's backoff, which reads as "it just doesn't work" from the TV.
 const RESERVED_PORTS = new Set([8097, 8098, 8099, 8100]);
-const USER = "tvbox";
 const TOKEN_BYTES = 24;
 
 function portOf(v) {
@@ -59,6 +63,43 @@ function nameOk(n) {
 
 function newToken() {
   return crypto.randomBytes(TOKEN_BYTES).toString("base64url");
+}
+
+// A credential for one box: a user name that means nothing (so nothing has to be
+// escaped or kept unique against a box's own name) and a secret this box will not
+// keep. Only the hash is stored - the secret is handed over once, at pairing, and
+// a box that lost it pairs again.
+function newCredential() {
+  return { user: "box-" + crypto.randomBytes(6).toString("hex"), secret: newToken() };
+}
+
+// htpasswd's SHA-1 form, which is what rclone's own parser understands. SHA-1 is
+// long dead for passwords people choose; these are 24 random bytes, so there is no
+// dictionary and no preimage to find - the hash is here to keep the key out of a
+// file at rest, not to survive a guessing attack.
+const HASH_PREFIX = "{SHA}";
+function hashSecret(secret) {
+  return HASH_PREFIX + crypto.createHash("sha1").update(String(secret)).digest("base64");
+}
+
+// The file rclone authenticates against: one line per box that has been paired
+// with. Written before every start, so a forgotten box's line is gone the moment
+// the server comes back up.
+function writeHtpasswd(issued) {
+  const lines = (Array.isArray(issued) ? issued : [])
+    .filter((x) => x && typeof x.user === "string" && typeof x.hash === "string")
+    .map((x) => x.user + ":" + x.hash);
+  // With nobody paired the file still gets a line, for a user whose secret nothing
+  // holds. rclone with no htpasswd serves the shares to the whole LAN unauthenticated,
+  // so "no credentials" must mean 401 rather than no question asked.
+  if (!lines.length) {
+    const dead = newCredential();
+    lines.push(dead.user + ":" + hashSecret(dead.secret));
+  }
+  fs.mkdirSync(path.dirname(HTPASSWD), { recursive: true });
+  fs.writeFileSync(HTPASSWD, lines.join("\n") + "\n", { mode: 0o600 });
+  fs.chmodSync(HTPASSWD, 0o600); // writeFileSync's mode does not apply to a file that existed
+  return HTPASSWD;
 }
 
 function isDir(p) {
@@ -81,6 +122,31 @@ function contained(root, target) {
   } catch (e) {
     return false;
   }
+}
+
+// A destination that does not exist yet. A box that has never started the app has
+// no saves folder, which is precisely the box someone wants their saves brought
+// to - so a pull creates it. Only ever below a folder that already exists INSIDE
+// the app's root: mkdir follows a symlink planted in the app's directory, and
+// building the rest of the chain past one would put the pull outside the app.
+function ensureDir(root, target) {
+  if (isDir(target)) return contained(root, target);
+  let up = path.dirname(target);
+  while (!isDir(up) && path.dirname(up) !== up) up = path.dirname(up);
+  if (!isDir(up)) return false;
+  // The app's own root may not exist either - a flatpak that has never run has no
+  // data directory - and that IS the box someone wants their saves on. Creating it
+  // is safe for the same reason the rest is: everything from here down is made by
+  // this call, so there is no symlink in it that could point somewhere else. The
+  // root is a path the shell derived from the manifest, never one anybody sent.
+  const below = (parent, child) => child === parent || child.startsWith(parent + path.sep);
+  if (!contained(root, up) && !below(path.resolve(up), path.resolve(root))) return false;
+  try {
+    fs.mkdirSync(target, { recursive: true });
+  } catch (e) {
+    return false;
+  }
+  return contained(root, target);
 }
 
 // Every share every installed app declares, with a stable id per share. The id is
@@ -114,6 +180,9 @@ function entries(manifests, shareRootOf) {
         appName: m.name || m.id,
         name,
         path: dir,
+        // The anchor the path was resolved against, so a pull can re-check
+        // containment before creating a folder that is not there yet.
+        root,
         // Carried on the entry rather than looked up at pull time: the pull already
         // resolves the destination from the manifest, and both must come from the
         // same reading of it.
@@ -165,16 +234,23 @@ let live = null; // { port, shared } while served
 function start(cfg, deps) {
   const c = cfg || {};
   const port = portOf(c.port);
-  if (!c.token) return { ok: false, error: "token_missing" };
   if (!deps.onPath("rclone")) return { ok: false, error: "rclone_missing" };
   const all = deps.entries();
   const { shared, error } = buildRoot(all, c.enabled);
   if (error) return { ok: false, error };
   if (!shared.length) return { ok: false, error: "nothing_shared" };
+  try {
+    writeHtpasswd(c.issued);
+  } catch (e) {
+    console.warn("[appshares] could not write the key file:", e.message);
+    return { ok: false, error: "share_failed" };
+  }
   deps.supervisor.spawn(SERVICE, {
-    // Through the environment, never argv: any process on the box can read a
-    // command line.
-    env: { ...deps.childEnv(), RCLONE_USER: USER, RCLONE_PASS: String(c.token) },
+    env: deps.childEnv(),
+    // What identifies an instance of THIS server, across versions: nothing else on
+    // the box serves that directory. Without it a release that adds a flag cannot
+    // clear the previous release's leftover, and the leftover keeps the port.
+    reapPrefix: ["rclone", "serve", "webdav", ROOT],
     argv: () => [
       "rclone",
       "serve",
@@ -182,6 +258,8 @@ function start(cfg, deps) {
       ROOT,
       "--addr",
       ":" + port,
+      "--htpasswd",
+      HTPASSWD, // one line per paired box, so forgetting one revokes only that one
       "--read-only", // a peer pulls; nothing on the LAN may write an app's data
       "--copy-links", // the share root is symlinks, so they have to be followed
       "--dir-cache-time",
@@ -213,7 +291,9 @@ function status(cfg, deps) {
     enabled: !!c.enabled && enabled.size > 0,
     running: !!live,
     port: portOf(c.port),
-    hasToken: !!c.token,
+    // How many boxes hold a key to this one. Not the keys themselves, and not
+    // their hashes: the launcher names boxes, it never repeats a credential.
+    issued: (Array.isArray(c.issued) ? c.issued : []).length,
     rclone: !!(deps && deps.onPath && deps.onPath("rclone")),
     shares: all.map((e) => ({
       id: e.id,
@@ -231,11 +311,16 @@ module.exports = {
   ROOT,
   SERVICE,
   DEFAULT_PORT,
-  USER,
   portOf,
   nameOk,
   newToken,
+  newCredential,
+  hashSecret,
+  HASH_PREFIX,
+  writeHtpasswd,
+  HTPASSWD,
   contained,
+  ensureDir,
   entries,
   buildRoot,
   start,

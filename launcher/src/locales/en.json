@@ -651,19 +651,19 @@
     "groupAccess": "Sign-in"
   },
   "appshares": {
-    "title": "Saves sharing",
+    "title": "App sharing",
     "on": "on",
     "off": "off",
     "offering": "What this box offers",
-    "offeringHint": "Read-only, to another tvbox on your network. An app says in advance which of its own folders may be offered - nothing else can be.",
+    "offeringHint": "Folders an installed app may let another tvbox on your network read. Each app says in advance which of its own folders those are - nothing else can be offered - and reading is all the other box can do.",
     "nothingToOffer": "No installed app offers anything.",
-    "notYet": "nothing saved here yet",
+    "notYet": "empty so far",
     "noRclone": "Needs rclone, which the file server can install.",
     "offer": "Let another box connect",
     "offerHint": "Shows a code for five minutes. Type it on the other box.",
     "codeLabel": "Code",
     "boxes": "Boxes",
-    "boxesHint": "A box appears here once you have connected to it. It holds its own key, and can take it back at any time.",
+    "boxesHint": "A box appears here once it has been let in. Each holds a key of its own, so forgetting one takes that key back and leaves the others working.",
     "scan": "Find a box",
     "scanning": "Looking…",
     "scanHint": "Finds a box that is showing a code right now.",
@@ -671,13 +671,8 @@
     "foundBox": "Box found",
     "enterCode": "The code from the other box",
     "forget": "forget",
-    "paired": "Connected to {name}.",
-    "bring": "Bring saves here",
-    "bringHint": "Copies the other box's save files onto this one. Nothing is ever sent the other way, so two rooms cannot overwrite each other.",
-    "fromBox": "from {name}",
-    "pull": "bring",
-    "pulling": "bringing…",
-    "pulled": "Done - anything it replaced was kept.",
+    "paired": "Connected to {name}. Both boxes can read what the other offers.",
+    "inApp": "Bringing files across is done in the app itself.",
     "unreachable": "The box is not answering.",
     "retry": "Try again",
     "err": {
@@ -686,15 +681,12 @@
       "not_a_box": "That is not a tvbox, or it is not offering anything.",
       "refused": "The other box refused.",
       "rclone_missing": "rclone is missing.",
-      "unknown_peer": "That box is not connected any more.",
-      "unknown_share": "That app is not installed here.",
-      "pull_failed": "Bringing the saves failed.",
       "nothing_shared": "Nothing is switched on to offer.",
-      "token_missing": "This box has no key yet.",
       "bad_host": "That address is not usable.",
       "failed": "That didn't work.",
       "unknown": "Something went wrong."
-    }
+    },
+    "pairedOneWay": "Connected to {name}, one way: this box can read from it, but it offers nothing back yet. Switch a folder on over there and connect again."
   },
   "common": {
     "on": "On",
@@ -710,7 +702,7 @@
     "mqttHint": "Now-playing, commands and notifications over MQTT",
     "sharesHint": "A NAS as a source, so films can live on the network",
     "mirroringHint": "Show a phone's screen on the TV",
-    "appsharesHint": "Continue a game in another room: saves offered to, and brought from, your other box."
+    "appsharesHint": "Which of an app's folders another tvbox on your network may read, and which boxes have been let in."
   },
   "mirroring": {
     "title": "Screen mirroring",
