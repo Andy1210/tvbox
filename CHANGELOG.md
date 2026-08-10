@@ -5,6 +5,39 @@ updates). `scripts/make-release.sh` lifts the current version's `hu`/`en`
 blocks into the OTA feed's `notes` - keep both languages, keep it short, and
 write for the person on the couch (what changes for THEM), not for developers.
 
+## 2.11.0
+
+### hu
+
+- **A mentéseid átvihetők a másik boxra.** Ha két box van a lakásban, egy
+  szobában elkezdett játékot eddig nem lehetett a másikban folytatni. Mostantól
+  egyszer összekötöd a két boxot - az egyik mutat egy négyjegyű kódot, a másik
+  megkeresi és beírod -, és onnantól egy gombnyomással áthozod a mentéseket arra
+  a boxra, amelyiken játszani szeretnél. Beállítások → Hálózat → Mentések
+  megosztása. Mindig csak **hozni** lehet, küldeni nem: így ha ketten játszotok
+  két szobában, nem tudjátok felülírni egymás mentését. Amit egy áthozás
+  felülírna, azt a box félreteszi.
+- Az alkalmazás előre megmondja, melyik mappáit oszthatja meg így, és a
+  megosztás alapból ki van kapcsolva.
+- **A kontrollered ravaszai akkor is jók maradnak, ha a box a bekapcsolás
+  pillanatában veszi kézbe.** Bizonyos padoknál a jobb analóg kar és a ravaszok
+  felcserélődtek: mindkét ravasz halott volt, a kar meg félig lenyomva állt.
+
+### en
+
+- **Your saves can travel to your other box.** With two boxes in the house, a
+  game started in one room could not be picked up in the other. Now you connect
+  the two once - one shows a four-digit code, the other finds it and you type the
+  code - and after that one press brings the saves to whichever box you want to
+  play on. Settings → Network → Saves sharing. You can only ever **bring** saves,
+  never send them, so two people playing in two rooms cannot overwrite each
+  other; and anything a transfer would replace is kept.
+- An app says in advance which of its folders may be shared this way, and
+  sharing is off until you turn it on.
+- **A controller keeps its triggers even when the box grabs it the moment it
+  connects.** On some pads the right stick and the triggers swapped places: both
+  triggers were dead and the stick sat half-pressed.
+
 ## 2.10.1
 
 ### hu
