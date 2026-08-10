@@ -812,7 +812,12 @@
       "too_many": "There is no room for another share.",
       "rclone_missing": "The network tool is missing - install it first.",
       "failed": "That didn't work."
-    }
+    },
+    "cacheLabel": "What is on it",
+    "cacheMedia": "films",
+    "cacheGames": "games",
+    "cacheMediaHint": "Films and music: they start straight away and play as they arrive.",
+    "cacheGamesHint": "Games: the box copies a game to itself the first time you open it, then plays it from there. The first start is slower; after that it does not stutter."
   },
   "phoneRemote": {
     "code": "Code",

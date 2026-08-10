@@ -97,9 +97,28 @@ its own right, rather than also turning up as a folder called "shares".
 Two things are decided differently from the RetroArch package's share, which mounts
 the same way:
 
-- **The cache mode.** rclone's `full` downloads a whole file in the background:
-  right for a 700 MB disc image an emulator seeks around in, wrong for a 60 GB film
-  someone watches once. This uses `minimal` plus a read-ahead, so reads stay ranged.
+- **The cache mode, which follows what the share HOLDS.** rclone's `full` downloads
+  a whole file in the background: right for a disc image an emulator seeks around
+  in, wrong for a 60 GB film someone watches once. So the form asks what is on the
+  share - films or games - and mounts it accordingly (`minimal` plus a read-ahead,
+  or `full` with a long cache age and a cap).
+
+  The difference is not subtle. Measured on a Pi 5 with a GameCube image on an SMB
+  share, 200 random 64 kB reads - which is how an emulator reads a disc:
+
+  |                      | median | p90    | p99    | worst  |
+  | -------------------- | ------ | ------ | ------ | ------ |
+  | `minimal` (over SMB) | 79 ms  | 231 ms | 560 ms | 713 ms |
+  | the box's own disk   | 1.1 ms | 1.1 ms | 2.3 ms | 4.0 ms |
+
+  Three of those 200 reads took over half a second, and a game asking for several
+  in a row is the second of freezing someone notices. On `games` the file is
+  fetched once and read locally after that: the first start is slower, nothing
+  after it stutters. The cache is capped (16 GB) and floors the box's free space
+  (4 GB), because a share of films must not be able to fill the card just because
+  someone browsed it - and its age is 30 days rather than rclone's own hour, which
+  would re-fetch the game every evening.
+
 - **Read-only.** This is a player; a mistyped delete over SMB is not recoverable.
 
 The form is built around the box doing the finding, because typing a share name and

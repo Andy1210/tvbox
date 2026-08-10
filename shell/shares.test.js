@@ -56,6 +56,37 @@ test("the credentials reach rclone through the environment, never the command li
   assert.match(argv, /--read-only/, "this is a player: a mistyped delete over SMB is not recoverable");
 });
 
+// A film is streamed once; a disc image is seeked in for hours. Measured on a Pi 5
+// over SMB, a random 64 kB read from a GameCube image cost 79 ms at the median
+// against 1.1 ms locally - which is what the freezing mid-game was made of. So the
+// mount profile follows what the share HOLDS, and the two must not blur together.
+test("a share of games is mounted to be cached, a share of films to be streamed", () => {
+  const films = shares.mountArgs({ ...FULL, cache: "media" }).join(" ");
+  assert.match(films, /--vfs-cache-mode minimal/);
+  assert.ok(!films.includes("--vfs-cache-max-size"), "nothing is kept, so there is nothing to cap");
+
+  const games = shares.mountArgs({ ...FULL, cache: "games" }).join(" ");
+  assert.match(games, /--vfs-cache-mode full/, "the file is fetched once and read locally after that");
+  assert.match(games, /--vfs-cache-max-age 720h/, "rclone's own hour would re-fetch the game every evening");
+  assert.match(games, /--vfs-cache-max-size/, "a cap, so a library cannot grow into the whole card");
+  assert.match(games, /--vfs-cache-min-free-space/, "and a floor under the box's own free space");
+  assert.match(games, /--read-only/, "still a player: caching is not a licence to write");
+});
+
+test("a share stored before this setting existed is mounted the way it always was", () => {
+  const old = { name: "nas", host: "nas", share: "media" }; // no `cache` field at all
+  assert.match(shares.mountArgs(old).join(" "), /--vfs-cache-mode minimal/);
+  assert.strictEqual(shares.status([old], { onPath: () => true }).shares[0].cache, "media");
+});
+
+test("what a share holds is remembered across an edit, and cannot be anything else", () => {
+  const games = shares.shareFrom({ host: "nas", share: "roms", name: "roms", cache: "games" });
+  assert.strictEqual(games.cache, "games");
+  // An edit that only changes the password must not quietly move it back.
+  assert.strictEqual(shares.shareFrom({ host: "nas", share: "roms", name: "roms", pass: "x" }, games).cache, "games");
+  assert.throws(() => shares.shareFrom({ host: "nas", share: "roms", name: "roms", cache: "whatever" }), /bad_cache/);
+});
+
 test("no share with no user is still a guest, not an empty user", () => {
   assert.strictEqual(shares.envFor({ host: "nas", share: "m" }, {}).RCLONE_CONFIG_TVBOXSMB_USER, "guest");
 });

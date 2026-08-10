@@ -31,7 +31,8 @@
         color: #aab4c2;
         margin: 14px 0 4px;
       }
-      input {
+      input,
+      select {
         width: 100%;
         box-sizing: border-box;
         padding: 13px;
@@ -125,6 +126,12 @@
       <label for="name">{{name}}</label>
       <input id="name" autocapitalize="none" autocorrect="off" />
       <div class="small">{{nameHint}}</div>
+      <label for="cache">{{cacheLabel}}</label>
+      <select id="cache">
+        <option value="media">{{cacheMedia}}</option>
+        <option value="games">{{cacheGames}}</option>
+      </select>
+      <div class="small">{{cacheHint}}</div>
       <button class="btn" id="save">{{save}}</button>
     </div>
 
@@ -255,7 +262,12 @@
         try {
           r = await post(
             "/share-save",
-            Object.assign(creds(), { share: state.share, path: state.path, name: $("name").value.trim() }),
+            Object.assign(creds(), {
+              share: state.share,
+              path: state.path,
+              name: $("name").value.trim(),
+              cache: $("cache").value,
+            }),
           );
         } catch (_) {
           r = { ok: false };

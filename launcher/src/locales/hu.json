@@ -812,7 +812,12 @@
       "too_many": "Nincs több hely megosztásnak.",
       "rclone_missing": "Hiányzik a hálózati eszköz - előbb telepítsd.",
       "failed": "Nem sikerült."
-    }
+    },
+    "cacheLabel": "Mi van rajta",
+    "cacheMedia": "filmek",
+    "cacheGames": "játékok",
+    "cacheMediaHint": "Filmek és zene: azonnal indulnak, és menet közben töltődnek.",
+    "cacheGamesHint": "Játékok: a box első megnyitáskor átmásolja magához a játékot, és onnantól onnan futtatja. Az első indítás lassabb, utána viszont nem akad meg."
   },
   "phoneRemote": {
     "code": "Kód",

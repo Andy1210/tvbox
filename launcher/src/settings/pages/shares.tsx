@@ -12,7 +12,7 @@ import {
 } from "../../lib/api";
 import { SharePairing } from "../../components/SharePairing";
 import { SettingsPage } from "../SettingsPage";
-import { Group, InfoRow, Note, Row, TextRow } from "../Rows";
+import { Group, InfoRow, Note, Row, TextRow, ToggleRow } from "../Rows";
 import { useSettingsNav } from "../nav";
 import { invalidateSummary } from "../summary";
 
@@ -47,6 +47,7 @@ function ShareEditPage({ existing, onDone }: { existing?: ShareRow; onDone: () =
     host: existing?.host || "",
     share: existing?.share || "",
     path: existing?.path || "",
+    cache: existing?.cache || "media",
     user: existing?.user || "",
   });
   const [passSet, setPassSet] = useState(!!existing?.hasPass);
@@ -166,6 +167,19 @@ function ShareEditPage({ existing, onDone }: { existing?: ShareRow; onDone: () =
           value={draft.path}
           emptyLabel={t("shares.wholeShare")}
           onSubmit={(v) => set({ path: v.trim() })}
+        />
+        {/* What is on it, not how it is cached: the person setting this up knows
+            what they put on the NAS. A film is streamed once and a disc image is
+            seeked in for hours, and over SMB that difference is a second of
+            freezing in the middle of a game. */}
+        <ToggleRow
+          id="cache"
+          label={t("shares.cacheLabel")}
+          hint={draft.cache === "games" ? t("shares.cacheGamesHint") : t("shares.cacheMediaHint")}
+          on={draft.cache === "games"}
+          onToggle={() => set({ cache: draft.cache === "games" ? "media" : "games" })}
+          onWord={t("shares.cacheGames")}
+          offWord={t("shares.cacheMedia")}
         />
         <TextRow
           id="name"
