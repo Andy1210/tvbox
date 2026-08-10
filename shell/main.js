@@ -397,7 +397,7 @@ function pullAppshare(peerId, shareId) {
   // A replaced file goes here rather than into the void, and the stamp is what
   // makes two pulls of the same game distinguishable afterwards.
   const backupDir = path.join(peers.REPLACED, new Date().toISOString().replace(/[:.]/g, "-"));
-  const argv = peers.pullArgv(peer, shareId, entry.path, backupDir);
+  const argv = peers.pullArgv(peer, shareId, entry.path, backupDir, entry.exclude);
   const child = spawn(argv[0], argv.slice(1), {
     env: { ...process.env, RCLONE_WEBDAV_PASS: String(peer.token) },
     stdio: ["ignore", "ignore", "pipe"],

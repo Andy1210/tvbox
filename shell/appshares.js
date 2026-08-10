@@ -94,6 +94,7 @@ function entries(manifests, shareRootOf) {
     if (!rels || !rels.length) continue;
     const root = shareRootOf(m);
     if (!root) continue; // names a flatpak it does not depend on
+    const exclude = Array.isArray(m.shares.exclude) ? m.shares.exclude.filter((x) => typeof x === "string") : [];
     const used = new Set();
     for (const rel of rels) {
       const dir = path.join(root, rel);
@@ -113,6 +114,10 @@ function entries(manifests, shareRootOf) {
         appName: m.name || m.id,
         name,
         path: dir,
+        // Carried on the entry rather than looked up at pull time: the pull already
+        // resolves the destination from the manifest, and both must come from the
+        // same reading of it.
+        exclude,
         // A folder an app has not created yet is still a valid declaration - it
         // appears in Settings, greyed out, instead of vanishing from the list the
         // moment an emulator has not saved anything.

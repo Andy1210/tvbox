@@ -28,9 +28,15 @@ Nothing an app asks for at runtime. A manifest declares it:
 ```json
 "shares": {
   "flatpak": "org.libretro.RetroArch",
-  "paths": ["config/retroarch/saves", "config/retroarch/states"]
+  "paths": ["config/retroarch/saves", "config/retroarch/states"],
+  "exclude": ["**/Cache/**", "**/Logs/**"]
 }
 ```
+
+`exclude` is what stops a pull dragging things that are not saves: an emulator's
+shader cache sits inside the same folder, runs to hundreds of megabytes, and is
+rebuilt on whichever box needs it. The patterns only ever narrow a copy, so a bad
+one costs files nobody wanted rather than reaching anything new.
 
 The paths are relative to the app's **own** root - its flatpak's per-user data
 dir when it names one it already depends on, otherwise its own bundle dir. That

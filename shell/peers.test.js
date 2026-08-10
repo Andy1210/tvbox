@@ -79,10 +79,23 @@ test("a pull reads from the peer, writes into one place, and keeps what it repla
     "retroarch/saves",
     "/home/tv/.var/app/org.libretro.RetroArch/config/retroarch/saves",
     "/home/tv/.cache/tvbox/appshares-replaced/2026",
+    ["**/Cache/**", "**/Logs/**"],
   );
   assert.deepStrictEqual(argv.slice(0, 3), ["rclone", "copy", ":webdav:retroarch/saves"]);
   assert.equal(argv[3], "/home/tv/.var/app/org.libretro.RetroArch/config/retroarch/saves");
   assert.ok(argv.includes("--backup-dir"), "a replaced save is moved aside, not lost");
   assert.ok(!argv.join(" ").includes("secret-token"), "the credential goes through the environment");
   assert.ok(!argv.includes("sync"), "copy, never sync: a pull must not delete on either side");
+  // The app's own list of what is not a save. Without it the first pull of an
+  // emulator's saves drags its shader cache across, which is hundreds of megabytes
+  // and rebuilt on arrival anyway.
+  assert.deepStrictEqual(
+    argv.filter((a, i) => argv[i - 1] === "--exclude"),
+    ["**/Cache/**", "**/Logs/**"],
+  );
+});
+
+test("a share with nothing to exclude passes no filters at all", () => {
+  const argv = peers.pullArgv({ host: "h", port: 1, token: "t" }, "a/b", "/dest", "/backup");
+  assert.ok(!argv.includes("--exclude"));
 });

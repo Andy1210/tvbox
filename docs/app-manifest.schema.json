@@ -167,6 +167,15 @@
             "maxLength": 200
           },
           "description": "Relative in-app directories. No absolute paths and no `..`: they are joined onto the app's own root, and the last segment becomes the share's name - which is also a URL segment on the peer that fetches it. A path whose resolved target leaves the app's root (a symlink) is listed but never served."
+        },
+        "exclude": {
+          "type": "array",
+          "maxItems": 8,
+          "items": {
+            "type": "string",
+            "maxLength": 100
+          },
+          "description": "rclone filter patterns for what inside those folders is not worth carrying across - a shader cache or a log, which live beside the saves, are neither saves nor small, and are rebuilt on the box that needs them. Applied when a peer pulls."
         }
       }
     },

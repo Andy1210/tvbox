@@ -148,7 +148,12 @@ async function pairWith(host, code, deps) {
 // Replaced files are moved aside rather than overwritten. A pull is somebody
 // saying "the other room's copy is the one I want", and being wrong about that
 // should not be the end of a save.
-function pullArgv(peer, shareId, dest, backupDir) {
+function pullArgv(peer, shareId, dest, backupDir, exclude) {
+  const filters = [];
+  // The app's own list of what is not worth carrying (a shader cache, a log). These
+  // only ever narrow the copy, so a bad pattern costs files that were not wanted -
+  // it cannot reach anything the share does not already hold.
+  for (const pat of Array.isArray(exclude) ? exclude : []) filters.push("--exclude", String(pat));
   return [
     "rclone",
     "copy",
@@ -164,6 +169,7 @@ function pullArgv(peer, shareId, dest, backupDir) {
     // never here: any process on the box can read a command line.
     "--backup-dir",
     backupDir,
+    ...filters,
     "--transfers",
     "2",
     "--timeout",

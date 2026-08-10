@@ -303,6 +303,17 @@ function validateManifest(m, src) {
       if (path.isAbsolute(rel) || rel.split(/[\\/]/).some((s) => s === ".." || s === "" || s === "."))
         return bad("shares.paths must be relative in-app paths: " + JSON.stringify(rel));
     }
+    // What inside those folders is not worth carrying: an emulator's shader cache
+    // and logs sit beside its saves, are neither saves nor small, and are rebuilt
+    // on whichever box needs them. These are rclone filter patterns, so they only
+    // ever narrow what a pull takes - they cannot widen what is served.
+    if (sh.exclude !== undefined) {
+      if (!Array.isArray(sh.exclude) || sh.exclude.length > 8)
+        return bad("shares.exclude must be an array of at most 8");
+      for (const pat of sh.exclude) {
+        if (typeof pat !== "string" || !pat || pat.length > 100) return bad("bad shares.exclude entry");
+      }
+    }
   }
   const CAPS = ["nav", "player", "config", "fetch", "storage", "display", "input", "system"];
   const caps = m.runtime && m.runtime.capabilities;
