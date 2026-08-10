@@ -663,7 +663,7 @@
     "offerHint": "Öt percig mutat egy kódot. Azt kell beírni a másik boxon.",
     "codeLabel": "Kód",
     "boxes": "Boxok",
-    "boxesHint": "Egy box akkor jelenik meg itt, ha beengedted. A kulcs nála van, és bármikor visszavonhatod, ha elfelejteted vele.",
+    "boxesHint": "Egy box akkor kerül ide, ha beengedted. Mindegyiknek saját kulcsa van, így ha egyet elfelejtesz, csak az ő kulcsa szűnik meg - a többi marad.",
     "scan": "Box keresése",
     "scanning": "Keresem…",
     "scanHint": "Azt a boxot találja meg, amelyik éppen kódot mutat.",
@@ -671,7 +671,7 @@
     "foundBox": "Talált box",
     "enterCode": "A másik boxon látható kód",
     "forget": "elfelejt",
-    "paired": "Csatlakozva: {name}.",
+    "paired": "Összekötve: {name}. Mindkét box olvashatja a másik megosztásait.",
     "inApp": "A fájlok áthozása magában az alkalmazásban történik.",
     "unreachable": "A box nem válaszol.",
     "retry": "Újra",
@@ -681,15 +681,12 @@
       "not_a_box": "Ez nem tvbox, vagy nem kínál semmit.",
       "refused": "A másik box elutasította.",
       "rclone_missing": "Hiányzik az rclone.",
-      "unknown_peer": "Az a box már nincs csatlakoztatva.",
-      "unknown_share": "Az az alkalmazás itt nincs telepítve.",
-      "pull_failed": "A fájlok áthozása nem sikerült.",
       "nothing_shared": "Semmi nincs bekapcsolva megosztásra.",
-      "token_missing": "Ennek a boxnak még nincs kulcsa.",
       "bad_host": "Ez a cím nem használható.",
       "failed": "Ez nem sikerült.",
       "unknown": "Valami félrement."
-    }
+    },
+    "pairedOneWay": "Összekötve: {name}, de csak egy irányba: innen olvasható a másik, viszont ő még semmit nem kínál. Kapcsolj be ott egy mappát, és kösd össze újra."
   },
   "common": {
     "on": "Be",

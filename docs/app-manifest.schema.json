@@ -445,7 +445,7 @@
         "capabilities": {
           "type": "array",
           "items": {
-            "enum": ["nav", "player", "config", "fetch", "storage", "display", "input", "system"]
+            "enum": ["nav", "player", "config", "fetch", "storage", "display", "input", "system", "shares"]
           },
           "description": "THE security boundary: which preload-bridge surfaces the app gets. Defaults to [\"nav\"] - an app that forgets this must not silently gain player/config/fetch. `fetch` is scoped to `origins`."
         },

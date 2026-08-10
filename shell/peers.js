@@ -189,9 +189,12 @@ function peerFrom(out, host) {
   const token = out && typeof out.token === "string" ? out.token : "";
   const name = out && typeof out.name === "string" ? out.name.trim().slice(0, 64) : "";
   const id = out && typeof out.id === "string" && out.id ? out.id : name;
-  if (!host || !name || !token || token.length > 256) return null;
+  // The user name the other box minted for us. Its own shape is checked where it
+  // is stored; here it only has to be a plausible HTTP basic-auth user.
+  const user = out && typeof out.user === "string" && /^[A-Za-z0-9._-]{1,64}$/.test(out.user) ? out.user : "";
+  if (!host || !name || !token || token.length > 256 || !user) return null;
   if (!Number.isInteger(port) || port < 1 || port > 65535) return null;
-  return { id: id.slice(0, 64), name, host, port, token };
+  return { id: id.slice(0, 64), name, host, port, user, token };
 }
 
 // Boxes on the LAN that are waiting to pair right now.
@@ -276,7 +279,7 @@ function pullArgv(peer, shareId, dest, backupDir, exclude) {
     "--webdav-vendor",
     "other",
     "--webdav-user",
-    "tvbox",
+    String(peer.user || ""), // the name that box minted for this one, at pairing
     // The token goes in the environment (RCLONE_WEBDAV_PASS is set by the caller),
     // never here: any process on the box can read a command line.
     "--backup-dir",

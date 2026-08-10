@@ -663,7 +663,7 @@
     "offerHint": "Shows a code for five minutes. Type it on the other box.",
     "codeLabel": "Code",
     "boxes": "Boxes",
-    "boxesHint": "A box appears here once it has been let in. It holds its own key, and this box can take it back at any time by forgetting it.",
+    "boxesHint": "A box appears here once it has been let in. Each holds a key of its own, so forgetting one takes that key back and leaves the others working.",
     "scan": "Find a box",
     "scanning": "Looking…",
     "scanHint": "Finds a box that is showing a code right now.",
@@ -671,7 +671,7 @@
     "foundBox": "Box found",
     "enterCode": "The code from the other box",
     "forget": "forget",
-    "paired": "Connected to {name}.",
+    "paired": "Connected to {name}. Both boxes can read what the other offers.",
     "inApp": "Bringing files across is done in the app itself.",
     "unreachable": "The box is not answering.",
     "retry": "Try again",
@@ -681,15 +681,12 @@
       "not_a_box": "That is not a tvbox, or it is not offering anything.",
       "refused": "The other box refused.",
       "rclone_missing": "rclone is missing.",
-      "unknown_peer": "That box is not connected any more.",
-      "unknown_share": "That app is not installed here.",
-      "pull_failed": "Bringing the files failed.",
       "nothing_shared": "Nothing is switched on to offer.",
-      "token_missing": "This box has no key yet.",
       "bad_host": "That address is not usable.",
       "failed": "That didn't work.",
       "unknown": "Something went wrong."
-    }
+    },
+    "pairedOneWay": "Connected to {name}, one way: this box can read from it, but it offers nothing back yet. Switch a folder on over there and connect again."
   },
   "common": {
     "on": "On",

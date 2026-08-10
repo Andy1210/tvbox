@@ -36,6 +36,8 @@ function fakeCtx(over = {}) {
   return {
     appIsRunning: () => false,
     applyAppshares: () => ({ ok: true }),
+    adoptShareKey: () => {},
+    revokeShareKey: () => {},
     appsharesStatus: () => ({ running: false, shares: [] }),
     applyFileserver: () => ({ ok: true }),
     applyMqttConfig: () => {},

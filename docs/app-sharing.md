@@ -61,14 +61,21 @@ and off until switched on.
 
 ## Connecting two boxes
 
-Asymmetric on purpose - only one end needs a person at the TV.
+One code, and only one end needs a person at the TV.
 
-1. On the box that **has** the save: _Let another box connect_. It shows a
-   four-digit code for five minutes.
-2. On the other box: _Find a box_. It sweeps its own /24 for the pairing port,
-   which is only open while a box is actually waiting to pair - so the sweep
-   finds the box someone just walked up to, and nothing at all when nobody is
-   offering. Pick it, type the code.
+1. On one box: _Let another box connect_. It shows a four-digit code for five
+   minutes.
+2. On the other: _Find a box_. It sweeps its own /24 for the pairing port, which
+   is only open while a box is actually waiting to pair - so the sweep finds the
+   box someone just walked up to, and nothing at all when nobody is offering.
+   Pick it, type the code.
+
+**Both directions, once.** The box that asks sends its own key in the same
+request, so the box being asked ends up able to read it too. Pairing once per
+direction would mean walking back to the other TV, showing a second code and
+typing it the other way round, for a relationship that is symmetric anyway. A box
+that is offering nothing has no key to send; the answer says so instead of leaving
+the pairing quietly one-way.
 
 Nobody types an address, and there is no discovery service: the port being open
 is the announcement, and the page behind it carries a marker so a sweep can tell
@@ -76,22 +83,44 @@ a box from anything else holding that port.
 
 ## Credentials
 
-The box hands over a token minted for its app shares alone - never the
-[file server](file-server.md)'s password, which unlocks everything that box
-offers, reads and writes. This one is read-only, reaches nothing but the declared
-folders, and can be revoked on its own by turning the shares off.
+**A key per box, not a password for everyone.** Pairing mints a credential for
+that one box - a random user name and a secret - and keeps only its hash, in the
+htpasswd file rclone authenticates against. Forgetting a box removes its line and
+restarts the server, so the key it holds stops working and every other box goes on
+as before. One shared password could not do that: revoking it would mean breaking
+every room at once.
 
-It is minted when the first share is switched on rather than at boot, so a box
-that never offers anything has no credential sitting in its config. Both ends
-live in `~/.tvbox/config.json` (chmod 600) like every other secret, and the
-launcher is only ever told whether one is set.
+It is never the [file server](file-server.md)'s password, which unlocks everything
+that box offers, reads and writes. This one is read-only and reaches nothing but
+the declared folders. Nothing is minted until someone switches a share on, so a box
+that offers nothing has no credential sitting in its config, and a pairing with it
+is simply one-way - which the screen says rather than leaving it to be discovered
+from the other room.
+
+**The limit worth knowing.** The box that asks sends its own key in the pairing
+request, which is what makes one code enough for both directions. A four-digit code
+cannot be verified in that direction without revealing it, so what receives the key
+is whatever answered the address the sweep found. On a LAN with a device
+impersonating a tvbox pairing page, that device gets a key. This is why the key is
+per box, read-only, listed in Settings by name, and revocable there - a bad pairing
+is visible and undone with one press, rather than being a password that cannot be
+taken back. Everything here also travels in clear over the LAN, like the file
+server's own basic auth.
 
 ## What it runs on
 
 `rclone serve webdav`, supervised, no root - the same binary the file server and
 the network shares use, so a box that has one has all three. Port 8096 by
-default, `--read-only`, credentials through the environment rather than argv
-(any process on the box can read a command line).
+default, `--read-only`, and `--htpasswd` pointing at
+`~/.cache/tvbox/appshares.htpasswd` (0600, one line per paired box, written
+before every start). No credential is ever in argv or the environment on the
+serving side; a pull passes the peer's key to rclone through the environment,
+because any process on the box can read a command line.
+
+The htpasswd file is never empty of lines: with nobody paired it holds one entry
+whose secret nothing has. rclone with no htpasswd would serve the shares to the
+whole LAN unauthenticated, so "no keys" has to mean 401 rather than no question
+asked.
 
 The shares are rebuilt from the manifest each time the set changes, so a share
 someone turned off cannot linger as a live symlink.
@@ -102,5 +131,6 @@ someone turned off cannot linger as a live symlink.
 | ----------------------------------------------------------------------------------------- | -------------------------------------------------------- |
 | [shell/appshares.js](../shell/appshares.js)                                               | What this box offers: the entries, the root, the server. |
 | [shell/peers.js](../shell/peers.js)                                                       | The other box: the sweep, the pairing, the pull.         |
-| [shell/pairing/peer.js](../shell/pairing/peer.js)                                         | Hands a peer the token, gated by the code on screen.     |
+| [shell/pairing/peer.js](../shell/pairing/peer.js)                                         | Mints a peer's key, gated by the code on screen.         |
+| [shell/preload.js](../shell/preload.js) + [shell/preload-app.js](../shell/preload-app.js) | The `shares` capability an app pulls through.            |
 | [launcher/src/settings/pages/appshares.tsx](../launcher/src/settings/pages/appshares.tsx) | The screen.                                              |

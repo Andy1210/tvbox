@@ -13,16 +13,23 @@
 // a relationship that is symmetric anyway. It is also why this is a POST: the
 // exchange carries something now.
 //
-// What is handed over is the app-shares token, never the file server's password:
-// it reaches an app's declared folders read-only and can be revoked on its own.
+// What is handed over is a key minted for THAT box alone, never the file server's
+// password: it reaches an app's declared folders read-only, and forgetting the box
+// in Settings is what takes it back.
+//
+// The limit worth stating: this hands a credential to whoever answered the address
+// the sweep found, and a four-digit code cannot be verified in that direction
+// without revealing it. So a box that answers the pairing marker gets a key -
+// which is why the key is per box, read-only, and revocable from the same screen
+// that lists it.
 const peers = require("../peers");
 
-let credentialsHook = () => null;
-let rememberHook = () => {};
+let issueHook = () => null;
+let rememberHook = () => true;
 
 // main.js owns the config and the shares server; this only asks for them.
-function init({ credentials, remember }) {
-  if (credentials) credentialsHook = credentials;
+function init({ issue, remember }) {
+  if (issue) issueHook = issue;
   if (remember) rememberHook = remember;
 }
 
@@ -60,25 +67,28 @@ const routes = {
   // Gated by the pairing core: the four digits travel in the body, a wrong one is
   // refused there and counts towards its lockout.
   "POST /peer/credentials": (req, res, ctx) => {
-    const mine = credentialsHook();
-    if (!mine || !mine.token) return ctx.json(res, { error: "not_sharing" });
     // Remembered by the address the request ARRIVED from, never one it sent: a box
     // does not get to say where it lives. A box that is offering nothing has no
     // credentials to send, and pairing with it is simply one-way.
-    const theirs = peers.peerFrom(ctx.body, peers.callerAddress(req));
-    if (theirs) rememberHook(theirs);
+    const from = peers.callerAddress(req);
+    const theirs = peers.peerFrom(ctx.body, from);
+    const mutual = !!(theirs && rememberHook(theirs));
+    // Minted for THIS box, and only once the caller has passed the code: a key per
+    // peer is what lets Settings take one back without breaking the others.
+    const mine = issueHook({ id: theirs ? theirs.id : "", name: theirs ? theirs.name : "", host: from });
     // Handing the credential over ends this session: leaving the window open would
-    // let a second box take the same token off the same code.
+    // let a second box take a key off the same code.
     ctx.stopSoon(1000);
-    ctx.json(res, { id: mine.id, name: mine.name, port: mine.port, token: mine.token, mutual: !!theirs });
+    if (!mine || !mine.token) return ctx.json(res, { error: "not_sharing", mutual });
+    ctx.json(res, { id: mine.id, name: mine.name, port: mine.port, user: mine.user, token: mine.token, mutual });
   },
 };
 
-// What this box hands a peer. Read by the pair ROUTE as well, so the credentials
-// this box offers are defined in exactly one place (main.js wires it) whichever
-// end of the exchange is running.
-function credentials() {
-  return credentialsHook();
+// Mint what this box hands a peer. Called by the pair ROUTE as well, so a key is
+// issued the same way (and recorded the same way) whichever end of the exchange
+// this box is on.
+function issue(box) {
+  return issueHook(box || {});
 }
 
-module.exports = { init, page, routes, credentials, STR };
+module.exports = { init, page, routes, issue, STR };

@@ -133,7 +133,6 @@ Because the manifest is user-visible and user-installed, and the box is a home
 LAN device, this mirrors the trust already granted to a remote app's declared
 navigation `origins` - with request/response hardening on top.
 
-
 ## `shares` - this app's folders, from the box in the other room
 
 Two boxes in two rooms, and an app whose files a person would want in both: an

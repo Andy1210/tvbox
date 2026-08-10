@@ -124,7 +124,12 @@ export function AppSharesPage() {
     if (r.ok) {
       setFound(null);
       setPicked(null);
-      setMsg({ tone: "ok", text: t("appshares.paired").replace("{name}", r.peer?.name || host) });
+      // One code is meant to connect both directions. It only half works when the
+      // other box has nothing switched on - it has no key to give - and that is
+      // worth saying here rather than leaving it to be discovered from the other
+      // room.
+      const key = r.mutual === false ? "appshares.pairedOneWay" : "appshares.paired";
+      setMsg({ tone: r.mutual === false ? "warn" : "ok", text: t(key).replace("{name}", r.peer?.name || host) });
       await load();
     } else {
       setMsg({ tone: "warn", text: errText(t, r.error || "unknown") });

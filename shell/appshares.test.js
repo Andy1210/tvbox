@@ -119,7 +119,7 @@ test("only the shares that are switched on reach the served directory", () => {
   assert.ok(!fs.existsSync(path.join(appshares.ROOT, "retroarch", "saves")));
 });
 
-test("the server refuses to run without a token or without anything to serve", () => {
+test("the server refuses to run with nothing to serve", () => {
   const deps = {
     onPath: () => true,
     childEnv: () => ({}),
@@ -130,11 +130,10 @@ test("the server refuses to run without a token or without anything to serve", (
       },
     },
   };
-  assert.equal(appshares.start({ enabled: ["retroarch/saves"] }, deps).error, "token_missing");
-  assert.equal(appshares.start({ token: "t", enabled: [] }, deps).error, "nothing_shared");
+  assert.equal(appshares.start({ enabled: [] }, deps).error, "nothing_shared");
 });
 
-test("it serves read-only, and the token never reaches argv", () => {
+test("it serves read-only, and no key reaches argv or the environment", () => {
   let spawned = null;
   const deps = {
     onPath: () => true,
@@ -142,13 +141,43 @@ test("it serves read-only, and the token never reaches argv", () => {
     entries: () => appshares.entries([retroarch], rootOf),
     supervisor: { spawn: (name, opts) => (spawned = { name, opts }) },
   };
-  const r = appshares.start({ token: "secret-token", enabled: ["retroarch/saves"] }, deps);
+  const cred = appshares.newCredential();
+  const r = appshares.start(
+    {
+      enabled: ["retroarch/saves"],
+      issued: [{ id: "tvbox-gaming", name: "gaming", user: cred.user, hash: appshares.hashSecret(cred.secret) }],
+    },
+    deps,
+  );
   assert.equal(r.ok, true);
   const argv = spawned.opts.argv();
   assert.deepStrictEqual(argv.slice(0, 4), ["rclone", "serve", "webdav", appshares.ROOT]);
   assert.ok(argv.includes("--read-only"), "a peer pulls; it must not be able to write");
-  assert.ok(!argv.join(" ").includes("secret-token"), "the credential goes through the environment");
-  assert.equal(spawned.opts.env.RCLONE_PASS, "secret-token");
+  assert.ok(argv.includes("--htpasswd"), "no htpasswd would mean no authentication at all");
+  const all = argv.join(" ") + JSON.stringify(spawned.opts.env);
+  assert.ok(!all.includes(cred.secret), "a key is never in a command line or an environment");
+  const file = fs.readFileSync(appshares.HTPASSWD, "utf8");
+  assert.match(file, new RegExp("^" + cred.user + ":\\{SHA\\}"), "one line per box, by hash");
+  assert.ok(!file.includes(cred.secret));
+  assert.equal(fs.statSync(appshares.HTPASSWD).mode & 0o777, 0o600);
+});
+
+test("forgetting the last box leaves a lock nobody has the key to, not an open door", () => {
+  // rclone with no htpasswd serves to the whole LAN. So "nobody is paired" has to
+  // produce a file that refuses everyone, not an argument that is left out.
+  const file = appshares.writeHtpasswd([]);
+  const lines = fs.readFileSync(file, "utf8").trim().split("\n");
+  assert.equal(lines.length, 1);
+  assert.match(lines[0], /^box-[a-f0-9]+:\{SHA\}/);
+});
+
+test("two keys are never the same key", () => {
+  const a = appshares.newCredential();
+  const b = appshares.newCredential();
+  assert.notEqual(a.user, b.user);
+  assert.notEqual(a.secret, b.secret);
+  assert.equal(appshares.hashSecret("x"), appshares.hashSecret("x"), "the same secret hashes the same way");
+  assert.notEqual(appshares.hashSecret("x"), appshares.hashSecret("y"));
 });
 
 test("a port the shell already listens on falls back to the default", () => {

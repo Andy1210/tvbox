@@ -415,6 +415,18 @@ function peerOk(p) {
     Number.isInteger(Number(p.port))
   );
 }
+// A credential handed out, as it is kept: never the secret itself.
+function issuedOk(x) {
+  return (
+    x &&
+    typeof x.id === "string" &&
+    x.id &&
+    typeof x.user === "string" &&
+    /^box-[a-f0-9]{6,32}$/.test(x.user) &&
+    typeof x.hash === "string" &&
+    x.hash.startsWith("{SHA}")
+  );
+}
 function setAppshares(appshares) {
   const c = load();
   const cur = c.appshares || {};
@@ -424,8 +436,13 @@ function setAppshares(appshares) {
     port: Number(a.port === undefined ? cur.port : a.port) || 0,
     token: a.token === undefined ? cur.token || "" : String(a.token),
     // Replaced whole, like the share list: a peer is removed by sending the list
-    // without it, so there is one way in and one way out.
-    peers: Array.isArray(a.peers) ? a.peers.filter(peerOk).slice(0, 8) : cur.peers || [],
+    // without it, so there is one way in and one way out. The NEWEST are kept - a
+    // full list must not turn the next pairing into one that reports success and
+    // stores nothing.
+    peers: Array.isArray(a.peers) ? a.peers.filter(peerOk).slice(-8) : cur.peers || [],
+    // The other direction: a key this box handed to another one, by its hash.
+    // Removing an entry is what makes forgetting a box a revocation.
+    issued: Array.isArray(a.issued) ? a.issued.filter(issuedOk).slice(-8) : cur.issued || [],
   };
   c.appshares = next;
   save(c);

@@ -299,7 +299,7 @@ export const scanForBoxes = () =>
     },
   );
 export const pairWithBox = (host: string, code: string) =>
-  postJson<{ ok: boolean; peer?: { id: string; name: string; host: string }; error?: string }>(
+  postJson<{ ok: boolean; peer?: { id: string; name: string; host: string }; mutual?: boolean; error?: string }>(
     "/tvbox/api/appshares/pair",
     { host, code },
     { ok: false, error: "failed" },
