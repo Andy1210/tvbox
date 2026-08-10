@@ -113,6 +113,13 @@ availability-gated on the status topic. No HA YAML needed for that.
 - `seek` (+ `position`: seconds, absolute) - only while the box's own mpv holds
   the clock. An app playing its own audio (librespot) has no position to move,
   and the `state` topic says so with `seekable: false`.
+- `find_remote` (+ optional `mac`, otherwise the first remote that can),
+  `find_remote_stop` - ring the remote's own buzzer so you can find it down the
+  side of the sofa. This is here rather than only in Settings for the obvious
+  reason: the button you would otherwise press is on the thing you are looking
+  for. Only Remote Pro-class remotes carry a buzzer; on anything else the box
+  logs that nothing here can ring. The ring stops by itself after a minute, so a
+  command that never gets its `find_remote_stop` cannot run the battery down.
 
 ### Notifications (`notify`)
 

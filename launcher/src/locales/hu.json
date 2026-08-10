@@ -217,6 +217,8 @@
     "testNone": "Még nincs elkapott gomb...",
     "testStop": "Leállítás",
     "cancel": "Mégse",
+    "find": "Távirányító megkeresése",
+    "findStop": "Csörgetés leállítása",
     "resetDevice": "A távirányító gombjainak visszaállítása",
     "reassignTitle": "A gomb már hozzá van rendelve",
     "reassignBody": "Ez a gomb már a(z) „{from}” művelethez tartozik. Átrendeled a(z) „{to}” művelethez?",
