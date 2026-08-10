@@ -5,6 +5,47 @@ updates). `scripts/make-release.sh` lifts the current version's `hu`/`en`
 blocks into the OTA feed's `notes` - keep both languages, keep it short, and
 write for the person on the couch (what changes for THEM), not for developers.
 
+## 2.16.0
+
+### hu
+
+- **Új alapokon a távirányító TV-vezérlése.** Nem kódszámok közül kell találgatni:
+  felveszed, ami a szobában van - TV, soundbar -, aztán megmondod, melyik gomb
+  melyiket vezérelje. Egy gombra két készülék is köthető, így egy nyomás mindkettőnek
+  szól. A márkák közt kereshetsz vagy kezdőbetű szerint lépkedhetsz, és a doboz
+  felajánlja annak a TV-nek a márkáját, amelyikbe be van dugva.
+- **Rövid lett a kódlista.** Egy márkánál eddig több tucat, egyforma nevű sor jött,
+  a légkondiktól kezdve mindennel. Mostantól az azonos jelet küldő kódok egy sorban
+  vannak, és ha épp a hangerőt állítod be, csak azok látszanak, amikben van hangerő:
+  Samsungnál 68 helyett 13. Ami marad, arról a sor megmondja, mit tud.
+- **A listákban nem ugrik át sorokat a távirányító.**
+- **Egy távirányítót lenyitva rövid menü fogad**: gombok, megkeresés, TV IR. A
+  gombok betanítása külön oldalra került, így nem kell végiggörgetni huszonöt sort,
+  hogy a többit lásd.
+- **A gombok visszaállítása rákérdez**, mielőtt törölné, amit betanítottál - és a
+  kérdés alapból a Mégsén áll.
+- **Javítva:** a Távirányítók és eszközök képernyő a valóban jelen lévő
+  távirányítókat számolja, nem a régen törölteket is.
+
+### en
+
+- **The remote's TV control, rebuilt.** No more guessing between code numbers: you
+  add what is in the room - a TV, a soundbar - and then say which button drives
+  which. A button can carry two devices, so one press reaches both. Search the
+  brands or step in by first letter; the box offers the brand of the TV it is
+  plugged into.
+- **The code list got short.** A brand used to arrive as dozens of identically named
+  rows, air conditioners and all. Codes that send the same thing are now one row,
+  and when you are setting up volume only the ones that have volume are listed:
+  13 instead of 68 for Samsung. Each row says what it can drive.
+- **No more skipped rows** when moving through those lists with the remote.
+- **Opening a remote gives you a short menu**: buttons, find it, TV IR. Teaching the
+  buttons moved to its own page, so twenty-five rows no longer stand between you and
+  everything else.
+- **Resetting a remote's buttons asks first**, and the question starts on Cancel.
+- **Fixed:** the Remotes & accessories screen counts the remotes that are actually
+  here, not ones removed long ago.
+
 ## 2.15.0
 
 ### hu
