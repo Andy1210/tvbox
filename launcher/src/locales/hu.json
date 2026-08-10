@@ -230,7 +230,10 @@
     "devicesCount": "{n} távirányító",
     "resetTitle": "Visszaállítod a távirányító gombjait?",
     "resetBody": "A(z) „{remote}” távirányítón {n} betanított gomb van. A visszaállítás mindet törli, és minden gomb visszatér az alapértelmezett működéséhez. Ez nem vonható vissza.",
-    "resetConfirm": "Visszaállítás"
+    "resetConfirm": "Visszaállítás",
+    "keysEntry": "Gombok",
+    "allDefault": "mind alapértelmezett",
+    "listHint": "Válaszd ki a távirányítót, amelyiket beállítanád."
   },
   "appsettings": {
     "hint": "Rendezd át vagy rejtsd el az alkalmazásokat a főképernyőn.",

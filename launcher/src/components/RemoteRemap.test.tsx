@@ -66,12 +66,16 @@ const press = async (text: string | RegExp) =>
   });
 type Posted = { url: string; body: unknown };
 const resets = (posted: Posted[]) => posted.filter((p) => p.url.includes("/remote/reset"));
-// Which remote's actions are open survives a remount on purpose (the TV IR flow is
-// a pushed page above this screen), and that outlives a test too - so open it only
-// when it is not already open, or the press would close it again.
-const expand = async () => {
-  if (screen.queryByText("Reset this remote's buttons")) return;
-  await press("AR");
+// The path a user takes: open the remote's menu, then its Buttons page. Which
+// remote's menu is open survives a remount on purpose (every entry is a pushed page
+// now), and that outlives a test too - so only open it when it is not already open,
+// or the press would close it again.
+const openButtons = async () => {
+  if (!screen.queryByText("Buttons")) {
+    await press("AR");
+    await settle();
+  }
+  await press("Buttons");
   await settle();
 };
 
@@ -89,7 +93,7 @@ describe("resetting a remote's buttons", () => {
     render(<Screen />);
     await settle();
 
-    await expand();
+    await openButtons();
     await press("Reset this remote's buttons");
     await settle();
 
@@ -103,7 +107,7 @@ describe("resetting a remote's buttons", () => {
     const posted = stubShell();
     render(<Screen />);
     await settle();
-    await expand();
+    await openButtons();
     await press("Reset this remote's buttons");
     await settle();
     await press("Cancel");
@@ -119,7 +123,7 @@ describe("resetting a remote's buttons", () => {
     const posted = stubShell();
     render(<Screen />);
     await settle();
-    await expand();
+    await openButtons();
     await press("Reset this remote's buttons");
     await settle();
     await press("Reset"); // the confirm button, not the row
