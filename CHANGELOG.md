@@ -5,6 +5,22 @@ updates). `scripts/make-release.sh` lifts the current version's `hu`/`en`
 blocks into the OTA feed's `notes` - keep both languages, keep it short, and
 write for the person on the couch (what changes for THEM), not for developers.
 
+## 2.14.0
+
+### hu
+
+- **Emulátoronként is áthozhatók a mentések, nem csak egyben.** A RetroArch
+  Mentések fülén minden emulátor külön sorban áll a saját két dátumával, és külön
+  gombbal hozható át. Egyetlen dátum a boxra nem árulja el, melyik szobában van a
+  frissebb mentés, ha az egyikben SNES-szel, a másikban GameCube-bal játszottak.
+
+### en
+
+- **Saves can be brought one emulator at a time, not just all at once.**
+  RetroArch's Saves tab lists each emulator on its own row, with its own two dates
+  and its own button. One date per box cannot say where the fresher save is when one
+  room played the SNES and the other the GameCube.
+
 ## 2.13.0
 
 ### hu
