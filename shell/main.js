@@ -398,8 +398,18 @@ function pullAppshare(peerId, shareId) {
   // makes two pulls of the same game distinguishable afterwards.
   const backupDir = path.join(peers.REPLACED, new Date().toISOString().replace(/[:.]/g, "-"));
   const argv = peers.pullArgv(peer, shareId, entry.path, backupDir, entry.exclude);
+  // rclone wants every credential in its own reversible encoding, whether it comes
+  // from a config file or the environment - a plain token answers 401. shares.js
+  // owns that encoding for the same reason it owns the mount arguments.
+  let secret;
+  try {
+    secret = shares.obscure(peer.token);
+  } catch (e) {
+    console.warn("[appshares] could not encode the peer's token:", e.message);
+    return { ok: false, error: "pull_failed" };
+  }
   const child = spawn(argv[0], argv.slice(1), {
-    env: { ...process.env, RCLONE_WEBDAV_PASS: String(peer.token) },
+    env: { ...process.env, RCLONE_WEBDAV_PASS: secret },
     stdio: ["ignore", "ignore", "pipe"],
   });
   let err = "";
@@ -996,6 +1006,10 @@ function serve() {
       return httpserver.jsonRes(res, { ...st, installing: rcloneInstalling });
     }
     if (p === "/tvbox/api/appshares") {
+      // Re-read the manifests, like /tvbox/api/apps does: an app installed since
+      // boot brings its shares with it, and without this they appear only after
+      // something else happened to refresh the cache.
+      apps.loadManifests();
       const cfg = config.rawAppshares();
       const st = appshares.status(cfg, appsharesDeps);
       // Peers without their tokens: the launcher needs to name a box and nothing more.
