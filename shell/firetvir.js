@@ -14,6 +14,7 @@
 //            with the venv's python (the remote's GATT keymap service does the
 //            rest; see remote/keymap_compile.py).
 const { execFile, spawn } = require("child_process");
+const crypto = require("crypto");
 const fs = require("fs");
 const path = require("path");
 const os = require("os");
@@ -25,6 +26,7 @@ const PYENV = path.join(TVBOX, "pyenv");
 const PY = path.join(PYENV, "bin", "python3");
 const TOOL = path.join(TVBOX, "firetv_remote_ir.py");
 const CODES_FILE = path.join(TVBOX, "firetv_tv_codes.json");
+const TEST_CODES_FILE = path.join(TVBOX, "firetv_tv_codes.test.json"); // a blast, which stores nothing
 const CACHE_DIR = path.join(TVBOX, "cache");
 const INDEX_CACHE = path.join(CACHE_DIR, "irdb-index-v2.json"); // v2: all device types, not just TV
 const INDEX_TTL_MS = 30 * 24 * 3600 * 1000;
@@ -197,16 +199,41 @@ function installDeps() {
   return true;
 }
 
+// Where a redirect may lead. irdb is the only thing this module fetches, and a
+// Location header is the one part of the answer the server chooses freely - so it
+// stays inside GitHub rather than being followed anywhere.
+const ALLOWED_HOSTS = new Set(["api.github.com", "raw.githubusercontent.com", "objects.githubusercontent.com"]);
+
 // ---- tiny https GET with one redirect + size cap ---------------------------------
+// The callback fires EXACTLY once. Destroying the request on the size cap raises an
+// `error` right after, and a caller that keeps a counter in this callback (the brand
+// downloader's concurrency) would then double-count it and either finish early or
+// never finish at all.
 function httpsGet(url, maxBytes, cb, redirected) {
+  let done = false;
+  const once = (err, body) => {
+    if (done) return;
+    done = true;
+    cb(err, body);
+  };
   const req = https.get(url, { headers: { "User-Agent": "tvbox", Accept: "*/*" }, timeout: 30000 }, (res) => {
     if (res.statusCode >= 301 && res.statusCode <= 308 && res.headers.location && !redirected) {
       res.resume();
-      return httpsGet(new URL(res.headers.location, url).href, maxBytes, cb, true);
+      let next;
+      try {
+        next = new URL(res.headers.location, url);
+      } catch (e) {
+        return once(new Error("bad redirect"));
+      }
+      if (next.protocol !== "https:" || !ALLOWED_HOSTS.has(next.hostname)) {
+        return once(new Error("redirect outside github: " + next.hostname));
+      }
+      done = true; // the retry owns the callback from here
+      return httpsGet(next.href, maxBytes, cb, true);
     }
     if (res.statusCode !== 200) {
       res.resume();
-      return cb(new Error("HTTP " + res.statusCode + (res.statusCode === 403 ? " (rate limited? retry later)" : "")));
+      return once(new Error("HTTP " + res.statusCode + (res.statusCode === 403 ? " (rate limited? retry later)" : "")));
     }
     const chunks = [];
     let size = 0;
@@ -214,21 +241,26 @@ function httpsGet(url, maxBytes, cb, redirected) {
       size += d.length;
       if (size > maxBytes) {
         req.destroy();
-        return cb(new Error("response too large"));
+        return once(new Error("response too large"));
       }
       chunks.push(d);
     });
-    res.on("end", () => cb(null, Buffer.concat(chunks).toString("utf8")));
+    res.on("end", () => once(null, Buffer.concat(chunks).toString("utf8")));
   });
   req.on("timeout", () => req.destroy(new Error("timeout")));
-  req.on("error", (e) => cb(e));
+  req.on("error", (e) => once(e));
 }
 
 // ---- irdb brand index -------------------------------------------------------------
+// The file is ~1.7 MB of JSON and every brand lookup needs it, so it is parsed once
+// per process rather than per request: a readFileSync + JSON.parse of that size runs
+// on the same event loop that serves the TV's UI.
+let indexMemo = null;
 function loadIndexCache() {
+  if (indexMemo && Date.now() - indexMemo.ts < INDEX_TTL_MS) return indexMemo;
   try {
     const c = JSON.parse(fs.readFileSync(INDEX_CACHE, "utf8"));
-    if (Date.now() - c.ts < INDEX_TTL_MS && Array.isArray(c.brands)) return c;
+    if (Date.now() - c.ts < INDEX_TTL_MS && Array.isArray(c.brands)) return (indexMemo = c);
   } catch (e) {}
   return null;
 }
@@ -244,11 +276,11 @@ function fetchBrands(cb) {
     } catch (e) {
       return cb(new Error("bad index json"));
     }
-    // Every device type, not just TV: the per-key override lets a single button
-    // drive something else entirely (a soundbar on volume). irdb has no tidy
-    // "Soundbar" folder - Samsung's audio codes sit under Unknown_AH59-* remote
-    // model numbers - so the type is carried through and shown rather than
-    // filtered to a guessed whitelist. The UI defaults the BASE picker to TV.
+    // Every device type, not just TV: a button may drive something else entirely
+    // (a soundbar on volume). irdb has no tidy "Soundbar" folder - Samsung's audio
+    // codes sit under Unknown_AH59-* remote model numbers - so the type is carried
+    // through and shown rather than filtered to a guessed whitelist. What makes
+    // that list usable is brandDevices() below, not a type filter.
     const brands = new Map();
     for (const ent of tree) {
       const m = /^codes\/([^/]+)\/([^/]+)\/([^/]+\.csv)$/.exec(ent.path || "");
@@ -262,9 +294,10 @@ function fetchBrands(cb) {
         sets: sets.sort((a, b) => a.type.localeCompare(b.type) || a.name.localeCompare(b.name)),
       }))
       .sort((a, b) => a.brand.localeCompare(b.brand));
+    indexMemo = { ts: Date.now(), brands: out };
     try {
       fs.mkdirSync(CACHE_DIR, { recursive: true });
-      fs.writeFileSync(INDEX_CACHE, JSON.stringify({ ts: Date.now(), brands: out }));
+      fs.writeFileSync(INDEX_CACHE, JSON.stringify(indexMemo));
     } catch (e) {}
     cb(null, out);
   });
@@ -337,7 +370,10 @@ function validCodesetPath(p) {
 }
 
 function fetchCodeset(relPath, cb) {
-  if (!validCodesetPath(relPath)) return cb(new Error("invalid codeset path"));
+  // Deferred, not immediate: the brand downloader keeps its concurrency count in
+  // this callback, and a synchronous call would re-enter its pump loop from inside
+  // its own iteration.
+  if (!validCodesetPath(relPath)) return process.nextTick(() => cb(new Error("invalid codeset path")));
   const url = RAW_BASE + relPath.split("/").map(encodeURIComponent).join("/");
   httpsGet(url, MAX_CSV_BYTES, (err, body) => {
     if (err) return cb(err);
@@ -387,6 +423,431 @@ const irdbRow = (row) => ({
   subdevice: row.subdevice,
   function: row.function,
 });
+
+// ---- one brand's DEVICES: its codesets, merged by the IR they actually send ------
+//
+// A brand folder is a list of REMOTE MODELS, not of devices, and the same codes are
+// filed under every model number that ever carried them. Measured against the live
+// index: Samsung's 68 codesets are 25 distinct codes for these four keys, 27 of them
+// byte-identical (NECx2 device 7,7 - the TV); Sony's 183 are 57, LG's 36 are 16. So
+// the list a person has to read is an order of magnitude shorter than the folder,
+// and it shrinks again once the keys a button needs are required: 68 -> 13 for
+// Samsung on volume, where the soundbar (NECx2 67,83) is then the only entry with
+// volume and no power.
+//
+// This is what a type filter alone cannot do. 1228 of irdb's 1476 type folders are
+// `Unknown_<remote model>` - 65 of Samsung's 68 sets - so grouping by type leaves
+// 60 groups of one. The type is kept as a LABEL and a coarse kind, never as the
+// thing that makes the list short.
+const BRAND_TTL_MS = 30 * 24 * 3600 * 1000;
+// A run that lost some of its codesets is kept only long enough to stop the UI's
+// poll from restarting it; a month of a silently short list is the thing to avoid.
+const BRAND_PARTIAL_TTL_MS = 10 * 60 * 1000;
+const BRAND_CONCURRENCY = 6; // small: 183 sets is the worst brand, and this shares the box's link
+// A brand whose downloads all fail must not be cached as "this brand has nothing".
+// Stop early instead - offline, every request fails the same way.
+const BRAND_GIVE_UP_AFTER = 8;
+const MAX_BRAND_SETS = 400;
+const MAX_BRAND_JOBS = 2;
+const JOB_KEEP_ERROR_MS = 60000; // long enough for the screen that asked to see the error
+
+// The four keys as one comparable string, which is what decides that two codesets
+// are the same device. Keys the set does not carry are absent rather than empty, so
+// a set with volume only can never merge into one that also has power.
+function signature(keys) {
+  return IR_KEYS.filter((k) => keys[k])
+    .map((k) => [k, keys[k].protocol, keys[k].device, keys[k].subdevice, keys[k].function].join(":"))
+    .join("|");
+}
+
+// irdb's folder name, as a person would read it: `Unknown_AH59-01527F` is a remote
+// model number and says more without the prefix than with it.
+const typeLabel = (t) => String(t || "").replace(/^Unknown[_ ]?/, "") || String(t || "");
+
+// The name to put on a merged group. A real device type ("TV", "Sound Bar",
+// "Receiver") beats a model number, because it says what the thing IS; among equals
+// the shortest wins, which keeps "TV" ahead of "Rear Projection DLP TV".
+function bestType(types) {
+  return [...types].sort((a, b) => {
+    const ua = /^Unknown[_ ]/.test(a) ? 1 : 0;
+    const ub = /^Unknown[_ ]/.test(b) ? 1 : 0;
+    return ua - ub || a.length - b.length || a.localeCompare(b);
+  })[0];
+}
+
+// A coarse kind for the row's hint and the optional filter. Order is the contract:
+// a satellite receiver is a set-top box and not an amplifier, and a CD player is
+// audio and not a disc player, so the narrower words are asked first. Nothing is
+// hidden by this - it defaults to showing everything, and the folder names are on
+// the row anyway.
+const KIND_PATTERNS = [
+  ["climate", /air.?cond|climate|heat pump/i],
+  ["settop", /cable|satellite|\bsat\b|\bdss\b|set.?top|iptv|\bstb\b|decoder/i],
+  ["player", /\bdvd|blu.?ray|\bvcr\b|laser ?disc|\bvhs\b|\bdvr\b|jukebox|cassette/i],
+  ["audio", /receiv|amplifi|\bamp\b|audio|sound|speaker|stereo|hi.?fi|surround|tuner|\bcd\b|karaoke|\bav\b|zone/i],
+  ["tv", /(^|[^a-z])tv([^a-z]|$)|television|plasma|\blcd\b|\bled\b|monitor|projector|projection|display/i],
+  ["player", /player|recorder|\bdisc\b/i],
+];
+function deviceKind(types) {
+  for (const [kind, re] of KIND_PATTERNS) if (types.some((t) => re.test(t))) return kind;
+  return "other";
+}
+const KIND_ORDER = ["tv", "audio", "settop", "player", "climate", "other"];
+
+// sets: [{ path, type, keys }] -> the merged devices, plus how many carried none of
+// the four keys (those are dropped: nothing here could ever be programmed from them).
+function groupSets(sets) {
+  const groups = new Map();
+  let skipped = 0;
+  for (const s of sets) {
+    const sig = signature(s.keys || {});
+    if (!sig) {
+      skipped++;
+      continue;
+    }
+    let g = groups.get(sig);
+    if (!g) groups.set(sig, (g = { sig, types: [], paths: [], keys: s.keys }));
+    g.types.push(s.type);
+    g.paths.push(s.path);
+  }
+  const devices = [...groups.values()].map((g) => {
+    const top = bestType(g.types);
+    const at = g.types.indexOf(top);
+    const keys = IR_KEYS.filter((k) => g.keys[k]);
+    const first = g.keys[keys[0]];
+    return {
+      // What tells two same-named groups apart. A brand routinely files several
+      // unrelated codes under "TV", and a picker offering two identical rows is a
+      // coin toss - so the address they actually transmit on travels with the row.
+      variant: first.protocol + " " + first.device + (first.subdevice >= 0 ? "," + first.subdevice : ""),
+      // Stable across refetches (it is the codes themselves), so a device stored in
+      // a saved plan still matches the list after a cache expiry.
+      id: crypto.createHash("sha1").update(g.sig).digest("hex").slice(0, 12),
+      // The set the group is programmed FROM - the one whose folder gave the label,
+      // so what gets written matches what the row says.
+      path: g.paths[at],
+      label: typeLabel(top),
+      kind: deviceKind(g.types),
+      count: g.paths.length,
+      types: [...new Set(g.types.map(typeLabel))].slice(0, 8),
+      keys,
+      protocols: [...new Set(keys.map((k) => g.keys[k].protocol))],
+    };
+  });
+  devices.sort(
+    (a, b) =>
+      KIND_ORDER.indexOf(a.kind) - KIND_ORDER.indexOf(b.kind) || b.count - a.count || a.label.localeCompare(b.label),
+  );
+  // Only the repeats pay for the disambiguation: "TV" stays "TV" when it is the
+  // only one, and becomes "TV (NEC1 4)" when the brand files two different codes
+  // under that name. The address can collide too - two codes on one device number
+  // differing only in their function bytes - and two rows a person cannot tell
+  // apart are worse than an ugly suffix, so the second pass numbers what is left.
+  const label = (list) => {
+    const seen = new Map();
+    for (const d of list) seen.set(d.label, (seen.get(d.label) || 0) + 1);
+    return seen;
+  };
+  let counts = label(devices);
+  for (const d of devices) if (counts.get(d.label) > 1) d.label += " (" + d.variant + ")";
+  counts = label(devices);
+  const nth = new Map();
+  for (const d of devices) {
+    if (counts.get(d.label) < 2) continue;
+    const n = (nth.get(d.label) || 0) + 1;
+    nth.set(d.label, n);
+    d.label += " #" + n;
+  }
+  return { devices, skipped };
+}
+
+const brandSlug = (b) => b.replace(/[^A-Za-z0-9._-]/g, "_").slice(0, 40);
+// The version is part of the NAME, so a change to what a merged device looks like
+// (a label rule, a new field) takes effect at once instead of waiting out a 30-day
+// cache on every box that already has one.
+const BRAND_CACHE_VERSION = "v2";
+const brandCacheFile = (b) =>
+  path.join(
+    CACHE_DIR,
+    "irdb-brand-" +
+      BRAND_CACHE_VERSION +
+      "-" +
+      brandSlug(b) +
+      "-" +
+      crypto.createHash("sha1").update(b).digest("hex").slice(0, 8) +
+      ".json",
+  );
+
+// A brand's answer, in memory as well as on disk. The memo is not an optimisation:
+// a box whose ~/.tvbox is full or read-only would otherwise never have a cache to
+// find, and the UI's 700 ms poll would start the whole download again on every tick,
+// for ever. It is also what makes an EMPTY answer stick - a brand really can hold no
+// code with any of these four keys, and "no devices" has to be cacheable or it reads
+// as "not fetched yet".
+const brandMemo = new Map(); // brand -> { ts, devices, skipped, failed, partial }
+
+function rememberBrand(brand, payload) {
+  brandMemo.set(brand, payload);
+  try {
+    fs.mkdirSync(CACHE_DIR, { recursive: true });
+    fs.writeFileSync(brandCacheFile(brand), JSON.stringify(payload));
+  } catch (e) {}
+}
+
+function loadBrandCache(brand) {
+  const fresh = (c) =>
+    c && Array.isArray(c.devices) && Date.now() - c.ts < (c.partial ? BRAND_PARTIAL_TTL_MS : BRAND_TTL_MS);
+  const memo = brandMemo.get(brand);
+  if (fresh(memo)) return memo;
+  try {
+    const c = JSON.parse(fs.readFileSync(brandCacheFile(brand), "utf8"));
+    if (fresh(c)) {
+      brandMemo.set(brand, c);
+      return c;
+    }
+  } catch (e) {}
+  return null;
+}
+
+const brandJobs = new Map(); // brand -> { done, total, error } while its codesets download
+
+function startBrandJob(brand) {
+  const job = { done: 0, total: 0, error: "" };
+  brandJobs.set(brand, job);
+  const fail = (msg) => {
+    job.error = String(msg).slice(0, 200);
+    // A failed job is reported to whoever polls next and then has to go, whether or
+    // not anyone polls: a screen the user left would otherwise leave its entry in the
+    // map for the life of the process, and the map is what bounds concurrency.
+    setTimeout(() => {
+      if (brandJobs.get(brand) === job) brandJobs.delete(brand);
+    }, JOB_KEEP_ERROR_MS).unref?.();
+  };
+  fetchBrands((err, brands) => {
+    if (err) return fail(err.message || err);
+    const found = (brands || []).find((b) => b.brand === brand);
+    if (!found) return fail("unknown brand");
+    const sets = found.sets.slice(0, MAX_BRAND_SETS);
+    job.total = sets.length;
+    if (!sets.length) return fail("no codesets");
+    const results = [];
+    let next = 0;
+    let failed = 0;
+    let live = 0;
+    const pump = () => {
+      while (live < BRAND_CONCURRENCY && next < sets.length && !job.error) {
+        const set = sets[next++];
+        live++;
+        fetchCodeset(set.path, (e, cs) => {
+          live--;
+          job.done++;
+          if (e) {
+            failed++;
+            // Every download failing is a box with no route to GitHub, not a brand
+            // with no codes - and caching the empty answer would outlive the outage.
+            if (failed >= BRAND_GIVE_UP_AFTER && !results.length) fail("download failed: " + (e.message || e));
+          } else results.push({ path: set.path, type: set.type, keys: cs.keys });
+          if (live === 0 && (next >= sets.length || job.error)) finish();
+          else pump();
+        });
+      }
+    };
+    const finish = () => {
+      if (job.error) return;
+      if (!results.length) return fail("download failed");
+      const { devices, skipped } = groupSets(results);
+      const protocols = [...new Set(devices.flatMap((d) => d.protocols))];
+      checkProtocols(protocols, (perr, supported) => {
+        // A protocol check that could not run must not read as "unsupported": the
+        // row would be greyed out for a code that works. Unknown means offered.
+        for (const d of devices) d.supported = perr ? null : supported;
+        // A run that lost codesets to the network is a SHORT list, and a short list
+        // is indistinguishable from a brand that simply has little - so it is cached
+        // for minutes rather than a month, and the count travels with it so the
+        // screen can say a retry is worth it.
+        rememberBrand(brand, { ts: Date.now(), devices, skipped, failed, partial: failed > 0 });
+        brandJobs.delete(brand);
+      });
+    };
+    pump();
+  });
+}
+
+// The UI polls this: `loading` with a count while the codesets come down, then `ok`
+// with the merged list. Cached brands answer without touching the network.
+function brandDevices(brand, cb) {
+  const name = String(brand || "").trim();
+  if (!name || name.length > 80 || /[/\\]/.test(name)) return cb(new Error("invalid brand"));
+  const cached = loadBrandCache(name);
+  if (cached) {
+    return cb(null, {
+      state: "ok",
+      devices: cached.devices,
+      skipped: cached.skipped || 0,
+      failed: cached.failed || 0,
+    });
+  }
+  const job = brandJobs.get(name);
+  if (!job) {
+    // One brand at a time, plus a little slack. Each job is up to 400 outbound
+    // fetches and a python subprocess at the end, and a user stepping through the
+    // letter index leaves the previous screen's job running behind them.
+    if (brandJobs.size >= MAX_BRAND_JOBS) return cb(new Error("busy: another brand is still downloading"));
+    startBrandJob(name);
+    return cb(null, { state: "loading", done: 0, total: 0, devices: [] });
+  }
+  if (job.error) {
+    brandJobs.delete(name);
+    return cb(new Error(job.error));
+  }
+  return cb(null, { state: "loading", done: job.done, total: job.total, devices: [] });
+}
+
+// ---- the saved plan: which devices this remote drives, and from which button -------
+// The programmed keymap lives on the REMOTE and cannot be read back, so without this
+// a second visit would show a blank screen for a remote that is fully set up. Kept
+// per MAC, next to the box's other settings, and carried by a backup.
+const PLAN_FILE = path.join(TVBOX, "firetv_ir_plan.json");
+const MAX_PLAN_BYTES = 256e3;
+const MAX_PLAN_DEVICES = 8;
+// irdb's longest real path is well under this; it only has to stop a caller from
+// storing a novel in the field that becomes a URL.
+const MAX_PATH_CHARS = 300;
+const KINDS = new Set([...KIND_ORDER]);
+const str = (v, max) => String(v == null ? "" : v).slice(0, max);
+const num = (v) => (Number.isFinite(v) && v >= 0 ? v : 0);
+
+// Everything here arrives from the launcher and ends up naming an outbound fetch, so
+// it is re-checked rather than trusted: a device id that no device carries, or a
+// path outside irdb's codes/, would otherwise be stored and re-sent on every program.
+//
+// EVERY field is bounded, not just the number of devices. The count is what the
+// caller controls least: a `keys` array repeated a hundred thousand times passes the
+// membership filter, and a file this module can no longer read (readPlans) reports
+// EVERY remote as unconfigured - for a setting whose whole reason to exist is that
+// the remote cannot be read back.
+function sanitizePlan(raw) {
+  const devices = [];
+  for (const d of Array.isArray(raw && raw.devices) ? raw.devices.slice(0, MAX_PLAN_DEVICES) : []) {
+    const p = str(d && d.path, MAX_PATH_CHARS);
+    if (!d || !/^[a-f0-9]{6,32}$/.test(String(d.id || "")) || !validCodesetPath(p)) continue;
+    devices.push({
+      id: String(d.id),
+      brand: str(d.brand, 60),
+      label: str(d.label, 60),
+      kind: KINDS.has(d.kind) ? d.kind : "other",
+      path: p,
+      // Deduped, not just filtered: the set of buttons a device drives is at most
+      // four, whatever the caller sent.
+      keys: Array.isArray(d.keys) ? IR_KEYS.filter((k) => d.keys.includes(k)) : [],
+      protocol: str(d.protocol, 24),
+      // How many irdb folders carry this same code - shown on the device screen so
+      // a merged row can say what it merged.
+      count: Number.isFinite(d.count) ? Math.min(9999, Math.max(1, Math.round(d.count))) : 1,
+    });
+  }
+  // A button may only name a device whose codeset actually carries it. Without this
+  // the screen can read "Power - Samsung Sound Bar", the save reports success, and
+  // the button does nothing: resolvePlan skips a key it has no row for, silently.
+  // The box is the authority on that, not the screen that assembled the plan.
+  const canSend = (id, key) => devices.some((d) => d.id === id && d.keys.includes(key));
+  const assign = {};
+  for (const key of IR_KEYS) {
+    const a = (raw && raw.assign && raw.assign[key]) || null;
+    if (!a || !canSend(a.device, key)) continue;
+    assign[key] = {
+      device: String(a.device),
+      second: canSend(a.second, key) && a.second !== a.device ? String(a.second) : null,
+    };
+  }
+  // What was last written to THIS remote, if anything. It lives here rather than in
+  // the box-wide codes file because it is a fact about one remote.
+  const pr = raw && raw.programmed;
+  const programmed = pr && typeof pr === "object" && pr.label ? { label: str(pr.label, 60), ts: num(pr.ts) } : null;
+  // Carried, not stamped: `ts` says when the setup was saved, and a read is not a
+  // save. writePlan is what sets it.
+  return { devices, assign, programmed, ts: num(raw && raw.ts) };
+}
+
+// {} = no file yet. null = there IS one and it could not be read, which is a
+// different thing entirely: this file holds every remote, so treating a damaged or
+// half-written one as "nothing configured" would let the next save persist that
+// emptiness over the other remotes' setups.
+function readPlans() {
+  if (!fs.existsSync(PLAN_FILE)) return {};
+  try {
+    const st = fs.statSync(PLAN_FILE);
+    if (st.size > MAX_PLAN_BYTES) {
+      // Nothing this module writes can get here (writePlan refuses first), so this
+      // is a hand-edited or damaged file.
+      console.warn("[firetvir] oversized", PLAN_FILE, st.size, "bytes");
+      return null;
+    }
+    const j = JSON.parse(fs.readFileSync(PLAN_FILE, "utf8"));
+    if (!j || typeof j !== "object") return null;
+    return j;
+  } catch (e) {
+    console.warn("[firetvir] could not read", PLAN_FILE, String(e.message || e));
+    return null;
+  }
+}
+
+function readPlan(mac) {
+  if (!MAC_RE.test(mac)) return null;
+  const all = readPlans();
+  if (!all) return null;
+  const p = all[mac.toLowerCase()];
+  return p ? sanitizePlan(p) : { devices: [], assign: {}, ts: 0 };
+}
+
+// The one place the file is written. `mode` on writeFileSync only applies when the
+// file is CREATED and is masked by umask, so the permission is set explicitly
+// afterwards - this file names the devices in someone's living room.
+function savePlans(all) {
+  const body = JSON.stringify(all, null, 2);
+  // The budget is enforced where the file is WRITTEN, not only where it is read: a
+  // file the reader rejects takes every OTHER remote's setup with it, and the next
+  // legitimate save would then persist that emptiness.
+  if (body.length > MAX_PLAN_BYTES) {
+    console.warn("[firetvir] refusing to write a", body.length, "byte plan file");
+    return false;
+  }
+  try {
+    fs.mkdirSync(TVBOX, { recursive: true }); // a box that has never written one
+    fs.writeFileSync(PLAN_FILE, body, { mode: 0o600 });
+    fs.chmodSync(PLAN_FILE, 0o600);
+    return true;
+  } catch (e) {
+    console.warn("[firetvir] could not write", PLAN_FILE, String(e.message || e));
+    return false;
+  }
+}
+
+function writePlan(mac, raw) {
+  if (!MAC_RE.test(mac)) return null;
+  const plan = { ...sanitizePlan(raw), ts: Date.now() };
+  const all = readPlans();
+  // Refuse rather than rewrite: a file we could not parse still holds the other
+  // remotes, and writing this one's entry alone is how they would be lost.
+  if (!all) return null;
+  if (plan.devices.length) all[mac.toLowerCase()] = plan;
+  else delete all[mac.toLowerCase()];
+  return savePlans(all) ? plan : null;
+}
+
+// Change ONE remote's entry, leaving every other remote's exactly as it was. What
+// was last written to a remote is per remote, and the box-wide codes file cannot
+// say that: erasing one remote would clear what the screen says about another.
+function updatePlan(mac, fn) {
+  if (!MAC_RE.test(mac)) return null;
+  const all = readPlans();
+  if (!all) return null;
+  const key = mac.toLowerCase();
+  if (!all[key]) return null; // nothing set up for this remote: nothing to record
+  const next = fn({ ...all[key] });
+  all[key] = next;
+  return savePlans(all) ? next : null;
+}
 
 // A "plan" is what the UI assembles: one base codeset for everything, plus
 // optional per-key overrides, plus an optional SECOND device per key (one press
@@ -467,6 +928,9 @@ const MAC_RE = /^([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}$/;
 // The blast is built from the SAME plan the program would write, so what you
 // hear/see in the test is exactly what lands on the remote - including a
 // key's second device.
+// A test writes its OWN config file. `status.configured` is read from CODES_FILE
+// and the screen reports it as what was last written to the remote - so a test,
+// which stores nothing on the remote at all, must not be able to claim that.
 function testKey(mac, planOrPath, key, cb) {
   if (!MAC_RE.test(mac)) return cb(new Error("invalid MAC"));
   if (!IR_KEYS.includes(key)) return cb(new Error("invalid key"));
@@ -474,11 +938,11 @@ function testKey(mac, planOrPath, key, cb) {
     if (err) return cb(err);
     if (!spec.keys[key]) return cb(new Error("codeset has no " + key));
     try {
-      fs.writeFileSync(CODES_FILE, JSON.stringify(spec, null, 2));
+      fs.writeFileSync(TEST_CODES_FILE, JSON.stringify(spec, null, 2));
     } catch (e) {
       return cb(e);
     }
-    runTool(["blast", mac, "--config", CODES_FILE, "--key", key], 30000, cb);
+    runTool(["blast", mac, "--config", TEST_CODES_FILE, "--key", key], 30000, cb);
   });
 }
 
@@ -491,13 +955,29 @@ function program(mac, planOrPath, label, cb) {
     } catch (e) {
       return cb(e);
     }
-    runTool(["program", mac, "--config", CODES_FILE], 60000, cb);
+    runTool(["program", mac, "--config", CODES_FILE], 60000, (err, r) => {
+      // Recorded against the MAC that was actually written, so a second remote's
+      // screen never reports this one's codes.
+      if (!err && r && r.ok) updatePlan(mac, (p) => ({ ...p, programmed: { label: str(label, 60), ts: Date.now() } }));
+      cb(err, r);
+    });
   });
 }
 
 function erase(mac, cb) {
   if (!MAC_RE.test(mac)) return cb(new Error("invalid MAC"));
-  runTool(["erase", mac], 30000, cb);
+  runTool(["erase", mac], 30000, (err, r) => {
+    // The devices stay - you erase to stop the remote blasting, not to throw away
+    // the setup, and re-programming should not mean building it again. What goes is
+    // the record that anything IS on the remote, for this remote only.
+    if (!err && r && r.ok) {
+      updatePlan(mac, (p) => ({ ...p, programmed: null }));
+      try {
+        fs.unlinkSync(CODES_FILE);
+      } catch (e) {}
+    }
+    cb(err, r);
+  });
 }
 
 function status(cb) {
@@ -528,8 +1008,12 @@ module.exports = {
   installDeps,
   fetchBrands,
   fetchCodeset,
+  brandDevices,
+  readPlan,
+  writePlan,
   checkProtocols,
   testKey,
   program,
   erase,
+  _test: { signature, groupSets, bestType, deviceKind, typeLabel, sanitizePlan, updatePlan },
 };

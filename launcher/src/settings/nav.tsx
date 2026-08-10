@@ -45,6 +45,13 @@ export interface StackEntry extends PushedPage {
 interface SettingsNav {
   push: (page: PushedPage) => void;
   pop: () => void;
+  // Back to a level several pushes down, for a flow whose last step finishes the
+  // job it was opened for: picking an IR code walks brand -> letter -> code, and
+  // leaving the user to press Back three times past screens they are done with is
+  // worse than the walk itself. The caller passes the `depth` it read on the page
+  // it wants to return to - a number, so it cannot go stale the way a callback
+  // into an unmounted page would.
+  popTo: (depth: number) => void;
   depth: number;
   // Where Back wants the focus to land, handed to the page that mounts after a pop.
   // It is CONSUMED by that page, which is what keeps this a single decision: the
@@ -57,6 +64,7 @@ interface SettingsNav {
 const NavContext = createContext<SettingsNav>({
   push: () => {},
   pop: () => {},
+  popTo: () => {},
   depth: 0,
   takePendingFocus: () => null,
 });
@@ -82,6 +90,17 @@ export function SettingsNavProvider({ children }: { children: (stack: StackEntry
     setStack((s) => s.slice(0, -1));
   }, []);
 
+  // The focus to restore is the one recorded by the OUTERMOST entry being dropped -
+  // that is the row the user pressed to start the flow, and the levels in between
+  // are screens they never have to see again.
+  const popTo = useCallback((depth: number) => {
+    const target = Math.max(0, depth);
+    const outermost = stackRef.current[target];
+    if (!outermost) return; // already at or above that level
+    if (outermost.returnFocus) pendingFocus.current = outermost.returnFocus;
+    setStack((s) => s.slice(0, target));
+  }, []);
+
   const takePendingFocus = useCallback(() => {
     const key = pendingFocus.current;
     pendingFocus.current = null;
@@ -91,8 +110,8 @@ export function SettingsNavProvider({ children }: { children: (stack: StackEntry
   // depth is read by the rail (to stand down) and by pages, so it belongs in the
   // context rather than being derived at each call site.
   const nav = useMemo(
-    () => ({ push, pop, depth: stack.length, takePendingFocus }),
-    [push, pop, stack.length, takePendingFocus],
+    () => ({ push, pop, popTo, depth: stack.length, takePendingFocus }),
+    [push, pop, popTo, stack.length, takePendingFocus],
   );
 
   return <NavContext.Provider value={nav}>{children(stack)}</NavContext.Provider>;

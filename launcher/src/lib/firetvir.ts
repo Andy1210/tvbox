@@ -1,6 +1,10 @@
 // Launcher client for Fire TV remote IR programming (shell/firetvir.js).
-// The guided flow in FiretvIrSettings.tsx drives these; the codesets come from
-// the community irdb database (credited in About + the flow's footer).
+// The flow in settings/pages/firetvir.tsx drives these; the codesets come from the
+// community irdb database (credited in About + the flow's footer).
+export const IR_KEYS = ["VolumeUp", "VolumeDown", "Mute", "Power"] as const;
+export type IrKey = (typeof IR_KEYS)[number];
+export type IrKind = "tv" | "audio" | "settop" | "player" | "climate" | "other";
+
 export interface FiretvIrStatus {
   toolPresent: boolean;
   venvPresent: boolean;
@@ -9,26 +13,64 @@ export interface FiretvIrStatus {
   installStep: string;
   installError: string;
   configured: { name: string; source: string } | null;
-  suggestedBrand: string | null; // the connected TV's brand (EDID/CEC), pre-selected in the flow
+  suggestedBrand: string | null; // the connected TV's brand (EDID/CEC), offered first in the picker
 }
 export interface IrBrand {
   brand: string;
-  // `type` is the irdb device folder ("TV", "Receiver", "Unknown_AH59-..."). The
-  // base picker shows TV sets; a per-key override shows all of them, since a
-  // button can drive something else entirely (a soundbar on volume).
+  // The irdb device folders under this brand. Only the COUNT is used now - what a
+  // brand really offers is `IrDevice[]`, which merges these by the codes they send.
   sets: { name: string; path: string; type: string }[];
 }
-export interface IrCodeset {
-  ok: boolean;
-  path: string;
-  keys: Record<string, { functionname: string; protocol: string }>;
+// One device a brand offers, as the picker shows it: every codeset that sends the
+// same four codes merged into a single row (shell/firetvir.js `groupSets`).
+export interface IrDevice {
+  id: string;
+  path: string; // the codeset it is programmed from
+  label: string;
+  kind: IrKind;
+  count: number; // how many irdb folders carry this exact code
+  types: string[];
+  keys: IrKey[]; // the buttons it can actually drive
   protocols: string[];
-  supported: Record<string, boolean> | null; // per-protocol, null if the check failed
+  variant: string; // protocol + address, what tells two same-named rows apart
+  supported: Record<string, boolean> | null; // per protocol; null = the check could not run
+}
+export interface BrandDevices {
+  ok: boolean;
+  state?: "loading" | "ok";
+  done?: number;
+  total?: number;
+  devices?: IrDevice[];
+  skipped?: number; // codesets with none of the four keys - nothing to program from
+  // Codesets that did not come down. A short list looks exactly like a brand with
+  // little in it, so the count travels with the answer and the page offers a retry.
+  failed?: number;
   error?: string;
 }
-// What gets written to the remote: one base codeset for every key, plus
-// optional per-key overrides (a different brand on a single button) and an
-// optional second device on a key, so one press blasts both.
+// What the remote was set up to drive. Stored on the box because the keymap written
+// to the remote cannot be read back, so this is the only record of it.
+export interface IrPlanDevice {
+  id: string;
+  brand: string;
+  label: string;
+  kind: IrKind;
+  path: string;
+  keys: IrKey[];
+  protocol: string;
+  count: number;
+}
+export type IrAssign = Partial<Record<IrKey, { device: string; second: string | null }>>;
+export interface IrSetup {
+  devices: IrPlanDevice[];
+  assign: IrAssign;
+  // What was last written to THIS remote, per remote. The box-wide codes file
+  // cannot say that: erasing one remote would clear what the screen reports about
+  // another.
+  programmed: { label: string; ts: number } | null;
+  ts: number;
+}
+// The wire format the shell resolves into a keymap: a codeset per key, plus an
+// optional second device on a key so one press blasts both.
 export interface IrPlan {
   base: string | null;
   keys: Record<string, { path?: string; second?: string }>;
@@ -77,15 +119,29 @@ export function installIrDeps(): Promise<{ ok: boolean }> {
 export function fetchIrBrands(): Promise<{ ok: boolean; brands?: IrBrand[]; error?: string }> {
   return getJson("/tvbox/api/firetvir/brands", { ok: false, error: "unreachable" });
 }
-export function fetchIrCodeset(path: string): Promise<IrCodeset> {
-  return getJson("/tvbox/api/firetvir/codeset?path=" + encodeURIComponent(path), {
+// Poll while `state === "loading"`: the box is downloading that brand's codesets
+// and `done`/`total` is how far it is.
+export function fetchBrandDevices(brand: string): Promise<BrandDevices> {
+  return getJson("/tvbox/api/firetvir/brand?name=" + encodeURIComponent(brand), {
     ok: false,
-    path,
-    keys: {},
-    protocols: [],
-    supported: null,
     error: "unreachable",
   });
+}
+// null = the box could not be asked. NOT an empty plan: every writer sends the
+// whole thing, so a caller that took a failed read for "nothing configured" would
+// save that over a remote that is fully set up.
+export function fetchIrSetup(mac: string): Promise<IrSetup | null> {
+  return getJson<{ ok: boolean; plan?: IrSetup } | null>(
+    "/tvbox/api/firetvir/plan?mac=" + encodeURIComponent(mac),
+    null,
+  ).then((r) => (r && r.ok && r.plan ? r.plan : null));
+}
+// The box answers with the plan it actually kept (it re-validates), so the screen
+// shows what is stored rather than what was sent.
+export function saveIrSetup(mac: string, plan: IrSetup): Promise<IrSetup | null> {
+  return postJson<{ ok: boolean; plan?: IrSetup }>("/tvbox/api/firetvir/plan", { mac, plan }, { ok: false }).then(
+    (r) => (r.ok && r.plan ? r.plan : null),
+  );
 }
 export function testIrKey(mac: string, plan: IrPlan, key: string): Promise<ToolResult> {
   return postJson("/tvbox/api/firetvir/test", { mac, plan, key }, { ok: false, error: "unreachable" });
@@ -96,3 +152,32 @@ export function programIr(mac: string, plan: IrPlan, label: string): Promise<Too
 export function eraseIr(mac: string): Promise<ToolResult> {
   return postJson("/tvbox/api/firetvir/erase", { mac }, { ok: false, error: "unreachable" });
 }
+
+// The stored setup, as the shell's programmer wants it. `base` stays null on
+// purpose: every key names its own codeset, so a key nobody assigned is simply
+// absent instead of silently inheriting another device's codes.
+export function toIrPlan(setup: IrSetup): IrPlan {
+  const byId = new Map(setup.devices.map((d) => [d.id, d]));
+  const keys: IrPlan["keys"] = {};
+  for (const key of IR_KEYS) {
+    const a = setup.assign[key];
+    const dev = a && byId.get(a.device);
+    if (!dev) continue;
+    const second = a?.second ? byId.get(a.second) : null;
+    keys[key] = second ? { path: dev.path, second: second.path } : { path: dev.path };
+  }
+  return { base: null, keys };
+}
+
+// A plan carrying ONE key, for the per-key test: the shell blasts exactly what it
+// would program, second device included.
+export function toSingleKeyPlan(setup: IrSetup, key: IrKey): IrPlan {
+  const full = toIrPlan(setup);
+  return { base: null, keys: full.keys[key] ? { [key]: full.keys[key] } : {} };
+}
+
+// A codeset whose protocol this box cannot generate would blast nothing, so the
+// picker greys it out instead. An unknown answer (the check could not run) counts
+// as usable - refusing on no information hides codes that work.
+export const deviceSupported = (d: IrDevice): boolean =>
+  !d.supported || d.protocols.every((p) => d.supported?.[p] !== false);

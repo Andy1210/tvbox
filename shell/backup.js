@@ -42,7 +42,10 @@ const CONFIG_FILE = path.join(TVBOX, "config.json");
 const RESTORE_LS = path.join(TVBOX, "restore-localstorage.json");
 const PENDING_APPFILES = path.join(TVBOX, "restore-appfiles.json");
 // Small secret-bearing sidecar files worth carrying across a re-flash.
-const EXTRA_FILES = ["spotify-accounts.json", "spotify-refresh-token"];
+// firetv_ir_plan.json is here because it cannot be rebuilt from anything: the
+// keymap it describes lives on the REMOTE and is write-only, so a box restored
+// without it shows a fully programmed remote as unconfigured.
+const EXTRA_FILES = ["spotify-accounts.json", "spotify-refresh-token", "firetv_ir_plan.json"];
 const MAX_APPDATA = 40; // per-app stores are capped at 256 KB each (appdata.js)
 // An app's own declared files (`backup.paths` in its manifest): RetroArch's
 // playlists and save files are the case this exists for. Bounded on purpose - the
@@ -511,8 +514,14 @@ function apply(payload) {
   if (payload.files && typeof payload.files === "object") {
     for (const name of EXTRA_FILES) {
       // fixed allowlist - never write attacker-chosen paths
-      if (typeof payload.files[name] === "string")
-        fs.writeFileSync(path.join(TVBOX, name), payload.files[name], { mode: 0o600 });
+      if (typeof payload.files[name] === "string") {
+        const dest = path.join(TVBOX, name);
+        // `mode` applies only when the file is created and is masked by umask, so a
+        // file that already exists would keep whatever permissions it had. These
+        // carry tokens and the devices in someone's home.
+        fs.writeFileSync(dest, payload.files[name], { mode: 0o600 });
+        fs.chmodSync(dest, 0o600);
+      }
     }
   }
   if (payload.appdata && typeof payload.appdata === "object") {
