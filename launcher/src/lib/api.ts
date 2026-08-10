@@ -246,6 +246,76 @@ export async function saveFileServer(patch: {
 }
 export const installRclone = () => post("/tvbox/api/fileserver/install-rclone", {});
 
+// Saves sharing: the folders installed apps declare, offered read-only to another
+// box, and the boxes this one has been paired with. No credential ever crosses
+// this boundary - the box says whether it HAS a token, never what it is.
+export interface AppShare {
+  id: string; // "<app id>/<share name>", stable: what the enable list stores
+  appId: string;
+  appName: string;
+  name: string;
+  present: boolean; // the folder exists (an app that has saved nothing yet has not made it)
+  on: boolean;
+}
+export interface AppSharesStatus {
+  enabled: boolean;
+  running: boolean;
+  port: number;
+  hasToken: boolean;
+  rclone: boolean;
+  installing?: boolean;
+  shares: AppShare[];
+  serving: string[];
+  peers: { id: string; name: string; host: string }[];
+}
+export async function fetchAppShares(): Promise<AppSharesStatus | null> {
+  try {
+    const res = await fetch("/tvbox/api/appshares", { cache: "no-store" });
+    if (!res.ok) throw new Error("HTTP " + res.status);
+    return (await res.json()) as AppSharesStatus;
+  } catch (e) {
+    console.warn("[launcher] app shares status failed:", e);
+    return null;
+  }
+}
+export const saveAppShares = (enabled: string[]) =>
+  postJson<{ ok: boolean; error?: string; status?: AppSharesStatus }>(
+    "/tvbox/api/appshares",
+    { enabled },
+    {
+      ok: false,
+      error: "failed",
+    },
+  );
+// A sweep of the LAN for a box that is waiting to pair right now. Slow by nature,
+// so it is a button rather than something the page does on its own.
+export const scanForBoxes = () =>
+  postJson<{ ok: boolean; found?: { host: string }[]; error?: string }>(
+    "/tvbox/api/appshares/scan",
+    {},
+    {
+      ok: false,
+      error: "failed",
+    },
+  );
+export const pairWithBox = (host: string, code: string) =>
+  postJson<{ ok: boolean; peer?: { id: string; name: string; host: string }; error?: string }>(
+    "/tvbox/api/appshares/pair",
+    { host, code },
+    { ok: false, error: "failed" },
+  );
+export const forgetBox = (id: string) =>
+  postJson<{ ok: boolean }>("/tvbox/api/appshares/peer-remove", { id }, { ok: false });
+export const pullShare = (peerId: string, shareId: string) =>
+  postJson<{ ok: boolean; error?: string }>(
+    "/tvbox/api/appshares/pull",
+    { peerId, shareId },
+    {
+      ok: false,
+      error: "failed",
+    },
+  );
+
 // Screen mirroring (Wi-Fi Display). There is no stored setting to read: the box
 // is either mirroring right now or it is not, because a group owner holds the
 // radio and opens a pairing button that anyone in range could press. So this

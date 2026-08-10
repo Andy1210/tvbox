@@ -77,6 +77,10 @@ const remotePath = (s) => REMOTE + ":" + s.share + (s.path ? "/" + s.path : "");
 
 // rclone's own reversible encoding for a stored password. Fed over stdin so the
 // plain one never appears in the process list.
+//
+// Exported because rclone wants this for EVERY credential it is handed, not just a
+// share's: appshares hands a peer's token to `rclone copy` the same way, and a
+// second copy of this would be a second thing to get wrong.
 function obscure(pass) {
   return execFileSync("rclone", ["obscure", "-"], { input: String(pass), encoding: "utf8" }).trim();
 }
@@ -277,6 +281,7 @@ module.exports = {
   SHARES_DIR,
   MAX_SHARES,
   VFS_ARGS,
+  obscure,
   hostOk,
   shareOk,
   nameOk,

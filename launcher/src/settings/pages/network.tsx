@@ -1,6 +1,6 @@
 import { useI18n } from "../../lib/i18n";
 import { wifiStatus } from "../../lib/wifi";
-import { fetchFileServer, fetchShares, fetchMirroring } from "../../lib/api";
+import { fetchFileServer, fetchShares, fetchMirroring, fetchAppShares } from "../../lib/api";
 import { useConfigStore } from "../../stores/config";
 import { SettingsPage } from "../SettingsPage";
 import { Group, Row } from "../Rows";
@@ -8,6 +8,7 @@ import { useSettingsNav } from "../nav";
 import { useSummary } from "../summary";
 import { WifiPage } from "./wifi";
 import { FileServerPage } from "./fileserver";
+import { AppSharesPage } from "./appshares";
 import { SharesPage } from "./shares";
 import { MqttPage } from "./mqtt";
 import { MirroringPage } from "./mirroring";
@@ -22,6 +23,7 @@ export function NetworkPane() {
   const wifi = useSummary("wifi", wifiStatus);
   const fs = useSummary("fileserver", fetchFileServer);
   const shares = useSummary("shares", fetchShares);
+  const appshares = useSummary("appshares", fetchAppShares);
   const mirror = useSummary("mirroring", fetchMirroring);
   const mqtt = useConfigStore((s) => s.config?.mqtt);
 
@@ -49,6 +51,13 @@ export function NetworkPane() {
           hint={t("network.fileserverHint")}
           value={fs ? (fs.running ? t("fileserver.running") : t("fileserver.stopped")) : undefined}
           onEnter={() => nav.push({ id: "fileserver", title: t("fileserver.title"), render: () => <FileServerPage /> })}
+        />
+        <Row
+          id="appshares"
+          label={t("appshares.title")}
+          hint={t("network.appsharesHint")}
+          value={appshares ? (appshares.running ? t("appshares.on") : t("appshares.off")) : undefined}
+          onEnter={() => nav.push({ id: "appshares", title: t("appshares.title"), render: () => <AppSharesPage /> })}
         />
         <Row
           id="shares"

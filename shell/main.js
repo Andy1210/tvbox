@@ -36,6 +36,9 @@ const ir = require("./ir"); // IR blaster hub: TV volume/mute over ESPHome or Ho
 const appwins = require("./appwindows"); // background-apps window registry + hidden-set policy (LRU/RAM guard)
 const nativeapp = require("./native"); // native (non-Electron) apps: RetroArch et al own the screen AND the input
 const fileserver = require("./fileserver"); // the box's folders over WebDAV (rclone, no root)
+const appshares = require("./appshares"); // folders an app declares, read-only, to another box
+const peers = require("./peers"); // the other box: found, paired with, pulled from
+const peerPairing = require("./pairing/peer"); // hands a peer the token for those shares
 const browse = require("./browse"); // local + USB media: which roots exist, and listing one
 const images = require("./images"); // photo thumbnails + view renders, and their cache
 const photoshare = require("./photoshare"); // photos a phone cast at the viewer
@@ -203,6 +206,15 @@ function emitConfigChange(sections) {
 // PATH matters here (rclone lands in ~/.tvbox/bin, which install.js prepends);
 // the Wayland vars do not - this serves files, it draws nothing.
 const fileserverDeps = { onPath: apps.onPath, childEnv: () => ({ ...process.env }), supervisor };
+// The same wiring for the shares an APP declares, with one addition: what there is
+// to offer comes from the installed manifests, and it is a function because an app
+// can be installed while the box is running.
+const appsharesDeps = {
+  onPath: apps.onPath,
+  childEnv: () => ({ ...process.env }),
+  supervisor,
+  entries: () => appshares.entries(apps.getManifests(), apps.appShareRoot),
+};
 // Same reason for the same one field: `udisksctl` is what mounts a stick and it is
 // not on every box (udisks2 is a soft dep, and OTA can never add an apt package),
 // so browse.js asks before it runs anything. `shares` is a function rather than a
@@ -344,6 +356,87 @@ function applyFileserverInner() {
   return r;
 }
 
+function applyAppshares() {
+  try {
+    return applyAppsharesInner();
+  } catch (e) {
+    console.warn("[appshares] apply failed:", e.message);
+    return { ok: false, error: "failed" };
+  }
+}
+function applyAppsharesInner() {
+  let cfg = config.rawAppshares();
+  // Drop ids no installed app declares any more. Without this an app that was
+  // uninstalled leaves its share in the list, the server refuses to start with
+  // "nothing shared", and the screen offers nothing to switch off - the stale
+  // entry is invisible there, because the list is built from the manifests.
+  const known = new Set(appsharesDeps.entries().map((e) => e.id));
+  const kept = (Array.isArray(cfg.enabled) ? cfg.enabled : []).filter((id) => known.has(id));
+  if (kept.length !== (cfg.enabled || []).length) cfg = config.setAppshares({ enabled: kept });
+  const enabled = kept;
+  if (!enabled.length) {
+    appshares.stop(appsharesDeps);
+    return { ok: true, stopped: true };
+  }
+  // The token is minted on the first share somebody turns on, not at boot: a box
+  // that never offers anything has no credential lying in its config to leak.
+  if (!cfg.token) config.setAppshares({ token: appshares.newToken() });
+  const r = appshares.start(config.rawAppshares(), appsharesDeps);
+  if (!r.ok) {
+    appshares.stop(appsharesDeps); // never leave a half-started share behind
+    console.warn("[appshares] not started:", r.error);
+  } else {
+    console.log("[appshares] offering", r.shared.length, "folder(s) on :" + r.port);
+  }
+  return r;
+}
+
+// Pull one share from a paired box into the same app's folder here. Both ends are
+// resolved from what THIS box knows - the peer from its stored id, the destination
+// from the local manifest - so a caller names a share, never a path.
+function pullAppshare(peerId, shareId) {
+  const cfg = config.rawAppshares();
+  const peer = (cfg.peers || []).find((x) => x.id === peerId);
+  if (!peer) return { ok: false, error: "unknown_peer" };
+  const entry = appsharesDeps.entries().find((x) => x.id === shareId);
+  if (!entry) return { ok: false, error: "unknown_share" };
+  // `present` is what says the folder exists AND still resolves inside the app's
+  // own root. Refused here rather than only in the UI: this destination is handed
+  // to rclone, and a direct call must not reach past a symlink the screen greys out.
+  if (!entry.present) return { ok: false, error: "unknown_share" };
+  if (!apps.onPath("rclone")) return { ok: false, error: "rclone_missing" };
+  // A replaced file goes here rather than into the void, and the stamp is what
+  // makes two pulls of the same game distinguishable afterwards.
+  const backupDir = path.join(peers.REPLACED, new Date().toISOString().replace(/[:.]/g, "-"));
+  const argv = peers.pullArgv(peer, shareId, entry.path, backupDir, entry.exclude);
+  // rclone wants every credential in its own reversible encoding, whether it comes
+  // from a config file or the environment - a plain token answers 401. shares.js
+  // owns that encoding for the same reason it owns the mount arguments.
+  let secret;
+  try {
+    secret = shares.obscure(peer.token);
+  } catch (e) {
+    console.warn("[appshares] could not encode the peer's token:", e.message);
+    return { ok: false, error: "pull_failed" };
+  }
+  const child = spawn(argv[0], argv.slice(1), {
+    env: { ...process.env, RCLONE_WEBDAV_PASS: secret },
+    stdio: ["ignore", "ignore", "pipe"],
+  });
+  let err = "";
+  child.stderr.on("data", (d) => {
+    if (err.length < 4000) err += d;
+  });
+  return new Promise((resolve) => {
+    child.on("error", (e) => resolve({ ok: false, error: e.message }));
+    child.on("exit", (code) => {
+      if (code === 0) console.log("[appshares] pulled", shareId, "from", peer.name);
+      else console.warn("[appshares] pull failed:", code, err.slice(0, 400));
+      resolve({ ok: code === 0, error: code === 0 ? null : "pull_failed", detail: err.slice(0, 400) });
+    });
+  });
+}
+
 // rclone is a ~20MB download, so it runs out of process like every other no-root
 // binary install - the UI polls the status for `rclone`.
 function installRclone() {
@@ -359,6 +452,7 @@ function installRclone() {
     // Both features run on this one binary, so whichever asked for it, everything
     // waiting on it can start now.
     if (config.rawFileserver().enabled) applyFileserver();
+    if ((config.rawAppshares().enabled || []).length) applyAppshares();
     if (config.rawShares().length) applyShares();
   };
   child.on("error", done);
@@ -651,6 +745,9 @@ function serve() {
   // of them can load this file.
   const routeCtx = {
     appIsRunning: (id) => !!appWindow(id),
+    applyAppshares,
+    appsharesStatus: () => appshares.status(config.rawAppshares(), appsharesDeps),
+    pullAppshare,
     applyFileserver,
     applyMqttConfig,
     audioSink: () => audioSink,
@@ -918,6 +1015,17 @@ function serve() {
     if (p === "/tvbox/api/fileserver") {
       const st = fileserver.status(config.rawFileserver(), fileserverDeps);
       return httpserver.jsonRes(res, { ...st, installing: rcloneInstalling });
+    }
+    if (p === "/tvbox/api/appshares") {
+      // Re-read the manifests, like /tvbox/api/apps does: an app installed since
+      // boot brings its shares with it, and without this they appear only after
+      // something else happened to refresh the cache.
+      apps.loadManifests();
+      const cfg = config.rawAppshares();
+      const st = appshares.status(cfg, appsharesDeps);
+      // Peers without their tokens: the launcher needs to name a box and nothing more.
+      const list = (cfg.peers || []).map((x) => ({ id: x.id, name: x.name, host: x.host }));
+      return httpserver.jsonRes(res, { ...st, peers: list, installing: rcloneInstalling });
     }
     // What there is to play on the box itself: the user's own folders and each
     // partition of a plugged-in USB stick (browse.js). Read-only; the app that
@@ -2828,6 +2936,25 @@ app.whenReady().then(async () => {
   pairing.register("photoshare", require("./pairing/photoshare"));
   pairing.register("backup", backupPairing);
   pairing.register("text", require("./pairing/text"));
+  // The one pairing kind whose client is another box rather than a phone. It reads
+  // the token straight from the config, so the credential exists in exactly one
+  // place and a share turned off between the code appearing and the peer asking
+  // takes the answer with it.
+  peerPairing.init({
+    credentials: () => {
+      const cfg = config.rawAppshares();
+      if (!cfg.token || !(cfg.enabled || []).length) return null;
+      // The hostname is what makes a box itself here, the same source the MQTT
+      // device id is derived from - so a peer list names the rooms, not addresses.
+      return {
+        id: identity.defaultDeviceId(),
+        name: identity.hostname(),
+        port: appshares.portOf(cfg.port),
+        token: cfg.token,
+      };
+    },
+  });
+  pairing.register("peer", peerPairing);
   // A phone acting as the remote. The FIFO write goes ONLY to the remote bridge:
   // the CEC one forwards what it does not recognise to cec-client's stdin, so a
   // key would arrive there as a CEC command.
@@ -3051,6 +3178,7 @@ app.whenReady().then(async () => {
   });
   updater.startSchedulers(); // boot check + 6h re-check + nightly idle auto-apply
   if (config.rawFileserver().enabled) applyFileserver(); // the LAN share survives a restart
+  if ((config.rawAppshares().enabled || []).length) applyAppshares(); // and so do an app's
   if (config.rawShares().length) applyShares(); // and so do the shares the box reads FROM
   setInterval(maintenance.appsAutoTick, 30 * 60 * 1000); // nightly registry app auto-update (same window)
   // Not gated to the small hours like the registry check: a bundle whose flatpak

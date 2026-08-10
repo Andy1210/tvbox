@@ -35,6 +35,9 @@ function fakeRes() {
 function fakeCtx(over = {}) {
   return {
     appIsRunning: () => false,
+    applyAppshares: () => ({ ok: true }),
+    appsharesStatus: () => ({ running: false, shares: [] }),
+    pullAppshare: () => Promise.resolve({ ok: true }),
     applyFileserver: () => ({ ok: true }),
     applyMqttConfig: () => {},
     notify: () => {},
@@ -133,6 +136,45 @@ test("arming screen mirroring reports a refusal instead of pretending it worked"
   routes.post("/tvbox/api/miracast/start", {}, ok, fakeCtx());
   assert.strictEqual(jsonOf(ok).ok, true);
   assert.strictEqual(jsonOf(ok).name, "tvbox", "the name a phone will look for comes back for the UI to show");
+});
+
+test("the list of shares being offered is the on/off switch, and it is applied at once", () => {
+  const config = require("./config");
+  let applied = 0;
+  const ctx = fakeCtx({ applyAppshares: () => (applied++, { ok: true }) });
+  const res = fakeRes();
+  routes.post("/tvbox/api/appshares", { enabled: ["retroarch/saves"] }, res, ctx);
+  assert.deepStrictEqual(config.rawAppshares().enabled, ["retroarch/saves"]);
+  assert.strictEqual(applied, 1, "a setting nobody can see the effect of is a trap");
+  routes.post("/tvbox/api/appshares", { enabled: [] }, fakeRes(), ctx);
+  assert.deepStrictEqual(config.rawAppshares().enabled, [], "an empty list is how it is off");
+});
+
+test("a peer is dropped by name, and its token goes with it", () => {
+  const config = require("./config");
+  const peer = { id: "tvbox-gaming", name: "gaming", host: "192.168.1.7", port: 8096, token: "tok" };
+  config.setAppshares({ peers: [peer] });
+  const res = fakeRes();
+  routes.post("/tvbox/api/appshares/peer-remove", { id: "tvbox-gaming" }, res, fakeCtx());
+  assert.deepStrictEqual(config.rawAppshares().peers, []);
+  assert.deepStrictEqual(jsonOf(res).peers, [], "and the answer never carries a token");
+});
+
+test("a pull names a share and a box, never a path", async () => {
+  let asked = null;
+  const ctx = fakeCtx({
+    pullAppshare: (peerId, shareId) => {
+      asked = { peerId, shareId };
+      return Promise.resolve({ ok: true });
+    },
+  });
+  const res = fakeRes();
+  await routes.post("/tvbox/api/appshares/pull", { peerId: "b", shareId: "retroarch/saves", dest: "/etc" }, res, ctx);
+  assert.deepStrictEqual(
+    asked,
+    { peerId: "b", shareId: "retroarch/saves" },
+    "the destination is not the caller's to give",
+  );
 });
 
 test("every ctx member a route uses is one the shell actually provides", () => {
