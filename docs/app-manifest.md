@@ -114,6 +114,7 @@ Top level:
 | `version`         |     | Your app's version, informational.                                                 |
 | `pairing`         |     | Phone actions the app offers (below).                                              |
 | `backup`          |     | Files of its own a settings backup should carry (below).                           |
+| `shares`          |     | Folders of its own another tvbox may read over the LAN (below).                    |
 
 `requires` - dependencies; a missing binary greys the tile with "needs X",
 nothing crash-loops:
@@ -208,6 +209,35 @@ The pairing server is up only while that screen is open, and every route under i
 is code-gated by the shell (`c` in the query for reads, `code` in the body for
 writes). Requests are capped in size; a route that needs a bigger body says so
 (`{ maxBody, handler }`).
+
+## Folders another box may read (`shares`)
+
+The same idea as `backup`, pointed sideways instead of forwards in time: a second
+box in another room reading this one's save files, so a game started in the living
+room can be picked up in the bedroom. See [saves sharing](saves-sharing.md).
+
+```jsonc
+"shares": {
+  // Same rule as backup.flatpak: a ref the app already declares.
+  "flatpak": "org.libretro.RetroArch",
+  // Directories, relative to the app's own root. Up to 8.
+  "paths": ["config/retroarch/saves", "config/retroarch/states"],
+},
+```
+
+Declared, not requested. The shell builds the served directory from this list
+itself and there is no runtime call that takes a path, so what an app may offer
+can be read before it is installed - and nothing can widen it afterwards. The
+last segment of each path becomes the share's name, which is also a path segment
+on the box that fetches it.
+
+Offering is **read-only**, off until someone turns it on in Settings, and served
+on a token of its own rather than the file server's password. A declared path
+whose resolved target leaves the app's root - a symlink in its own folder - is
+listed but never served.
+
+This is not a sandbox: an installed app runs with full trust and has the network
+anyway. The declaration is there to be visible and reviewable.
 
 ## Files a backup should carry (`backup`)
 

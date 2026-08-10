@@ -20,6 +20,7 @@ const ir = require("./ir");
 const maintenance = require("./maintenance");
 const apps = require("./install");
 const pairing = require("./pairing");
+const peers = require("./peers"); // the other box: found by a sweep, paired with, pulled from
 const phoneremote = require("./phoneremote"); // a phone acting as the remote, on the LAN
 const photoshare = require("./photoshare"); // photos a phone cast at the viewer
 const removable = require("./removable"); // the USB stick: mount on open, unmount before it is pulled
@@ -417,6 +418,61 @@ function post(p, data, res, ctx) {
   }
   if (p === "/tvbox/api/fileserver/install-rclone") {
     return httpserver.jsonRes(res, { ok: true, installing: ctx.installRclone() });
+  }
+  // ---- app shares: this box's offer, the boxes it knows, and pulling from one ----
+  if (p === "/tvbox/api/appshares") {
+    // The list of share ids being offered IS the on/off switch: an empty list stops
+    // the server, so there is no second setting that could disagree with it.
+    config.setAppshares({ enabled: data.enabled });
+    const r = ctx.applyAppshares();
+    return httpserver.jsonRes(res, { ok: !!r.ok, error: r.error || null, status: ctx.appsharesStatus() });
+  }
+  if (p === "/tvbox/api/appshares/scan") {
+    // Boxes waiting to pair right now. Slow by nature (a sweep of the /24), so the
+    // UI asks for it on a button rather than on opening the page.
+    return peers
+      .scan()
+      .then((found) => httpserver.jsonRes(res, { ok: true, found }))
+      .catch((e) => httpserver.jsonRes(res, { ok: false, error: String(e.message || e).slice(0, 120) }));
+  }
+  if (p === "/tvbox/api/appshares/pair") {
+    const host = String(data.host || "");
+    const code = String(data.code || "");
+    // Only an address the sweep could have produced. Pairing always follows one,
+    // so anything else - another subnet, a public address, this box - is not a
+    // peer, and taking it would make this route a way to have the box fetch an
+    // address of someone else's choosing.
+    if (!peers.onLocalSubnet(host)) return httpserver.jsonRes(res, { ok: false, error: "bad_host" });
+    return peers
+      .pairWith(host, code)
+      .then((r) => {
+        if (!r.ok) return httpserver.jsonRes(res, r);
+        // Replaced rather than appended when the same box pairs again: a peer's
+        // token is reissued each time, and two entries would leave the stale one
+        // to be tried first.
+        const kept = (config.rawAppshares().peers || []).filter((x) => x.id !== r.peer.id);
+        config.setAppshares({ peers: [...kept, r.peer] });
+        return httpserver.jsonRes(res, { ok: true, peer: { id: r.peer.id, name: r.peer.name, host: r.peer.host } });
+      })
+      .catch((e) => httpserver.jsonRes(res, { ok: false, error: String(e.message || e).slice(0, 120) }));
+  }
+  if (p === "/tvbox/api/appshares/peer-remove") {
+    const id = String(data.id || "");
+    const peersLeft = (config.rawAppshares().peers || []).filter((x) => x.id !== id);
+    config.setAppshares({ peers: peersLeft });
+    return httpserver.jsonRes(res, {
+      ok: true,
+      peers: peersLeft.map((x) => ({ id: x.id, name: x.name, host: x.host })),
+    });
+  }
+  if (p === "/tvbox/api/appshares/pull") {
+    const r = ctx.pullAppshare(String(data.peerId || ""), String(data.shareId || ""));
+    // A failure before rclone starts comes back as a plain object; the run itself
+    // is a promise.
+    if (!r || typeof r.then !== "function") return httpserver.jsonRes(res, r || { ok: false, error: "failed" });
+    return r
+      .then((out) => httpserver.jsonRes(res, out))
+      .catch((e) => httpserver.jsonRes(res, { ok: false, error: String(e.message || e).slice(0, 120) }));
   }
   if (p === "/tvbox/api/config/app") {
     // Set a urlConfig app's address: { key, baseUrl } (http/https or empty to clear).

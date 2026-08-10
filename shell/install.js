@@ -281,6 +281,47 @@ function validateManifest(m, src) {
       }
     }
   }
+  // Folders the app offers, read-only, to another box on the LAN - the save files
+  // an emulator keeps, so a game picked up in one room can be continued in
+  // another. Declared here rather than asked for at runtime: the shell builds the
+  // share root itself from this list, so an app can only ever offer what its
+  // manifest says, and what that is can be read before installing it. The paths
+  // resolve against the app's own root (appShareRoot), which is what stops a
+  // manifest naming somebody else's folder.
+  const sh = m.shares;
+  if (sh !== undefined) {
+    if (!sh || typeof sh !== "object" || Array.isArray(sh)) return bad("shares must be an object");
+    // Membership, not just syntax. A well-formed ref the app does not depend on
+    // passes the shape check and is then refused by appShareRoot, so the manifest
+    // loads and its shares silently disappear from a screen that offers them -
+    // which reads as the feature being broken rather than as a bad manifest.
+    if (sh.flatpak !== undefined) {
+      if (!nativeapp.flatpakRefOk(sh.flatpak)) return bad("shares.flatpak must be a flatpak ref");
+      if (!flatpak.refsFor(m).some((f) => f.ref === sh.flatpak))
+        return bad("shares.flatpak must be a ref the app declares: " + JSON.stringify(sh.flatpak));
+    }
+    if (!Array.isArray(sh.paths) || !sh.paths.length || sh.paths.length > 8)
+      return bad("shares.paths must be 1-8 relative paths");
+    for (const rel of sh.paths) {
+      if (typeof rel !== "string" || !rel || rel.length > 200) return bad("bad shares.paths entry");
+      // Same rule as backup.paths, and for the same reason: these are joined onto
+      // the app's own root. A share name also becomes a path segment in the URL a
+      // peer box fetches, so a traversal here would reach past the share root too.
+      if (path.isAbsolute(rel) || rel.split(/[\\/]/).some((s) => s === ".." || s === "" || s === "."))
+        return bad("shares.paths must be relative in-app paths: " + JSON.stringify(rel));
+    }
+    // What inside those folders is not worth carrying: an emulator's shader cache
+    // and logs sit beside its saves, are neither saves nor small, and are rebuilt
+    // on whichever box needs them. These are rclone filter patterns, so they only
+    // ever narrow what a pull takes - they cannot widen what is served.
+    if (sh.exclude !== undefined) {
+      if (!Array.isArray(sh.exclude) || sh.exclude.length > 8)
+        return bad("shares.exclude must be an array of at most 8");
+      for (const pat of sh.exclude) {
+        if (typeof pat !== "string" || !pat || pat.length > 100) return bad("bad shares.exclude entry");
+      }
+    }
+  }
   const CAPS = ["nav", "player", "config", "fetch", "storage", "display", "input", "system"];
   const caps = m.runtime && m.runtime.capabilities;
   if (caps != null) {
@@ -359,21 +400,33 @@ function isInstalled(id) {
   return fs.existsSync(appDataDir(id));
 }
 
-// The directory an app's `backup.paths` are resolved against: its flatpak's
-// per-user data dir when the manifest names one (RetroArch keeps its playlists
-// and saves there), otherwise the app's own extracted-bundle dir. Returns null
-// when the manifest declares nothing or names a flatpak it doesn't depend on -
-// a backup must never be able to read or write outside the app it belongs to.
+// The directory an app's declared relative paths are resolved against: its
+// flatpak's per-user data dir when the manifest names one (RetroArch keeps its
+// playlists and saves there), otherwise the app's own extracted-bundle dir.
+// Returns null when the manifest names a flatpak it doesn't depend on - a
+// declaration must never be able to reach outside the app it belongs to.
+//
+// One helper for both callers on purpose: `backup.paths` are written back on a
+// restore and `shares.paths` are handed to another box, so the two must not be
+// able to drift into different ideas of where an app ends.
+function declaredRoot(m, ref, what) {
+  if (!ref) return appDataDir(m.id);
+  const declared = flatpak.refsFor(m).map((f) => f.ref);
+  if (!declared.includes(ref)) {
+    console.warn("[apps]", m.id + ": " + what, ref, "is not one of its own refs - ignoring");
+    return null;
+  }
+  return flatpak.dataDir(ref);
+}
 function appBackupRoot(m) {
   const bk = m && m.backup;
   if (!bk || !Array.isArray(bk.paths) || !bk.paths.length) return null;
-  if (!bk.flatpak) return appDataDir(m.id);
-  const declared = flatpak.refsFor(m).map((f) => f.ref);
-  if (!declared.includes(bk.flatpak)) {
-    console.warn("[apps]", m.id + ": backup.flatpak", bk.flatpak, "is not one of its own refs - ignoring");
-    return null;
-  }
-  return flatpak.dataDir(bk.flatpak);
+  return declaredRoot(m, bk.flatpak, "backup.flatpak");
+}
+function appShareRoot(m) {
+  const sh = m && m.shares;
+  if (!sh || !Array.isArray(sh.paths) || !sh.paths.length) return null;
+  return declaredRoot(m, sh.flatpak, "shares.flatpak");
 }
 
 // Is an executable on PATH (or an absolute path)? Used to check a manifest's
@@ -842,6 +895,7 @@ module.exports = {
   manifestById,
   appDataDir,
   appBackupRoot,
+  appShareRoot,
   stateFileOk,
   RESERVED_STATE_FILES,
   isInstalled,
