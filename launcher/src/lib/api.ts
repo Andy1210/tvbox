@@ -361,6 +361,9 @@ export interface ShareRow {
   path: string; // sub-folder inside the share ("" = its root)
   user: string;
   domain: string;
+  // What is on it, which decides how it is mounted: a film is streamed once, a
+  // emulator seeks around a disc image for hours, so it has to be cached to play.
+  cache: "media" | "games";
   hasPass: boolean;
   mountPoint: string;
   mounted: boolean;
@@ -377,6 +380,7 @@ export interface ShareInput {
   host?: string;
   share?: string;
   path?: string;
+  cache?: "media" | "games";
   user?: string;
   domain?: string;
   pass?: string; // omitted keeps the stored one, "" clears it

@@ -31,7 +31,8 @@
         color: #aab4c2;
         margin: 14px 0 4px;
       }
-      input {
+      input,
+      select {
         width: 100%;
         box-sizing: border-box;
         padding: 13px;
@@ -125,6 +126,12 @@
       <label for="name">{{name}}</label>
       <input id="name" autocapitalize="none" autocorrect="off" />
       <div class="small">{{nameHint}}</div>
+      <label for="cache">{{cacheLabel}}</label>
+      <select id="cache">
+        <option value="media">{{cacheMedia}}</option>
+        <option value="games">{{cacheGames}}</option>
+      </select>
+      <div class="small">{{cacheHint}}</div>
       <button class="btn" id="save">{{save}}</button>
     </div>
 
@@ -158,12 +165,19 @@
         return { host: $("host").value.trim(), user: $("user").value.trim(), pass: $("pass").value };
       }
 
+      // What is already configured, kept so the form can follow a share it is
+      // about to REPLACE: saving under an existing name overwrites it, and a
+      // dropdown that always reads "films" would quietly move a games share back
+      // to the film profile when somebody only came to fix the password.
+      var existingShares = [];
+
       async function listExisting() {
         try {
           var d = await (await fetch(q("/share-list"))).json();
         } catch (_) {
           return;
         }
+        existingShares = d.shares || [];
         var box = $("existing");
         box.innerHTML = "";
         $("existingTitle").style.display = (d.shares || []).length ? "block" : "none";
@@ -173,6 +187,18 @@
           box.appendChild(el);
         });
       }
+
+      // Typing the name of a share that exists means editing it, so the profile
+      // follows that share until someone changes it by hand.
+      $("name").addEventListener("input", function () {
+        var want = $("name").value.trim().toLowerCase();
+        for (var i = 0; i < existingShares.length; i++) {
+          if (existingShares[i].name === want && existingShares[i].cache) {
+            $("cache").value = existingShares[i].cache;
+            return;
+          }
+        }
+      });
 
       // Step 1: what does this server offer?
       $("lookup").onclick = async function () {
@@ -255,7 +281,12 @@
         try {
           r = await post(
             "/share-save",
-            Object.assign(creds(), { share: state.share, path: state.path, name: $("name").value.trim() }),
+            Object.assign(creds(), {
+              share: state.share,
+              path: state.path,
+              name: $("name").value.trim(),
+              cache: $("cache").value,
+            }),
           );
         } catch (_) {
           r = { ok: false };

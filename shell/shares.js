@@ -46,6 +46,47 @@ const VFS_ARGS = [
   "--no-modtime",
 ];
 
+// The other half of that comment, for a share that holds GAMES. An emulator does
+// not read a disc image the way a player reads a film: it seeks, constantly, for a
+// few kB at a time, and every miss over SMB is a round trip. Measured on a Pi 5
+// with a GameCube image on `minimal`: a random 64 kB read took **79 ms at the
+// median and 560 ms in the worst percent**, against 1.1 ms from the box's own
+// disk - which is what a second of freezing in the middle of a game is made of.
+//
+// `full` downloads the file in the background on first open and serves it from
+// the cache after that, so the game pays once. Three limits make that safe to
+// leave on: an age long enough that a game survives between sessions (rclone's
+// own default is an hour, which would re-fetch it every evening), a ceiling on
+// the cache, and a floor under the box's free space - a share of films must not
+// be able to fill the card just because someone browsed it.
+const GAMES_ARGS = [
+  "--read-only",
+  "--vfs-cache-mode",
+  "full",
+  "--vfs-cache-max-age",
+  "720h",
+  "--vfs-cache-max-size",
+  "16G",
+  "--vfs-cache-min-free-space",
+  "4G",
+  "--buffer-size",
+  "64M",
+  "--dir-cache-time",
+  "30s",
+  "--no-modtime",
+];
+
+// What a share holds, which is the only thing that decides how it is mounted.
+// Named for the content rather than for rclone's cache modes: the person setting
+// it up knows what they put on the NAS, not what a VFS is.
+const CACHE_MODES = ["media", "games"];
+function cacheModeOk(m) {
+  return CACHE_MODES.includes(m);
+}
+function vfsArgs(s) {
+  return s && s.cache === "games" ? GAMES_ARGS : VFS_ARGS;
+}
+
 // A host name or an IP. No scheme, no path, no credentials.
 function hostOk(h) {
   return typeof h === "string" && h.length <= 253 && /^[A-Za-z0-9]([A-Za-z0-9._-]*[A-Za-z0-9])?$/.test(h);
@@ -111,7 +152,12 @@ function shareFrom(input, stored) {
   if (!nameOk(name)) throw new Error("bad_name");
   if (!pathOk(sub)) throw new Error("bad_path");
   const pass = i.pass === undefined ? (stored && stored.pass) || "" : i.pass ? obscure(String(i.pass)) : "";
-  return { name, host, share: shareName, path: sub, user, domain, pass };
+  // Omitted keeps what the share already had, so an edit that only changes the
+  // password cannot silently move a games share back to the film profile. A share
+  // that predates this setting is media, which is what it was mounted as.
+  const cache = i.cache === undefined ? (stored && stored.cache) || "media" : String(i.cache);
+  if (!cacheModeOk(cache)) throw new Error("bad_cache");
+  return { name, host, share: shareName, path: sub, user, domain, pass, cache };
 }
 
 // rclone reads a remote's settings from RCLONE_CONFIG_<REMOTE>_<KEY>.
@@ -127,7 +173,7 @@ function envFor(s, baseEnv) {
   };
 }
 
-const mountArgs = (s) => ["rclone", "mount", remotePath(s), mountPoint(s), ...VFS_ARGS];
+const mountArgs = (s) => ["rclone", "mount", remotePath(s), mountPoint(s), ...vfsArgs(s)];
 
 // A FUSE mount shows up in /proc/self/mountinfo. readdir is not a usable test: an
 // unmounted mount point is simply an empty directory. (The path is an argument so
@@ -261,6 +307,9 @@ function status(shares, deps) {
       path: s.path || "",
       user: s.user || "",
       domain: s.domain || "",
+      // What is on it, which is what decides the mount profile. A share stored
+      // before this setting existed reads as media, which is how it was mounted.
+      cache: s.cache === "games" ? "games" : "media",
       hasPass: !!s.pass,
       mountPoint: mountPoint(s),
       mounted: isMounted(s),
@@ -281,6 +330,10 @@ module.exports = {
   SHARES_DIR,
   MAX_SHARES,
   VFS_ARGS,
+  GAMES_ARGS,
+  CACHE_MODES,
+  cacheModeOk,
+  vfsArgs,
   obscure,
   hostOk,
   shareOk,

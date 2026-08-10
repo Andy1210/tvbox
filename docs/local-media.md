@@ -97,9 +97,40 @@ its own right, rather than also turning up as a folder called "shares".
 Two things are decided differently from the RetroArch package's share, which mounts
 the same way:
 
-- **The cache mode.** rclone's `full` downloads a whole file in the background:
-  right for a 700 MB disc image an emulator seeks around in, wrong for a 60 GB film
-  someone watches once. This uses `minimal` plus a read-ahead, so reads stay ranged.
+- **The cache mode, which follows what the share HOLDS.** rclone's `full` downloads
+  a whole file in the background: right for a disc image an emulator seeks around
+  in, wrong for a 60 GB film someone watches once. So the form asks what is on the
+  share - films or games - and mounts it accordingly (`minimal` plus a read-ahead,
+  or `full` with a long cache age and a cap).
+
+  The difference is not subtle. Measured on a Pi 5, 200 random 64 kB reads of a
+  GameCube image on an SMB share - which is how an emulator reads a disc:
+
+  |                                              | median | p90     | p99     | worst   | over 500 ms |
+  | -------------------------------------------- | ------ | ------- | ------- | ------- | ----------- |
+  | `media` (what both used to get)              | 79 ms  | 231 ms  | 560 ms  | 713 ms  | 3 of 200    |
+  | `games`, while the copy is still catching up | 37 ms  | 1140 ms | 4950 ms | 5345 ms | 43 of 200   |
+  | `games`, once the file is cached             | 0.2 ms | 1.4 ms  | 2.0 ms  | 8.7 ms  | 0 of 200    |
+
+  The last row is the point: a game that has been played once reads at local-disk
+  speed, and the freezing is gone. **The middle row is the price**, and it belongs
+  here - the first play is worse than before while the file is still arriving. That
+  row is also the worst case by construction: it reads uniformly at random across
+  the whole image while rclone downloads it in order, which is not how a game reads
+  its disc. The copy runs at whatever the link gives (~10 MB/s here, so about two
+  minutes for a GameCube image).
+
+  Three limits keep it safe to leave on: a 30-day cache age (rclone's own default
+  is an hour, which would re-fetch the game every evening), a 16 GB ceiling, and a
+  4 GB floor under the box's free space.
+
+  **What gets cached is every file that is OPENED, not only the one being played** -
+  sparsely, just the parts actually read, but it adds up: an idle artwork scan
+  walking the library left 9 GB in the cache on the box this was measured on. The
+  limits bound it and the LRU keeps the game you actually play, but it is bandwidth
+  nobody asked for. If that ever matters the answer is not a bigger cap - it is for
+  the launch path to copy the one game it is about to start.
+
 - **Read-only.** This is a player; a mistyped delete over SMB is not recoverable.
 
 The form is built around the box doing the finding, because typing a share name and

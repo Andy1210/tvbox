@@ -39,6 +39,11 @@ const STR = {
     up: "Vissza egy szintet",
     name: "Név a TV-n",
     nameHint: "Ezen a néven jelenik meg a Fájlok appban.",
+    cacheLabel: "Mi van rajta",
+    cacheMedia: "Filmek, zene",
+    cacheGames: "Játékok",
+    cacheHint:
+      "A filmek menet közben töltődnek. Egy játékot a box első megnyitáskor átmásol magához, mert egy lemezképben az emulátor folyamatosan ugrál - hálózatról az akadozna.",
     save: "Mentés",
     saving: "Mentés…",
     saved: "Kész - a TV-n megjelenik a megosztás.",
@@ -59,6 +64,11 @@ const STR = {
     up: "Up one level",
     name: "Name on the TV",
     nameHint: "This is what it is called in the Files app.",
+    cacheLabel: "What is on it",
+    cacheMedia: "Films, music",
+    cacheGames: "Games",
+    cacheHint:
+      "Films play as they arrive. A game is copied to the box the first time it is opened, because an emulator seeks around a disc image constantly - over the network that stutters.",
     save: "Save",
     saving: "Saving…",
     saved: "Done - it shows up on the TV.",
