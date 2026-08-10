@@ -412,6 +412,11 @@ function peerOk(p) {
     typeof p.name === "string" &&
     typeof p.host === "string" &&
     typeof p.token === "string" &&
+    // The name that key was minted under. A row from before keys were per box has
+    // no user and its token opens nothing, so dropping it is what stops Settings
+    // listing a box that can never be read - the release notes say to pair again.
+    typeof p.user === "string" &&
+    p.user &&
     Number.isInteger(Number(p.port))
   );
 }
