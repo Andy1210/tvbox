@@ -109,11 +109,82 @@ export const BT_DEVICES: BtDevice[] = [
 export const REMOTES = [{ id: "a8:42:a7:c2:3e:ab", name: "Fire TV Remote", keymap: {} }];
 // A few TV brands + one codeset each, mirroring the irdb index shape.
 export const IR_BRANDS = [
-  { brand: "LG", sets: [{ name: "4,-1", path: "codes/LG/TV/4,-1.csv" }] },
-  { brand: "Samsung", sets: [{ name: "7,7", path: "codes/Samsung/TV/7,7.csv" }] },
-  { brand: "Sony", sets: [{ name: "1,-1", path: "codes/Sony/TV/1,-1.csv" }] },
-  { brand: "Panasonic", sets: [{ name: "16,-1", path: "codes/Panasonic/TV/16,-1.csv" }] },
+  { brand: "LG", sets: [{ name: "4,-1", path: "codes/LG/TV/4,-1.csv", type: "TV" }] },
+  { brand: "Samsung", sets: [{ name: "7,7", path: "codes/Samsung/TV/7,7.csv", type: "TV" }] },
+  { brand: "Sony", sets: [{ name: "1,-1", path: "codes/Sony/TV/1,-1.csv", type: "TV" }] },
+  { brand: "Panasonic", sets: [{ name: "16,-1", path: "codes/Panasonic/TV/16,-1.csv", type: "TV" }] },
 ];
+
+// What a brand's codesets look like once the box has merged the ones that send the
+// same codes (shell/firetvir.js `groupSets`). The demo's Samsung mirrors the real
+// shape: one TV code filed under dozens of remote model numbers, and a soundbar
+// that carries volume but no power.
+export const IR_DEVICES: Record<string, unknown[]> = {
+  LG: [
+    {
+      id: "1a2b3c4d5e6f",
+      path: "codes/LG/TV/4,-1.csv",
+      label: "TV",
+      kind: "tv",
+      count: 10,
+      types: ["TV", "42H3000"],
+      keys: ["VolumeUp", "VolumeDown", "Mute", "Power"],
+      protocols: ["NEC1"],
+      variant: "NEC1 4",
+      supported: { NEC1: true },
+    },
+    {
+      id: "2b3c4d5e6f70",
+      path: "codes/LG/Sound Bar/44,44.csv",
+      label: "Sound Bar",
+      kind: "audio",
+      count: 2,
+      types: ["Sound Bar"],
+      keys: ["VolumeUp", "VolumeDown", "Mute", "Power"],
+      protocols: ["NECx1"],
+      variant: "NECx1 44,44",
+      supported: { NECx1: true },
+    },
+  ],
+  Samsung: [
+    {
+      id: "3c4d5e6f7081",
+      path: "codes/Samsung/TV/7,7.csv",
+      label: "TV",
+      kind: "tv",
+      count: 27,
+      types: ["TV", "BN59-00869A", "AA59-00600A"],
+      keys: ["VolumeUp", "VolumeDown", "Mute", "Power"],
+      protocols: ["NECx2"],
+      variant: "NECx2 7,7",
+      supported: { NECx2: true },
+    },
+    {
+      id: "4d5e6f708192",
+      path: "codes/Samsung/Unknown_AH59-01527F/67,83.csv",
+      label: "AH59-01527F",
+      kind: "other",
+      count: 1,
+      types: ["AH59-01527F"],
+      keys: ["VolumeUp", "VolumeDown", "Mute"],
+      protocols: ["NECx2"],
+      variant: "NECx2 67,83",
+      supported: { NECx2: true },
+    },
+    {
+      id: "5e6f70819203",
+      path: "codes/Samsung/Air Conditioner/1,8.csv",
+      label: "Air Conditioner",
+      kind: "climate",
+      count: 2,
+      types: ["Air Conditioner"],
+      keys: ["Power"],
+      protocols: ["Samsung20"],
+      variant: "Samsung20 1,8",
+      supported: { Samsung20: false },
+    },
+  ],
+};
 
 export const BT_SCAN_EXTRA: BtDevice = {
   mac: "5C:EB:68:C2:70:1E",
