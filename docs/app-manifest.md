@@ -151,7 +151,7 @@ user-space from the UI or `tvbox install <id>`):
 | `textInput`           | `auto` (default) raises the box's typing screen when a text field takes focus; `off` for an app that ships its own on-screen keyboard.                                                                                                                                                                   |
 | `cookies`             | Cookies placed in the app's own session before the first load, for a site whose language/market lever is a cookie (`[{ url, name, value }]`, `{locale}` placeholders allowed). Only for hosts in `origins`.                                                                                              |
 | `language`            | What language the app is told it runs in (`Accept-Language` + `navigator.language`). Default `"system"` = the box's UI language; a BCP-47 tag pins it. Never put a market in the app's URL - that stops following the setting.                                                                           |
-| `capabilities`        | **The security boundary.** Which preload-bridge surfaces the app gets: `nav`, `player`, `fetch`, `config`, `storage`, `display`, `input`, `system`. Default `["nav"]` - omitting it must never grant more. See [capabilities.md](capabilities.md).                                                       |
+| `capabilities`        | **The security boundary.** Which preload-bridge surfaces the app gets: `nav`, `player`, `fetch`, `config`, `storage`, `display`, `input`, `system`, `shares`. Default `["nav"]` - omitting it must never grant more. See [capabilities.md](capabilities.md).                                             |
 | `bridge`              | Renderer bridge adapter, `"./<file>.js"` shipped by the PACKAGE beside its manifest. A bridge emulates some foreign host API the client expects (Plex HTPC wants Qt's QWebChannel), which is one client's shape - so it belongs to that app and updates from the registry with it. The shell ships none. |
 | `player`              | `mpv-fullscreen` (video behind the transparent launcher) \| `mpv-overlay` (behind a transparent app element).                                                                                                                                                                                            |
 | `transparentSelector` | The app element made transparent to reveal mpv (e.g. `#media-container`).                                                                                                                                                                                                                                |
@@ -214,7 +214,7 @@ writes). Requests are capped in size; a route that needs a bigger body says so
 
 The same idea as `backup`, pointed sideways instead of forwards in time: a second
 box in another room reading this one's save files, so a game started in the living
-room can be picked up in the bedroom. See [saves sharing](saves-sharing.md).
+room can be picked up in the bedroom. See [app sharing](app-sharing.md).
 
 ```jsonc
 "shares": {

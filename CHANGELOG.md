@@ -5,6 +5,44 @@ updates). `scripts/make-release.sh` lifts the current version's `hu`/`en`
 blocks into the OTA feed's `notes` - keep both languages, keep it short, and
 write for the person on the couch (what changes for THEM), not for developers.
 
+## 2.12.0
+
+### hu
+
+- **A mentések áthozása átkerült oda, ahová való: a RetroArch alkalmazásba.**
+  Eddig a box beállításaiban volt egy gomb, ami játékmentésekről beszélt - azon a
+  tévén is, ahol emulátor sincs telepítve. Mostantól a RetroArch új _Mentések_
+  fülén hozod át a másik boxról a mentéseidet és a pillanatképeidet. A
+  beállításokban csak az marad, ami tényleg a boxé: melyik alkalmazás melyik
+  mappáját osztod meg, és melyik boxot engedted be.
+- **Egy kód, mindkét irány.** Elég az egyik tévén beírni: onnantól mindkét box
+  olvassa a másikét. Eddig ehhez át kellett menni a másik szobába, ott is kódot
+  mutatni és visszagépelni.
+- **Minden beengedett box saját kulcsot kap.** Ha elfelejtesz egyet, csak az ő
+  kulcsa szűnik meg - a többi szoba marad, ahogy volt.
+- Ha egy boxon még el sem indult az emulátor, a mentések oda is áthozhatók: a box
+  létrehozza a mappát, ahelyett hogy hibát írna ki.
+- A korábban összekötött boxokat egyszer újra össze kell kötni: a régi, közös
+  jelszó helyét vette át a boxonkénti kulcs.
+
+### en
+
+- **Bringing saves across moved into the RetroArch app, where it belongs.** It
+  used to be a button in the box's own settings that talked about game saves -
+  even on a TV with no emulator installed. Now RetroArch has a _Saves_ tab that
+  brings your saves and save states over from the other box. Settings keeps only
+  what is really the box's: which of an app's folders you share, and which boxes
+  you have let in.
+- **One code, both directions.** Type it once, on either TV, and from then on each
+  box can read the other. It used to mean walking to the other room, showing a
+  second code and typing it back.
+- **Every box you let in gets a key of its own.** Forget one and only that key
+  stops working - the other rooms carry on.
+- Saves can be brought to a box where the emulator has never run: the box creates
+  the folder instead of reporting a failure.
+- Boxes connected before this update need connecting once more: the shared
+  password they used has been replaced by a key per box.
+
 ## 2.11.0
 
 ### hu

@@ -21,6 +21,7 @@ const maintenance = require("./maintenance");
 const apps = require("./install");
 const pairing = require("./pairing");
 const peers = require("./peers"); // the other box: found by a sweep, paired with, pulled from
+const peerPairing = require("./pairing/peer"); // and what this box hands one when they pair
 const phoneremote = require("./phoneremote"); // a phone acting as the remote, on the LAN
 const photoshare = require("./photoshare"); // photos a phone cast at the viewer
 const removable = require("./removable"); // the USB stick: mount on open, unmount before it is pulled
@@ -443,36 +444,53 @@ function post(p, data, res, ctx) {
     // peer, and taking it would make this route a way to have the box fetch an
     // address of someone else's choosing.
     if (!peers.onLocalSubnet(host)) return httpserver.jsonRes(res, { ok: false, error: "bad_host" });
+    // A key of its own for the box we are about to meet, minted before the request
+    // because it travels IN it: one code then pairs both directions, instead of a
+    // second walk to the other TV to show a second code. Which box it belongs to is
+    // only known once the answer comes back, so the row is adopted (or revoked)
+    // after.
+    const key = peerPairing.issue({ name: host, host });
     return peers
-      .pairWith(host, code)
+      .pairWith(host, code, undefined, key || {})
       .then((r) => {
-        if (!r.ok) return httpserver.jsonRes(res, r);
-        // Replaced rather than appended when the same box pairs again: a peer's
-        // token is reissued each time, and two entries would leave the stale one
-        // to be tried first.
+        // A pairing that did not happen must not leave a working key behind.
+        if (!r.ok) {
+          ctx.revokeShareKey(key);
+          return httpserver.jsonRes(res, r);
+        }
+        ctx.adoptShareKey(key, r.peer);
+        // Replaced rather than appended when the same box pairs again: a peer's key
+        // is reissued each time, and two entries would leave the stale one to be
+        // tried first.
         const kept = (config.rawAppshares().peers || []).filter((x) => x.id !== r.peer.id);
         config.setAppshares({ peers: [...kept, r.peer] });
-        return httpserver.jsonRes(res, { ok: true, peer: { id: r.peer.id, name: r.peer.name, host: r.peer.host } });
+        return httpserver.jsonRes(res, {
+          ok: true,
+          peer: { id: r.peer.id, name: r.peer.name, host: r.peer.host },
+          // Whether the other box could take this one's key as well. It cannot if
+          // it is sharing nothing, and the screen says so rather than leaving the
+          // user to discover that half of it did not happen.
+          mutual: !!r.mutual,
+        });
       })
-      .catch((e) => httpserver.jsonRes(res, { ok: false, error: String(e.message || e).slice(0, 120) }));
+      .catch((e) => {
+        ctx.revokeShareKey(key);
+        return httpserver.jsonRes(res, { ok: false, error: String(e.message || e).slice(0, 120) });
+      });
   }
   if (p === "/tvbox/api/appshares/peer-remove") {
     const id = String(data.id || "");
-    const peersLeft = (config.rawAppshares().peers || []).filter((x) => x.id !== id);
-    config.setAppshares({ peers: peersLeft });
+    const cur = config.rawAppshares();
+    const peersLeft = (cur.peers || []).filter((x) => x.id !== id);
+    // Both directions of the relationship end here: this box stops fetching from
+    // that one, and the key that box holds stops working. A single shared password
+    // could not do the second half without breaking every other box.
+    config.setAppshares({ peers: peersLeft, issued: (cur.issued || []).filter((x) => x.id !== id) });
+    ctx.applyAppshares();
     return httpserver.jsonRes(res, {
       ok: true,
       peers: peersLeft.map((x) => ({ id: x.id, name: x.name, host: x.host })),
     });
-  }
-  if (p === "/tvbox/api/appshares/pull") {
-    const r = ctx.pullAppshare(String(data.peerId || ""), String(data.shareId || ""));
-    // A failure before rclone starts comes back as a plain object; the run itself
-    // is a promise.
-    if (!r || typeof r.then !== "function") return httpserver.jsonRes(res, r || { ok: false, error: "failed" });
-    return r
-      .then((out) => httpserver.jsonRes(res, out))
-      .catch((e) => httpserver.jsonRes(res, { ok: false, error: String(e.message || e).slice(0, 120) }));
   }
   if (p === "/tvbox/api/config/app") {
     // Set a urlConfig app's address: { key, baseUrl } (http/https or empty to clear).

@@ -161,6 +161,30 @@ test("a leftover instance of the same service is cleared before starting", async
   assert.ok(started, "then the service starts");
 });
 
+test("an update changes a service's arguments, and the leftover is still its own", async () => {
+  // The leftover that matters comes from the PREVIOUS release: its command line
+  // differs by exactly the flag the new one added, so an exact match never finds it
+  // and every respawn hits a port the old instance still holds. A service that can
+  // name itself in its leading arguments is cleared anyway.
+  const before = ["sleep", "32"];
+  const after = ["sleep", "32", "--now-with-a-flag"];
+  const orphan = await makeOrphan("sleep 32", before);
+  assert.notStrictEqual(orphan, -1, "the test needs a genuinely orphaned process");
+
+  const sup = new Supervisor();
+  const lines = [];
+  sup.spawn("dup2", { argv: () => after, reapPrefix: before, log: (m) => lines.push(m) });
+
+  const cleared = await until(() => !alive(orphan));
+  sup.stop("dup2");
+  try {
+    process.kill(orphan, "SIGKILL");
+  } catch (e) {
+    /* already reaped, which is the point */
+  }
+  assert.ok(cleared, "the previous version's instance must be signalled: " + JSON.stringify(lines));
+});
+
 test("a process with the same argv but a living parent is left alone", async () => {
   // "Kill whatever runs this command line" is a much broader promise than "clear my
   // own leftovers": a live parent means somebody else is supervising it.

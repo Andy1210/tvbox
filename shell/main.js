@@ -365,22 +365,18 @@ function applyAppshares() {
   }
 }
 function applyAppsharesInner() {
-  let cfg = config.rawAppshares();
+  const cfg = config.rawAppshares();
   // Drop ids no installed app declares any more. Without this an app that was
   // uninstalled leaves its share in the list, the server refuses to start with
   // "nothing shared", and the screen offers nothing to switch off - the stale
   // entry is invisible there, because the list is built from the manifests.
   const known = new Set(appsharesDeps.entries().map((e) => e.id));
   const kept = (Array.isArray(cfg.enabled) ? cfg.enabled : []).filter((id) => known.has(id));
-  if (kept.length !== (cfg.enabled || []).length) cfg = config.setAppshares({ enabled: kept });
-  const enabled = kept;
-  if (!enabled.length) {
+  if (kept.length !== (cfg.enabled || []).length) config.setAppshares({ enabled: kept });
+  if (!kept.length) {
     appshares.stop(appsharesDeps);
     return { ok: true, stopped: true };
   }
-  // The token is minted on the first share somebody turns on, not at boot: a box
-  // that never offers anything has no credential lying in its config to leak.
-  if (!cfg.token) config.setAppshares({ token: appshares.newToken() });
   const r = appshares.start(config.rawAppshares(), appsharesDeps);
   if (!r.ok) {
     appshares.stop(appsharesDeps); // never leave a half-started share behind
@@ -391,9 +387,116 @@ function applyAppsharesInner() {
   return r;
 }
 
+// The box on the other side of the exchange, remembered - replaced rather than
+// appended, because a key is reissued each time and a stale entry would be tried
+// first. Two things it refuses: an address that is not on this box's own subnet
+// (the outbound half refuses the same, and for the same reason), and an id that
+// already names a DIFFERENT box - a peer id is a hostname, so it is guessable, and
+// a caller must not be able to repoint the room next door at itself.
+function rememberPeer(peer) {
+  if (!peers.onLocalSubnet(peer.host)) {
+    console.warn("[appshares] refused a peer from off the local subnet:", peer.host);
+    return false;
+  }
+  const known = config.rawAppshares().peers || [];
+  const clash = known.find((x) => x.id === peer.id && x.host !== peer.host);
+  if (clash) {
+    console.warn("[appshares] refused a peer claiming", peer.id, "- that name is", clash.host);
+    return false;
+  }
+  const kept = known.filter((x) => x.id !== peer.id);
+  config.setAppshares({ peers: [...kept, peer] });
+  console.log("[appshares] paired with", peer.name);
+  return true;
+}
+
+// The key this box hands another one, minted per box and recorded by its hash so
+// that forgetting the box is what revokes it. Answers null while nothing is being
+// offered: a box that shares nothing has no key to give, and pairing with it is
+// simply one-way.
+function issueShareKey(box) {
+  const cfg = config.rawAppshares();
+  // What is actually served, not what the list says: an id whose app has been
+  // uninstalled keeps the list non-empty while the server refuses to start on
+  // "nothing shared", and a peer would pair happily and be refused on its first
+  // pull. Same filter applyAppshares uses.
+  const known = new Set(appsharesDeps.entries().map((e) => e.id));
+  if (!(cfg.enabled || []).some((id) => known.has(id))) return null;
+  const cred = appshares.newCredential();
+  // The hostname is what makes a box itself here, the same source the MQTT device
+  // id is derived from - so a peer list names the rooms, not addresses.
+  const id = String((box && box.id) || "") || "box-" + cred.user;
+  const kept = (cfg.issued || []).filter((x) => x.id !== id);
+  config.setAppshares({
+    issued: [
+      ...kept,
+      {
+        id,
+        name: String((box && box.name) || id).slice(0, 64),
+        user: cred.user,
+        hash: appshares.hashSecret(cred.secret),
+      },
+    ],
+  });
+  // The file rclone reads is written at start; the new line has to reach a server
+  // that is already running.
+  applyAppshares();
+  return {
+    id: identity.defaultDeviceId(),
+    name: identity.hostname(),
+    port: appshares.portOf(cfg.port),
+    user: cred.user,
+    token: cred.secret,
+  };
+}
+
+// A key is minted before the other box has said who it is (its credentials travel
+// in the same request), so the row starts under a placeholder id and is adopted
+// once the answer names the box. Adoption is what makes "forget this box" reach it.
+function adoptShareKey(key, peer) {
+  if (!key || !peer) return;
+  const cur = config.rawAppshares();
+  const rows = (cur.issued || []).filter((x) => x.id !== peer.id);
+  const mine = (cur.issued || []).find((x) => x.user === key.user);
+  if (!mine) return;
+  config.setAppshares({
+    issued: [...rows.filter((x) => x.user !== key.user), { ...mine, id: peer.id, name: peer.name }],
+  });
+  applyAppshares();
+}
+
+// A key nobody is named on. A pairing mints one under a placeholder id and adopts
+// it when the answer names the box, so a shell that exits between the two leaves a
+// working key that "forget this box" cannot reach - no peer row mentions it. Run at
+// startup, never during a pairing: the placeholder is legitimately unmatched while
+// the exchange is in flight.
+function pruneOrphanShareKeys() {
+  const cur = config.rawAppshares();
+  const named = new Set((cur.peers || []).map((x) => x.id));
+  const kept = (cur.issued || []).filter((x) => named.has(x.id));
+  if (kept.length === (cur.issued || []).length) return;
+  console.log("[appshares] dropping", (cur.issued || []).length - kept.length, "key(s) no box is named on");
+  config.setAppshares({ issued: kept });
+}
+
+// A key handed to something that turned out not to be a box, or to a pairing that
+// failed. It may already be in someone's hands, so it is removed rather than left
+// to expire - which for a credential with no expiry means never.
+function revokeShareKey(key) {
+  if (!key || !key.user) return;
+  const cur = config.rawAppshares();
+  config.setAppshares({ issued: (cur.issued || []).filter((x) => x.user !== key.user) });
+  applyAppshares();
+}
+
 // Pull one share from a paired box into the same app's folder here. Both ends are
 // resolved from what THIS box knows - the peer from its stored id, the destination
 // from the local manifest - so a caller names a share, never a path.
+// One pull at a time per app. Two rclones copying into the same folder race each
+// other's --backup-dir, and a renderer that calls this in a loop would fill the
+// disk with copies of what it replaced.
+const pullsInFlight = new Set();
+
 function pullAppshare(peerId, shareId) {
   const cfg = config.rawAppshares();
   const peer = (cfg.peers || []).find((x) => x.id === peerId);
@@ -401,9 +504,13 @@ function pullAppshare(peerId, shareId) {
   const entry = appsharesDeps.entries().find((x) => x.id === shareId);
   if (!entry) return { ok: false, error: "unknown_share" };
   // `present` is what says the folder exists AND still resolves inside the app's
-  // own root. Refused here rather than only in the UI: this destination is handed
-  // to rclone, and a direct call must not reach past a symlink the screen greys out.
-  if (!entry.present) return { ok: false, error: "unknown_share" };
+  // own root. Checked here rather than only in the UI: this destination is handed
+  // to rclone, and a direct call must not reach past a symlink the screen greys
+  // out. A folder the app has simply not created yet is made - a box that has
+  // never started the app is the one most likely to want a save brought to it.
+  if (!entry.present && !appshares.ensureDir(entry.root, entry.path)) {
+    return { ok: false, error: "unknown_share" };
+  }
   if (!apps.onPath("rclone")) return { ok: false, error: "rclone_missing" };
   // A replaced file goes here rather than into the void, and the stamp is what
   // makes two pulls of the same game distinguishable afterwards.
@@ -420,7 +527,7 @@ function pullAppshare(peerId, shareId) {
     return { ok: false, error: "pull_failed" };
   }
   const child = spawn(argv[0], argv.slice(1), {
-    env: { ...process.env, RCLONE_WEBDAV_PASS: secret },
+    env: { ...process.env, RCLONE_WEBDAV_USER: String(peer.user || ""), RCLONE_WEBDAV_PASS: secret },
     stdio: ["ignore", "ignore", "pipe"],
   });
   let err = "";
@@ -746,8 +853,9 @@ function serve() {
   const routeCtx = {
     appIsRunning: (id) => !!appWindow(id),
     applyAppshares,
+    adoptShareKey,
+    revokeShareKey,
     appsharesStatus: () => appshares.status(config.rawAppshares(), appsharesDeps),
-    pullAppshare,
     applyFileserver,
     applyMqttConfig,
     audioSink: () => audioSink,
@@ -2615,6 +2723,51 @@ ipcMain.handle("app:storage", (e, action, key, value) => {
   return { ok: false, error: "unknown storage action" };
 });
 
+// ---- capability: an app's own shares, and bringing them from another box ----
+// The box owns the boundary and the app owns the screen. What an app may offer is
+// its manifest's business and switching it on is a person's, in Settings - an app
+// package is trusted Node code in the host process, so "the app asks nicely" would
+// not be a boundary at all. What belongs to the app is the ACTION: it knows what a
+// save is, when someone would want one, and how to say so.
+//
+// Everything here is therefore scoped to the sender's own app id. It can see the
+// boxes this one has paired with and its OWN shares, and it can pull its OWN
+// share; another app's is not in the list and is refused if named. The
+// destination is never sent - pullAppshare resolves it from the local manifest,
+// because a path from a renderer is a path somebody else chose.
+ipcMain.handle("app:shares", async (e, action, payload) => {
+  const id = appIdForSender(e.sender);
+  if (!id || !capsFor(id).includes("shares")) return { ok: false, error: "no shares capability" };
+  const cfg = config.rawAppshares();
+  const enabled = new Set(Array.isArray(cfg.enabled) ? cfg.enabled : []);
+  const mine = appsharesDeps.entries().filter((x) => x.appId === id);
+  if (action === "list") {
+    return {
+      ok: true,
+      // Never the token: an app has no use for one, and the peer list is the only
+      // thing here that could carry a credential out of the shell.
+      peers: (cfg.peers || []).map((p) => ({ id: p.id, name: p.name })),
+      shares: mine.map((x) => ({ id: x.id, name: x.name, present: x.present, on: enabled.has(x.id) })),
+    };
+  }
+  if (action === "pull") {
+    const p = payload || {};
+    const shareId = String(p.shareId || "");
+    if (!mine.some((x) => x.id === shareId)) return { ok: false, error: "unknown_share" };
+    if (pullsInFlight.has(id)) return { ok: false, error: "busy" };
+    pullsInFlight.add(id);
+    try {
+      const r = await pullAppshare(String(p.peerId || ""), shareId);
+      // `detail` is rclone's own stderr, which names the peer's address and the
+      // local destination. The list above is careful to hand an app neither.
+      return { ok: !!(r && r.ok), error: (r && r.error) || null };
+    } finally {
+      pullsInFlight.delete(id);
+    }
+  }
+  return { ok: false, error: "unknown shares action" };
+});
+
 // ---- capability: adaptive display mode ----
 // "I am about to show video this size at this framerate" - the shell switches the
 // output to a mode that suits it and puts the UI mode back on release. For apps
@@ -2941,18 +3094,8 @@ app.whenReady().then(async () => {
   // place and a share turned off between the code appearing and the peer asking
   // takes the answer with it.
   peerPairing.init({
-    credentials: () => {
-      const cfg = config.rawAppshares();
-      if (!cfg.token || !(cfg.enabled || []).length) return null;
-      // The hostname is what makes a box itself here, the same source the MQTT
-      // device id is derived from - so a peer list names the rooms, not addresses.
-      return {
-        id: identity.defaultDeviceId(),
-        name: identity.hostname(),
-        port: appshares.portOf(cfg.port),
-        token: cfg.token,
-      };
-    },
+    remember: rememberPeer,
+    issue: issueShareKey,
   });
   pairing.register("peer", peerPairing);
   // A phone acting as the remote. The FIFO write goes ONLY to the remote bridge:
@@ -3178,6 +3321,7 @@ app.whenReady().then(async () => {
   });
   updater.startSchedulers(); // boot check + 6h re-check + nightly idle auto-apply
   if (config.rawFileserver().enabled) applyFileserver(); // the LAN share survives a restart
+  pruneOrphanShareKeys(); // before the server starts, so a stray key is never served
   if ((config.rawAppshares().enabled || []).length) applyAppshares(); // and so do an app's
   if (config.rawShares().length) applyShares(); // and so do the shares the box reads FROM
   setInterval(maintenance.appsAutoTick, 30 * 60 * 1000); // nightly registry app auto-update (same window)

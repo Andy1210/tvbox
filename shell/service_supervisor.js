@@ -69,10 +69,19 @@ class Supervisor {
   //
   // Three things have to hold before signalling anything, because "kill whatever
   // runs this command line" is a much broader promise than "clear my own
-  // leftovers": the command line must match in FULL (argv() is recomputed per start
-  // and deterministic, so this is an exact comparison and not a pattern), the
-  // process must not be one of our own children, and it must be ORPHANED - a live
-  // parent means somebody is still supervising it, and that somebody is not us.
+  // leftovers": the command line must match, the process must not be one of our own
+  // children, and it must be ORPHANED - a live parent means somebody is still
+  // supervising it, and that somebody is not us.
+  //
+  // Matching is exact by default (argv() is recomputed per start and deterministic,
+  // so this is a comparison and not a pattern). A service may instead declare
+  // `reapPrefix`: the leading arguments that identify an instance as ITS OWN
+  // whatever else the version added. That is what an update needs - the leftover
+  // worth clearing is the one from the PREVIOUS release, whose command line differs
+  // by exactly the flag that release added, so an exact match never finds it and the
+  // new instance respawns against a held port until someone reboots the box. A
+  // prefix is only safe when it names something no other program would run, which
+  // in practice means it ends in a path of ours.
   //
   // The limit worth naming: orphaned is read as PPid 1, which is where the kernel
   // reparents on this hardware (measured). Under a subreaper - a pid namespace, or a
@@ -85,7 +94,8 @@ class Supervisor {
     for (const other of this.svcs.values()) {
       if (other.proc && other.proc.pid) mine.add(other.proc.pid);
     }
-    const want = argv.join("\0");
+    const prefix = s && s.spec && Array.isArray(s.spec.reapPrefix) ? s.spec.reapPrefix : null;
+    const want = (prefix || argv).join("\0");
     let entries;
     try {
       entries = fs.readdirSync("/proc");
@@ -103,7 +113,8 @@ class Supervisor {
         continue; // exited, or another user's process
       }
       // procfs terminates the last argument too, so drop that before comparing.
-      if (cmdline.replace(/\0$/, "") !== want) continue;
+      const line = cmdline.replace(/\0$/, "");
+      if (prefix ? !(line === want || line.startsWith(want + "\0")) : line !== want) continue;
       if (!isOrphan(pid)) continue;
       // Ask once, insist afterwards: a service that ignored SIGTERM would
       // otherwise keep the port and the reason for the next pass would be the same.

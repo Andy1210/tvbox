@@ -251,6 +251,26 @@ const { ipcRenderer } = require("electron");
       },
     };
   }
+  // ---- shares capability: this app's folders on the box in the other room ----
+  // The app owns the screen for this, because it is the one that knows what its
+  // files mean - "continue in the other room" is a sentence only an emulator can
+  // write. What it does NOT own is the permission: which folders may be offered
+  // comes from its manifest, switching them on is a person's job in Settings, and
+  // the boxes are paired there too. Same surface as the remote-window preload
+  // (preload-app.js), because an app is not meant to know which window it got.
+  if (caps.indexOf("shares") >= 0) {
+    window.tvbox.shares = {
+      // { peers: [{id, name}], shares: [{id, name, present, on}] } - this app's own.
+      list: function () {
+        return ipcRenderer.invoke("app:shares", "list");
+      },
+      // Bring one of this app's shares from a paired box. There is no push, and no
+      // destination argument: the box resolves where it goes from the manifest.
+      pull: function (peerId, shareId) {
+        return ipcRenderer.invoke("app:shares", "pull", { peerId: String(peerId), shareId: String(shareId) });
+      },
+    };
+  }
   // HOME-screen widgets (plugin-driven cards, e.g. Spotify now-playing).
   window.tvbox.onWidgets = function (cb) {
     var h = function (_e, list) {

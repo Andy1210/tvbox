@@ -27,7 +27,7 @@ const STATUS = (over: Record<string, unknown> = {}) => ({
   enabled: false,
   running: false,
   port: 8096,
-  hasToken: false,
+  issued: 0,
   rclone: true,
   shares: [
     { id: "retroarch/saves", appId: "retroarch", appName: "RetroArch", name: "saves", present: true, on: false },
@@ -63,7 +63,7 @@ async function mount(over: Record<string, unknown> = {}) {
   return posted;
 }
 
-describe("saves sharing", () => {
+describe("app sharing", () => {
   it("lists what each app declares, and says which folder has nothing in it yet", async () => {
     await mount();
     expect(screen.getByText("RetroArch - saves")).toBeTruthy();
@@ -92,17 +92,21 @@ describe("saves sharing", () => {
     expect((write!.body as { enabled: string[] }).enabled).toEqual(["retroarch/saves"]);
   });
 
-  it("a pull names a box and a share, and never a path", async () => {
+  it("offers no way to bring files across: that belongs to the app", async () => {
+    // The shell must not grow a second, app-shaped UI beside the app's own. This
+    // page is the permission surface - what is offered, and to which boxes - and it
+    // says where the action went rather than looking unfinished.
     const posted = await mount({
       peers: [{ id: "tvbox-gaming", name: "gaming", host: "192.168.1.7" }],
       shares: [
         { id: "retroarch/saves", appId: "retroarch", appName: "RetroArch", name: "saves", present: true, on: true },
       ],
     });
-    await setFocus("appshares:pull-tvbox-gaming-retroarch/saves");
-    await remote.ok();
-    const pull = posted.find((p) => p.url === "/tvbox/api/appshares/pull");
-    expect(pull).toBeTruthy();
-    expect(pull!.body).toEqual({ peerId: "tvbox-gaming", shareId: "retroarch/saves" });
+    expect(screen.getByText(/in the app itself/i)).toBeTruthy();
+    // Nothing on the page offers the action, so there is nothing to press and no
+    // request to make: asserting only the second would pass on a page that still
+    // rendered the button.
+    expect(screen.queryByText(/^(bring|pull|fetch)$/i)).toBeNull();
+    expect(posted.find((p) => p.url.includes("/pull"))).toBeUndefined();
   });
 });
