@@ -492,6 +492,78 @@ function revokeShareKey(key) {
   applyAppshares();
 }
 
+// What a pull would actually do, before anyone presses it. Both sides listed with
+// the pull's own filters (an emulator rewrites its config on every exit - unfiltered,
+// the other box is always "newer" and the answer is worthless), and the credential
+// reaches rclone the same way it does for a copy.
+//
+// Answers per share, never a file list: the app needs to say "the other room is a
+// day ahead", not to be handed the contents of a folder it did not ask for.
+function compareAppshare(peerId, shareId) {
+  const cfg = config.rawAppshares();
+  const peer = (cfg.peers || []).find((x) => x.id === peerId);
+  if (!peer) return Promise.resolve({ ok: false, error: "unknown_peer" });
+  const entry = appsharesDeps.entries().find((x) => x.id === shareId);
+  if (!entry) return Promise.resolve({ ok: false, error: "unknown_share" });
+  if (!apps.onPath("rclone")) return Promise.resolve({ ok: false, error: "rclone_missing" });
+  let secret;
+  try {
+    secret = shares.obscure(peer.token);
+  } catch (e) {
+    return Promise.resolve({ ok: false, error: "compare_failed" });
+  }
+  const env = {
+    ...process.env,
+    RCLONE_WEBDAV_USER: String(peer.user || ""),
+    RCLONE_WEBDAV_PASS: secret,
+  };
+  const listing = (argv, useEnv) =>
+    new Promise((resolve) => {
+      const child = spawn(argv[0], argv.slice(1), {
+        env: useEnv ? env : process.env,
+        stdio: ["ignore", "pipe", "pipe"],
+      });
+      let out = "";
+      let err = "";
+      // A listing is small (names, sizes, times) but a share is someone else's
+      // folder: a cap keeps a hostile or broken peer from feeding us a stream.
+      child.stdout.on("data", (d) => {
+        if (out.length < 4_000_000) out += d;
+      });
+      child.stderr.on("data", (d) => {
+        if (err.length < 2000) err += d;
+      });
+      const kill = setTimeout(() => child.kill("SIGKILL"), 25000);
+      child.on("error", () => (clearTimeout(kill), resolve(null)));
+      child.on("exit", (code) => {
+        clearTimeout(kill);
+        if (code !== 0) {
+          console.warn("[appshares] listing failed:", code, err.slice(0, 200));
+          return resolve(null);
+        }
+        try {
+          resolve(JSON.parse(out || "[]"));
+        } catch (e) {
+          resolve(null);
+        }
+      });
+    });
+  // The local side is listed with rclone too, so both answers come from the same
+  // filter engine - a pattern that means one thing here and another there would
+  // make the comparison lie in exactly the cases it exists for.
+  return Promise.all([
+    entry.present ? listing(peers.lsArgv(entry.path, entry.exclude, null), false) : Promise.resolve([]),
+    listing(peers.lsArgv(":webdav:" + shareId, entry.exclude, peer), true),
+  ]).then(([here, there]) => {
+    if (!there) return { ok: false, error: "unreachable" };
+    // A local listing that FAILED is not an empty folder. Read as one it would
+    // report everything on the other box as worth bringing, which is the most
+    // dangerous answer this call can give - it is the one that invites the press.
+    if (!here) return { ok: false, error: "compare_failed" };
+    return { ok: true, ...peers.compareListings(here, there) };
+  });
+}
+
 // Pull one share from a paired box into the same app's folder here. Both ends are
 // resolved from what THIS box knows - the peer from its stored id, the destination
 // from the local manifest - so a caller names a share, never a path.
@@ -2752,6 +2824,12 @@ ipcMain.handle("app:shares", async (e, action, payload) => {
       peers: (cfg.peers || []).map((p) => ({ id: p.id, name: p.name })),
       shares: mine.map((x) => ({ id: x.id, name: x.name, present: x.present, on: enabled.has(x.id) })),
     };
+  }
+  if (action === "compare") {
+    const p = payload || {};
+    const shareId = String(p.shareId || "");
+    if (!mine.some((x) => x.id === shareId)) return { ok: false, error: "unknown_share" };
+    return compareAppshare(String(p.peerId || ""), shareId);
   }
   if (action === "pull") {
     const p = payload || {};

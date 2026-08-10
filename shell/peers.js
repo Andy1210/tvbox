@@ -295,6 +295,85 @@ function pullArgv(peer, shareId, dest, backupDir, exclude) {
   ];
 }
 
+// What a share holds, on either side of the wire. The same command shape for the
+// peer (a webdav remote) and for this box (a path), so the two answers are
+// comparable - and with the pull's own filters, because the interesting question is
+// "would copying this bring anything newer", not "did any byte change".
+//
+// rclone reports a WebDAV mtime to the second, so two files written in the same
+// second are equal here. That is the resolution the protocol has.
+function lsArgv(target, exclude, peer) {
+  const filters = [];
+  for (const pat of Array.isArray(exclude) ? exclude : []) filters.push("--exclude", String(pat));
+  const remote = peer
+    ? [
+        "--webdav-url",
+        "http://" + peer.host + ":" + peer.port + "/",
+        "--webdav-vendor",
+        "other",
+        "--webdav-user",
+        String(peer.user || ""),
+      ]
+    : [];
+  return ["rclone", "lsjson", target, "--recursive", "--files-only", ...remote, ...filters, "--timeout", "20s"];
+}
+
+// Two listings, one verdict. Everything the screen needs to say whether a pull is
+// worth pressing:
+//
+//   newest    - when each side was last written, so a person can recognise "that is
+//               the session I remember"
+//   newerThere - files the pull would BRING (missing here, or newer there)
+//   olderThere - files it would REPLACE WITH AN OLDER COPY. rclone copies whatever
+//               differs, in the direction asked for; it does not prefer the newer
+//               file. This is the count that turns a pull into a regret, so it is
+//               counted separately rather than folded into "differences".
+//   sameTimeDiffers - written in the same second on both sides but not the same
+//               size. rclone's default check is size AND modification time, so
+//               these WOULD be copied; counting only timestamps would report
+//               "nothing to do" for a pull that replaces files.
+const MTIME_SLACK_MS = 2000; // WebDAV's second-resolution, plus a second of slack
+
+function compareListings(here, there) {
+  const at = (row) => Date.parse((row && row.ModTime) || "") || 0;
+  // A size that is not a number is not a difference. rclone always reports one; a
+  // listing that somehow does not would otherwise make every file look changed.
+  const sized = (row) => (row && Number.isFinite(Number(row.Size)) ? Number(row.Size) : null);
+  const byPath = (rows) => {
+    const m = new Map();
+    for (const r of Array.isArray(rows) ? rows : []) if (r && r.Path) m.set(r.Path, r);
+    return m;
+  };
+  const a = byPath(here);
+  const b = byPath(there);
+  const newestOf = (m) => {
+    let n = 0;
+    for (const r of m.values()) n = Math.max(n, at(r));
+    return n || null;
+  };
+  let newerThere = 0;
+  let olderThere = 0;
+  let sameTimeDiffers = 0;
+  for (const [p, r] of b) {
+    const mine = a.get(p);
+    if (!mine) {
+      newerThere++;
+      continue;
+    }
+    const d = at(r) - at(mine);
+    if (d > MTIME_SLACK_MS) newerThere++;
+    else if (d < -MTIME_SLACK_MS) olderThere++;
+    else if (sized(r) !== null && sized(mine) !== null && sized(r) !== sized(mine)) sameTimeDiffers++;
+  }
+  return {
+    here: { newest: newestOf(a), files: a.size },
+    there: { newest: newestOf(b), files: b.size },
+    newerThere,
+    olderThere,
+    sameTimeDiffers,
+  };
+}
+
 const REPLACED = path.join(os.homedir(), ".cache", "tvbox", "appshares-replaced");
 
 module.exports = {
@@ -308,4 +387,7 @@ module.exports = {
   scan,
   pairWith,
   pullArgv,
+  lsArgv,
+  compareListings,
+  MTIME_SLACK_MS,
 };

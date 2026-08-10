@@ -87,6 +87,11 @@ if (caps.indexOf("shares") >= 0) {
     },
     // Bring one of this app's shares from a paired box. There is no push, and no
     // destination argument: the box resolves where it goes from the manifest.
+    // What a pull would bring, and what it would replace with an older copy.
+    // Read-only, and the answer is a verdict rather than a listing.
+    compare: function (peerId, shareId) {
+      return ipcRenderer.invoke("app:shares", "compare", { peerId: String(peerId), shareId: String(shareId) });
+    },
     pull: function (peerId, shareId) {
       return ipcRenderer.invoke("app:shares", "pull", { peerId: String(peerId), shareId: String(shareId) });
     },
