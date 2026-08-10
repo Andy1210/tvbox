@@ -1194,21 +1194,22 @@ function serve() {
       remotefinder.capableRemotes((macs) => httpserver.jsonRes(res, { macs, ringing: remotefinder.isRinging() }));
       return;
     }
+    // The brands the published index carries (shell/irindex.js), with the licence
+    // notice that has to travel with the data.
     if (p === "/tvbox/api/firetvir/brands") {
-      firetvir.fetchBrands((err, brands) =>
+      firetvir.brands((err, r) =>
         httpserver.jsonRes(
           res,
-          err ? { ok: false, error: String(err.message || err).slice(0, 200) } : { ok: true, brands },
+          err ? { ok: false, error: String(err.message || err).slice(0, 200) } : { ok: true, ...r },
         ),
       );
       return;
     }
-    // One brand's codesets merged into the devices they really are. Answers
-    // `state: "loading"` with a count while they download, so the picker can say
-    // how far it is instead of freezing on the biggest brands.
+    // One brand's codesets merged into the devices they really are - one small file,
+    // built by scripts/ir-index/build.js rather than assembled here.
     if (p === "/tvbox/api/firetvir/brand") {
       const q = (req.url || "").split("?")[1];
-      const brand = q ? new URLSearchParams(q).get("name") || "" : "";
+      const brand = q ? new URLSearchParams(q).get("slug") || "" : "";
       firetvir.brandDevices(brand, (err, r) =>
         httpserver.jsonRes(
           res,

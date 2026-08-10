@@ -4,20 +4,22 @@ import { useI18n } from "../../lib/i18n";
 import { useConfigStore } from "../../stores/config";
 import {
   IR_KEYS,
+  deviceKeys,
   deviceSupported,
   eraseIr,
   fetchBrandDevices,
-  fetchIrBrands,
+  fetchIrIndex,
   fetchIrSetup,
   fetchIrStatus,
+  forKey,
   installIrDeps,
+  planDevice,
   programIr,
   saveIrSetup,
   testIrKey,
-  toIrPlan,
-  toSingleKeyPlan,
   type FiretvIrStatus,
   type IrAssign,
+  type IrBrandListing,
   type IrDevice,
   type IrKey,
   type IrPlanDevice,
@@ -36,7 +38,7 @@ import { useSettingsNav } from "../nav";
 // It is built around DEVICES, not codesets, because that is the question the user
 // actually has: "the volume should go to the soundbar, the power to the TV". You add
 // what is in the room, then say which button drives which - the four-key plan the
-// shell programs is derived from that (`toIrPlan`), never edited directly.
+// box programs is derived from that, never edited directly.
 //
 // Two rules the shape follows, both from settings/nav.tsx: a pushed page owns the
 // state it shows (so every level here reads the plan from the box on mount, and the
@@ -49,7 +51,6 @@ import { useSettingsNav } from "../nav";
 // candidate list. Rows in a Group touch by design and never transform.
 const KEY_ORDER: IrKey[] = [...IR_KEYS];
 const DEPS_POLL_MS = 2000;
-const BRAND_POLL_MS = 700;
 const MAX_LISTED_BRANDS = 60; // a search that matches more than this asks for another letter
 // Mirrors shell/firetvir.js: MAX_PLAN_DEVICES bounds what one remote may carry, and
 // sanitizePlan keeps the FIRST that many - so the screen has to refuse the extra one
@@ -144,19 +145,19 @@ interface PickProps {
   replaceId?: string;
 }
 
-function BrandDevicesPage({ mac, home, brand, forKey, replaceId }: PickProps & { brand: string }) {
+function BrandDevicesPage({
+  mac,
+  home,
+  brand,
+  slug,
+  forKey: onlyFor,
+  replaceId,
+}: PickProps & { brand: string; slug: string }) {
   const { t } = useI18n();
   const nav = useSettingsNav();
-  // `null` = the box has not answered yet. `done`/`total` is its download progress,
-  // and total 0 while loading means it has not even counted the codesets - which is
-  // NOT the same as a brand that turned out to have none.
-  const [state, setState] = useState<{
-    devices: IrDevice[];
-    done: number;
-    total: number;
-    skipped: number;
-    failed: number;
-  } | null>(null);
+  // `null` = the box has not answered yet. One small file per brand, so there is nothing
+  // to report progress about any more - the codes were merged when the index was built.
+  const [state, setState] = useState<{ devices: IrDevice[]; skipped: number } | null>(null);
   const [loaded, setLoaded] = useState(false);
   const [error, setError] = useState("");
   const [onlyUsable, setOnlyUsable] = useState(true);
@@ -168,25 +169,17 @@ function BrandDevicesPage({ mac, home, brand, forKey, replaceId }: PickProps & {
 
   useEffect(() => {
     alive.current = true;
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    const tick = async () => {
-      const r = await fetchBrandDevices(brand);
+    void (async () => {
+      const r = await fetchBrandDevices(slug);
       if (!alive.current) return;
       if (!r.ok) return setError(r.error || "error");
-      if (r.state === "loading") {
-        setState({ devices: [], done: r.done || 0, total: r.total || 0, skipped: 0, failed: 0 });
-        timer = setTimeout(tick, BRAND_POLL_MS);
-        return;
-      }
-      setState({ devices: r.devices || [], done: 0, total: 0, skipped: r.skipped || 0, failed: r.failed || 0 });
+      setState({ devices: r.devices || [], skipped: r.skipped || 0 });
       setLoaded(true);
-    };
-    void tick();
+    })();
     return () => {
       alive.current = false;
-      clearTimeout(timer);
     };
-  }, [brand, attempt]);
+  }, [slug, attempt]);
 
   const retry = () => {
     setError("");
@@ -199,7 +192,7 @@ function BrandDevicesPage({ mac, home, brand, forKey, replaceId }: PickProps & {
   // Only the kinds this brand really has, so the row never offers an empty answer.
   const kinds = ["all", ...KIND_ORDER_UI.filter((k) => all.some((d) => d.kind === k))];
   const shown = all.filter(
-    (d) => (!onlyUsable || !forKey || d.keys.includes(forKey)) && (kind === "all" || d.kind === kind),
+    (d) => (!onlyUsable || !onlyFor || !!d.keys[onlyFor]) && (kind === "all" || d.kind === kind),
   );
 
   const pick = async (d: IrDevice) => {
@@ -207,24 +200,17 @@ function BrandDevicesPage({ mac, home, brand, forKey, replaceId }: PickProps & {
     setSaving(true);
     setMsg("");
     try {
-      // Read the plan again rather than trusting a copy taken when this page opened:
-      // the levels above are unmounted, and this page can sit open for minutes while
-      // codesets download.
+      // Read the plan again rather than trusting a copy taken when this page opened: the
+      // levels above are unmounted, and this page can sit open while someone reads a
+      // long list.
       const cur = await fetchIrSetup(mac);
-      // A read that FAILED is not an empty plan. Writing here sends the whole thing,
-      // so it would erase every device this remote already drives - and nothing was
-      // sent, so say that rather than blaming the save.
+      // A read that FAILED is not an empty plan. Writing here sends the whole thing, so
+      // it would erase every device this remote already drives - and nothing was sent, so
+      // say that rather than blaming the save.
       if (!cur) return setMsg(t("firetvir.readFailed"));
-      const dev: IrPlanDevice = {
-        id: d.id,
-        brand,
-        label: d.label,
-        kind: d.kind,
-        path: d.path,
-        keys: d.keys,
-        protocol: d.protocols[0] || "",
-        count: d.count,
-      };
+      // The codes travel INTO the plan, so what gets programmed is what was chosen even
+      // if a later index build renames or regroups this device.
+      const dev: IrPlanDevice = planDevice(d, brand, slug);
       const assign: IrAssign = { ...cur.assign };
       let devices = cur.devices.filter((x) => x.id !== dev.id && x.id !== replaceId);
       if (replaceId) {
@@ -233,21 +219,21 @@ function BrandDevicesPage({ mac, home, brand, forKey, replaceId }: PickProps & {
           if (!a) continue;
           const device = a.device === replaceId ? dev.id : a.device;
           const second = a.second === replaceId ? dev.id : a.second;
-          // The replacement may not carry every button the old device did, and a
-          // button pointed at a code with no row for it is programmed as nothing.
-          if (device === dev.id && !dev.keys.includes(k)) delete assign[k];
+          // The replacement may not carry every button the old device did, and a button
+          // pointed at a code with no row for it is programmed as nothing.
+          if (device === dev.id && !dev.keys[k]) delete assign[k];
           else assign[k] = { device, second: second && second !== device ? second : null };
         }
       }
       if (devices.length >= MAX_PLAN_DEVICES) return setMsg(t("firetvir.tooManyDevices", { n: MAX_PLAN_DEVICES }));
       devices = [...devices, dev];
-      if (forKey) {
-        const prev = assign[forKey];
-        assign[forKey] = { device: dev.id, second: prev?.second && prev.second !== dev.id ? prev.second : null };
+      if (onlyFor) {
+        const prev = assign[onlyFor];
+        assign[onlyFor] = { device: dev.id, second: prev?.second && prev.second !== dev.id ? prev.second : null };
       }
       // A new device takes every button nobody has claimed yet. Adding the TV first
       // should leave the screen set up, not with four rows still reading "not set".
-      for (const k of KEY_ORDER) if (!assign[k] && dev.keys.includes(k)) assign[k] = { device: dev.id, second: null };
+      for (const k of KEY_ORDER) if (!assign[k] && dev.keys[k]) assign[k] = { device: dev.id, second: null };
       const kept = await saveIrSetup(mac, { ...cur, devices, assign });
       if (!kept || !kept.devices.some((x) => x.id === dev.id)) return setMsg(t("firetvir.saveFailed"));
       nav.popTo(home);
@@ -258,33 +244,30 @@ function BrandDevicesPage({ mac, home, brand, forKey, replaceId }: PickProps & {
     }
   };
 
-  const keyWords = (d: IrDevice) => d.keys.map((k) => t("firetvir.key." + k)).join(", ");
-  const scanning = !!state && !loaded;
+  const keyWords = (d: IrDevice) =>
+    deviceKeys(d)
+      .map((k) => t("firetvir.key." + k))
+      .join(", ");
+  const sourceWord = (d: IrDevice) => d.sources.map((s) => t("firetvir.source." + s)).join(" + ");
 
   return (
     <SettingsPage id="ftir-sets" title={brand} subtitle={t("firetvir.setsHint")} onBack={nav.pop} animate="push">
       {msg && <Note tone="warn">{msg}</Note>}
       {error && <Note tone="warn">{t("firetvir.brandsError", { error })}</Note>}
-      {scanning && state && (
-        <Note tone="accent">
-          {state.total ? t("firetvir.scanning", { done: state.done, total: state.total }) : t("firetvir.loading")}
-        </Note>
-      )}
       {!state && !error && <Note>{t("firetvir.loading")}</Note>}
-      {loaded && !!state?.failed && <Note tone="warn">{t("firetvir.partial", { n: state.failed })}</Note>}
 
-      {(!!error || (loaded && !!state?.failed)) && (
+      {!!error && (
         <Group>
-          <Row id="retry" label={t("firetvir.retry")} trailing="none" autoFocus={!!error} onEnter={retry} />
+          <Row id="retry" label={t("firetvir.retry")} trailing="none" autoFocus onEnter={retry} />
         </Group>
       )}
 
       {all.length > 0 && (
         <Group>
-          {forKey && (
+          {onlyFor && (
             <ToggleRow
               id="onlyusable"
-              label={t("firetvir.onlyWith", { key: t("firetvir.key." + forKey) })}
+              label={t("firetvir.onlyWith", { key: t("firetvir.key." + onlyFor) })}
               hint={t("firetvir.onlyWithHint")}
               on={onlyUsable}
               onToggle={() => setOnlyUsable((v) => !v)}
@@ -318,7 +301,7 @@ function BrandDevicesPage({ mac, home, brand, forKey, replaceId }: PickProps & {
             label={d.label}
             hint={
               deviceSupported(d)
-                ? t("firetvir.kind." + d.kind) + " · " + keyWords(d)
+                ? t("firetvir.kind." + d.kind) + " · " + keyWords(d) + " · " + sourceWord(d)
                 : t("firetvir.unsupported", { protocol: d.protocols.join(", ") })
             }
             value={d.count > 1 ? t("firetvir.sameCode", { n: d.count }) : d.variant}
@@ -339,33 +322,53 @@ function BrandDevicesPage({ mac, home, brand, forKey, replaceId }: PickProps & {
   );
 }
 
-function BrandListPage({ mac, home, forKey, replaceId, letter }: PickProps & { letter: string }) {
+// A brand row, wherever it is listed: what it is called and what a fetch of it is
+// addressed by (the slug the published index gives it).
+function brandRow(
+  b: IrBrandListing,
+  t: (k: string, v?: Record<string, string | number>) => string,
+  open: (b: IrBrandListing) => void,
+) {
+  return (
+    <Row
+      key={b.slug}
+      id={"brand-" + b.slug}
+      label={b.brand}
+      value={t("firetvir.deviceCount", { n: b.devices })}
+      onEnter={() => open(b)}
+    />
+  );
+}
+
+function BrandListPage({ mac, home, forKey: onlyFor, replaceId, letter }: PickProps & { letter: string }) {
   const { t } = useI18n();
   const nav = useSettingsNav();
-  const [brands, setBrands] = useState<{ brand: string; n: number }[] | null>(null);
+  const [brands, setBrands] = useState<IrBrandListing[] | null>(null);
   const [error, setError] = useState("");
   const [attempt, setAttempt] = useState(0);
 
   useEffect(() => {
     let alive = true;
-    void fetchIrBrands().then((r) => {
+    void fetchIrIndex().then((r) => {
       if (!alive) return;
-      // An empty list and a failed fetch look identical once the error is dropped,
-      // and the second one leaves a page with a letter for a title and nothing on it.
+      // An empty list and a failed fetch look identical once the error is dropped, and
+      // the second one leaves a page with a letter for a title and nothing on it.
       if (!r.ok || !r.brands) return setError(r.error || "error");
       setError("");
-      setBrands(r.brands.filter((b) => initial(b.brand) === letter).map((b) => ({ brand: b.brand, n: b.sets.length })));
+      setBrands(r.brands.filter((b) => initial(b.brand) === letter));
     });
     return () => {
       alive = false;
     };
   }, [letter, attempt]);
 
-  const open = (brand: string) =>
+  const open = (b: IrBrandListing) =>
     nav.push({
-      id: "ftir-sets-" + brand,
-      title: brand,
-      render: () => <BrandDevicesPage mac={mac} home={home} brand={brand} forKey={forKey} replaceId={replaceId} />,
+      id: "ftir-sets-" + b.slug,
+      title: b.brand,
+      render: () => (
+        <BrandDevicesPage mac={mac} home={home} brand={b.brand} slug={b.slug} forKey={onlyFor} replaceId={replaceId} />
+      ),
     });
 
   return (
@@ -386,34 +389,30 @@ function BrandListPage({ mac, home, forKey, replaceId, letter }: PickProps & { l
           />
         </Group>
       )}
-      <Group>
-        {(brands || []).map((b) => (
-          <Row
-            key={b.brand}
-            id={"brand-" + b.brand}
-            label={b.brand}
-            value={t("firetvir.setCount", { n: b.n })}
-            onEnter={() => open(b.brand)}
-          />
-        ))}
-      </Group>
+      <Group>{(brands || []).map((b) => brandRow(b, t, open))}</Group>
     </SettingsPage>
   );
 }
 
-function BrandPickerPage({ mac, home, forKey, replaceId }: PickProps) {
+function BrandPickerPage({ mac, home, forKey: onlyFor, replaceId }: PickProps) {
   const { t } = useI18n();
   const nav = useSettingsNav();
-  const [brands, setBrands] = useState<{ brand: string; n: number }[] | null>(null);
+  const [brands, setBrands] = useState<IrBrandListing[] | null>(null);
   const [error, setError] = useState("");
   const [query, setQuery] = useState("");
   const [suggested, setSuggested] = useState<string | null>(null);
+  const [built, setBuilt] = useState("");
 
   const load = useCallback(async () => {
     setError("");
-    const r = await fetchIrBrands();
-    if (r.ok && r.brands) setBrands(r.brands.map((b) => ({ brand: b.brand, n: b.sets.length })));
-    else setError(r.error || "error");
+    const r = await fetchIrIndex();
+    if (r.ok && r.brands) {
+      setBrands(r.brands);
+      // When the list was built. It is a downloaded file the box keeps for a month, so
+      // "my new TV is not in here" has an answer that is not a shrug.
+      const d = new Date(r.generated || "");
+      setBuilt(isNaN(d.getTime()) ? "" : d.toLocaleDateString());
+    } else setError(r.error || "error");
   }, []);
 
   useEffect(() => {
@@ -421,23 +420,25 @@ function BrandPickerPage({ mac, home, forKey, replaceId }: PickProps) {
     void fetchIrStatus().then((s) => s && setSuggested(s.suggestedBrand));
   }, [load]);
 
-  const open = (brand: string) =>
+  const open = (b: IrBrandListing) =>
     nav.push({
-      id: "ftir-sets-" + brand,
-      title: brand,
-      render: () => <BrandDevicesPage mac={mac} home={home} brand={brand} forKey={forKey} replaceId={replaceId} />,
+      id: "ftir-sets-" + b.slug,
+      title: b.brand,
+      render: () => (
+        <BrandDevicesPage mac={mac} home={home} brand={b.brand} slug={b.slug} forKey={onlyFor} replaceId={replaceId} />
+      ),
     });
   const openLetter = (letter: string) =>
     nav.push({
       id: "ftir-letter-" + letter,
       title: letter,
-      render: () => <BrandListPage mac={mac} home={home} letter={letter} forKey={forKey} replaceId={replaceId} />,
+      render: () => <BrandListPage mac={mac} home={home} letter={letter} forKey={onlyFor} replaceId={replaceId} />,
     });
 
   const q = query.trim().toLowerCase();
   const hits = q ? (brands || []).filter((b) => b.brand.toLowerCase().includes(q)) : [];
-  // The letter index exists because there are 646 brands: listing even the first
-  // screenful of them is a wall nobody reads, and the ones past it are unreachable.
+  // The letter index exists because there are over a thousand brands: listing even the
+  // first screenful of them is a wall nobody reads, and the ones past it are unreachable.
   const letters = [...new Set((brands || []).map((b) => initial(b.brand)))].sort();
   const counts = new Map<string, number>();
   for (const b of brands || []) counts.set(initial(b.brand), (counts.get(initial(b.brand)) || 0) + 1);
@@ -445,7 +446,7 @@ function BrandPickerPage({ mac, home, forKey, replaceId }: PickProps) {
   return (
     <SettingsPage
       id="ftir-brand"
-      title={forKey ? t("firetvir.pickFor", { key: t("firetvir.key." + forKey) }) : t("firetvir.pickBrand")}
+      title={onlyFor ? t("firetvir.pickFor", { key: t("firetvir.key." + onlyFor) }) : t("firetvir.pickBrand")}
       subtitle={t("firetvir.pickBrandHint")}
       onBack={nav.pop}
       animate="push"
@@ -465,22 +466,19 @@ function BrandPickerPage({ mac, home, forKey, replaceId }: PickProps) {
         {error && <Row id="retry" label={t("firetvir.retry")} trailing="none" onEnter={() => void load()} />}
         {/* The box read the TV's brand off the HDMI EDID, so the commonest answer is
             one press away and the alphabet is for everything else. */}
-        {!q && suggested && (brands || []).some((b) => b.brand === suggested) && (
-          <Row id="suggested" label={suggested} hint={t("firetvir.suggestedHint")} onEnter={() => open(suggested)} />
-        )}
+        {!q &&
+          suggested &&
+          (() => {
+            const hit = (brands || []).find((b) => b.brand === suggested);
+            return hit ? (
+              <Row id="suggested" label={hit.brand} hint={t("firetvir.suggestedHint")} onEnter={() => open(hit)} />
+            ) : null;
+          })()}
       </Group>
 
       {q ? (
         <Group title={t("firetvir.matches", { n: hits.length })}>
-          {hits.slice(0, MAX_LISTED_BRANDS).map((b) => (
-            <Row
-              key={b.brand}
-              id={"brand-" + b.brand}
-              label={b.brand}
-              value={t("firetvir.setCount", { n: b.n })}
-              onEnter={() => open(b.brand)}
-            />
-          ))}
+          {hits.slice(0, MAX_LISTED_BRANDS).map((b) => brandRow(b, t, open))}
           {!hits.length && brands && <InfoRow label={t("firetvir.noMatch")} value="" />}
           {hits.length > MAX_LISTED_BRANDS && <InfoRow label={t("firetvir.narrow")} value="" />}
         </Group>
@@ -497,6 +495,7 @@ function BrandPickerPage({ mac, home, forKey, replaceId }: PickProps) {
           ))}
         </Group>
       )}
+      {!!built && <Note>{t("firetvir.indexAge", { date: built })}</Note>}
     </SettingsPage>
   );
 }
@@ -513,17 +512,18 @@ function IrDevicePage({ mac, home, deviceId }: { mac: string; home: number; devi
   const dev = setup?.devices.find((d) => d.id === deviceId);
   const usedBy = setup ? KEY_ORDER.filter((k) => setup.assign[k]?.device === deviceId) : [];
 
+  const canDrive = dev ? deviceKeys(dev) : [];
+
   const test = async () => {
-    if (!setup || !dev || !dev.keys.length || busy) return;
-    // A button this device is really used for AND can really send. Testing a key it
-    // was assigned to but has no row for would fail with a puzzling error about the
-    // codeset instead of proving anything.
-    const key = usedBy.find((k) => dev.keys.includes(k)) || dev.keys[0];
+    if (!setup || !dev || !canDrive.length || busy) return;
+    // A button this device is really used for AND can really send. Testing a key it was
+    // assigned to but has no code for would fail with a puzzling error instead of
+    // proving anything.
+    const key = usedBy.find((k) => !!dev.keys[k]) || canDrive[0];
     setBusy(true);
     setMsg(null);
     // Point the blast at THIS device even if the button is assigned elsewhere.
-    const probe: IrSetup = { ...setup, assign: { [key]: { device: deviceId, second: null } } };
-    const r = await testIrKey(mac, toSingleKeyPlan(probe, key), key);
+    const r = await testIrKey(mac, forKey(setup, key, deviceId), key);
     setBusy(false);
     setMsg({
       ok: r.ok,
@@ -581,10 +581,17 @@ function IrDevicePage({ mac, home, deviceId }: { mac: string; home: number; devi
           <Group>
             <InfoRow label={t("firetvir.brand")} value={dev.brand} />
             <InfoRow label={t("firetvir.type")} value={t("firetvir.kind." + dev.kind)} />
-            <InfoRow label={t("firetvir.protocol")} value={dev.protocol} />
+            <InfoRow
+              label={t("firetvir.protocol")}
+              value={[...new Set(canDrive.map((k) => dev.keys[k]?.protocol).filter(Boolean))].join(", ")}
+            />
+            <InfoRow
+              label={t("firetvir.database")}
+              value={dev.sources.map((s) => t("firetvir.source." + s)).join(" + ") || t("firetvir.none")}
+            />
             <InfoRow
               label={t("firetvir.canDrive")}
-              value={dev.keys.map((k) => t("firetvir.key." + k)).join(", ") || t("firetvir.none")}
+              value={canDrive.map((k) => t("firetvir.key." + k)).join(", ") || t("firetvir.none")}
             />
             <InfoRow
               label={t("firetvir.assignedTo")}
@@ -600,7 +607,7 @@ function IrDevicePage({ mac, home, deviceId }: { mac: string; home: number; devi
               label={busy ? t("firetvir.testing") : t("firetvir.test")}
               trailing="none"
               autoFocus
-              disabled={!dev.keys.length}
+              disabled={!canDrive.length}
               onEnter={() => void test()}
             />
             <Row
@@ -650,7 +657,7 @@ function IrKeyPage({ mac, home, irKey }: { mac: string; home: number; irKey: IrK
     if (!setup || !assigned || busy) return;
     setBusy(true);
     setMsg(null);
-    const r = await testIrKey(mac, toSingleKeyPlan(setup, irKey), irKey);
+    const r = await testIrKey(mac, forKey(setup, irKey), irKey);
     setBusy(false);
     setMsg({
       ok: r.ok,
@@ -705,11 +712,11 @@ function IrKeyPage({ mac, home, irKey }: { mac: string; home: number; irKey: IrK
                 label={deviceName(d)}
                 // A device whose codeset has no row for this button cannot drive it, and
                 // saying so beats a button that is quietly never programmed.
-                hint={d.keys.includes(irKey) ? undefined : t("firetvir.keyMissing")}
+                hint={d.keys[irKey] ? undefined : t("firetvir.keyMissing")}
                 value={assigned?.device === d.id ? t("common.selected") : undefined}
                 trailing="none"
                 autoFocus={assigned?.device === d.id}
-                disabled={!d.keys.includes(irKey)}
+                disabled={!d.keys[irKey]}
                 onEnter={() => setPrimary(d.id)}
               />
             ))}
@@ -747,10 +754,10 @@ function IrKeyPage({ mac, home, irKey }: { mac: string; home: number; irKey: IrK
                     key={d.id}
                     id={"second-" + d.id}
                     label={deviceName(d)}
-                    hint={d.keys.includes(irKey) ? undefined : t("firetvir.keyMissing")}
+                    hint={d.keys[irKey] ? undefined : t("firetvir.keyMissing")}
                     value={assigned.second === d.id ? t("common.selected") : undefined}
                     trailing="none"
-                    disabled={!d.keys.includes(irKey)}
+                    disabled={!d.keys[irKey]}
                     onEnter={() => setSecond(d.id)}
                   />
                 ))}
@@ -827,7 +834,7 @@ export function FiretvIrPage({ device }: { device: { id: string; name: string } 
     if (!setup || !assignedKeys.length || busy) return;
     setBusy("program");
     setMsg(null);
-    const r = await programIr(mac, toIrPlan(setup), planLabel(setup));
+    const r = await programIr(mac, setup, planLabel(setup));
     setBusy("");
     if (r.ok) {
       await setPassthrough(true);

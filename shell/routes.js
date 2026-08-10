@@ -222,16 +222,18 @@ function post(p, data, res, ctx) {
   if (p === "/tvbox/api/firetvir/deps") {
     return httpserver.jsonRes(res, { ok: firetvir.installDeps() }); // progress is polled via /firetvir/status
   }
-  // `plan` = { base, keys: { <key>: { path, second } } } (per-key brands + a
-  // second device on a key); a bare `path` is the single-codeset form.
+  // `plan` is the same object the plan route stores and the screen shows: the devices
+  // this remote drives (each carrying its own codes) plus which button drives which.
+  // One shape for storing, testing and programming, so a test cannot fire something
+  // other than what a save would write.
   if (p === "/tvbox/api/firetvir/test") {
-    firetvir.testKey(String(data.mac || ""), data.plan || String(data.path || ""), String(data.key || ""), (err, r) =>
+    firetvir.testKey(String(data.mac || ""), data.plan, String(data.key || ""), (err, r) =>
       httpserver.jsonRes(res, err ? { ok: false, error: String(err.message || err).slice(0, 200) } : r),
     );
     return;
   }
   if (p === "/tvbox/api/firetvir/program") {
-    firetvir.program(String(data.mac || ""), data.plan || String(data.path || ""), String(data.label || ""), (err, r) =>
+    firetvir.program(String(data.mac || ""), data.plan, String(data.label || ""), (err, r) =>
       httpserver.jsonRes(res, err ? { ok: false, error: String(err.message || err).slice(0, 200) } : r),
     );
     return;

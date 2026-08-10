@@ -301,12 +301,14 @@ A Fire TV / Alexa Voice Remote has its own IR blaster, but it normally only
 learns TV codes when paired to a Fire TV box. tvbox can program it directly:
 pair the remote over Bluetooth, then under **Settings → Remotes & accessories** (it shows
 up under the remote itself, only for a remote that supports this) pick your TV
-brand and save. tvbox looks the codes up in the community
-[irdb](https://github.com/probonopd/irdb) database and writes them to the
-remote over its Bluetooth keymap service, so afterwards the remote drives the
-TV's volume, mute and power on its own, no Fire TV needed. It suggests your TV
-brand automatically from the HDMI EDID. Details and the reverse-engineering
-notes: [docs/firetv-remote-ir.md](docs/firetv-remote-ir.md).
+brand and save. tvbox looks the codes up in a code index built from the community
+[irdb](https://github.com/probonopd/irdb) and
+[Flipper-IRDB](https://github.com/UberGuidoZ/Flipper-IRDB) databases, and writes
+them to the remote over its Bluetooth keymap service, so afterwards the remote
+drives the TV's volume, mute and power on its own, no Fire TV needed. The second
+database is what carries a signal no decoder understands - a soundbar with its own
+protocol, say. It suggests your TV brand automatically from the HDMI EDID. Details
+and the reverse-engineering notes: [docs/firetv-remote-ir.md](docs/firetv-remote-ir.md).
 
 ## The App Store
 

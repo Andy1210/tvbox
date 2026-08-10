@@ -34,20 +34,21 @@ drives which.
 1. **Install Bluetooth support** - one tap creates a user-space venv at
    `~/.tvbox/pyenv` and installs `bleak` (+ `dbus-fast`) into it (needs internet;
    `python3-venv`/`pip` come from `provision.sh`). No root, nothing global.
-2. **Add a device** - brand (search, or step in by first letter), then the codes
-   that brand offers. Codes come from the community **irdb** database
-   ([github.com/probonopd/irdb](https://github.com/probonopd/irdb), cached ~30
-   days under `~/.tvbox/cache/`); tvbox converts the irdb
-   `(protocol, device, subdevice, function)` row into raw IR timings on the box
-   (`remote/ir_protocols.py`: NEC/NECx/RC5/RC6/Sony SIRC/Panasonic; anything
-   else is offered as unpressable instead of blasting garbage). The brand the
-   box read off the TV's HDMI EDID is offered first.
+2. **Add a device** - brand (search, or step in by first letter), then the devices
+   that brand offers. Those come from a **published index the box downloads**
+   (`shell/irindex.js`, one small file per brand, cached ~30 days under
+   `~/.tvbox/cache/`); the brand the box read off the TV's HDMI EDID is offered
+   first. What the index is built from is below.
 3. **Assign the buttons** - Volume ±, Mute and Power each name a device, and
    optionally a **second** one so a single press blasts both. A device whose code
    has no row for a button cannot be assigned to it, and says so.
 4. **Test** - a per-key InstantFire blast (nothing saved yet); point the remote
    at the device and confirm it reacts. The test blasts exactly what saving would
-   write, second device included.
+   write, second device included. Measured on two Amazon remotes: a blast leaves the
+   remote's BLE link DOWN, so a second test right after it fails until the remote is
+   woken with a button press, and a remote that was asleep to begin with answers
+   status `00` rather than `02`. Neither is a fault in the code; a remote's own
+   programmed keys are infrared and need no link at all.
 5. **Save to the remote** - programs the keymap; then tvbox sets
    `remote.devices[<mac>].irPassthrough = true` so the bridge stops diverting
    that remote's BT volume keys to the box's own IR blaster (no double volume).
@@ -56,51 +57,103 @@ drives which.
 The setup is stored per remote in `~/.tvbox/firetv_ir_plan.json` and carried by a
 backup. It has to be: the keymap lives on the REMOTE and cannot be read back, so
 without it a second visit would show a fully programmed remote as unconfigured.
-A button may only name a device whose codeset really carries it - the box enforces
-that when it stores the plan, because a key with no row is programmed as nothing
-and would read on screen as set up.
+The plan carries **the codes themselves**, not references into the index - so
+programming needs no network, and an index rebuilt upstream cannot change what a
+remote that is already set up would be written with. A button may only name a
+device whose code really carries it - the box enforces that when it stores the
+plan, because a key with no code is programmed as nothing and would read on screen
+as set up.
 
-Two operational notes. A **test** writes `firetv_tv_codes.test.json` and a
-**program** writes `firetv_tv_codes.json`; only the second is what "last written to
-the remote" reports, and erasing removes it. And a brand whose codesets did not all
-come down is cached for minutes rather than the usual 30 days, with the failure
-count on screen - a short list is otherwise indistinguishable from a brand that has
-little in it. `~/.tvbox/cache/irdb-brand-v2-*` are those caches; deleting them is
-always safe.
+A **test** writes `firetv_tv_codes.test.json` and a **program** writes
+`firetv_tv_codes.json`; only the second is what "last written to the remote"
+reports, and erasing removes it. `~/.tvbox/cache/ir-index-v1.json` and
+`ir-brand-<revision>-*.json` are the browsing caches; deleting them is always safe,
+and a rebuilt index retires them by itself (their name carries its revision).
+
+### Where the codes come from
+
+Two databases, merged by CI into one index at
+**`https://andy1210.github.io/tvbox/ir/`** (built by `scripts/ir-index/build.js`,
+published by `.github/workflows/demo.yml` next to the launcher demo, rebuilt weekly
+and on any change to the generator):
+
+- **irdb** ([github.com/probonopd/irdb](https://github.com/probonopd/irdb)) - one
+  DECODED row per button: protocol, device, subdevice, function. 3243 codesets.
+- **Flipper-IRDB**
+  ([github.com/UberGuidoZ/Flipper-IRDB](https://github.com/UberGuidoZ/Flipper-IRDB),
+  CC0) - one `.ir` file per remote model, each button either `parsed` (a protocol
+  plus address/command bytes) or **`raw`** (the microsecond timings themselves).
+  1950 curated files; its `_Converted_/` tree is skipped, being 6944 files of other
+  databases run through a converter - `_Converted_/CSV/` IS irdb, which the index
+  already carries natively.
+
+**Raw is why the second database is here at all.** irdb can only hold what a
+decoder understands, so a signal none of them do cannot be in it. Samsung's
+soundbars are exactly that: a 4.5/4.5 ms leader where NEC has 9/4.5, i.e. Samsung's
+own 36-bit protocol, so every Samsung codeset in irdb is the wrong protocol for one.
+A capture of such a remote has to reach the keymap unchanged, which is what
+`scripts/ir-index/flipper.test.js` asserts against a codes file known to work.
+
+The box converts a code to IR itself: `remote/ir_protocols.py` for an irdb row
+(NEC/NECx/RC5/RC6/Sony SIRC/Panasonic) and `remote/flipper_protocols.py` for a
+Flipper `parsed` block (NEC/NECext/NEC42/Samsung32/RC5/RC5X/RC6/SIRC 12-15-20/
+Kaseikyo/RCA/Pioneer, ported from the Flipper firmware's own encoder tables). A raw
+capture needs no encoder - it is sent verbatim. Anything else is offered as
+unpressable rather than blasting garbage, and the box decides that from ITS OWN
+python rather than trusting the index, because a box updates on its own schedule.
+
+Two things the generator does that are easy to get wrong:
+
+- **A capture may hold the same frame several times** (263 of the ~900 that carry
+  one of these four buttons do). On a volume key that is two steps per press, and on
+  a power toggle a press that undoes itself - so a repeat is cut back to one frame.
+  The test is PERIODICITY, not a long gap: a Samsung 36-bit frame carries a 4.5 ms
+  element in its middle, and a gap rule would send half of it.
+- **Microseconds convert to the keymap's 10 µs unit with python's rounding**
+  (half to even), the same rule `ir_protocols.py` uses: 505 µs is 50, not 51.
 
 ### Why a brand's list is short
 
-A brand folder in irdb is a list of REMOTE MODELS, and the same codes are filed
-under every model number that ever carried them - so the box merges the codesets
-that send the same four keys into one row (`groupSets` in `shell/firetvir.js`).
-Measured against the live index: Samsung's 68 codesets are 25 distinct codes, 27
-of them byte-identical (NECx2 device 7,7 - the TV); Sony's 183 are 57; LG's 36
-are 16. Requiring the key being assigned shortens it again - Samsung goes to 13
-for volume, where the soundbar (NECx2 67,83) is then the only entry with volume
-and no power.
+A brand folder in either database is a list of REMOTE MODELS, and the same codes are
+filed under every model number that ever carried them - so the index merges the
+codesets that send the same four keys into one row (`scripts/ir-index/group.js`).
+Measured against the live databases: Samsung's 153 codesets become 64 rows, LG's 109
+become 40, and 3243 + 1950 codesets in total become 3089 devices across 1151 brands.
+
+What decides that two codesets are the same device is the **frame they transmit**,
+hashed through the encoders above - which is also what merges the two databases: an
+irdb `NEC1 4,-1,8` row and a Flipper `NEC addr 04 cmd 08` block are the same
+waveform, and offering both would be asking someone to choose between two identical
+rows. 54 devices carry codes from both.
 
 A type filter cannot do that job: 1228 of irdb's 1476 type folders are
 `Unknown_<remote model>` (65 of Samsung's 68 sets), so grouping by type leaves 60
-groups of one. The type is kept as the row's label and a coarse kind (TV / audio
-/ set-top / player / climate), never as the thing that makes the list short. Two
-groups that end up with the same label carry the address they transmit on -
-brands do file two unrelated codes under "TV".
+groups of one. The type is kept as the row's label and a coarse kind (TV / audio /
+set-top / player / climate), never as the thing that makes the list short. Two
+groups that end up with the same label carry the address they transmit on, and then
+the model number most of their files were filed under - brands do file two unrelated
+codes under "TV".
 
 Note the box already toggles the TV over HDMI-CEC, so "TV + soundbar on one
 button" usually needs only the soundbar's code on that key.
 
-irdb attribution: the verbatim notice its license requires (LICENSE.md clause
-2, "Contains/accesses irdb by Simon Peter and contributors, used under
-permission. …") is shown in **Settings → About → Open source**, and the flow
-footer credits it too. Note the license's **clause 1**: before shipping a
-product that uses irdb you must announce it by opening an issue at
-github.com/probonopd/irdb/issues (a one-time step for whoever distributes a
-build - not a runtime concern).
+**Attribution.** irdb's licence (LICENSE.md clause 2) requires a verbatim notice
+wherever the database is used or accessed: it is shown in **Settings → About → Open
+source**, travels inside the index (`ir/index.json`, `ir/NOTICE.txt`) and the flow
+footer credits both databases. Clause **1** is a human step for whoever distributes
+a build: announce the product by opening an issue at
+github.com/probonopd/irdb/issues. Flipper-IRDB is CC0, so it needs none - it is
+credited anyway.
+
+**Pointing a fork's boxes at its own build:** `firetvir.indexBase` in
+`~/.tvbox/config.json` (https only), the same kind of self-host override as
+`update.feed`.
 
 ### The manual way (SSH)
 
-`~/.tvbox/firetv_remote_ir.py` (with `~/.tvbox/keymap_compile.py` +
-`~/.tvbox/ir_protocols.py`). Needs `bleak` - either the venv the UI made
+`~/.tvbox/firetv_remote_ir.py` (with `~/.tvbox/keymap_compile.py`,
+`~/.tvbox/ir_protocols.py` and `~/.tvbox/flipper_protocols.py`). Needs `bleak` -
+either the venv the UI made
 (`~/.tvbox/pyenv/bin/python3`) or a plain `python3 -m pip install bleak`.
 
 Codes live in `~/.tvbox/firetv_tv_codes.json` - copy the shipped
@@ -118,9 +171,11 @@ Codes live in `~/.tvbox/firetv_tv_codes.json` - copy the shipped
 ```
 
 Per key, one of: `{"irdb":{"protocol":"NEC1","device":4,"subdevice":-1,"function":2}}`
-(an irdb row - what the UI writes), `{"nec":{"address":N,"command":M}}` (LG and
-most TVs), `{"pronto":"0000 006D ..."}` (a Pronto/CCF code), or
-`{"raw":[...],"frequency":38000}` (on/off durations in **10 µs** units).
+(an irdb row), `{"flipper":{"protocol":"Samsung32","address":"07 00 00 00","command":"02 00 00 00"}}`
+(a Flipper-IRDB parsed block), `{"raw":[...],"frequency":38000}` (on/off durations
+in **10 µs** units - a capture, and what a soundbar no decoder knows needs),
+`{"nec":{"address":N,"command":M}}` (LG and most TVs), or
+`{"pronto":"0000 006D ..."}` (a Pronto/CCF code). The UI writes the first three.
 
 ```sh
 python3 ~/.tvbox/firetv_remote_ir.py scan                      # find the remote's MAC
@@ -139,8 +194,10 @@ To check on the real remote: BlueZ usually negotiates a large ATT MTU (needed fo
 the 200-byte chunk writes) automatically; whether the keymap survives the
 remote's deep sleep / re-pairing is remote-firmware-dependent - verify.
 
-Shell plumbing for the UI flow is `shell/firetvir.js` (venv + irdb fetch/cache +
-BLE tool runner); endpoints under `/tvbox/api/firetvir/*`.
+Shell plumbing for the UI flow is `shell/firetvir.js` (venv, the saved plan, the
+BLE tool runner) plus `shell/irindex.js` (the published index); endpoints under
+`/tvbox/api/firetvir/*`. The index generator and its tests live in
+`scripts/ir-index/`.
 
 ## 2. App buttons (Netflix / Prime / …) → any action
 

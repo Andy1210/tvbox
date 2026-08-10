@@ -107,81 +107,111 @@ export const BT_DEVICES: BtDevice[] = [
 // A paired BT remote for the button-remap + Fire TV IR demo. Its id is a MAC,
 // and it's marked "programmable" (below) so the Fire TV IR sub-panel shows.
 export const REMOTES = [{ id: "a8:42:a7:c2:3e:ab", name: "Fire TV Remote", keymap: {} }];
-// A few TV brands + one codeset each, mirroring the irdb index shape.
-export const IR_BRANDS = [
-  { brand: "LG", sets: [{ name: "4,-1", path: "codes/LG/TV/4,-1.csv", type: "TV" }] },
-  { brand: "Samsung", sets: [{ name: "7,7", path: "codes/Samsung/TV/7,7.csv", type: "TV" }] },
-  { brand: "Sony", sets: [{ name: "1,-1", path: "codes/Sony/TV/1,-1.csv", type: "TV" }] },
-  { brand: "Panasonic", sets: [{ name: "16,-1", path: "codes/Panasonic/TV/16,-1.csv", type: "TV" }] },
-];
+// The brands the published index lists, and what a brand file holds. Mirrors the real
+// shape (scripts/ir-index/build.js): a device is what a code SENDS, so the codesets that
+// send it are merged and the row carries the codes themselves.
+export const IR_INDEX = {
+  revision: "demo00000000",
+  generated: "2026-08-10T20:00:00.000Z",
+  notice:
+    "Contains/accesses irdb by Simon Peter and contributors, used under permission. For licensing details and for information on how to contribute to the database, see https://github.com/probonopd/irdb",
+  brands: [
+    { brand: "LG", slug: "lg-000001", devices: 2, kinds: ["tv", "audio"] },
+    { brand: "Samsung", slug: "samsung-000002", devices: 3, kinds: ["tv", "audio", "climate"] },
+    { brand: "Sony", slug: "sony-000003", devices: 1, kinds: ["tv"] },
+    { brand: "Panasonic", slug: "panasonic-000004", devices: 1, kinds: ["tv"] },
+  ],
+};
 
-// What a brand's codesets look like once the box has merged the ones that send the
-// same codes (shell/firetvir.js `groupSets`). The demo's Samsung mirrors the real
-// shape: one TV code filed under dozens of remote model numbers, and a soundbar
-// that carries volume but no power.
+const irdb = (protocol: string, device: number, subdevice: number, fn: number) => ({
+  protocol,
+  entry: { irdb: { protocol, device, subdevice, function: fn } },
+});
+// A capture, which is what only the second database can carry: a soundbar whose
+// protocol no decoder expresses has its volume as raw timings.
+const raw = () => ({
+  protocol: "raw",
+  entry: { raw: [452, 449, 50, 50, 50, 151, 50, 151, 50, 50, 50], frequency: 38000 },
+});
+
 export const IR_DEVICES: Record<string, unknown[]> = {
-  LG: [
+  "lg-000001": [
     {
       id: "1a2b3c4d5e6f",
-      path: "codes/LG/TV/4,-1.csv",
       label: "TV",
       kind: "tv",
-      count: 10,
-      types: ["TV", "42H3000"],
-      keys: ["VolumeUp", "VolumeDown", "Mute", "Power"],
+      count: 44,
+      types: ["TV", "TVs"],
+      sources: ["flipper", "irdb"],
       protocols: ["NEC1"],
       variant: "NEC1 4",
-      supported: { NEC1: true },
+      usable: true,
+      keys: {
+        VolumeUp: irdb("NEC1", 4, -1, 2),
+        VolumeDown: irdb("NEC1", 4, -1, 3),
+        Mute: irdb("NEC1", 4, -1, 9),
+        Power: irdb("NEC1", 4, -1, 8),
+      },
     },
     {
       id: "2b3c4d5e6f70",
-      path: "codes/LG/Sound Bar/44,44.csv",
-      label: "Sound Bar",
+      label: "Sound Bars",
       kind: "audio",
       count: 2,
       types: ["Sound Bar"],
-      keys: ["VolumeUp", "VolumeDown", "Mute", "Power"],
+      sources: ["irdb"],
       protocols: ["NECx1"],
       variant: "NECx1 44,44",
-      supported: { NECx1: true },
+      usable: true,
+      keys: {
+        VolumeUp: irdb("NECx1", 44, 44, 7),
+        VolumeDown: irdb("NECx1", 44, 44, 11),
+        Mute: irdb("NECx1", 44, 44, 15),
+        Power: irdb("NECx1", 44, 44, 2),
+      },
     },
   ],
-  Samsung: [
+  "samsung-000002": [
     {
       id: "3c4d5e6f7081",
-      path: "codes/Samsung/TV/7,7.csv",
       label: "TV",
       kind: "tv",
       count: 27,
       types: ["TV", "BN59-00869A", "AA59-00600A"],
-      keys: ["VolumeUp", "VolumeDown", "Mute", "Power"],
+      sources: ["irdb"],
       protocols: ["NECx2"],
       variant: "NECx2 7,7",
-      supported: { NECx2: true },
+      usable: true,
+      keys: {
+        VolumeUp: irdb("NECx2", 7, 7, 7),
+        VolumeDown: irdb("NECx2", 7, 7, 11),
+        Mute: irdb("NECx2", 7, 7, 15),
+        Power: irdb("NECx2", 7, 7, 2),
+      },
     },
     {
       id: "4d5e6f708192",
-      path: "codes/Samsung/Unknown_AH59-01527F/67,83.csv",
-      label: "AH59-01527F",
-      kind: "other",
+      label: "Sound Bars · AH59-02767C",
+      kind: "audio",
       count: 1,
-      types: ["AH59-01527F"],
-      keys: ["VolumeUp", "VolumeDown", "Mute"],
-      protocols: ["NECx2"],
-      variant: "NECx2 67,83",
-      supported: { NECx2: true },
+      types: ["Sound Bars"],
+      sources: ["flipper"],
+      protocols: ["raw"],
+      variant: "raw 38 kHz",
+      usable: true,
+      keys: { VolumeUp: raw(), VolumeDown: raw(), Mute: raw() },
     },
     {
       id: "5e6f70819203",
-      path: "codes/Samsung/Air Conditioner/1,8.csv",
       label: "Air Conditioner",
       kind: "climate",
       count: 2,
       types: ["Air Conditioner"],
-      keys: ["Power"],
+      sources: ["irdb"],
       protocols: ["Samsung20"],
       variant: "Samsung20 1,8",
-      supported: { Samsung20: false },
+      usable: false,
+      keys: { Power: irdb("Samsung20", 1, 8, 2) },
     },
   ],
 };

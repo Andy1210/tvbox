@@ -296,16 +296,20 @@ export async function handleApi(
     case "/tvbox/api/firetvir/programmable":
       return { macs: data.REMOTES.map((r) => r.id.toLowerCase()) };
     case "/tvbox/api/firetvir/brands":
-      return { ok: true, brands: data.IR_BRANDS };
-    // A real box downloads a brand's codesets and answers `loading` until they are
-    // in; the demo has them already, so it only ever answers `ok`.
-    case "/tvbox/api/firetvir/brand":
+      return { ok: true, ...data.IR_INDEX };
+    // One small file per brand, as the box gets it from the published index.
+    case "/tvbox/api/firetvir/brand": {
+      const slug = params.get("slug") || "";
+      const devices = data.IR_DEVICES[slug];
+      if (!devices) return { ok: false, error: "unknown brand" };
       return {
         ok: true,
-        state: "ok",
-        devices: data.IR_DEVICES[params.get("name") || ""] || [],
+        brand: data.IR_INDEX.brands.find((b) => b.slug === slug)?.brand || slug,
+        slug,
+        devices,
         skipped: 0,
       };
+    }
     case "/tvbox/api/firetvir/plan": {
       if (method === "POST") {
         const mac = String(b.mac ?? "").toLowerCase(); // the box keys by lowercase MAC
