@@ -103,21 +103,33 @@ the same way:
   share - films or games - and mounts it accordingly (`minimal` plus a read-ahead,
   or `full` with a long cache age and a cap).
 
-  The difference is not subtle. Measured on a Pi 5 with a GameCube image on an SMB
-  share, 200 random 64 kB reads - which is how an emulator reads a disc:
+  The difference is not subtle. Measured on a Pi 5, 200 random 64 kB reads of a
+  GameCube image on an SMB share - which is how an emulator reads a disc:
 
-  |                      | median | p90    | p99    | worst  |
-  | -------------------- | ------ | ------ | ------ | ------ |
-  | `minimal` (over SMB) | 79 ms  | 231 ms | 560 ms | 713 ms |
-  | the box's own disk   | 1.1 ms | 1.1 ms | 2.3 ms | 4.0 ms |
+  |                                              | median | p90     | p99     | worst   | over 500 ms |
+  | -------------------------------------------- | ------ | ------- | ------- | ------- | ----------- |
+  | `media` (what both used to get)              | 79 ms  | 231 ms  | 560 ms  | 713 ms  | 3 of 200    |
+  | `games`, while the copy is still catching up | 37 ms  | 1140 ms | 4950 ms | 5345 ms | 43 of 200   |
+  | `games`, once the file is cached             | 0.2 ms | 1.4 ms  | 2.0 ms  | 8.7 ms  | 0 of 200    |
 
-  Three of those 200 reads took over half a second, and a game asking for several
-  in a row is the second of freezing someone notices. On `games` the file is
-  fetched once and read locally after that: the first start is slower, nothing
-  after it stutters. The cache is capped (16 GB) and floors the box's free space
-  (4 GB), because a share of films must not be able to fill the card just because
-  someone browsed it - and its age is 30 days rather than rclone's own hour, which
-  would re-fetch the game every evening.
+  The last row is the point: a game that has been played once reads at local-disk
+  speed, and the freezing is gone. **The middle row is the price**, and it belongs
+  here - the first play is worse than before while the file is still arriving. That
+  row is also the worst case by construction: it reads uniformly at random across
+  the whole image while rclone downloads it in order, which is not how a game reads
+  its disc. The copy runs at whatever the link gives (~10 MB/s here, so about two
+  minutes for a GameCube image).
+
+  Three limits keep it safe to leave on: a 30-day cache age (rclone's own default
+  is an hour, which would re-fetch the game every evening), a 16 GB ceiling, and a
+  4 GB floor under the box's free space.
+
+  **What gets cached is every file that is OPENED, not only the one being played** -
+  sparsely, just the parts actually read, but it adds up: an idle artwork scan
+  walking the library left 9 GB in the cache on the box this was measured on. The
+  limits bound it and the LRU keeps the game you actually play, but it is bandwidth
+  nobody asked for. If that ever matters the answer is not a bigger cap - it is for
+  the launch path to copy the one game it is about to start.
 
 - **Read-only.** This is a player; a mistyped delete over SMB is not recoverable.
 
