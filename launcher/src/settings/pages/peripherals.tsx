@@ -17,10 +17,9 @@ import { IrPage } from "./ir";
 // Settings -> Remotes & accessories. Bluetooth, the per-remote button map, and the
 // IR blaster that gives a CEC-volume-less TV its volume back.
 //
-// The button map keeps its existing screen (RemoteRemap): it is a learning flow
-// with its own modals and a panic path, not a list of settings, and rebuilding it
-// as rows would be a rewrite with nothing to gain. It is simply reached from here
-// as its own page now instead of being the middle third of one long column.
+// The button map keeps its own screens (RemoteRemap -> RemoteKeymap): it is a
+// learning flow with its own modals and a panic path, not a list of settings, and
+// rebuilding it as rows would be a rewrite with nothing to gain.
 const BT_POLL_MS = 4000;
 
 // Self-contained (see PushedPage): it re-reads the device after every action rather
@@ -260,7 +259,9 @@ function RemoteButtonsPage() {
     <SettingsPage
       id="remote"
       title={t("remote.title")}
-      subtitle={t("remote.hint")}
+      // The teaching instructions moved with the thing they describe: this screen
+      // is now a list of remotes, and each one's buttons are a page below it.
+      subtitle={t("remote.listHint")}
       onBack={nav.pop}
       animate="push"
       focusPolicy="legacy"

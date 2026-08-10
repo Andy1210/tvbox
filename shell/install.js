@@ -120,6 +120,11 @@ const RESERVED_STATE_FILES = new Set([
   "config.json",
   "spotify-accounts.json",
   "spotify-refresh-token",
+  // Which devices each Fire TV remote drives (firetvir.js). Listed as a matter of
+  // rule, not of spelling: no id can satisfy the `<id>-` prefix against a name with
+  // no hyphen in it, but a shell file a backup carries must be closed to apps by
+  // this list rather than by its own punctuation.
+  "firetv_ir_plan.json",
   "restore-localstorage.json",
   "restore-appfiles.json",
   "reconcile.json",
