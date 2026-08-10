@@ -212,8 +212,9 @@ function BrandDevicesPage({ mac, home, brand, forKey, replaceId }: PickProps & {
       // codesets download.
       const cur = await fetchIrSetup(mac);
       // A read that FAILED is not an empty plan. Writing here sends the whole thing,
-      // so it would erase every device this remote already drives.
-      if (!cur) return setMsg(t("firetvir.saveFailed"));
+      // so it would erase every device this remote already drives - and nothing was
+      // sent, so say that rather than blaming the save.
+      if (!cur) return setMsg(t("firetvir.readFailed"));
       const dev: IrPlanDevice = {
         id: d.id,
         brand,

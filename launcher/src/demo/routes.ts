@@ -308,11 +308,11 @@ export async function handleApi(
       };
     case "/tvbox/api/firetvir/plan": {
       if (method === "POST") {
-        const mac = String(b.mac ?? "");
+        const mac = String(b.mac ?? "").toLowerCase(); // the box keys by lowercase MAC
         irPlans[mac] = b.plan;
         return { ok: true, plan: b.plan };
       }
-      return { ok: true, plan: irPlans[params.get("mac") || ""] || { devices: [], assign: {}, ts: 0 } };
+      return { ok: true, plan: irPlans[(params.get("mac") || "").toLowerCase()] || { devices: [], assign: {}, ts: 0 } };
     }
     case "/tvbox/api/ui/locale":
       return ok; // the demo has no shell state to mirror into

@@ -764,26 +764,34 @@ function sanitizePlan(raw) {
   return { devices, assign, ts: Number.isFinite(raw && raw.ts) ? raw.ts : 0 };
 }
 
+// {} = no file yet. null = there IS one and it could not be read, which is a
+// different thing entirely: this file holds every remote, so treating a damaged or
+// half-written one as "nothing configured" would let the next save persist that
+// emptiness over the other remotes' setups.
 function readPlans() {
+  if (!fs.existsSync(PLAN_FILE)) return {};
   try {
     const st = fs.statSync(PLAN_FILE);
     if (st.size > MAX_PLAN_BYTES) {
       // Nothing this module writes can get here (writePlan refuses first), so this
-      // is a hand-edited or damaged file. Saying so beats every remote quietly
-      // reading as unconfigured.
-      console.warn("[firetvir] ignoring oversized", PLAN_FILE, st.size, "bytes");
-      return {};
+      // is a hand-edited or damaged file.
+      console.warn("[firetvir] oversized", PLAN_FILE, st.size, "bytes");
+      return null;
     }
     const j = JSON.parse(fs.readFileSync(PLAN_FILE, "utf8"));
-    return j && typeof j === "object" ? j : {};
+    if (!j || typeof j !== "object") return null;
+    return j;
   } catch (e) {
-    return {};
+    console.warn("[firetvir] could not read", PLAN_FILE, String(e.message || e));
+    return null;
   }
 }
 
 function readPlan(mac) {
   if (!MAC_RE.test(mac)) return null;
-  const p = readPlans()[mac.toLowerCase()];
+  const all = readPlans();
+  if (!all) return null;
+  const p = all[mac.toLowerCase()];
   return p ? sanitizePlan(p) : { devices: [], assign: {}, ts: 0 };
 }
 
@@ -791,6 +799,9 @@ function writePlan(mac, raw) {
   if (!MAC_RE.test(mac)) return null;
   const plan = { ...sanitizePlan(raw), ts: Date.now() };
   const all = readPlans();
+  // Refuse rather than rewrite: a file we could not parse still holds the other
+  // remotes, and writing this one's entry alone is how they would be lost.
+  if (!all) return null;
   if (plan.devices.length) all[mac.toLowerCase()] = plan;
   else delete all[mac.toLowerCase()];
   const body = JSON.stringify(all, null, 2);

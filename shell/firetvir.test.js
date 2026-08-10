@@ -222,3 +222,71 @@ test("sanitizePlan carries the saved time rather than stamping it", () => {
   assert.equal(one.ts, 1234);
   assert.equal(sanitizePlan({ devices: [] }).ts, 0);
 });
+
+// The plan file is the box's only record of what a remote drives, and it holds
+// EVERY remote - so these run against a real file, in a child process with its own
+// home (the module resolves ~/.tvbox at import time, so one process is one box).
+const fs = require("node:fs");
+const os = require("node:os");
+const path = require("node:path");
+const { execFileSync } = require("node:child_process");
+
+function inBox(home, body) {
+  const script = `
+    const os = require("os");
+    os.homedir = () => ${JSON.stringify(home)};
+    const f = require(${JSON.stringify(path.join(__dirname, "firetvir.js"))});
+    ${body}
+  `;
+  return execFileSync(process.execPath, ["-e", script], { encoding: "utf8" }).trim();
+}
+
+const DEVICE = {
+  id: "abc123def456",
+  brand: "Samsung",
+  label: "TV",
+  kind: "tv",
+  path: "codes/Samsung/TV/7,7.csv",
+  keys: ["VolumeUp", "Power"],
+  protocol: "NECx2",
+};
+
+test("a plan round-trips through the file, per remote", () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), "ftir-"));
+  fs.mkdirSync(path.join(home, ".tvbox"));
+  const out = inBox(
+    home,
+    `
+    f.writePlan("AA:BB:CC:DD:EE:FF", { devices: ${JSON.stringify([DEVICE])}, assign: { Power: { device: "abc123def456" } } });
+    f.writePlan("11:22:33:44:55:66", { devices: ${JSON.stringify([DEVICE])}, assign: {} });
+    const a = f.readPlan("aa:bb:cc:dd:ee:ff");
+    console.log(JSON.stringify({ n: a.devices.length, power: a.assign.Power.device, ts: a.ts > 0 }));
+  `,
+  );
+  assert.deepEqual(JSON.parse(out), { n: 1, power: "abc123def456", ts: true });
+  // Written for the owner only: it names what is in someone's living room.
+  assert.equal(fs.statSync(path.join(home, ".tvbox", "firetv_ir_plan.json")).mode & 0o777, 0o600);
+  const both = JSON.parse(fs.readFileSync(path.join(home, ".tvbox", "firetv_ir_plan.json"), "utf8"));
+  assert.deepEqual(Object.keys(both).sort(), ["11:22:33:44:55:66", "aa:bb:cc:dd:ee:ff"], "MACs are keyed lowercase");
+});
+
+test("a plan file that cannot be read is never rewritten from one remote", () => {
+  // Half a file (a power cut mid-write, a hand edit) parses as nothing. Treating it
+  // as "no remote is configured" and saving over it is how the OTHER remotes' setups
+  // would be lost - so the write is refused and the screen is told.
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), "ftir-"));
+  fs.mkdirSync(path.join(home, ".tvbox"));
+  const file = path.join(home, ".tvbox", "firetv_ir_plan.json");
+  fs.writeFileSync(file, '{"aa:bb:cc:dd:ee:ff": {"devices": [{"id": "abc12');
+  const out = inBox(
+    home,
+    `
+    const wrote = f.writePlan("11:22:33:44:55:66", { devices: ${JSON.stringify([DEVICE])}, assign: {} });
+    console.log(JSON.stringify({ wrote, read: f.readPlan("11:22:33:44:55:66") }));
+  `,
+  );
+  const r = JSON.parse(out);
+  assert.equal(r.wrote, null, "the write is refused");
+  assert.equal(r.read, null, "and the read says so rather than answering 'nothing configured'");
+  assert.ok(fs.readFileSync(file, "utf8").startsWith('{"aa:bb'), "the damaged file is left for a human");
+});

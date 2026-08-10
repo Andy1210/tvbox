@@ -27,7 +27,7 @@ write it.
 
 ### The easy way: Settings → Remotes & accessories → "Fire TV remote → TV IR"
 
-The guided on-TV flow does all of the below for you, no SSH. It is built around
+The guided on-TV flow does everything below for you, with no SSH. It is built around
 **devices**, not codesets: you add what is in the room, then say which button
 drives which.
 

@@ -1223,7 +1223,10 @@ function serve() {
       const q = (req.url || "").split("?")[1];
       const mac = q ? new URLSearchParams(q).get("mac") || "" : "";
       const plan = firetvir.readPlan(mac);
-      httpserver.jsonRes(res, plan ? { ok: true, plan } : { ok: false, error: "invalid mac" });
+      // null covers both a bad MAC and a plan file that could not be read, and the
+      // screen treats either the same way: it must not offer a setup that would be
+      // written over the real one.
+      httpserver.jsonRes(res, plan ? { ok: true, plan } : { ok: false, error: "could not read the saved setup" });
       return;
     }
     if (p === "/tvbox/api/fileserver") {
