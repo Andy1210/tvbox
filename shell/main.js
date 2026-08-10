@@ -572,12 +572,16 @@ function compareAppshare(peerId, shareId) {
 // disk with copies of what it replaced.
 const pullsInFlight = new Set();
 
-function pullAppshare(peerId, shareId) {
+function pullAppshare(peerId, shareId, group) {
   const cfg = config.rawAppshares();
   const peer = (cfg.peers || []).find((x) => x.id === peerId);
   if (!peer) return { ok: false, error: "unknown_peer" };
   const entry = appsharesDeps.entries().find((x) => x.id === shareId);
   if (!entry) return { ok: false, error: "unknown_share" };
+  // One emulator's folder instead of the whole share. The name came from a
+  // renderer, so it may hold no separator and no dot-name; where it lands is
+  // checked again below, against the app's own root, like every other destination.
+  if (group && !peers.groupNameOk(group)) return { ok: false, error: "unknown_group" };
   // `present` is what says the folder exists AND still resolves inside the app's
   // own root. Checked here rather than only in the UI: this destination is handed
   // to rclone, and a direct call must not reach past a symlink the screen greys
@@ -586,11 +590,16 @@ function pullAppshare(peerId, shareId) {
   if (!entry.present && !appshares.ensureDir(entry.root, entry.path)) {
     return { ok: false, error: "unknown_share" };
   }
+  // The destination is built here, never sent: a share's path plus at most one
+  // folder name, and it has to resolve inside the app's root once symlinks are
+  // followed - the same check the share itself passed.
+  const dest = group ? path.join(entry.path, group) : entry.path;
+  if (group && !appshares.ensureDir(entry.root, dest)) return { ok: false, error: "unknown_group" };
   if (!apps.onPath("rclone")) return { ok: false, error: "rclone_missing" };
   // A replaced file goes here rather than into the void, and the stamp is what
   // makes two pulls of the same game distinguishable afterwards.
   const backupDir = path.join(peers.REPLACED, new Date().toISOString().replace(/[:.]/g, "-"));
-  const argv = peers.pullArgv(peer, shareId, entry.path, backupDir, entry.exclude);
+  const argv = peers.pullArgv(peer, shareId, dest, backupDir, entry.exclude, group || "");
   // rclone wants every credential in its own reversible encoding, whether it comes
   // from a config file or the environment - a plain token answers 401. shares.js
   // owns that encoding for the same reason it owns the mount arguments.
@@ -2838,7 +2847,7 @@ ipcMain.handle("app:shares", async (e, action, payload) => {
     if (pullsInFlight.has(id)) return { ok: false, error: "busy" };
     pullsInFlight.add(id);
     try {
-      const r = await pullAppshare(String(p.peerId || ""), shareId);
+      const r = await pullAppshare(String(p.peerId || ""), shareId, p.group ? String(p.group) : "");
       // `detail` is rclone's own stderr, which names the peer's address and the
       // local destination. The list above is careful to hand an app neither.
       return { ok: !!(r && r.ok), error: (r && r.error) || null };
