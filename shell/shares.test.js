@@ -82,8 +82,11 @@ test("a share stored before this setting existed is mounted the way it always wa
 test("what a share holds is remembered across an edit, and cannot be anything else", () => {
   const games = shares.shareFrom({ host: "nas", share: "roms", name: "roms", cache: "games" });
   assert.strictEqual(games.cache, "games");
-  // An edit that only changes the password must not quietly move it back.
-  assert.strictEqual(shares.shareFrom({ host: "nas", share: "roms", name: "roms", pass: "x" }, games).cache, "games");
+  // An edit that says nothing about it must not quietly move it back. The password
+  // is cleared rather than set on purpose: setting one runs `rclone obscure`, and a
+  // test that needs a binary installed is a test that fails on a fresh runner.
+  assert.strictEqual(shares.shareFrom({ host: "nas", share: "roms", name: "roms", pass: "" }, games).cache, "games");
+  assert.strictEqual(shares.shareFrom({ host: "nas", share: "roms", name: "roms", path: "gc" }, games).cache, "games");
   assert.throws(() => shares.shareFrom({ host: "nas", share: "roms", name: "roms", cache: "whatever" }), /bad_cache/);
 });
 
