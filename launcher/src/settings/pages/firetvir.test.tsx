@@ -72,7 +72,7 @@ const SAMSUNG = [
 // The box's own copy of the plan: a POST replaces it and the next GET returns it,
 // which is what the pages agree through (each level re-reads on mount).
 function stubShell(initial?: IrSetup, planDelayMs = 0) {
-  const state = { plan: initial || ({ devices: [], assign: {}, ts: 0 } as IrSetup) };
+  const state = { plan: initial || ({ devices: [], assign: {}, programmed: null, ts: 0 } as IrSetup) };
   const posted: Record<string, unknown>[] = [];
   const json = (body: unknown) =>
     Promise.resolve(new Response(JSON.stringify(body), { headers: { "Content-Type": "application/json" } }));
@@ -101,7 +101,12 @@ function stubShell(initial?: IrSetup, planDelayMs = 0) {
 }
 const settle = () => act(async () => await new Promise((r) => setTimeout(r, 20)));
 
-const setup = (devices: IrSetup["devices"], assign: IrSetup["assign"]): IrSetup => ({ devices, assign, ts: 1 });
+const setup = (devices: IrSetup["devices"], assign: IrSetup["assign"]): IrSetup => ({
+  devices,
+  assign,
+  programmed: null,
+  ts: 1,
+});
 const TV = {
   id: "aaaaaaaaaaaa",
   brand: "Samsung",

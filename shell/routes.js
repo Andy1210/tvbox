@@ -246,7 +246,13 @@ function post(p, data, res, ctx) {
   // derived, because the keymap on the remote cannot be read back. The answer is
   // the SANITIZED plan, so the screen shows what was really kept.
   if (p === "/tvbox/api/firetvir/plan") {
-    const plan = firetvir.writePlan(String(data.mac || ""), data.plan || {});
+    // An object with no devices is the intended way to clear a remote; anything
+    // that is NOT an object (a truncated body, `plan: "x"`) would sanitize to the
+    // same empty plan and erase the remote's only record while reporting success.
+    if (!data.plan || typeof data.plan !== "object" || Array.isArray(data.plan)) {
+      return httpserver.jsonRes(res, { ok: false, error: "invalid plan" });
+    }
+    const plan = firetvir.writePlan(String(data.mac || ""), data.plan);
     return httpserver.jsonRes(res, plan ? { ok: true, plan } : { ok: false, error: "could not save" });
   }
   if (p === "/tvbox/api/nowplaying") {

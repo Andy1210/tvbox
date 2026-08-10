@@ -514,8 +514,14 @@ function apply(payload) {
   if (payload.files && typeof payload.files === "object") {
     for (const name of EXTRA_FILES) {
       // fixed allowlist - never write attacker-chosen paths
-      if (typeof payload.files[name] === "string")
-        fs.writeFileSync(path.join(TVBOX, name), payload.files[name], { mode: 0o600 });
+      if (typeof payload.files[name] === "string") {
+        const dest = path.join(TVBOX, name);
+        // `mode` applies only when the file is created and is masked by umask, so a
+        // file that already exists would keep whatever permissions it had. These
+        // carry tokens and the devices in someone's home.
+        fs.writeFileSync(dest, payload.files[name], { mode: 0o600 });
+        fs.chmodSync(dest, 0o600);
+      }
     }
   }
   if (payload.appdata && typeof payload.appdata === "object") {

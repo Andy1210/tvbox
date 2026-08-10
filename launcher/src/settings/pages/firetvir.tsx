@@ -969,7 +969,7 @@ export function FiretvIrPage({ device }: { device: { id: string; name: string } 
               onEnter={() => void doErase()}
             />
           </Group>
-          {status?.configured?.name && <Note>{t("firetvir.lastProgrammed", { name: status.configured.name })}</Note>}
+          {setup.programmed?.label && <Note>{t("firetvir.lastProgrammed", { name: setup.programmed.label })}</Note>}
         </>
       )}
       <Note>{t("firetvir.credit")}</Note>

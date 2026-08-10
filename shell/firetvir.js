@@ -715,6 +715,7 @@ const MAX_PLAN_DEVICES = 8;
 const MAX_PATH_CHARS = 300;
 const KINDS = new Set([...KIND_ORDER]);
 const str = (v, max) => String(v == null ? "" : v).slice(0, max);
+const num = (v) => (Number.isFinite(v) && v >= 0 ? v : 0);
 
 // Everything here arrives from the launcher and ends up naming an outbound fetch, so
 // it is re-checked rather than trusted: a device id that no device carries, or a
@@ -759,9 +760,13 @@ function sanitizePlan(raw) {
       second: canSend(a.second, key) && a.second !== a.device ? String(a.second) : null,
     };
   }
-  // Carried, not stamped: this says when the setup was saved, and a read is not a
+  // What was last written to THIS remote, if anything. It lives here rather than in
+  // the box-wide codes file because it is a fact about one remote.
+  const pr = raw && raw.programmed;
+  const programmed = pr && typeof pr === "object" && pr.label ? { label: str(pr.label, 60), ts: num(pr.ts) } : null;
+  // Carried, not stamped: `ts` says when the setup was saved, and a read is not a
   // save. writePlan is what sets it.
-  return { devices, assign, ts: Number.isFinite(raw && raw.ts) ? raw.ts : 0 };
+  return { devices, assign, programmed, ts: num(raw && raw.ts) };
 }
 
 // {} = no file yet. null = there IS one and it could not be read, which is a
@@ -795,6 +800,29 @@ function readPlan(mac) {
   return p ? sanitizePlan(p) : { devices: [], assign: {}, ts: 0 };
 }
 
+// The one place the file is written. `mode` on writeFileSync only applies when the
+// file is CREATED and is masked by umask, so the permission is set explicitly
+// afterwards - this file names the devices in someone's living room.
+function savePlans(all) {
+  const body = JSON.stringify(all, null, 2);
+  // The budget is enforced where the file is WRITTEN, not only where it is read: a
+  // file the reader rejects takes every OTHER remote's setup with it, and the next
+  // legitimate save would then persist that emptiness.
+  if (body.length > MAX_PLAN_BYTES) {
+    console.warn("[firetvir] refusing to write a", body.length, "byte plan file");
+    return false;
+  }
+  try {
+    fs.mkdirSync(TVBOX, { recursive: true }); // a box that has never written one
+    fs.writeFileSync(PLAN_FILE, body, { mode: 0o600 });
+    fs.chmodSync(PLAN_FILE, 0o600);
+    return true;
+  } catch (e) {
+    console.warn("[firetvir] could not write", PLAN_FILE, String(e.message || e));
+    return false;
+  }
+}
+
 function writePlan(mac, raw) {
   if (!MAC_RE.test(mac)) return null;
   const plan = { ...sanitizePlan(raw), ts: Date.now() };
@@ -804,20 +832,21 @@ function writePlan(mac, raw) {
   if (!all) return null;
   if (plan.devices.length) all[mac.toLowerCase()] = plan;
   else delete all[mac.toLowerCase()];
-  const body = JSON.stringify(all, null, 2);
-  // The budget is enforced where the file is WRITTEN, not only where it is read: a
-  // file the reader rejects takes every OTHER remote's setup with it, and the next
-  // legitimate save would then persist that emptiness.
-  if (body.length > MAX_PLAN_BYTES) {
-    console.warn("[firetvir] refusing to write a", body.length, "byte plan file");
-    return null;
-  }
-  try {
-    fs.writeFileSync(PLAN_FILE, body, { mode: 0o600 });
-  } catch (e) {
-    return null;
-  }
-  return plan;
+  return savePlans(all) ? plan : null;
+}
+
+// Change ONE remote's entry, leaving every other remote's exactly as it was. What
+// was last written to a remote is per remote, and the box-wide codes file cannot
+// say that: erasing one remote would clear what the screen says about another.
+function updatePlan(mac, fn) {
+  if (!MAC_RE.test(mac)) return null;
+  const all = readPlans();
+  if (!all) return null;
+  const key = mac.toLowerCase();
+  if (!all[key]) return null; // nothing set up for this remote: nothing to record
+  const next = fn({ ...all[key] });
+  all[key] = next;
+  return savePlans(all) ? next : null;
 }
 
 // A "plan" is what the UI assembles: one base codeset for everything, plus
@@ -926,16 +955,23 @@ function program(mac, planOrPath, label, cb) {
     } catch (e) {
       return cb(e);
     }
-    runTool(["program", mac, "--config", CODES_FILE], 60000, cb);
+    runTool(["program", mac, "--config", CODES_FILE], 60000, (err, r) => {
+      // Recorded against the MAC that was actually written, so a second remote's
+      // screen never reports this one's codes.
+      if (!err && r && r.ok) updatePlan(mac, (p) => ({ ...p, programmed: { label: str(label, 60), ts: Date.now() } }));
+      cb(err, r);
+    });
   });
 }
 
 function erase(mac, cb) {
   if (!MAC_RE.test(mac)) return cb(new Error("invalid MAC"));
   runTool(["erase", mac], 30000, (err, r) => {
-    // The codes file is this box's record of what the remote carries. Leaving it
-    // behind makes the screen go on naming codes that are no longer there.
+    // The devices stay - you erase to stop the remote blasting, not to throw away
+    // the setup, and re-programming should not mean building it again. What goes is
+    // the record that anything IS on the remote, for this remote only.
     if (!err && r && r.ok) {
+      updatePlan(mac, (p) => ({ ...p, programmed: null }));
       try {
         fs.unlinkSync(CODES_FILE);
       } catch (e) {}
@@ -979,5 +1015,5 @@ module.exports = {
   testKey,
   program,
   erase,
-  _test: { signature, groupSets, bestType, deviceKind, typeLabel, sanitizePlan },
+  _test: { signature, groupSets, bestType, deviceKind, typeLabel, sanitizePlan, updatePlan },
 };

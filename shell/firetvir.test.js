@@ -290,3 +290,40 @@ test("a plan file that cannot be read is never rewritten from one remote", () =>
   assert.equal(r.read, null, "and the read says so rather than answering 'nothing configured'");
   assert.ok(fs.readFileSync(file, "utf8").startsWith('{"aa:bb'), "the damaged file is left for a human");
 });
+
+test("what was written to one remote is not what another remote reports", () => {
+  // The codes file is box-wide, so it cannot answer "what is on THIS remote" - and
+  // erasing one remote used to clear the line the screen showed for the other.
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), "ftir-"));
+  fs.mkdirSync(path.join(home, ".tvbox"));
+  const plans = {
+    "aa:bb:cc:dd:ee:ff": { devices: [DEVICE], assign: {}, programmed: { label: "LG TV", ts: 5 } },
+    "11:22:33:44:55:66": { devices: [DEVICE], assign: {}, programmed: { label: "Samsung Sound Bar", ts: 6 } },
+  };
+  fs.writeFileSync(path.join(home, ".tvbox", "firetv_ir_plan.json"), JSON.stringify(plans));
+  const out = inBox(
+    home,
+    `
+    f._test.updatePlan("11:22:33:44:55:66", (p) => ({ ...p, programmed: null }));
+    console.log(JSON.stringify({
+      erased: f.readPlan("11:22:33:44:55:66").programmed,
+      other: f.readPlan("aa:bb:cc:dd:ee:ff").programmed,
+    }));
+  `,
+  );
+  const r = JSON.parse(out);
+  assert.equal(r.erased, null, "the remote that was erased no longer claims to carry codes");
+  assert.deepEqual(r.other, { label: "LG TV", ts: 5 }, "and the other remote is untouched");
+});
+
+test("the plan file is owner-only even when it already existed", () => {
+  // writeFileSync's `mode` applies only when the file is CREATED, and is masked by
+  // umask - a file that already existed would keep whatever it had.
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), "ftir-"));
+  fs.mkdirSync(path.join(home, ".tvbox"));
+  const file = path.join(home, ".tvbox", "firetv_ir_plan.json");
+  fs.writeFileSync(file, "{}");
+  fs.chmodSync(file, 0o644);
+  inBox(home, `f.writePlan("aa:bb:cc:dd:ee:ff", { devices: ${JSON.stringify([DEVICE])}, assign: {} });`);
+  assert.equal(fs.statSync(file).mode & 0o777, 0o600);
+});

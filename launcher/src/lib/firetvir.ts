@@ -63,6 +63,10 @@ export type IrAssign = Partial<Record<IrKey, { device: string; second: string | 
 export interface IrSetup {
   devices: IrPlanDevice[];
   assign: IrAssign;
+  // What was last written to THIS remote, per remote. The box-wide codes file
+  // cannot say that: erasing one remote would clear what the screen reports about
+  // another.
+  programmed: { label: string; ts: number } | null;
   ts: number;
 }
 // The wire format the shell resolves into a keymap: a codeset per key, plus an

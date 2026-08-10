@@ -312,7 +312,10 @@ export async function handleApi(
         irPlans[mac] = b.plan;
         return { ok: true, plan: b.plan };
       }
-      return { ok: true, plan: irPlans[(params.get("mac") || "").toLowerCase()] || { devices: [], assign: {}, ts: 0 } };
+      return {
+        ok: true,
+        plan: irPlans[(params.get("mac") || "").toLowerCase()] || { devices: [], assign: {}, programmed: null, ts: 0 },
+      };
     }
     case "/tvbox/api/ui/locale":
       return ok; // the demo has no shell state to mirror into
