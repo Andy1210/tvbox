@@ -248,6 +248,9 @@ async function pairWith(host, code, deps, own) {
   } catch (e) {
     return { ok: false, error: "not_a_box" };
   }
+  // A box that answered but would not deal with us says so; without this the
+  // screen blames the address for a decision the other end made.
+  if (out && typeof out.error === "string" && out.error) return { ok: false, error: out.error };
   const peer = peerFrom(out, host);
   if (!peer) return { ok: false, error: "not_a_box" };
   // Whether the other box could take ours as well. It cannot if it is offering

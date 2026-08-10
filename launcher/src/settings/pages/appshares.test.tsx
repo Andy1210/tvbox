@@ -103,6 +103,10 @@ describe("app sharing", () => {
       ],
     });
     expect(screen.getByText(/in the app itself/i)).toBeTruthy();
+    // Nothing on the page offers the action, so there is nothing to press and no
+    // request to make: asserting only the second would pass on a page that still
+    // rendered the button.
+    expect(screen.queryByText(/^(bring|pull|fetch)$/i)).toBeNull();
     expect(posted.find((p) => p.url.includes("/pull"))).toBeUndefined();
   });
 });

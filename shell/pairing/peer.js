@@ -72,15 +72,31 @@ const routes = {
     // credentials to send, and pairing with it is simply one-way.
     const from = peers.callerAddress(req);
     const theirs = peers.peerFrom(ctx.body, from);
-    const mutual = !!(theirs && rememberHook(theirs));
+    // A caller this box refuses to remember gets no key either. The refusal reasons
+    // are an id that already names another box and an address off this subnet - and
+    // a key is recorded under the id the caller CLAIMED, so issuing one anyway would
+    // let a refused caller replace the key belonging to the box it was imitating.
+    if (theirs && !rememberHook(theirs)) {
+      ctx.stopSoon(1000);
+      return ctx.json(res, { error: "refused", mutual: false });
+    }
     // Minted for THIS box, and only once the caller has passed the code: a key per
-    // peer is what lets Settings take one back without breaking the others.
+    // peer is what lets Settings take one back without breaking the others. A caller
+    // with nothing to offer is still given one - that is a one-way pairing, not a
+    // refused one.
     const mine = issueHook({ id: theirs ? theirs.id : "", name: theirs ? theirs.name : "", host: from });
     // Handing the credential over ends this session: leaving the window open would
     // let a second box take a key off the same code.
     ctx.stopSoon(1000);
-    if (!mine || !mine.token) return ctx.json(res, { error: "not_sharing", mutual });
-    ctx.json(res, { id: mine.id, name: mine.name, port: mine.port, user: mine.user, token: mine.token, mutual });
+    if (!mine || !mine.token) return ctx.json(res, { error: "not_sharing", mutual: !!theirs });
+    ctx.json(res, {
+      id: mine.id,
+      name: mine.name,
+      port: mine.port,
+      user: mine.user,
+      token: mine.token,
+      mutual: !!theirs,
+    });
   },
 };
 

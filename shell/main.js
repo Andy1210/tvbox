@@ -416,7 +416,12 @@ function rememberPeer(peer) {
 // simply one-way.
 function issueShareKey(box) {
   const cfg = config.rawAppshares();
-  if (!(cfg.enabled || []).length) return null;
+  // What is actually served, not what the list says: an id whose app has been
+  // uninstalled keeps the list non-empty while the server refuses to start on
+  // "nothing shared", and a peer would pair happily and be refused on its first
+  // pull. Same filter applyAppshares uses.
+  const known = new Set(appsharesDeps.entries().map((e) => e.id));
+  if (!(cfg.enabled || []).some((id) => known.has(id))) return null;
   const cred = appshares.newCredential();
   // The hostname is what makes a box itself here, the same source the MQTT device
   // id is derived from - so a peer list names the rooms, not addresses.
@@ -458,6 +463,20 @@ function adoptShareKey(key, peer) {
     issued: [...rows.filter((x) => x.user !== key.user), { ...mine, id: peer.id, name: peer.name }],
   });
   applyAppshares();
+}
+
+// A key nobody is named on. A pairing mints one under a placeholder id and adopts
+// it when the answer names the box, so a shell that exits between the two leaves a
+// working key that "forget this box" cannot reach - no peer row mentions it. Run at
+// startup, never during a pairing: the placeholder is legitimately unmatched while
+// the exchange is in flight.
+function pruneOrphanShareKeys() {
+  const cur = config.rawAppshares();
+  const named = new Set((cur.peers || []).map((x) => x.id));
+  const kept = (cur.issued || []).filter((x) => named.has(x.id));
+  if (kept.length === (cur.issued || []).length) return;
+  console.log("[appshares] dropping", (cur.issued || []).length - kept.length, "key(s) no box is named on");
+  config.setAppshares({ issued: kept });
 }
 
 // A key handed to something that turned out not to be a box, or to a pairing that
@@ -3302,6 +3321,7 @@ app.whenReady().then(async () => {
   });
   updater.startSchedulers(); // boot check + 6h re-check + nightly idle auto-apply
   if (config.rawFileserver().enabled) applyFileserver(); // the LAN share survives a restart
+  pruneOrphanShareKeys(); // before the server starts, so a stray key is never served
   if ((config.rawAppshares().enabled || []).length) applyAppshares(); // and so do an app's
   if (config.rawShares().length) applyShares(); // and so do the shares the box reads FROM
   setInterval(maintenance.appsAutoTick, 30 * 60 * 1000); // nightly registry app auto-update (same window)

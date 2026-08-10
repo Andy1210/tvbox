@@ -44,13 +44,24 @@ test("a box that says it lives somewhere else is still remembered where it calle
   assert.equal(remembered.host, "192.168.1.7");
 });
 
-test("a caller this box refuses to remember still gets its key, and is told it is one-way", () => {
+test("a caller this box refuses to remember gets no key either", () => {
   // Refusing happens for a reason the caller cannot fix by asking again - a name
-  // that already belongs to another box, an address off this subnet - so the
-  // pairing is not failed, it is reported as half done.
-  const r = ask(theirs, { remember: () => false });
-  assert.equal(r.answered.mutual, false);
+  // that already belongs to another box, an address off this subnet. A key is
+  // recorded under the id the caller CLAIMED, so handing one over anyway would let
+  // a refused caller replace the key belonging to the box it was imitating.
+  let issued = 0;
+  const r = ask(theirs, { remember: () => false, issue: () => (issued++, { token: "k" }) });
+  assert.deepStrictEqual(r.answered, { error: "refused", mutual: false });
+  assert.equal(issued, 0, "nothing may be minted for a caller that was turned down");
+  assert.equal(r.stopped, 1, "and the code is spent either way");
+});
+
+test("a caller with nothing of its own to offer is still given a key", () => {
+  // That is a one-way pairing, not a refused one: this box can be read from there,
+  // and the screen says which of the two happened.
+  const r = ask({ name: "gaming" }, { remember: () => false });
   assert.equal(r.answered.token, "k");
+  assert.equal(r.answered.mutual, false);
 });
 
 test("a box that offers nothing hands out no key", () => {

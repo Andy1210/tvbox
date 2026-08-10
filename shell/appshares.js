@@ -77,8 +77,9 @@ function newCredential() {
 // long dead for passwords people choose; these are 24 random bytes, so there is no
 // dictionary and no preimage to find - the hash is here to keep the key out of a
 // file at rest, not to survive a guessing attack.
+const HASH_PREFIX = "{SHA}";
 function hashSecret(secret) {
-  return "{SHA}" + crypto.createHash("sha1").update(String(secret)).digest("base64");
+  return HASH_PREFIX + crypto.createHash("sha1").update(String(secret)).digest("base64");
 }
 
 // The file rclone authenticates against: one line per box that has been paired
@@ -315,6 +316,7 @@ module.exports = {
   newToken,
   newCredential,
   hashSecret,
+  HASH_PREFIX,
   writeHtpasswd,
   HTPASSWD,
   contained,

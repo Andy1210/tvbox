@@ -160,6 +160,12 @@ test("it serves read-only, and no key reaches argv or the environment", () => {
   assert.match(file, new RegExp("^" + cred.user + ":\\{SHA\\}"), "one line per box, by hash");
   assert.ok(!file.includes(cred.secret));
   assert.equal(fs.statSync(appshares.HTPASSWD).mode & 0o777, 0o600);
+  // And it lives outside the directory rclone serves - a file of keys must not be
+  // one of the things the server can hand out.
+  assert.ok(
+    !appshares.HTPASSWD.startsWith(appshares.ROOT + path.sep),
+    "the key file must not be inside the served root",
+  );
 });
 
 test("forgetting the last box leaves a lock nobody has the key to, not an open door", () => {

@@ -415,6 +415,7 @@ function peerOk(p) {
     Number.isInteger(Number(p.port))
   );
 }
+const appshares = require("./appshares"); // only for the shape of a stored key
 // A credential handed out, as it is kept: never the secret itself.
 function issuedOk(x) {
   return (
@@ -424,7 +425,10 @@ function issuedOk(x) {
     typeof x.user === "string" &&
     /^box-[a-f0-9]{6,32}$/.test(x.user) &&
     typeof x.hash === "string" &&
-    x.hash.startsWith("{SHA}")
+    // The one place that decides the format is the one that writes the file. A
+    // literal here would silently drop every key the day that changes, and a box
+    // would lose every peer with nothing in the log to say why.
+    x.hash.startsWith(appshares.HASH_PREFIX)
   );
 }
 function setAppshares(appshares) {
