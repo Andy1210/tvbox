@@ -169,7 +169,14 @@ await window.tvbox.shares.pull(peers[0].id, shares[0].id);
 `newerThere` is what would arrive; **`olderThere` is what would be replaced by an
 older copy** - rclone copies whatever differs in the direction it was asked for, it
 does not prefer the newer file, and that count is the difference between a useful
-pull and a regret. `sameTimeDiffers` is the third case: written in the same second
+pull and a regret. `groups` breaks the same numbers down by the first folder inside the share - which
+for an emulator's saves is one per emulator, because that is how RetroArch already
+writes them. That breakdown is what makes "which box has the newer save" answerable
+at all: one date per box says nothing useful when one room played the SNES and the
+other the GameCube. `pull` takes an optional third argument naming one of those
+folders, so a room can bring the console it played without touching the rest.
+
+`sameTimeDiffers` is the third case: written in the same second
 on both sides but not the same size. rclone's default check is size AND modification
 time, so those are copied too - a verdict built on timestamps alone would report
 "nothing to do" for a pull that replaces files. `newest` is a timestamp in

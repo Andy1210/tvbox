@@ -271,8 +271,15 @@ const { ipcRenderer } = require("electron");
       compare: function (peerId, shareId) {
         return ipcRenderer.invoke("app:shares", "compare", { peerId: String(peerId), shareId: String(shareId) });
       },
-      pull: function (peerId, shareId) {
-        return ipcRenderer.invoke("app:shares", "pull", { peerId: String(peerId), shareId: String(shareId) });
+      // `group` (optional) names ONE folder inside the share - an emulator's own,
+      // as `compare` reports them - so a room can bring the console it played
+      // without touching the rest.
+      pull: function (peerId, shareId, group) {
+        return ipcRenderer.invoke("app:shares", "pull", {
+          peerId: String(peerId),
+          shareId: String(shareId),
+          group: group ? String(group) : "",
+        });
       },
     };
   }

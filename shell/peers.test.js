@@ -294,3 +294,62 @@ test("nothing here yet means everything there is worth bringing", () => {
   assert.equal(r.newerThere, 1);
   assert.equal(r.olderThere, 0);
 });
+
+test("a comparison is per emulator, because one date per box answers the wrong question", () => {
+  // Somebody played the SNES in one room and the GameCube in the other. Each box is
+  // "newer" and neither answer helps - the useful one is per emulator, which is
+  // exactly how the saves are already laid out.
+  const f = (p, iso, size) => ({ Path: p, ModTime: iso, Size: size || 10 });
+  const here = [
+    f("Snes9x/Mario.srm", "2026-08-10T09:00:00Z"),
+    f("dolphin-emu/User/GC/SRAM.raw", "2026-08-01T09:00:00Z"),
+  ];
+  const there = [
+    f("Snes9x/Mario.srm", "2026-08-02T09:00:00Z"),
+    f("dolphin-emu/User/GC/SRAM.raw", "2026-08-10T09:00:00Z"),
+  ];
+  const r = peers.compareListings(here, there);
+  assert.equal(r.newerThere, 1, "in total, one file would arrive");
+  assert.equal(r.olderThere, 1, "and one would be replaced by an older copy");
+  const by = Object.fromEntries(r.groups.map((g) => [g.name, g]));
+  assert.deepStrictEqual(Object.keys(by).sort(), ["Snes9x", "dolphin-emu"]);
+  assert.equal(by["dolphin-emu"].newerThere, 1, "the GameCube save is newer in the other room");
+  assert.equal(by["dolphin-emu"].olderThere, 0);
+  assert.equal(by["Snes9x"].olderThere, 1, "and the SNES one is newer here");
+  assert.equal(by["Snes9x"].newerThere, 0);
+  assert.equal(new Date(by["Snes9x"].here.newest).toISOString(), "2026-08-10T09:00:00.000Z");
+});
+
+test("a file lying loose in a share belongs to no emulator", () => {
+  const r = peers.compareListings([], [{ Path: "loose.srm", ModTime: "2026-08-10T09:00:00Z", Size: 1 }]);
+  assert.equal(r.newerThere, 1, "it still counts in the total");
+  assert.deepStrictEqual(r.groups, [], "but there is nothing to ask for by name");
+});
+
+test("the folder a pull may name is one folder, and not a way out of the share", () => {
+  // Emulator folders carry spaces and dashes ("Beetle PSX HW"), so the rule cannot
+  // be a tidy identifier - it is "one segment, nothing that traverses".
+  assert.equal(peers.groupNameOk("Beetle PSX HW"), true);
+  assert.equal(peers.groupNameOk("dolphin-emu"), true);
+  for (const bad of ["", "..", ".", "a/b", "a\\b", "x ", " x", "a".repeat(129)]) {
+    assert.equal(peers.groupNameOk(bad), false, JSON.stringify(bad));
+  }
+  const argv = peers.pullArgv(
+    { host: "h", port: 1, user: "box-a1", token: "t" },
+    "retroarch/saves",
+    "/dest/Snes9x",
+    "/b",
+    [],
+    "Snes9x",
+  );
+  assert.equal(argv[2], ":webdav:retroarch/saves/Snes9x", "one level below the share, never above it");
+  assert.equal(argv[3], "/dest/Snes9x");
+  const whole = peers.pullArgv(
+    { host: "h", port: 1, user: "box-a1", token: "t" },
+    "retroarch/saves",
+    "/dest",
+    "/b",
+    [],
+  );
+  assert.equal(whole[2], ":webdav:retroarch/saves", "and the whole share when none is named");
+});
