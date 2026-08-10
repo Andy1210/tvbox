@@ -163,7 +163,11 @@ boxes cannot overwrite each other's copy behind the user's back.
 
 `pull` answers `{ ok, error? }`. `unknown_share` means this app does not declare it
 (or is not installed on the box that has it), `unknown_peer` that the box has been
-forgotten since.
+forgotten since, `busy` that one of this app's pulls is still running (one at a
+time - two copies into the same folder race each other), `rclone_missing` that the
+box has no rclone, and `pull_failed` that the copy itself did not finish. rclone's
+own message is logged on the box and deliberately not returned: it names the peer's
+address and the local path, which `list` is careful not to hand over.
 
 ## Where an app runs (the isolation model)
 

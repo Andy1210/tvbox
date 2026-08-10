@@ -27,7 +27,7 @@ const STATUS = (over: Record<string, unknown> = {}) => ({
   enabled: false,
   running: false,
   port: 8096,
-  hasToken: false,
+  issued: 0,
   rclone: true,
   shares: [
     { id: "retroarch/saves", appId: "retroarch", appName: "RetroArch", name: "saves", present: true, on: false },

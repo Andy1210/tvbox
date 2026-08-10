@@ -261,7 +261,7 @@ export interface AppSharesStatus {
   enabled: boolean;
   running: boolean;
   port: number;
-  hasToken: boolean;
+  issued: number; // boxes holding a key to this one - each revocable on its own
   rclone: boolean;
   installing?: boolean;
   shares: AppShare[];
