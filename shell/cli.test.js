@@ -60,3 +60,34 @@ test("aptRepoPlan: rejects a deb line whose repo URL has no host", () => {
   const line = "deb [signed-by=" + KEYRING + "] https://:8080/ suite main";
   assert.throws(() => cli.aptRepoPlan({ id: "spotify" }, { keyUrl: base.keyUrl, line }), /repository URL/);
 });
+
+// --- where a backup password is allowed to come from ---
+
+test("backupPasswordSource: --password is refused in both spellings, whatever else is set", () => {
+  // Not just dropped: without this the file argument would be the password,
+  // since `backup --password pw file` has "pw" as its first non-flag word.
+  for (const argv of [
+    ["backup", "--password", "pw", "f.json"],
+    ["backup", "--password=pw", "f.json"], // one word, and just as readable in ps
+  ]) {
+    const r = cli.backupPasswordSource("from-env", argv, true);
+    assert.equal(r.kind, "error", argv.join(" "));
+    assert.match(r.message, /--password/);
+  }
+});
+
+test("backupPasswordSource: the environment wins over the prompt", () => {
+  assert.equal(cli.backupPasswordSource("pw", ["backup", "f.json"], true).kind, "env");
+  assert.equal(cli.backupPasswordSource("pw", ["backup", "f.json"], false).kind, "env");
+});
+
+test("backupPasswordSource: --password-stdin is the non-interactive path", () => {
+  assert.equal(cli.backupPasswordSource("", ["restore", "f.json", "--password-stdin"], false).kind, "stdin");
+});
+
+test("backupPasswordSource: a terminal asks, and a pipe with nothing to read fails", () => {
+  assert.equal(cli.backupPasswordSource("", ["backup", "f.json"], true).kind, "prompt");
+  const r = cli.backupPasswordSource("", ["backup", "f.json"], false);
+  assert.equal(r.kind, "error");
+  assert.match(r.message, /TVBOX_BACKUP_PASSWORD/);
+});

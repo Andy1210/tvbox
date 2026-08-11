@@ -5,7 +5,8 @@
 //   tvbox install <id> [-f]    run an app's bundle install recipe (-f reinstalls)
 //   tvbox remove <id>          remove an installed app's data
 //   tvbox update [--check]     OTA self-update (--check only reports)
-//   tvbox backup <file>        encrypted settings backup (asks TVBOX_BACKUP_PASSWORD / --password)
+//   tvbox backup <file>        encrypted settings backup (password: TVBOX_BACKUP_PASSWORD,
+//                              --password-stdin, or a prompt with the echo off)
 //   tvbox restore <file>       restore a backup (then restart the shell)
 //   tvbox reconcile [--all]    re-acquire what a restore couldn't carry (packages/deps/bundles)
 // New web-client files are picked up live; a NEW app manifest needs a shell
@@ -104,6 +105,111 @@ function installAptRepo(m, r, log) {
 // The no-root dep install logic (static `requires.download` binaries plus
 // `requires.flatpak` apps) lives in install.js now, shared with the shell's UI
 // dep-install path - see apps.installUiDeps below.
+
+// Where a backup password may come from, and deliberately not from argv: a
+// command line is world-readable through /proc while the process runs, and it
+// stays in the history of whoever typed it. Pure, so the precedence is testable
+// without a terminal; the reading itself is below.
+//   env    - what a script should use
+//   stdin  - `--password-stdin`, for a password that comes out of a secret store
+//   prompt - a terminal, with the echo off
+function backupPasswordSource(env, argv, isTty) {
+  // `--password=pw` too, and not as a nicety: the point of refusing the flag is
+  // that the password must not be in argv, and that form puts it there just as
+  // plainly while looking like an unknown option to a naive check.
+  if (argv.some((a) => a === "--password" || a.startsWith("--password=")))
+    return {
+      kind: "error",
+      message: "--password is gone: any user can read a command line. Use TVBOX_BACKUP_PASSWORD or --password-stdin.",
+    };
+  if (env) return { kind: "env" };
+  if (argv.includes("--password-stdin")) return { kind: "stdin" };
+  if (isTty) return { kind: "prompt" };
+  return {
+    kind: "error",
+    message: "no password: set TVBOX_BACKUP_PASSWORD, or pipe one in with --password-stdin",
+  };
+}
+
+// Whatever a paste delivered past the Enter that ended the previous prompt.
+// Raw mode hands over bytes, not lines, so "pw\npw\n" pasted into the backup's
+// first question carries the answer to its second one inside the same chunk.
+let typedAhead = "";
+
+// Read one line with the echo off. Raw mode is the only way to keep the
+// characters off the screen, so this owns the whole keyboard for the duration,
+// which means honouring Ctrl-C and reading the terminal's own language. A chunk
+// is not a keystroke: an arrow key's escape sequence has to be recognised
+// wherever it falls, not only at the start of one, and what it spans is dropped
+// rather than typed into the password.
+function promptHidden(label) {
+  return new Promise((resolve, reject) => {
+    const stdin = process.stdin;
+    // The prompt goes to stderr so `tvbox backup /dev/stdout > file` still works.
+    process.stderr.write(label);
+    const wasRaw = stdin.isRaw;
+    let pw = "";
+    let esc = 0; // 0 = typing, 1 = just saw ESC, 2 = inside a CSI, 3 = inside an SS3
+    const finish = (err, val, rest) => {
+      typedAhead = rest || "";
+      stdin.off("data", onData);
+      stdin.setRawMode(wasRaw);
+      stdin.pause();
+      process.stderr.write("\n");
+      if (err) reject(err);
+      else resolve(val);
+    };
+    // True once the line has ended; anything past that belongs to the next one.
+    const feed = (text) => {
+      let used = 0;
+      for (const ch of text) {
+        used += ch.length;
+        if (esc === 1) esc = ch === "[" ? 2 : ch === "O" ? 3 : 0;
+        else if (esc === 2)
+          esc = ch >= "@" && ch <= "~" ? 0 : 2; // a CSI ends on its final byte
+        else if (esc === 3)
+          esc = 0; // an SS3 is exactly one more character
+        else if (ch === "\u001b") esc = 1;
+        else if (ch === "\r" || ch === "\n" || ch === "\u0004") {
+          finish(null, pw, text.slice(used));
+          return true;
+        } else if (ch === "\u0003") {
+          finish(new Error("cancelled"), null, "");
+          return true;
+        } else if (ch === "\u007f" || ch === "\b") pw = pw.slice(0, -1);
+        else if (ch >= " ") pw += ch;
+      }
+      return false;
+    };
+    const onData = (chunk) => feed(chunk);
+    if (typedAhead) {
+      const ahead = typedAhead;
+      typedAhead = "";
+      if (feed(ahead)) return;
+    }
+    stdin.setRawMode(true);
+    stdin.resume();
+    stdin.setEncoding("utf8");
+    stdin.on("data", onData);
+  });
+}
+
+// A backup asks twice, because a typo in it is only discovered by the restore
+// that cannot open the file - by which time the box it came from may be gone.
+async function readBackupPassword(cmd) {
+  const src = backupPasswordSource(process.env.TVBOX_BACKUP_PASSWORD, process.argv.slice(2), !!process.stdin.isTTY);
+  if (src.kind === "error") throw new Error(src.message);
+  if (src.kind === "env") return process.env.TVBOX_BACKUP_PASSWORD;
+  if (src.kind === "stdin") {
+    const pw = fs.readFileSync(0, "utf8").replace(/\r?\n$/, "");
+    if (!pw) throw new Error("--password-stdin: nothing arrived on stdin");
+    return pw;
+  }
+  const pw = await promptHidden("Password: ");
+  if (!pw) throw new Error("empty password");
+  if (cmd === "backup" && (await promptHidden("Repeat: ")) !== pw) throw new Error("the two passwords differ");
+  return pw;
+}
 
 function list() {
   const ms = apps.getManifests();
@@ -302,25 +408,25 @@ function main() {
   // no launcher localStorage here - locale/app-order need the UI path)
   if (cmd === "backup" || cmd === "restore") {
     const file = argv.slice(1).find((a) => !a.startsWith("-"));
-    const pwIdx = argv.indexOf("--password");
-    const password = pwIdx >= 0 ? argv[pwIdx + 1] : process.env.TVBOX_BACKUP_PASSWORD;
-    if (!file || !password) {
-      console.error(`usage: tvbox ${cmd} <file> --password <pw>   (or TVBOX_BACKUP_PASSWORD)`);
+    if (!file) {
+      console.error(`usage: tvbox ${cmd} <file>   (password: TVBOX_BACKUP_PASSWORD, --password-stdin, or a prompt)`);
       process.exit(1);
     }
     const backup = require("./backup");
-    try {
-      if (cmd === "backup") {
-        fs.writeFileSync(file, JSON.stringify(backup.encrypt(backup.collect(null), password)), { mode: 0o600 });
-        console.log("backup written:", file);
-      } else {
-        backup.apply(backup.decrypt(JSON.parse(fs.readFileSync(file, "utf8")), password));
-        console.log("restored. Restart the shell to load it:  pkill -f 'electron[/]dist'");
-      }
-    } catch (e) {
-      console.error(cmd + " failed: " + e.message);
-      process.exit(1);
-    }
+    readBackupPassword(cmd)
+      .then((password) => {
+        if (cmd === "backup") {
+          fs.writeFileSync(file, JSON.stringify(backup.encrypt(backup.collect(null), password)), { mode: 0o600 });
+          console.log("backup written:", file);
+        } else {
+          backup.apply(backup.decrypt(JSON.parse(fs.readFileSync(file, "utf8")), password));
+          console.log("restored. Restart the shell to load it:  pkill -f 'electron[/]dist'");
+        }
+      })
+      .catch((e) => {
+        console.error(cmd + " failed: " + e.message);
+        process.exit(1);
+      });
     return;
   }
 
@@ -380,4 +486,4 @@ function main() {
 
 if (require.main === module) main(); // run only as the CLI, not when required by a test
 
-module.exports = { aptRepoPlan, installAptRepo };
+module.exports = { aptRepoPlan, installAptRepo, backupPasswordSource };
