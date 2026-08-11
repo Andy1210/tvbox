@@ -5,6 +5,22 @@ updates). `scripts/make-release.sh` lifts the current version's `hu`/`en`
 blocks into the OTA feed's `notes` - keep both languages, keep it short, and
 write for the person on the couch (what changes for THEM), not for developers.
 
+## 2.17.1
+
+### hu
+
+- **A távirányítós mikrofon nem tud némán elakadni.** Ha az asszisztens elkezd egy
+  kérdést és aztán nem válaszol, a doboz eddig kivárta a végtelenségig: a mikrofon
+  utána már semmit nem küldött, és semmi nem jelezte, hogy baj van. Mostantól egy
+  perc után magától újrakapcsolódik, és a következő nyomásra megint működik.
+
+### en
+
+- **The remote's microphone can no longer get stuck without saying so.** If the
+  assistant started a question and then never answered, the box waited for it
+  forever: after that the microphone sent nothing, and nothing said why. It now
+  reconnects on its own after a minute, and the next press works again.
+
 ## 2.17.0
 
 ### hu
