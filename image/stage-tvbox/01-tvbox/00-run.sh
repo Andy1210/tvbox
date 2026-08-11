@@ -520,13 +520,19 @@ fi
 # blanked once the NM keyfile exists (the WiFi block above is write-once and
 # no-ops while $KF is present), so we never strip a PSK that was not actually
 # written into a connection. Atomic rewrite via a temp file on the same
-# partition; any failure leaves the original untouched. ---
+# partition; any failure leaves the original untouched. The syncs around the
+# rename are what make it atomic on FAT: the directory entry can otherwise reach
+# the card before the data it points at, which here would leave the cleartext
+# password in an orphaned cluster chain (same shape as write_cmdline in
+# provision.sh). ---
 SCRUB_WIFI=""
 [ -f "$KF" ] && SCRUB_WIFI="s/^WIFI_PASSWORD=.*/WIFI_PASSWORD=/"
 if [ -f "$CONF" ] && grep -Eq '^(PASSWORD|WIFI_PASSWORD)=.' "$CONF"; then
   TMP="$CONF.tvbox-scrub.$$"
   if sed "s/^PASSWORD=.*/PASSWORD=/; $SCRUB_WIFI" "$CONF" > "$TMP" 2>/dev/null && [ -s "$TMP" ]; then
+    sync
     mv -f "$TMP" "$CONF"
+    sync
   else
     rm -f "$TMP"
   fi
