@@ -5,6 +5,36 @@ updates). `scripts/make-release.sh` lifts the current version's `hu`/`en`
 blocks into the OTA feed's `notes` - keep both languages, keep it short, and
 write for the person on the couch (what changes for THEM), not for developers.
 
+## 2.17.0
+
+### hu
+
+- **Olyan készülékhez is van kód, amihez eddig egyik adatbázisban sem volt.** Néhány
+  soundbar és hangfal a saját jelét használja, amit a régi kódlista nem tudott leírni,
+  így a távirányítóra sem lehetett felvinni. A kódlista mostantól egy második,
+  felvétel-alapú adatbázist is tartalmaz, szóval ezek a készülékek is kiválaszthatók.
+- **Azonnal betölt a lista.** Egy márka megnyitása eddig letöltéssel járt, a nagyobbaknál
+  kivárással; most egy apró fájl az egész. A sor azt is mutatja, melyik adatbázisból jön
+  a kód, és mennyi távirányító küldi ugyanazt.
+- **Ami már be van állítva, az marad, és megbízhatóbb lett.** A beállítás magukat a
+  kódokat tárolja, így a "Mentés a távirányítóra" internet nélkül is működik, és nem
+  változik meg attól, hogy a kódlista közben frissült.
+- A kódlista hetente újraépül, és a Beállítások megmutatja, mikor készült.
+
+### en
+
+- **There are now codes for devices no database could describe before.** Some soundbars
+  and speakers use a signal of their own that the old code list could not express, so
+  they could not be put on the remote at all. The list now includes a second,
+  capture-based database, so those devices can be picked too.
+- **The list opens at once.** Choosing a brand used to mean a download, and a wait on the
+  bigger brands; now it is one small file. A row also says which database its code comes
+  from, and how many remotes send the same one.
+- **Whatever is already set up stays, and is steadier.** The setup stores the codes
+  themselves, so "Save to the remote" works with no internet and cannot change because
+  the code list moved on.
+- The code list is rebuilt weekly, and Settings shows when it was made.
+
 ## 2.16.0
 
 ### hu
