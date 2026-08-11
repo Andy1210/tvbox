@@ -1209,8 +1209,8 @@ function serve() {
     // built by scripts/ir-index/build.js rather than assembled here.
     if (p === "/tvbox/api/firetvir/brand") {
       const q = (req.url || "").split("?")[1];
-      const brand = q ? new URLSearchParams(q).get("slug") || "" : "";
-      firetvir.brandDevices(brand, (err, r) =>
+      const slug = q ? new URLSearchParams(q).get("slug") || "" : "";
+      firetvir.brandDevices(slug, (err, r) =>
         httpserver.jsonRes(
           res,
           err ? { ok: false, error: String(err.message || err).slice(0, 200) } : { ok: true, ...r },

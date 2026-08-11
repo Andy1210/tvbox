@@ -42,14 +42,27 @@ const brandKey = (b) =>
   String(b)
     .toUpperCase()
     .replace(/[^A-Z0-9]/g, "");
-const slugOf = (b) =>
-  String(b)
+// The brand's own name plus a hash of it, and every part of that is bounded so the
+// result cannot be a slug the box refuses (`validSlug` in shell/irindex.js: starts
+// alphanumeric, no `--`, at most 46 characters). Getting this wrong is silent - the
+// brand file is written, the index lists it, and the box drops the row on arrival - so
+// the shape is enforced here AND checked against the client's rule before publishing.
+const SLUG_MAX_NAME = 32;
+const slugOf = (b) => {
+  const name = String(b)
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-|-$/g, "")
-    .slice(0, 40) +
-  "-" +
-  crypto.createHash("sha1").update(brandKey(b)).digest("hex").slice(0, 6);
+    .slice(0, SLUG_MAX_NAME)
+    .replace(/^-+|-+$/g, "");
+  const hash = crypto.createHash("sha1").update(brandKey(b)).digest("hex").slice(0, 6);
+  return (name || "brand") + "-" + hash;
+};
+
+// The rule the box applies to a slug it is asked to fetch (shell/irindex.js
+// `validSlug`). Kept here as well rather than imported, because the generator must not
+// require the shell's runtime modules - and a copy that drifts fails the build below
+// instead of quietly costing a brand.
+const validSlug = (s) => /^[a-z0-9][a-z0-9-]{0,45}$/.test(s) && !s.includes("--");
 
 function readSets(root, mod, label) {
   const sets = mod.sets(root);
@@ -144,6 +157,7 @@ function main() {
     const { devices, skipped } = groupSets(b.sets);
     if (!devices.length) continue;
     const slug = slugOf(brand);
+    if (!validSlug(slug)) throw new Error(`slug the box would refuse: ${slug} (brand ${brand})`);
     const body = JSON.stringify({ brand, slug, generated, devices, skipped });
     fs.writeFileSync(path.join(out, "brands", slug + ".json"), body);
     bytes += body.length;
@@ -180,4 +194,4 @@ function main() {
 }
 
 if (require.main === module) main();
-module.exports = { brandKey, slugOf, IRDB_NOTICE, FLIPPER_NOTICE, FORMAT_VERSION };
+module.exports = { brandKey, slugOf, validSlug, IRDB_NOTICE, FLIPPER_NOTICE, FORMAT_VERSION };
