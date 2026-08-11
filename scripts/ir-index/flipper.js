@@ -23,6 +23,7 @@
 // under `Unknown_AH59-02767C`.
 const fs = require("fs");
 const path = require("path");
+const { canon, rejected } = require("./keys");
 
 const SKIP_DIR = "_Converted_";
 const MAX_BLOCKS = 600; // the deepest curated file has 256 buttons
@@ -38,24 +39,8 @@ const MAX_RAW_TIMINGS = 512;
 // Measured over the curated tree: `Vol_up`/`Vol_dn` carry 1375 of the volume blocks,
 // but the same button is also `VOL+`, `Vol_down`, `Vol_dwn`, `Volume_up`, `Vol_plus`,
 // `Vol_min`. Exact spellings are ranked ahead of loose ones so a file that has both
-// `Mute` and `Av_mute` binds the first.
-const canon = (s) =>
-  String(s || "")
-    .toUpperCase()
-    .trim()
-    .replace(/^KEY[_ ]/, "")
-    .replace(/[^A-Z0-9+-]/g, "");
-
-// A name that must never bind to the key it otherwise looks like. `Powerful` is an
-// air-conditioner mode, `Woofer_up` is not the volume, and muting the VIDEO is not
-// what someone pressing Mute on a soundbar wants.
-const REJECT = {
-  VolumeUp: /WOOFER|BASS|TREBLE|SUB|CENTER|SURROUND|MIC|ZOOM|SPEED/,
-  VolumeDown: /WOOFER|BASS|TREBLE|SUB|CENTER|SURROUND|MIC|ZOOM|SPEED/,
-  Mute: /MIC|VIDEO|^A-?V|SCREEN|PAUSE/,
-  Power: /POWERFUL|SUBWOOFER|MIC/,
-};
-
+// `Mute` and `Av_mute` binds the first. The names that must never bind at all are
+// shared with the irdb reader (scripts/ir-index/keys.js).
 const KEY_NAMES = {
   VolumeUp: {
     exact: ["VOLUP", "VOL+", "VOLUME+", "VOLUMEUP", "VOLPLUS", "+VOLUME", "VOLUMEPLUS"],
@@ -83,7 +68,7 @@ function matchKey(name) {
   const n = canon(name);
   if (!n) return null;
   for (const [key, spec] of Object.entries(KEY_NAMES)) {
-    if (REJECT[key] && REJECT[key].test(n)) continue;
+    if (rejected(key, n)) continue;
     const i = spec.exact.indexOf(n);
     if (i >= 0) return [key, 100 - i];
     for (let j = 0; j < spec.loose.length; j++) if (spec.loose[j].test(n)) return [key, 50 - j];

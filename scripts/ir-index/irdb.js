@@ -9,6 +9,7 @@
 // CSV any more; it reads what scripts/ir-index/build.js publishes.
 const fs = require("fs");
 const path = require("path");
+const { canon, rejected } = require("./keys");
 
 // Function-name synonyms across irdb (uppercased, checked in order: an exact match
 // wins over a contains match, entries without a "/" combo win over combos).
@@ -19,36 +20,16 @@ const KEY_SYNONYMS = {
   Power: ["POWER TOGGLE", "POWER", "POWER ON/OFF", "STANDBY"],
 };
 
-// irdb mixes two naming conventions: human ("VOLUME +", "VOL UP") and evdev-style
-// ("KEY_VOLUMEUP"), the latter common on audio/soundbar remotes. Collapsing both to
-// letters-only with the KEY_ prefix dropped makes them comparable - without this, a
-// KEY_* codeset silently loses Volume up/down (MUTE and POWER happened to survive as
-// substrings), which is exactly the case for a Samsung soundbar.
-const canon = (s) =>
-  String(s || "")
-    .toUpperCase()
-    .trim()
-    .replace(/^KEY[_ ]/, "")
-    .replace(/[^A-Z0-9+-]/g, "");
-
-// A name that must never bind, whatever it contains. `SUBWOOFER VOL+` contains the
-// synonym `VOL+` and `POWERFUL` contains `POWER`, so a contains-match binds them to the
-// TV's volume or power without this. The Flipper reader guards the same names
-// (scripts/ir-index/flipper.js `REJECT`); one index cannot hold two answers for one
-// spelling.
-const REJECT = {
-  VolumeUp: /WOOFER|BASS|TREBLE|SUB|CENTER|SURROUND|MIC|ZOOM/,
-  VolumeDown: /WOOFER|BASS|TREBLE|SUB|CENTER|SURROUND|MIC|ZOOM/,
-  Mute: /MIC|VIDEO|SCREEN/,
-  Power: /POWERFUL|SUBWOOFER|MIC/,
-};
-
+// A contains-match is what makes `KEY_VOLUMEUP` work - without it a KEY_* codeset
+// silently loses volume up and down while MUTE and POWER survive as substrings - and it
+// is also what would bind `SUBWOOFER VOL+` to the volume. The names that must never bind
+// are shared with the Flipper reader (scripts/ir-index/keys.js).
 function pickRow(rows, synonyms, key) {
   let best = null;
   let bestScore = -1;
   for (const r of rows) {
     const name = canon(r.functionname);
-    if (key && REJECT[key] && REJECT[key].test(name)) continue;
+    if (key && rejected(key, name)) continue;
     const slashy = r.functionname.includes("/");
     for (let i = 0; i < synonyms.length; i++) {
       const syn = canon(synonyms[i]);
@@ -166,7 +147,6 @@ function sets(root) {
 
 module.exports = {
   KEY_SYNONYMS,
-  REJECT,
   canon,
   parseCsv,
   pickRow,

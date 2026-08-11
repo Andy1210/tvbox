@@ -146,8 +146,10 @@ github.com/probonopd/irdb/issues. Flipper-IRDB is CC0, so it needs none - it is
 credited anyway.
 
 **Pointing a fork's boxes at its own build:** `firetvir.indexBase` in
-`~/.tvbox/config.json` (https only), the same kind of self-host override as
-`update.feed`.
+`~/.tvbox/config.json`, the same kind of self-host override as `update.feed` and vetted
+by the same rule (`netguard.isAllowedFetchUrl`): https to any host, plain http only to a
+LAN or loopback address. Every fetch is then pinned to that origin, and a redirect off it
+is refused.
 
 ### The manual way (SSH)
 
