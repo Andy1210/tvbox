@@ -14,6 +14,7 @@ voice/voice_satellite.py
 remote/firetv_remote_ir.py
 remote/keymap_compile.py
 remote/ir_protocols.py
+remote/flipper_protocols.py
 remote/firetv_hid_probe.py
 remote/firetv_tv_codes.example.json
 deploy/run-shell.sh

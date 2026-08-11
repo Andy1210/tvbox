@@ -308,7 +308,8 @@
     "bleak": "Bluetooth LE (távirányító IR-programozás)",
     "react": "indító felület",
     "vite": "indító build",
-    "tailwind": "indító stílus"
+    "tailwind": "indító stílus",
+    "flipperirdb": "a második TV-kód adatbázis - ez olyan jelet is tud, amit egyik dekóder sem ismer"
   },
   "app": {
     "shellUnreachable": "A box nem elérhető",
@@ -580,7 +581,7 @@
     "title": "TV IR (a távirányító saját jeladója)",
     "entry": "TV IR (a távirányító saját jeladója)",
     "hint": "Ebben a távirányítóban van infra jeladó. Vedd fel a szobában lévő készülékeket, aztán add meg, melyik gomb melyiket vezérelje - Fire TV doboz nem kell hozzá.",
-    "credit": "A kódok a közösségi irdb adatbázisból származnak (github.com/probonopd/irdb). Lásd a Névjegy menüt.",
+    "credit": "A kódok a közösségi irdb adatbázisból és a Flipper-IRDB-ből származnak, egy indexbe fűzve, amit a box letölt. Lásd a Névjegy menüt.",
     "key": {
       "VolumeUp": "Hangerő +",
       "VolumeDown": "Hangerő −",
@@ -654,15 +655,13 @@
     "byLetter": "Kezdőbetű szerint",
     "letterOther": "0-9 és egyéb",
     "brandCount": "{n} márka",
-    "setCount": "{n} kódkészlet",
     "matches": "{n} találat",
     "noMatch": "Nincs ilyen nevű márka.",
     "narrow": "Túl sok - írj tovább.",
     "brandsError": "Nem sikerült betölteni a listát: {error}",
     "retry": "Újra",
     "loading": "Betöltés…",
-    "setsHint": "Az azonos jelet küldő kódkészletek itt egy sorban vannak.",
-    "scanning": "Kódkészletek beolvasása… {done}/{total}",
+    "setsHint": "Az egyforma jelet küldő kódok itt egy sor.",
     "devicesFound": "{n} készülék",
     "onlyWith": "Csak amiben van {key}",
     "onlyWithHint": "Elrejti azokat a kódokat, amikben nincs ilyen gomb.",
@@ -673,9 +672,15 @@
     "readFailed": "Nem sikerült beolvasni a távirányító beállítását a dobozról. Semmi sem változott.",
     "saveFailed": "A doboz nem mentette el. Semmi sem változott.",
     "tooManyDevices": "Egy távirányító {n} készüléket vezérelhet. Előbb vegyél le egyet.",
-    "partial": "{n} kódkészletet nem sikerült letölteni - a lista hiányos lehet.",
     "kindFilterHint": "Balra-jobbra váltasz.",
-    "back": "Vissza"
+    "back": "Vissza",
+    "deviceCount": "készülék: {n}",
+    "database": "Adatbázis",
+    "source": {
+      "irdb": "irdb",
+      "flipper": "Flipper-IRDB"
+    },
+    "indexAge": "A kódlista {date}-i."
   },
   "fileserver": {
     "title": "Fájlkiszolgáló",

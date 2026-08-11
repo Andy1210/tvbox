@@ -52,6 +52,10 @@ jobs:
         # The pairing providers are tested too - one of them answers another box on
         # the LAN, which is not a place to find out a test file was never run.
         run: node --test shell/*.test.js shell/pairing/*.test.js
+      # The TV-code index generator (scripts/ir-index/) runs in the demo workflow, not
+      # on a box - but what it publishes is what every box programs a remote from.
+      - name: TV-code index generator unit tests
+        run: node --test scripts/ir-index/*.test.js
       # The root-side boot scripts (diagnostics + safe mode) are POSIX sh, and they
       # are tested the same way: each runs against a fake root with its commands
       # stubbed onto PATH, so no test touches the runner's real state.
@@ -111,6 +115,7 @@ jobs:
           python3 -m py_compile cec/cec_uinput_bridge.py remote/remote_input_bridge.py
           python3 -m py_compile gamepad/gamepad_shim.py
           python3 -m py_compile remote/firetv_remote_ir.py remote/keymap_compile.py remote/ir_protocols.py remote/firetv_hid_probe.py
+          python3 -m py_compile remote/flipper_protocols.py scripts/ir-index/frame_sig.py
           python3 -m py_compile voice/voice_satellite.py
           # The Home Assistant custom integration. Only a syntax check: importing it
           # needs Home Assistant itself, which is not a dependency of this repo.
@@ -129,6 +134,7 @@ jobs:
         run: |
           python3 remote/keymap_compile.py
           python3 remote/ir_protocols_test.py
+          python3 remote/flipper_protocols_test.py
           python3 remote/remote_input_bridge_test.py
           python3 gamepad/gamepad_shim_test.py
           python3 voice/voice_satellite_test.py

@@ -61,9 +61,6 @@ test("every file in the infra source dirs is listed in infra.list or consciously
   const NOT_SHIPPED = new Set([
     "deploy.sh", // the dev-deploy driver itself
     "infra.list", // the list itself
-    "ir_protocols_test.py", // unit test - runs in CI, never ships to a box
-    "gamepad_shim_test.py", // ditto (stubs evdev, so CI needs no hardware)
-    "remote_input_bridge_test.py", // ditto (stubs evdev; decodes captured HID reports)
   ]);
   const listed = new Set(infraListBasenames());
   const repo = path.join(__dirname, "..");
@@ -71,10 +68,10 @@ test("every file in the infra source dirs is listed in infra.list or consciously
     for (const name of fs.readdirSync(path.join(repo, dir))) {
       if (!fs.statSync(path.join(repo, dir, name)).isFile()) continue; // __pycache__ etc.
       if (NOT_SHIPPED.has(name)) continue;
-      // A test lives next to the script it tests (deploy/tvbox-diag.test.js and
-      // friends) and must never reach a box - same rule as the *_test.py entries
-      // above, as a pattern so adding one is not a CI failure.
-      if (name.endsWith(".test.js")) continue;
+      // A test lives next to the script it tests (deploy/tvbox-diag.test.js, the
+      // python encoders' *_test.py) and must never reach a box. Both as patterns, so
+      // adding a test is not a CI failure.
+      if (name.endsWith(".test.js") || name.endsWith("_test.py")) continue;
       assert.ok(
         listed.has(name),
         dir +

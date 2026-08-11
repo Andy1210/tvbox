@@ -2,7 +2,7 @@ import { describe, it, expect, vi, afterEach } from "vitest";
 import { useEffect } from "react";
 import { act, cleanup, render, screen } from "@testing-library/react";
 import { FiretvIrPage } from "./firetvir";
-import { toIrPlan, type IrSetup } from "../../lib/firetvir";
+import { forKey, type IrCode, type IrSetup } from "../../lib/firetvir";
 import { setupRemote, setFocus, remote } from "../../test/remote";
 import { SettingsNavProvider, useSettingsNav, type StackEntry } from "../nav";
 
@@ -27,47 +27,64 @@ const Page = () => <SettingsNavProvider>{(stack) => <Stack stack={stack} />}</Se
 
 setupRemote();
 
-// Samsung as the box really merges it: one TV code that dozens of remote model
-// numbers share, a soundbar with volume but no power, and an air conditioner whose
-// IR format this box cannot generate.
+// Samsung as the index publishes it: one TV code that dozens of remote model numbers
+// share, a soundbar whose volume is a raw capture (the kind only the second database
+// can carry), and an air conditioner whose IR format this box cannot generate.
+const irdb = (protocol: string, device: number, subdevice: number, fn: number): IrCode => ({
+  protocol,
+  entry: { irdb: { protocol, device, subdevice, function: fn } },
+});
+const RAW: IrCode = { protocol: "raw", entry: { raw: [452, 449, 50, 50, 50, 151, 50], frequency: 38000 } };
+
 const SAMSUNG = [
   {
     id: "aaaaaaaaaaaa",
-    path: "codes/Samsung/TV/7,7.csv",
     label: "TV",
     kind: "tv",
     count: 27,
     types: ["TV"],
-    keys: ["VolumeUp", "VolumeDown", "Mute", "Power"],
+    sources: ["irdb"],
     protocols: ["NECx2"],
     variant: "NECx2 7,7",
-    supported: { NECx2: true },
+    usable: true,
+    keys: {
+      VolumeUp: irdb("NECx2", 7, 7, 7),
+      VolumeDown: irdb("NECx2", 7, 7, 11),
+      Mute: irdb("NECx2", 7, 7, 15),
+      Power: irdb("NECx2", 7, 7, 2),
+    },
   },
   {
     id: "bbbbbbbbbbbb",
-    path: "codes/Samsung/Unknown_AH59-01527F/67,83.csv",
     label: "AH59-01527F",
-    kind: "other",
+    kind: "audio",
     count: 1,
-    types: ["AH59-01527F"],
-    keys: ["VolumeUp", "VolumeDown", "Mute"],
-    protocols: ["NECx2"],
-    variant: "NECx2 67,83",
-    supported: { NECx2: true },
+    types: ["Sound Bars"],
+    sources: ["flipper"],
+    protocols: ["raw"],
+    variant: "raw 38 kHz",
+    usable: true,
+    keys: { VolumeUp: RAW, VolumeDown: RAW, Mute: RAW },
   },
   {
     id: "cccccccccccc",
-    path: "codes/Samsung/Air Conditioner/1,8.csv",
     label: "Air Conditioner",
     kind: "climate",
     count: 2,
     types: ["Air Conditioner"],
-    keys: ["Power"],
+    sources: ["irdb"],
     protocols: ["Samsung20"],
     variant: "Samsung20 1,8",
-    supported: { Samsung20: false },
+    usable: false,
+    keys: { Power: irdb("Samsung20", 1, 8, 2) },
   },
 ];
+const INDEX = {
+  revision: "testrevision",
+  generated: "2026-08-10T20:00:00.000Z",
+  notice: "Contains/accesses irdb by Simon Peter and contributors, used under permission.",
+  brands: [{ brand: "Samsung", slug: "samsung-000002", devices: 3, kinds: ["tv", "audio", "climate"] }],
+};
 
 // The box's own copy of the plan: a POST replaces it and the next GET returns it,
 // which is what the pages agree through (each level re-reads on mount).
@@ -92,9 +109,9 @@ function stubShell(initial?: IrSetup, planDelayMs = 0) {
       const answer = json({ ok: true, plan: state.plan });
       return planDelayMs ? new Promise((r) => setTimeout(() => r(answer), planDelayMs)) : answer;
     }
-    if (url.includes("/firetvir/brands"))
-      return json({ ok: true, brands: [{ brand: "Samsung", sets: [{ name: "7,7", path: "x", type: "TV" }] }] });
-    if (url.includes("/firetvir/brand")) return json({ ok: true, state: "ok", devices: SAMSUNG, skipped: 4 });
+    if (url.includes("/firetvir/brands")) return json({ ok: true, ...INDEX });
+    if (url.includes("/firetvir/brand"))
+      return json({ ok: true, brand: "Samsung", slug: "samsung-000002", devices: SAMSUNG, skipped: 4 });
     return json({});
   });
   return { state, posted };
@@ -107,15 +124,17 @@ const setup = (devices: IrSetup["devices"], assign: IrSetup["assign"]): IrSetup 
   programmed: null,
   ts: 1,
 });
+// A device as the plan stores it: the codes travel with it, so programming needs no
+// index and no network.
 const TV = {
   id: "aaaaaaaaaaaa",
   brand: "Samsung",
+  slug: "samsung-000002",
   label: "TV",
   kind: "tv" as const,
-  path: "codes/Samsung/TV/7,7.csv",
-  keys: ["VolumeUp", "VolumeDown", "Mute", "Power"] as IrSetup["devices"][0]["keys"],
-  protocol: "NECx2",
   count: 27,
+  sources: ["irdb" as const],
+  keys: SAMSUNG[0].keys as IrSetup["devices"][0]["keys"],
 };
 
 describe("the Fire TV IR screen", () => {
@@ -291,16 +310,17 @@ describe("the Fire TV IR screen", () => {
     expect(screen.getByText(/didn't save|Couldn't read/)).toBeTruthy();
   });
 
-  it("does not claim a brand has nothing while its codesets are still downloading", async () => {
-    // The box answers `loading` with total 0 until it has counted them, and that is
-    // not the same as a brand with no codes - a user who reads it as one presses Back.
+  it("a brand the box could not fetch offers a retry rather than reading as empty", async () => {
+    // An unreachable index and a brand with no codes look identical once the error is
+    // dropped, and a user who reads one as the other presses Back.
     const { state } = stubShell();
-    let answers = 0;
     const real = globalThis.fetch as typeof fetch;
+    let fail = true;
     vi.stubGlobal("fetch", (url: string, init?: RequestInit) => {
-      if (String(url).includes("/firetvir/brand?") && answers++ < 1) {
+      if (String(url).includes("/firetvir/brand?") && fail) {
+        fail = false;
         return Promise.resolve(
-          new Response(JSON.stringify({ ok: true, state: "loading", done: 0, total: 0 }), {
+          new Response(JSON.stringify({ ok: false, error: "HTTP 503" }), {
             headers: { "Content-Type": "application/json" },
           }),
         );
@@ -317,6 +337,12 @@ describe("the Fire TV IR screen", () => {
     await settle();
 
     expect(screen.queryByText("Nothing here with that button.")).toBeNull();
+    expect(screen.getByText(/HTTP 503/)).toBeTruthy();
+    // The retry is focusable, and it really re-fetches.
+    await setFocus("ftir-sets:retry");
+    await remote.ok();
+    await settle();
+    expect(screen.getByText("AH59-01527F")).toBeTruthy();
     expect(state.plan.devices).toHaveLength(0);
   });
 
@@ -332,7 +358,7 @@ describe("the Fire TV IR screen", () => {
     await setFocus("ftir-brand:letter-S");
     await remote.ok();
     await settle();
-    await setFocus("ftir-letter:brand-Samsung");
+    await setFocus("ftir-letter:brand-samsung-000002");
     await remote.ok();
     await settle();
     await setFocus("ftir-sets:dev-aaaaaaaaaaaa");
@@ -344,23 +370,41 @@ describe("the Fire TV IR screen", () => {
     expect(state.plan.devices).toHaveLength(1);
   });
 
-  it("a button assigned to nothing is left out of the plan rather than inheriting", () => {
-    const plan = toIrPlan(
-      setup([TV], { VolumeUp: { device: TV.id, second: null }, Power: { device: "gone", second: null } }),
-    );
-    expect(plan.base).toBeNull();
-    expect(plan.keys.VolumeUp).toEqual({ path: TV.path });
-    expect(plan.keys.Power).toBeUndefined();
+  it("a picked device carries its codes into the plan", async () => {
+    // The plan is what gets programmed, and it holds the codes themselves - so a later
+    // index build cannot change what a remote that is already set up would be written
+    // with, and programming needs no network.
+    const { state } = stubShell();
+    render(<Page />);
+    await settle();
+    await setFocus("ftir:add");
+    await remote.ok();
+    await settle();
+    await setFocus("ftir-brand:suggested");
+    await remote.ok();
+    await settle();
+    await setFocus("ftir-sets:dev-bbbbbbbbbbbb"); // the soundbar, whose volume is a capture
+    await remote.ok();
+    await settle();
+
+    const dev = state.plan.devices[0];
+    expect(dev.slug).toBe("samsung-000002");
+    expect(dev.sources).toEqual(["flipper"]);
+    expect(dev.keys.VolumeUp?.entry).toEqual({ raw: [452, 449, 50, 50, 50, 151, 50], frequency: 38000 });
+    expect(dev.keys.Power).toBeUndefined();
   });
 
-  it("a second device rides along on the same key", () => {
-    const bar = {
-      ...TV,
-      id: "bbbbbbbbbbbb",
-      label: "AH59-01527F",
-      path: "codes/Samsung/Unknown_AH59-01527F/67,83.csv",
-    };
-    const plan = toIrPlan(setup([TV, bar], { Power: { device: TV.id, second: bar.id } }));
-    expect(plan.keys.Power).toEqual({ path: TV.path, second: bar.path });
+  it("a test blasts one button, with the second device that rides along on it", () => {
+    const bar = { ...TV, id: "bbbbbbbbbbbb", label: "AH59-01527F", keys: SAMSUNG[1].keys as typeof TV.keys };
+    const full = setup([TV, bar], {
+      Power: { device: TV.id, second: bar.id },
+      VolumeUp: { device: bar.id, second: null },
+    });
+    const one = forKey(full, "Power");
+    expect(Object.keys(one.assign)).toEqual(["Power"]);
+    expect(one.assign.Power).toEqual({ device: TV.id, second: bar.id });
+    expect(one.devices).toHaveLength(2); // the second device has to be in there to be blasted
+    // A button nothing is assigned to blasts nothing rather than another key's code.
+    expect(Object.keys(forKey(setup([TV], {}), "Mute").assign)).toEqual([]);
   });
 });

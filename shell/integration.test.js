@@ -106,7 +106,12 @@ ${body}
 // installer refuses a package whose own manifest disagrees with the index, so a
 // fixture that could disagree is a fixture that tests the wrong thing.
 const registry = { apps: [], fail: false, requests: 0 };
+// The TV-code index (shell/irindex.js) is served by the same listener, under /ir/. It is
+// a different client with the same shape of question - one index, then one file per
+// brand - and its fetch goes through netguard like the store's does.
+const irIndex = { revision: "rev00000001", devices: [], fail: false, requests: 0 };
 const registryServer = http.createServer((req, res) => {
+  if ((req.url || "").startsWith("/ir/")) return serveIrIndex(req, res);
   registry.requests++;
   if (registry.fail) {
     res.writeHead(500);
@@ -154,6 +159,32 @@ function filesOf(a) {
 }
 function registryUrl() {
   return `http://127.0.0.1:${registryServer.address().port}/index.json`;
+}
+
+// What a published code index looks like on the wire: an index listing brands, and one
+// file per brand carrying the code each button sends.
+function serveIrIndex(req, res) {
+  irIndex.requests++;
+  if (irIndex.fail) {
+    res.writeHead(503);
+    return res.end("index is down");
+  }
+  const brands = [{ brand: "Samsung", slug: "samsung-000001", devices: irIndex.devices.length, kinds: ["audio"] }];
+  const body =
+    req.url === "/ir/index.json"
+      ? { format: 1, generated: "2026-08-11T00:00:00.000Z", revision: irIndex.revision, notice: "irdb notice", brands }
+      : req.url === "/ir/brands/samsung-000001.json"
+        ? { brand: "Samsung", slug: "samsung-000001", devices: irIndex.devices, skipped: 2 }
+        : null;
+  if (!body) {
+    res.writeHead(404);
+    return res.end("no");
+  }
+  res.writeHead(200, { "Content-Type": "application/json" });
+  res.end(JSON.stringify(body));
+}
+function irIndexBase() {
+  return `http://127.0.0.1:${registryServer.address().port}/ir/`;
 }
 // A package app the registry offers. Only the parts a scenario cares about.
 function app(id, extra) {
@@ -511,4 +542,117 @@ test("a reconciliation interrupted by the user keeps its full retry budget", asy
   assert.deepStrictEqual(r.finalFailed, [], "and when the box is free, it finishes");
   assert.equal(r.retrying, false);
   assert.deepStrictEqual(r.installed, ["tunes"]);
+});
+
+// The TV codes a remote gets programmed with come from a published index over HTTP, are
+// cached, and are read back by a LATER process - three modules and a real fetch. The
+// unit tests for shell/irindex.js inject a fetcher, which is exactly the seam this
+// repo's own history says to distrust: they would pass with the transport broken.
+test("a box fetches the code index over HTTP, then answers from its cache when it is gone", async () => {
+  const home = newBox("ir-index");
+  // A soundbar capture, which is the case irdb cannot express and the reason the index
+  // carries two databases.
+  irIndex.devices = [
+    {
+      id: "c853fb071464",
+      label: "Sound Bars",
+      kind: "audio",
+      variant: "raw 38 kHz",
+      count: 1,
+      types: ["Sound Bars"],
+      sources: ["flipper"],
+      keys: {
+        VolumeUp: { protocol: "raw", entry: { raw: [452, 449, 50, 50, 50, 151, 50], frequency: 38000 } },
+        Mute: { protocol: "raw", entry: { raw: [449, 451, 47, 53, 47, 53, 47], frequency: 38000 } },
+      },
+    },
+    // A device with nothing this box could send is dropped on arrival, not offered.
+    { id: "ffffffffffff", label: "Broken", keys: { Power: { protocol: "raw", entry: { raw: [1, 2] } } } },
+  ];
+  irIndex.fail = false;
+  const before = irIndex.requests;
+
+  const body = `
+    const cfgFile = path.join(process.env.HOME, ".tvbox", "config.json");
+    fs.writeFileSync(cfgFile, JSON.stringify({ firetvir: { indexBase: ${JSON.stringify(irIndexBase())} } }));
+    const firetvir = mod("firetvir");
+    const answer = await new Promise((res, rej) =>
+      firetvir.brandDevices("samsung-000001", (e, a) => (e ? rej(e) : res(a))),
+    );
+    out({
+      brand: answer.brand,
+      ids: answer.devices.map((d) => d.id),
+      keys: Object.keys(answer.devices[0].keys),
+      raw: answer.devices[0].keys.VolumeUp.entry.raw,
+      usable: answer.devices[0].usable,
+      cache: fs.readdirSync(path.join(process.env.HOME, ".tvbox", "cache")).sort(),
+    });`;
+
+  const first = await inBox(home, body);
+  assert.equal(first.brand, "Samsung");
+  assert.deepStrictEqual(first.ids, ["c853fb071464"], "the device with no sendable code never reaches the screen");
+  assert.deepStrictEqual(first.keys, ["VolumeUp", "Mute"]);
+  assert.deepStrictEqual(first.raw, [452, 449, 50, 50, 50, 151, 50], "the capture arrives unchanged");
+  assert.equal(first.usable, true, "a capture needs no encoder, so this box can send it whatever python it has");
+  assert.deepStrictEqual(first.cache, ["ir-brand-rev00000001-samsung-000001.json", "ir-index-v1.json"]);
+  assert.ok(irIndex.requests > before, "it really went over HTTP");
+
+  // The index is unreachable now, and this is a new process: nothing is in memory.
+  irIndex.fail = true;
+  const cached = irIndex.requests;
+  const second = await inBox(home, body);
+  assert.deepStrictEqual(second.ids, first.ids, "the cache answers a box that cannot reach the index");
+  assert.deepStrictEqual(second.raw, first.raw);
+  assert.equal(irIndex.requests, cached, "and it did not even ask");
+});
+
+// A rebuilt index retires the brand copies from the previous one, or a box that browses
+// often keeps every generation of every brand it ever looked at.
+test("a rebuilt index sweeps the brand caches of the one before it", async () => {
+  const home = newBox("ir-revision");
+  irIndex.fail = false;
+  irIndex.revision = "rev00000001";
+  irIndex.devices = [
+    {
+      id: "aaaabbbbcccc",
+      label: "TV",
+      kind: "tv",
+      variant: "NEC1 4",
+      count: 3,
+      types: ["TV"],
+      sources: ["irdb"],
+      keys: {
+        Power: { protocol: "NEC1", entry: { irdb: { protocol: "NEC1", device: 4, subdevice: -1, function: 8 } } },
+      },
+    },
+  ];
+  const body = `
+    const cfgFile = path.join(process.env.HOME, ".tvbox", "config.json");
+    fs.writeFileSync(cfgFile, JSON.stringify({ firetvir: { indexBase: ${JSON.stringify(irIndexBase())} } }));
+    const firetvir = mod("firetvir");
+    const answer = await new Promise((res, rej) =>
+      firetvir.brandDevices("samsung-000001", (e, a) => (e ? rej(e) : res(a))),
+    );
+    out({
+      usable: answer.devices[0].usable,
+      cache: fs.readdirSync(path.join(process.env.HOME, ".tvbox", "cache")).sort(),
+    });`;
+
+  const first = await inBox(home, body);
+  assert.ok(first.cache.includes("ir-brand-rev00000001-samsung-000001.json"), first.cache.join(","));
+  // This one is an irdb row, and this box has no encoder modules in ~/.tvbox - so it
+  // cannot tell whether it could send it, and says so rather than greying the row out.
+  assert.equal(first.usable, null);
+
+  // A week later, CI has published a new build. The stale index cache has to be gone for
+  // the box to see it, so this is what a real box does: the cache file is removed (the
+  // 30-day TTL, from the box's side) and the next look picks the new revision up.
+  fs.rmSync(path.join(home, ".tvbox", "cache", "ir-index-v1.json"));
+  irIndex.revision = "rev00000002";
+  const second = await inBox(home, body);
+  assert.deepStrictEqual(
+    second.cache,
+    ["ir-brand-rev00000002-samsung-000001.json", "ir-index-v1.json"],
+    "the previous revision's copy is swept, not left behind",
+  );
 });

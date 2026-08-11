@@ -25,6 +25,7 @@ Examples:
 """
 import argparse, asyncio, json, os, sys, uuid as _uuid
 
+import flipper_protocols
 import ir_protocols
 import keymap_compile as kc
 
@@ -56,12 +57,17 @@ def log(*a): print(*a, file=sys.stderr, flush=True)
 
 # ---------------------------------------------------------------- config -------
 def code_sequences(k):
-    """One code entry ("irdb" / "nec" / "pronto" / "raw") -> (sequences, frequency,
-    min_repeat - only irdb rows carry one), or None if it carries no code. Split
-    out so a key's primary and its optional "second" device share one path."""
+    """One code entry ("irdb" / "flipper" / "nec" / "pronto" / "raw") -> (sequences,
+    frequency, min_repeat - only a database row carries one), or None if it carries
+    no code. Split out so a key's primary and its optional "second" device share one
+    path."""
     if "irdb" in k:                        # {"protocol":"NEC1","device":4,"subdevice":-1,"function":2}
         i = k["irdb"]
         enc = ir_protocols.encode(i["protocol"], i["device"], i.get("subdevice", -1), i["function"])
+        return [enc["raw"]], enc["frequency"], enc["repeat"]
+    if "flipper" in k:                     # {"protocol":"Samsung32","address":"07 00 00 00","command":"02 00 00 00"}
+        f = k["flipper"]
+        enc = flipper_protocols.encode(f["protocol"], f.get("address"), f.get("command"))
         return [enc["raw"]], enc["frequency"], enc["repeat"]
     if "nec" in k:                         # {"address":0x04,"command":0x08} - LG & most TVs
         n = k["nec"]
@@ -80,7 +86,8 @@ def code_sequences(k):
 def build_actions(spec, scan_id):
     """spec = {"duty_cycle":33, "keys": {"VolumeUp": {...}, ...}} ->
     dict key_name -> [action_bytes]. Each key entry carries a code as "irdb",
-    "nec", "pronto" (+ optional "pronto_repeat") or "raw":[..]+"frequency".
+    "flipper", "nec", "pronto" (+ optional "pronto_repeat") or
+    "raw":[..]+"frequency".
     Optional per-key: repeat, post_delay, toggle_mask, optional, notify_host,
     and "second" - a SECOND device's code in the same shape, so one press blasts
     both (e.g. Power to a TV and a soundbar). Amazon's keymap action holds at
@@ -95,15 +102,15 @@ def build_actions(spec, scan_id):
         repeat   = int(k.get("repeat", 1))
         pdelay   = int(k.get("post_delay", 1000 if key == "Power" else 0))
         tmask    = int(k.get("toggle_mask", 0))
-        # One bad code must cost at most its own key (or its own extra blast) -
-        # ir_protocols.encode raises for anything outside NEC/NECx/RC5/RC6/SIRC/
-        # Panasonic, and letting that escape would fail programming for EVERY key.
+        # One bad code must cost at most its own key (or its own extra blast) - both
+        # encoders raise for a protocol they do not implement, and letting that
+        # escape would fail programming for EVERY key.
         try:
             prim = code_sequences(k)
         except Exception as ex:
             log(f"! key {key!r}: code unusable ({ex}), skipping"); continue
         if prim is None:
-            log(f"! key {key!r} has no 'irdb'/'nec'/'pronto'/'raw', skipping"); continue
+            log(f"! key {key!r} has no 'irdb'/'flipper'/'nec'/'pronto'/'raw', skipping"); continue
         seqs, freq, min_repeat = prim
         rtype = "Sequence" if len(seqs) > 1 else "Basic"
         sec = None
