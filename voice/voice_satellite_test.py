@@ -237,10 +237,13 @@ async def test_a_liveness_event_does_not_pay_the_debt():
 
 async def test_real_output_pays_the_debt():
     """Anything Home Assistant actually produced means the run advanced."""
-    for etype in ("transcript", "synthesize", "audio-start", "audio-stop"):
+    for etype in sorted(vs.PROGRESS_EVENTS):
         satellite, writer = connected()
         satellite._awaiting_since = time.monotonic() - vs.RUN_TIMEOUT - 1
-        await satellite._on_event({"type": etype, "data": {"text": "x", "rate": 16000}}, b"")
+        # Read off PROGRESS_EVENTS rather than listed here: a name added there
+        # without a test is exactly the regression this is meant to catch.
+        payload = b"\x00\x00" if etype == "audio-chunk" else b""
+        await satellite._on_event({"type": etype, "data": {"text": "x", "rate": 16000}}, payload)
         assert satellite._awaiting_since is None, f"{etype} must clear the debt"
         async with watchdog_running(satellite):
             await asyncio.sleep(0.05)

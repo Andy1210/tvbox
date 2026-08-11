@@ -92,9 +92,11 @@ MAX_PAYLOAD = 1 << 20
 MAX_QUEUED = 256
 
 # How long a run may owe an answer before the connection is dropped. Home
-# Assistant sends nothing at all while a pipeline is stuck - no transcript, no
-# error, not even a ping - so silence for this long means the run is lost, and
-# closing our side is what lets its satellite reconnect into a working one.
+# How long a run may owe an answer. A stuck pipeline is not necessarily a silent
+# one: measured on 2026-08-11, Home Assistant kept answering every press with
+# `transcribe` while delivering no transcript for an hour, so what times out here
+# is the absence of OUTPUT, not the absence of traffic (see PROGRESS_EVENTS).
+# Closing our side is what lets its satellite reconnect into a working run.
 # Generously above a real turn, which is seconds even with a local model.
 RUN_TIMEOUT = 60.0
 WATCHDOG_INTERVAL = 5.0
@@ -559,7 +561,8 @@ class Satellite:
         self._peer_host = None
         # A run is open from the first audio chunk sent to the audio-stop that
         # ends it; `_awaiting_since` is when that stop went out, and is cleared by
-        # the next thing Home Assistant says.
+        # the next thing Home Assistant PRODUCES - a transcript, an answer, audio,
+        # an error. Chatter that only says it is alive leaves the debt standing.
         self._run_open = False
         self._awaiting_since = None
         self.player = Player(duck=config["duck"])
