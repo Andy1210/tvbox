@@ -132,7 +132,7 @@ in-place: back up to your phone, re-flash the SD image, restore.
 
 ## Backup & restore (phone, QR)
 
-Settings → System → Backup. Same pairing
+Settings → System → Backup & restore. Same pairing
 infrastructure as the IPTV/wallpaper phone pages (code-gated LAN server on
 :8099, 5-min TTL). The phone page does both directions:
 
