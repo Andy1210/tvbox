@@ -71,31 +71,39 @@ shell serves the bundle at `/<id>/` in the main window with the full `window.tvb
 SDK. This is the shape for a rich 10-foot UI. See
 [tvbox-apps/AUTHORING.md](https://github.com/Andy1210/tvbox-apps/blob/main/AUTHORING.md).
 
-**4. Native app** (RetroArch is this): `type: "native"` - not a web app at all.
-The app draws its own full-screen Wayland window and the shell launches and
-supervises it, hiding its own windows while it runs. Use this only when the thing
-you want already exists as a desktop program and re-implementing its UI as a web
-app would be absurd.
+**4. Native app**: `type: "native"` - not a web app at all. The app draws its own
+full-screen Wayland window and the shell launches and supervises it, hiding its
+own windows while it runs. Use this only when the thing you want already exists as
+a desktop program and re-implementing its UI as a web app would be absurd.
 
 ```jsonc
 {
-  "id": "retroarch",
+  "id": "someprogram",
   "manifestVersion": 1,
-  "name": "RetroArch",
+  "name": "Some program",
   "type": "native",
   "status": "ready",
-  "service": "retroarch", // a plugin, because a native app has no page to configure
-  "pairing": [{ "kind": "roms", "label": { "en": "Upload games", "hu": "Játékok feltöltése" } }],
-  "requires": { "flatpak": ["org.libretro.RetroArch"] }, // --user install, no root
+  "service": "someprogram", // a plugin, because a native app has no page to configure
+  "requires": { "flatpak": ["org.example.Program"] }, // --user install, no root
   "runtime": {
-    "native": { "flatpak": "org.libretro.RetroArch", "args": ["--fullscreen"] },
-    "capabilities": [], // a native app has no renderer of ours, so no bridges
+    "native": { "flatpak": "org.example.Program", "args": ["--fullscreen"] },
+    "capabilities": [], // no renderer of ours, so no bridges - and note that an
+    // EMPTY array grants nothing, while omitting the field would grant ["nav"]
   },
 }
 ```
 
-How the shell launches it, how the Home button still works, and why killing a
-flatpak app is not simply killing what you spawned: **[native-apps.md](native-apps.md)**.
+**The two shapes combine, and that is what RetroArch actually is.** Its browsing -
+consoles, covers, search - is a 10-foot web UI of ours, while the emulator has to
+be started per game with a core and a ROM on its command line. So RetroArch is a
+`type: "webclient"` app with `serve: "local"` **and** a `runtime.native` block, and
+its plugin starts the program per item through `host.launchNative(id, args)`. A
+flatpak named in `runtime.native` must also be in `requires.flatpak`, so the tile
+greys out until it is installed rather than failing at launch.
+
+How the shell launches either shape, how the Home button still works, and why
+killing a flatpak app is not simply killing what you spawned:
+**[native-apps.md](native-apps.md)**.
 
 ## Field reference
 
@@ -143,21 +151,21 @@ user-space from the UI or `tvbox install <id>`):
 
 `runtime` - how it's served and what it may touch:
 
-| Field                 | What                                                                                                                                                                                                                                                                                                     |
-| --------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `native`              | `type: native` only: `{ flatpak }` or `{ bin }`, plus `args`. Validated at manifest load AND at launch, with no shell involved. See [native-apps.md](native-apps.md).                                                                                                                                    |
-| `serve`               | `local` (own web/ bundle at /<id>/) \| `static` (legacy root bundle) \| `remote` (live site).                                                                                                                                                                                                            |
-| `url` / `urlConfig`   | remote: literal URL, or the config section holding `baseUrl`.                                                                                                                                                                                                                                            |
-| `origins`             | remote: allowed hostnames (+subdomains). Defaults to the URL's host.                                                                                                                                                                                                                                     |
-| `userAgent`           | remote: UA override (e.g. smart-TV UA for youtube.com/tv).                                                                                                                                                                                                                                               |
-| `entry`, `mount`      | static: entry file (default `index.html`); `"mount": "root"` serves at `/`.                                                                                                                                                                                                                              |
-| `textInput`           | `auto` (default) raises the box's typing screen when a text field takes focus; `off` for an app that ships its own on-screen keyboard.                                                                                                                                                                   |
-| `cookies`             | Cookies placed in the app's own session before the first load, for a site whose language/market lever is a cookie (`[{ url, name, value }]`, `{locale}` placeholders allowed). Only for hosts in `origins`.                                                                                              |
-| `language`            | What language the app is told it runs in (`Accept-Language` + `navigator.language`). Default `"system"` = the box's UI language; a BCP-47 tag pins it. Never put a market in the app's URL - that stops following the setting.                                                                           |
-| `capabilities`        | **The security boundary.** Which preload-bridge surfaces the app gets: `nav`, `player`, `fetch`, `config`, `storage`, `display`, `input`, `system`, `shares`. Default `["nav"]` - omitting it must never grant more. See [capabilities.md](capabilities.md).                                             |
-| `bridge`              | Renderer bridge adapter, `"./<file>.js"` shipped by the PACKAGE beside its manifest. A bridge emulates some foreign host API the client expects (Plex HTPC wants Qt's QWebChannel), which is one client's shape - so it belongs to that app and updates from the registry with it. The shell ships none. |
-| `player`              | `mpv-fullscreen` (video behind the transparent launcher) \| `mpv-overlay` (behind a transparent app element).                                                                                                                                                                                            |
-| `transparentSelector` | The app element made transparent to reveal mpv (e.g. `#media-container`).                                                                                                                                                                                                                                |
+| Field                 | What                                                                                                                                                                                                                                                                                                        |
+| --------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `native`              | A program to launch: `{ flatpak }` or `{ bin }`, plus `args`. Required on `type: native` (the app IS that program) and allowed on a `webclient` app that launches one per item, which is RetroArch. Validated at manifest load AND at launch, with no shell involved. See [native-apps.md](native-apps.md). |
+| `serve`               | `local` (own web/ bundle at /<id>/) \| `static` (legacy root bundle) \| `remote` (live site).                                                                                                                                                                                                               |
+| `url` / `urlConfig`   | remote: literal URL, or the config section holding `baseUrl`.                                                                                                                                                                                                                                               |
+| `origins`             | remote: allowed hostnames (+subdomains). Defaults to the URL's host.                                                                                                                                                                                                                                        |
+| `userAgent`           | remote: UA override (e.g. smart-TV UA for youtube.com/tv).                                                                                                                                                                                                                                                  |
+| `entry`, `mount`      | static: entry file (default `index.html`); `"mount": "root"` serves at `/`.                                                                                                                                                                                                                                 |
+| `textInput`           | `auto` (default) raises the box's typing screen when a text field takes focus; `off` for an app that ships its own on-screen keyboard.                                                                                                                                                                      |
+| `cookies`             | Cookies placed in the app's own session before the first load, for a site whose language/market lever is a cookie (`[{ url, name, value }]`, `{locale}` placeholders allowed). Only for hosts in `origins`.                                                                                                 |
+| `language`            | What language the app is told it runs in (`Accept-Language` + `navigator.language`). Default `"system"` = the box's UI language; a BCP-47 tag pins it. Never put a market in the app's URL - that stops following the setting.                                                                              |
+| `capabilities`        | **The security boundary.** Which preload-bridge surfaces the app gets: `nav`, `player`, `fetch`, `config`, `storage`, `display`, `input`, `system`, `shares`. Default `["nav"]` - omitting it must never grant more. See [capabilities.md](capabilities.md).                                                |
+| `bridge`              | Renderer bridge adapter, `"./<file>.js"` shipped by the PACKAGE beside its manifest. A bridge emulates some foreign host API the client expects (Plex HTPC wants Qt's QWebChannel), which is one client's shape - so it belongs to that app and updates from the registry with it. The shell ships none.    |
+| `player`              | `mpv-fullscreen` (video behind the transparent launcher) \| `mpv-overlay` (behind a transparent app element).                                                                                                                                                                                               |
+| `transparentSelector` | The app element made transparent to reveal mpv (e.g. `#media-container`).                                                                                                                                                                                                                                   |
 
 ## Shell-side plugins (`service`)
 
