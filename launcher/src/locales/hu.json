@@ -928,5 +928,21 @@
     "screenUnsupported": "Ehhez a box szoftvere túl régi.",
     "screenWatching": "A képed megosztva",
     "title": "Fejlesztői eszközök"
+  },
+  "radios": {
+    "groupBuiltin": "A doboz saját rádiói",
+    "builtinHint": "A következő újraindításkor lépnek életbe. Egy USB-adapternek saját antennája van, a tokon kívül; ez csak akkor ér valamit, ha a beépített rádió ki van kapcsolva, mert a chipen közösen használják az antennát.",
+    "builtinBt": "Beépített Bluetooth",
+    "builtinBtOnHint": "Bekapcsolva. Kapcsold ki, ha USB Bluetooth-adaptert használsz, vagy ha egyáltalán nem kell Bluetooth.",
+    "builtinBtOffHint": "A boot-beállításokban kikapcsolva. Kapcsold vissza, ha már nem használsz USB-adaptert.",
+    "builtinWifi": "Beépített Wi-Fi",
+    "builtinWifiOnHint": "Bekapcsolva. Kapcsold ki, ha a doboz kábelen lóg, vagy ha USB Wi-Fi adaptert használsz.",
+    "builtinWifiOffHint": "A boot-beállításokban kikapcsolva. Kapcsold vissza, ha újra Wi-Fit szeretnél.",
+    "btOffLosesRemotes": "Kikapcsolva a Bluetooth-távirányítók nem működnek, amíg nincs USB-adapter a dobozban - és az új adapterrel minden távirányítót újra kell párosítani. A HDMI-n érkező tévétávirányító működik tovább.",
+    "wifiOffGoesOffline": "Ebben a dobozban nincs hálózati kábel, szóval a Wi-Fi kikapcsolásával lekerül a hálózatról. Innen, a tévén bármikor visszakapcsolhatod.",
+    "applying": "Mentés…",
+    "needsRestart": "Mentve. Az újraindítás után lép életbe.",
+    "failed": "Nem sikerült elmenteni.",
+    "needsProvision": "Ez a doboz még nem tudja átállítani - számítógépről újra be kell állítani."
   }
 }

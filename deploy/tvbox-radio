@@ -1,0 +1,66 @@
+#!/bin/sh
+# Turn the Pi's OWN wifi or Bluetooth off for good, or back on, by adding or
+# removing a `dtoverlay=disable-*` line in the boot config. Root, because that
+# file is root's; started through `tvbox-radio@<action>.service`, which is the one
+# unit the box user may start (polkit rule in provision.sh). The shell never runs
+# sudo - see hard rule 1.
+#
+# The ACTION IS THE ARGUMENT, and it is matched against a fixed list here rather
+# than trusted: the caller can only pick one of four words, so nothing it says
+# reaches a file path, a shell or the config file itself.
+#
+# Why anyone wants this: the CYW43455's wifi and Bluetooth share one antenna and
+# one supply rail, and a sealed metal case attenuates what is left. Measured on a
+# box in an aluminium case: with a BT remote connected, 2.4 GHz wifi fell from
+# ~4.7 Mbit/s to under 0.7, and the reported RSSI dropped 5 dB with it. Handing a
+# radio to a USB dongle - which has its own antenna, outside the metal - is the
+# fix, and the built-in one has to get out of the way for that.
+set -eu
+
+CONFIG=/boot/firmware/config.txt
+ACTION="${1:-}"
+
+case "$ACTION" in
+  bt-off) OVERLAY=disable-bt; WANT=present ;;
+  bt-on) OVERLAY=disable-bt; WANT=absent ;;
+  wifi-off) OVERLAY=disable-wifi; WANT=present ;;
+  wifi-on) OVERLAY=disable-wifi; WANT=absent ;;
+  *)
+    echo "usage: tvbox-radio <bt-off|bt-on|wifi-off|wifi-on>" >&2
+    exit 2
+    ;;
+esac
+
+[ -f "$CONFIG" ] || { echo "no $CONFIG" >&2; exit 1; }
+
+# A commented-out line is not a setting: only a line that starts with the overlay
+# counts, so a box whose owner left `#dtoverlay=disable-bt` as a note is read as
+# enabled, and re-enabling never deletes that note either.
+has_overlay() {
+  grep -qE "^[[:space:]]*dtoverlay=$OVERLAY([[:space:],]|$)" "$CONFIG"
+}
+
+if [ "$WANT" = present ]; then
+  if has_overlay; then echo "already set: dtoverlay=$OVERLAY"; exit 0; fi
+  # `[all]` first, because a bare append lands in whatever section the file ends
+  # in - a `[pi5]` or `[cm4]` block would silently scope the overlay to one model.
+  NEW=$(printf '%s\n[all]\ndtoverlay=%s\n' "$(cat "$CONFIG")" "$OVERLAY")
+else
+  if ! has_overlay; then echo "already clear: dtoverlay=$OVERLAY"; exit 0; fi
+  NEW=$(grep -vE "^[[:space:]]*dtoverlay=$OVERLAY([[:space:],]|$)" "$CONFIG")
+fi
+
+# The boot partition is FAT: the cluster chain is allocated before the directory
+# entry is flushed, so a box cut off mid-write comes back with a ZERO-BYTE config
+# and its old contents orphaned into a FSCK*.REC. Temp file on the same
+# filesystem, sync, then rename - the same discipline provision.sh uses for
+# cmdline.txt, and the reason tvbox-diag.sh knows to look for an empty one.
+TMP="$CONFIG.tvbox-radio.$$"
+printf '%s\n' "$NEW" > "$TMP"
+[ -s "$TMP" ] || { rm -f "$TMP"; echo "refusing to write an empty config" >&2; exit 1; }
+cp -p "$CONFIG" "$CONFIG.bak-tvbox-radio" 2>/dev/null || true
+sync
+mv "$TMP" "$CONFIG"
+sync
+
+echo "$ACTION applied - the change takes effect on the next boot"

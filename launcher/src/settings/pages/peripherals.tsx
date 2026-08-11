@@ -13,6 +13,7 @@ import { useSummary, invalidateSummary } from "../summary";
 import { btGlyph } from "../icons";
 import { RemoteRemap } from "../../components/RemoteRemap";
 import { IrPage } from "./ir";
+import { radioState, setBuiltinRadio, type RadioState } from "../../lib/radios";
 
 // Settings -> Remotes & accessories. Bluetooth, the per-remote button map, and the
 // IR blaster that gives a CEC-volume-less TV its volume back.
@@ -134,6 +135,25 @@ function BluetoothPage() {
   busyRef.current = busy;
   scanningRef.current = scanning;
 
+  // The BUILT-IN controller as a boot-config setting. A USB dongle brings its own
+  // antenna, outside the case, and is only worth having once the built-in radio
+  // stops sharing the one on the chip - and an owner who wants no Bluetooth at all
+  // is entitled to that too. Nothing here checks for a dongle: the box cannot know
+  // what is about to be plugged in, and the warning says what is lost either way.
+  const [radios, setRadios] = useState<RadioState | null>(null);
+  useEffect(() => {
+    void radioState().then(setRadios);
+  }, []);
+
+  const toggleBuiltinBt = async () => {
+    if (!radios) return;
+    const want = radios.bt !== "on";
+    setMsg(t("radios.applying"));
+    const r = await setBuiltinRadio("bt", want);
+    setMsg(r.ok ? t("radios.needsRestart") : t("radios.failed"));
+    setRadios(await radioState());
+  };
+
   const alive = useRef(true);
   const refresh = useCallback(() => {
     invalidateSummary("bt");
@@ -233,6 +253,29 @@ function BluetoothPage() {
         ))}
         {devices && !devices.length && <InfoRow label={t("bt.none")} value="" />}
       </Group>
+
+      {radios?.readable && radios.bt !== null && (
+        <Group title={t("radios.groupBuiltin")} hint={t("radios.builtinHint")}>
+          <ToggleRow
+            id="builtin-bt"
+            label={t("radios.builtinBt")}
+            hint={
+              !radios.helper
+                ? t("radios.needsProvision")
+                : radios.bt === "on"
+                  ? t("radios.builtinBtOnHint")
+                  : t("radios.builtinBtOffHint")
+            }
+            on={radios.bt === "on"}
+            onToggle={() => {
+              if (radios.helper) void toggleBuiltinBt();
+            }}
+            onWord={t("common.on")}
+            offWord={t("common.off")}
+          />
+          {radios.bt === "on" && <Note tone="warn">{t("radios.btOffLosesRemotes")}</Note>}
+        </Group>
+      )}
 
       <Group title={t("bt.groupTroubleshooting")} hint={t("bt.ertmHint")}>
         <ToggleRow

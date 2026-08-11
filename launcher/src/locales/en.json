@@ -928,5 +928,21 @@
     "screenUnsupported": "This box's software is too old for it.",
     "screenWatching": "Your screen is shared",
     "title": "Developer tools"
+  },
+  "radios": {
+    "groupBuiltin": "The box's own radios",
+    "builtinHint": "These take effect at the next restart. A USB dongle brings its own antenna, outside the case; the built-in radio has to be off for that to be worth anything, because both share one antenna on this chip.",
+    "builtinBt": "Built-in Bluetooth",
+    "builtinBtOnHint": "On. Turn it off if you use a USB Bluetooth adapter, or want no Bluetooth at all.",
+    "builtinBtOffHint": "Off in the boot settings. Turn it back on if you stop using a USB adapter.",
+    "builtinWifi": "Built-in Wi-Fi",
+    "builtinWifiOnHint": "On. Turn it off if the box is on a cable, or if you use a USB Wi-Fi adapter.",
+    "builtinWifiOffHint": "Off in the boot settings. Turn it back on to use Wi-Fi again.",
+    "btOffLosesRemotes": "Turning it off means Bluetooth remotes stop working until a USB adapter is plugged in, and every remote has to be paired again with the new adapter. The TV remote over HDMI keeps working.",
+    "wifiOffGoesOffline": "This box has no network cable, so turning Wi-Fi off takes it off the network. You can turn it back on here, on the TV.",
+    "applying": "Saving…",
+    "needsRestart": "Saved. Restart the box for it to take effect.",
+    "failed": "Could not save it.",
+    "needsProvision": "This box cannot change it yet - it needs to be set up again from a computer."
   }
 }

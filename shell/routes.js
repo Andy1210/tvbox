@@ -32,6 +32,7 @@ const system = require("./system");
 const textinput = require("./textinput");
 const updater = require("./updater");
 const wifiradio = require("./wifiradio");
+const builtinradio = require("./builtinradio");
 
 // `udisksctl` is what mounts a stick, and it is not on every box (udisks2 is a soft
 // dep and OTA can never add an apt package), so removable.js asks before it runs.
@@ -578,6 +579,28 @@ function post(p, data, res, ctx) {
         httpserver.jsonRes(res, { ok, radio: on, ethernet: eth });
       });
     });
+  }
+  // The same radios, turned off for GOOD. The one above parks the wifi until the
+  // next boot; this writes `dtoverlay=disable-*` into the boot config, which is
+  // what actually frees the antenna for a USB dongle - they share one on this
+  // chip. Nothing is refused here, unlike the runtime switch: this screen is on
+  // the TV, reachable with the remote and no network, so every change it makes can
+  // be undone from the same place. The UI carries the warning instead.
+  if (p === "/tvbox/api/radios") {
+    // A real boolean and one of two names, or nothing - same reason as above: a
+    // malformed body must never read as "turn a radio off".
+    const radio = data && data.radio;
+    if (!data || (radio !== "wifi" && radio !== "bt") || typeof data.on !== "boolean") {
+      return httpserver.jsonRes(res, { ok: false, error: "bad-request" });
+    }
+    return builtinradio.apply({ radio, on: data.on }, (err) =>
+      httpserver.jsonRes(
+        res,
+        err
+          ? { ok: false, error: "apply-failed", detail: String(err.message || err) }
+          : { ok: true, radio, on: data.on, rebootRequired: true },
+      ),
+    );
   }
   // A USB stick is mounted when someone opens it on the TV and unmounted from the
   // same screen before it is pulled out - nothing on this box auto-mounts. The

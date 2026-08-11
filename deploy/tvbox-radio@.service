@@ -1,0 +1,14 @@
+[Unit]
+# One instance per action: bt-off, bt-on, wifi-off, wifi-on. The action is the
+# INSTANCE NAME, which is why the box user needs no writable request file for the
+# shell to ask for a change - polkit grants "start a tvbox-radio@* unit" and the
+# script matches the name against its own fixed list.
+Description=tvbox: turn the built-in %i radio on or off in the boot config
+Documentation=file:///usr/local/sbin/tvbox-radio
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/tvbox-radio %i
+# The boot partition is the only thing this touches.
+ProtectHome=yes
+PrivateTmp=yes

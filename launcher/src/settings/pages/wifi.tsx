@@ -19,6 +19,7 @@ import { Group, InfoRow, Note, Row, StatusBanner, ToggleRow } from "../Rows";
 import { useSettingsNav } from "../nav";
 import { invalidateSummary } from "../summary";
 import { icons } from "../icons";
+import { radioState, setBuiltinRadio, type RadioState } from "../../lib/radios";
 
 // Settings -> Network -> Wi-Fi. What used to be one column holding the radio
 // switch, the scan, the network list, the hidden-network entry and the regulatory
@@ -217,6 +218,23 @@ export function WifiPage({ embedded = false }: { embedded?: boolean } = {}) {
     if (r.ok) refresh();
   };
 
+  // The BOOT-CONFIG state of both radios, which is a different thing from the
+  // switch above: that one lasts until the next boot, this one is what actually
+  // frees the antenna. Loaded next to the wifi status so one refresh covers both.
+  const [radios, setRadios] = useState<RadioState | null>(null);
+  useEffect(() => {
+    void radioState().then(setRadios);
+  }, []);
+
+  const toggleBuiltinWifi = async () => {
+    if (!radios) return;
+    const want = radios.wifi !== "on"; // "on" means the radio is not disabled in config.txt
+    setMsg(t("radios.applying"));
+    const r = await setBuiltinRadio("wifi", want);
+    setMsg(r.ok ? t("radios.needsRestart") : t("radios.failed"));
+    setRadios(await radioState());
+  };
+
   const toggleRadio = async () => {
     const want = !status?.radio;
     setMsg(want ? t("wifi.radioTurningOn") : t("wifi.radioTurningOff"));
@@ -282,6 +300,28 @@ export function WifiPage({ embedded = false }: { embedded?: boolean } = {}) {
             onWord={t("common.on")}
             offWord={t("common.off")}
           />
+        )}
+        {radios?.readable && radios.wifi !== null && (
+          <ToggleRow
+            id="builtin-wifi"
+            label={t("radios.builtinWifi")}
+            hint={
+              !radios.helper
+                ? t("radios.needsProvision")
+                : radios.wifi === "on"
+                  ? t("radios.builtinWifiOnHint")
+                  : t("radios.builtinWifiOffHint")
+            }
+            on={radios.wifi === "on"}
+            onToggle={() => {
+              if (radios.helper) void toggleBuiltinWifi();
+            }}
+            onWord={t("common.on")}
+            offWord={t("common.off")}
+          />
+        )}
+        {radios?.readable && radios.wifi === "on" && !radios.ethernet?.connected && (
+          <Note tone="warn">{t("radios.wifiOffGoesOffline")}</Note>
         )}
         <Row
           id="rescan"
