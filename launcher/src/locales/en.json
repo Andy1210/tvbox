@@ -308,7 +308,8 @@
     "bleak": "Bluetooth LE (remote IR programming)",
     "react": "launcher UI",
     "vite": "launcher build",
-    "tailwind": "launcher styling"
+    "tailwind": "launcher styling",
+    "flipperirdb": "the second TV-code database - the one that can carry a signal no decoder understands"
   },
   "app": {
     "shellUnreachable": "Can't reach the box",
@@ -580,7 +581,7 @@
     "title": "TV IR (this remote's own blaster)",
     "entry": "TV IR (this remote's own blaster)",
     "hint": "This remote has an infrared LED. Add the devices in the room, then say which button drives which - no Fire TV box needed.",
-    "credit": "Codes from the community irdb database (github.com/probonopd/irdb). See About for credits.",
+    "credit": "Codes from the community irdb database and Flipper-IRDB, merged into an index this box downloads. See About for credits.",
     "key": {
       "VolumeUp": "Volume +",
       "VolumeDown": "Volume −",
@@ -654,15 +655,13 @@
     "byLetter": "By first letter",
     "letterOther": "0-9 and other",
     "brandCount": "brands: {n}",
-    "setCount": "codesets: {n}",
     "matches": "matches: {n}",
     "noMatch": "No brand by that name.",
     "narrow": "Too many - keep typing.",
     "brandsError": "Couldn't load the list: {error}",
     "retry": "Retry",
     "loading": "Loading…",
-    "setsHint": "Codesets that send the same thing are one row here.",
-    "scanning": "Reading codesets… {done}/{total}",
+    "setsHint": "Codes that send the same thing are one row here.",
     "devicesFound": "devices: {n}",
     "onlyWith": "Only ones with {key}",
     "onlyWithHint": "Hides codes that have no such button.",
@@ -673,9 +672,15 @@
     "readFailed": "Couldn't read this remote's setup from the box. Nothing was changed.",
     "saveFailed": "The box didn't save that. Nothing was changed.",
     "tooManyDevices": "A remote can drive {n} devices. Remove one first.",
-    "partial": "Codesets that didn't download: {n} - the list may be short.",
     "kindFilterHint": "Left and right to change.",
-    "back": "Back"
+    "back": "Back",
+    "deviceCount": "devices: {n}",
+    "database": "Database",
+    "source": {
+      "irdb": "irdb",
+      "flipper": "Flipper-IRDB"
+    },
+    "indexAge": "Code list built {date}."
   },
   "fileserver": {
     "title": "File server",

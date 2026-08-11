@@ -1,6 +1,11 @@
 # Publishes the browser demo (launcher built with --mode demo: mocked shell
 # API, no real box needed) to GitHub Pages: https://andy1210.github.io/tvbox/
-# Also hosts the static tvbox.conf generator at /tvbox/config/.
+# Also hosts the static tvbox.conf generator at /tvbox/config/ and the TV-code
+# index every box reads at /tvbox/ir/ (scripts/ir-index/).
+#
+# One workflow, because a Pages site is ONE artifact: a second workflow uploading
+# its own would replace this one's. The weekly run is for the index - the two
+# databases it is built from move without this repo changing.
 name: demo
 on:
   push:
@@ -9,7 +14,12 @@ on:
       - "launcher/**"
       - "app-sdk/**"
       - "docs/config/**"
+      - "scripts/ir-index/**"
+      - "remote/ir_protocols.py"
+      - "remote/flipper_protocols.py"
       - ".github/workflows/demo.yml"
+  schedule:
+    - cron: "17 4 * * 1"
   workflow_dispatch:
 
 permissions:
@@ -22,7 +32,28 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # The TV-code index the boxes fetch: two databases in, one small static tree out.
+  # This is what a box used to do itself, per brand, over hundreds of requests.
+  irdata:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22 }
+      - name: check out the two code databases
+        run: |
+          git clone --depth 1 -q https://github.com/probonopd/irdb.git /tmp/irdb
+          git clone --depth 1 -q https://github.com/UberGuidoZ/Flipper-IRDB.git /tmp/flipper-irdb
+      # The encoders that decide what a code transmits are this repo's own
+      # (remote/*_protocols.py), and the build hashes every frame through them - so a
+      # broken encoder fails here rather than on a remote.
+      - name: build the index
+        run: node scripts/ir-index/build.js --irdb /tmp/irdb --flipper /tmp/flipper-irdb --out ir-index
+      - uses: actions/upload-artifact@v4
+        with: { name: ir-index, path: ir-index, retention-days: 7 }
+
   build:
+    needs: irdata
     runs-on: ubuntu-latest
     defaults: { run: { working-directory: launcher } }
     steps:
@@ -33,6 +64,10 @@ jobs:
       - run: npm run build:demo
       # Ship the static tvbox.conf generator alongside the demo -> /tvbox/config/.
       - run: mkdir -p dist-demo/config && cp ../docs/config/index.html dist-demo/config/index.html
+      # ...and the code index -> /tvbox/ir/, which is what shell/irindex.js reads.
+      # After the build, because that is what creates dist-demo.
+      - uses: actions/download-artifact@v4
+        with: { name: ir-index, path: launcher/dist-demo/ir }
       - uses: actions/upload-pages-artifact@v3
         with: { path: launcher/dist-demo }
 

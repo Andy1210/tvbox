@@ -780,6 +780,13 @@ function setIr(ir) {
   save(c);
 }
 
+// Where the published TV-code index lives (shell/irindex.js ships the default). A fork
+// that builds its own with scripts/ir-index/ points its boxes at it here - the same
+// kind of self-host override as `update.feed`. No setter: nothing in the UI sets it.
+function rawFiretvir() {
+  return load().firetvir || null;
+}
+
 // Full config (incl. secrets) for ir.js - null unless the SELECTED backend is
 // usable, with defaults applied so ir.js never re-derives them.
 function rawIr() {
@@ -865,6 +872,7 @@ module.exports = {
   rawRemote,
   setIr,
   rawIr,
+  rawFiretvir,
   setApps,
   rawApps,
   replaceAll,

@@ -37,6 +37,12 @@ const CREDITS: { name: string; what: string; url: string; license: string }[] = 
   { name: "React", what: "aboutCredits.react", url: "react.dev", license: "MIT" },
   { name: "Vite", what: "aboutCredits.vite", url: "vite.dev", license: "MIT" },
   { name: "Tailwind CSS", what: "aboutCredits.tailwind", url: "tailwindcss.com", license: "MIT" },
+  {
+    name: "Flipper-IRDB",
+    what: "aboutCredits.flipperirdb",
+    url: "github.com/UberGuidoZ/Flipper-IRDB",
+    license: "CC0-1.0",
+  },
 ];
 
 function CreditsPage() {
