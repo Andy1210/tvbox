@@ -361,7 +361,8 @@ tvbox deps <id>            # an app's binary deps: download + flatpak need no ro
 tvbox install <id> [-f]    # fetch a bundle (flatpak --user / url / git; -f reinstalls)
 tvbox remove <id>
 tvbox update [--check]     # OTA self-update
-tvbox backup|restore <file>  # password in TVBOX_BACKUP_PASSWORD; argv shows up in `ps`
+tvbox backup|restore <file>  # asks for the password, or takes it from
+                             #   TVBOX_BACKUP_PASSWORD / --password-stdin
 ```
 
 ## Configuration and data
