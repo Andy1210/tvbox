@@ -355,11 +355,13 @@ The `tvbox` CLI on the Pi does the same jobs from SSH:
 
 ```sh
 tvbox list                 # apps + install status
-tvbox deps <id>            # binary deps (download: no root; apt: one sudo)
+tvbox deps <id>            # an app's binary deps: download + flatpak need no root,
+                           #   an `apt` dep is the one sudo step and is CLI-only,
+                           #   never something the store can trigger from the TV
 tvbox install <id> [-f]    # fetch a bundle (flatpak --user / url / git; -f reinstalls)
 tvbox remove <id>
 tvbox update [--check]     # OTA self-update
-tvbox backup|restore <file> --password <pw>
+tvbox backup|restore <file>  # password in TVBOX_BACKUP_PASSWORD; argv shows up in `ps`
 ```
 
 ## Configuration and data
@@ -380,16 +382,16 @@ Config is edited from the TV (Settings) or by scanning a QR and filling a form o
 your phone. The phone form is on your LAN only and gated by a code shown on the
 TV, so run pairing on a trusted network.
 
-Ports. Only the first one is always there; the rest open with the feature that
-needs them:
+Ports. Only the first is always there; the rest listen while the feature that
+needs them is on, and the two file-serving ones can be changed:
 
-| Port | What                                                    | Reachable from |
-| ---- | ------------------------------------------------------- | -------------- |
-| 8097 | the shell's HTTP API and the launcher                   | `127.0.0.1`    |
-| 8098 | file server (WebDAV), while enabled (default, settable) | LAN            |
-| 8099 | phone pairing, only while a pairing is running          | LAN            |
-| 8100 | phone as a remote, while enabled                        | LAN            |
-| 8096 | app sharing to another box, while enabled (default)     | LAN            |
+| Port | What                                  | Listening                                 |
+| ---- | ------------------------------------- | ----------------------------------------- |
+| 8097 | the shell's HTTP API and the launcher | always, `127.0.0.1` only                  |
+| 8098 | file server (WebDAV)                  | while it is set up and running, LAN       |
+| 8099 | phone pairing                         | only while a pairing is running, LAN      |
+| 8100 | phone as a remote                     | while a phone is allowed to drive it, LAN |
+| 8096 | app sharing to another box            | while something is actually shared, LAN   |
 
 ## When the box will not start
 
@@ -496,8 +498,8 @@ npm install
 npm start           # electron . (expects a Wayland session)
 ```
 
-Its unit tests need no Electron and run from the repo root:
-`node --test shell/*.test.js`.
+Its unit tests need no Electron and run from the repo root, the same way CI runs
+them: `node --test shell/*.test.js shell/pairing/*.test.js`.
 
 `deploy.sh` builds the launcher before syncing, so a normal deploy is the full
 build and install in one command. Run `npm run format` at the repo root before
