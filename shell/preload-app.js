@@ -194,6 +194,9 @@ if (info.language) {
 // process, so this side never touches the field.
 (function () {
   var TEXTY = /^(|text|search|email|url|tel|number|password)$/i;
+  // Ten times what the shell will type back, so the shell always sees enough to judge
+  // a value too long rather than a slice that looks short enough.
+  var VALUE_TRANSPORT_MAX = 4000;
   // Is this a text field at all? The question fieldInfo answers on the way in, with
   // none of the "can we usefully open a keyboard for it" conditions.
   function isField(el) {
@@ -227,6 +230,36 @@ if (info.language) {
     if (el.isContentEditable) return { kind: "contenteditable", password: false };
     return null;
   }
+  // What the field already holds, so the keyboard can open ON it rather than empty.
+  // The text is typed back as a REPLACEMENT, so without this a field with anything in
+  // it could only be retyped from scratch - there was no way to fix one character of
+  // an address, and no way to even see what was there.
+  //
+  // A password field is the exception and stays secret: its value is the one thing on
+  // a page that is deliberately not on screen, and this reaches both the TV and, once
+  // the phone is armed, a page served over the LAN in clear.
+  //
+  // The cap here is transport only - a page must not be able to push a novel through
+  // the IPC on a focus event. Whether a value is short enough to be OFFERED is the
+  // shell's call (MAX_TEXT in ../textinput.js), which is the one place that knows how
+  // much it will type back.
+  function valueOf(el, password) {
+    if (password) return "";
+    try {
+      var raw = el.isContentEditable ? el.innerText : el.value;
+      // The same strip labelFor does, and for the same reason: this text is put on
+      // the TV and on the phone page, where a bidi override can make it read as
+      // something else entirely - and a C0 control is dropped on the way back out
+      // anyway, so showing one would be showing a character that cannot survive.
+      var text = String(raw == null ? "" : raw).replace(
+        /[\u0000-\u001f\u007f\u200b-\u200f\u202a-\u202e\u2066-\u2069]/g,
+        "",
+      );
+      return text.slice(0, VALUE_TRANSPORT_MAX);
+    } catch (e) {
+      return "";
+    }
+  }
   // A label for the TV screen so the user knows WHAT they're typing. Never the
   // field's value - a placeholder/aria-label is authored text, a value is secret.
   function labelFor(el) {
@@ -255,7 +288,12 @@ if (info.language) {
       var info = fieldInfo(el);
       if (!info) return;
       try {
-        ipcRenderer.send("kbd:focus", { kind: info.kind, password: info.password, label: labelFor(el) });
+        ipcRenderer.send("kbd:focus", {
+          kind: info.kind,
+          password: info.password,
+          label: labelFor(el),
+          value: valueOf(el, info.password),
+        });
       } catch (e) {}
     },
     true,

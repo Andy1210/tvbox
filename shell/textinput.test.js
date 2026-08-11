@@ -167,3 +167,70 @@ test("MAX_TEXT is enforced", async () => {
   await new Promise((res) => setTimeout(res, 500));
   assert.strictEqual(wc.sent[0].length, textinput.MAX_TEXT);
 });
+
+// ---- what the keyboard opens ON -----------------------------------------------
+// Delivery REPLACES the field, so a keyboard that opens empty means a field with
+// anything in it can only be retyped from scratch - and its contents were never on
+// screen to read in the first place. What may be offered is decided here rather than
+// in the preload, because this is the module that knows how much it will type back.
+
+test("the field's current text is what the keyboard opens on", () => {
+  const label = reset();
+  const { log, wc } = harness();
+  textinput.focused("xcloud", wc, { kind: "email", label, value: "daniel@example.com" });
+  assert.strictEqual(log.shown[0].value, "daniel@example.com");
+  assert.strictEqual(textinput.status().value, "daniel@example.com");
+});
+
+test("a password's value is never offered, however it arrives", () => {
+  const label = reset();
+  const { log, wc } = harness();
+  // The preload withholds it too; this is the second refusal, and it is the one that
+  // matters - the value would go on to a phone page served over the LAN in clear.
+  textinput.focused("xcloud", wc, { kind: "password", password: true, label, value: "hunter2" });
+  assert.strictEqual(log.shown[0].value, "");
+});
+
+test("a field that turns into a password takes its value back out of the session", () => {
+  const label = reset();
+  const { wc } = harness();
+  textinput.focused("xcloud", wc, { kind: "text", label, value: "visible" });
+  // The same window, the same session: a sign-in step that swaps the input's type
+  // under the user updates the live session rather than opening a new screen.
+  textinput.focused("xcloud", wc, { kind: "password", password: true, label, value: "secret" });
+  assert.strictEqual(textinput.status().value, "");
+});
+
+test("a value too long to type back is dropped whole, never truncated", () => {
+  const label = reset();
+  const { log, wc } = harness();
+  // Truncating would be worse than not offering: the prefill would LOOK complete, and
+  // submitting it replaces the field with the part that fit - destroying text that
+  // was never on screen. An empty keyboard is the old behaviour, and it is honest.
+  textinput.focused("xcloud", wc, { kind: "text", label, value: "x".repeat(textinput.MAX_TEXT + 1) });
+  assert.strictEqual(log.shown[0].value, "");
+
+  const label2 = reset();
+  textinput.focused("xcloud", wc, { kind: "text", label: label2, value: "x".repeat(textinput.MAX_TEXT) });
+  assert.strictEqual(textinput.status().value.length, textinput.MAX_TEXT);
+});
+
+test("control characters are stripped from the offered value", () => {
+  const label = reset();
+  const { log, wc } = harness();
+  // They cannot survive delivery either (submit strips the same set), so offering one
+  // would show the user a character the box will silently drop on the way back.
+  const withControl = "a" + String.fromCharCode(1) + "bc" + String.fromCharCode(127) + "d";
+  textinput.focused("xcloud", wc, { kind: "text", label, value: withControl });
+  assert.strictEqual(log.shown[0].value, "abcd");
+});
+
+test("a field reporting no value at all still opens the keyboard", () => {
+  const label = reset();
+  const { log, wc } = harness();
+  // An older app window - or any page whose field is simply empty - reports nothing
+  // here, and an empty keyboard is exactly what should happen.
+  textinput.focused("xcloud", wc, { kind: "text", label });
+  assert.strictEqual(log.shown[0].active, true);
+  assert.strictEqual(log.shown[0].value, "");
+});

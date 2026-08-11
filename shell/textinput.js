@@ -20,7 +20,23 @@
 // dropped rather than delivered somewhere else.
 const MAX_TEXT = 400; // a login/search field, not a document
 
-let session = null; // { appId, wc, kind, password, label, url, code }
+// What the field already holds, offered to the keyboard so it opens ON the text
+// rather than empty. Delivery REPLACES the field (see submit), so without this a
+// field with anything in it could only be retyped from scratch.
+//
+// Two things it is not. It is never a password: the preload withholds that value and
+// this refuses it a second time, because the session's own flag is what the phone
+// page - served over the LAN in clear - keys off. And it is never TRUNCATED: a value
+// longer than we will type back is dropped whole, since a prefill silently cut short
+// looks complete, and submitting it would replace the field with the part that fit
+// and destroy text the user never saw. The keyboard then opens empty, as before.
+function offerableValue(text, password) {
+  if (password) return "";
+  const value = String(text == null ? "" : text).replace(/[\u0000-\u001f\u007f]/g, "");
+  return value.length > MAX_TEXT ? "" : value;
+}
+
+let session = null; // { appId, wc, kind, password, label, value, url, code }
 let lastEnded = null; // { appId, sig, at } - see the cooldown in focused()
 let ourPairing = false; // did WE start the pairing session? (photos/backup share it)
 const RETRIGGER_MS = 2500;
@@ -46,6 +62,9 @@ function focused(appId, wc, field) {
     session.kind = field.kind;
     session.password = !!field.password;
     session.label = field.label || session.label;
+    // Re-read through the flag we just set, so a field that turns into a password
+    // one under us takes its value back out of the session with it.
+    session.value = offerableValue(field.value, session.password);
     return;
   }
   // Putting the app window back in front can re-fire focusin on the field we just
@@ -61,6 +80,7 @@ function focused(appId, wc, field) {
     kind: String(field.kind || "text"),
     password: !!field.password,
     label: String(field.label || ""),
+    value: offerableValue(field.value, !!field.password),
     // No pairing session yet: starting one opens a LAN server, mints a code and
     // resets its lockout counter, so it waits for the user to ask for the phone
     // (startPhone) instead of happening because a page focused a field.
@@ -102,6 +122,7 @@ function status() {
     kind: session.kind,
     password: session.password,
     label: session.label,
+    value: session.value,
     url: session.url,
     code: session.code,
   };
