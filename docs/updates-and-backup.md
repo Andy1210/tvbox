@@ -149,8 +149,10 @@ Included: `config.json`, `~/.tvbox/apps/*.json`, `~/.tvbox/appdata/*.json` (the
 `storage` capability's per-app data), Spotify account tokens, launcher
 localStorage, and the **list of installed app ids**. NOT included (by design):
 ambient wallpapers and web-app logins (Plex/YouTube cookies live in per-app
-Electron partitions). Headless twin: `tvbox backup <file> --password <pw>` /
-`tvbox restore <file> --password <pw>`.
+Electron partitions). Headless twin: `tvbox backup <file>` / `tvbox restore
+<file>`, which take the password from `TVBOX_BACKUP_PASSWORD`, from stdin with
+`--password-stdin`, or by asking on a terminal with the echo off. Never from the
+command line: any user on the box can read one out of `/proc` while it runs.
 
 > **A clone gets the launcher's settings, not the apps' identities.** The
 > localStorage snapshot is one store shared by the launcher and every local
