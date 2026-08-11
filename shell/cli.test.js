@@ -73,6 +73,9 @@ test("backupPasswordSource: --password is refused in both spellings, whatever el
     const r = cli.backupPasswordSource("from-env", argv, true);
     assert.equal(r.kind, "error", argv.join(" "));
     assert.match(r.message, /--password/);
+    // Same rule as the stdin refusal: name the ways that do work.
+    assert.match(r.message, /TVBOX_BACKUP_PASSWORD/);
+    assert.match(r.message, /--password-stdin/);
   }
 });
 
@@ -85,9 +88,22 @@ test("backupPasswordSource: --password-stdin is the non-interactive path", () =>
   assert.equal(cli.backupPasswordSource("", ["restore", "f.json", "--password-stdin"], false).kind, "stdin");
 });
 
+test("backupPasswordSource: --password-stdin at a terminal is refused, not read", () => {
+  // Reading fd 0 from a TTY waits for EOF with the echo on: it would hang with the
+  // password on screen.
+  const r = cli.backupPasswordSource("", ["backup", "f.json", "--password-stdin"], true);
+  assert.equal(r.kind, "error");
+  assert.match(r.message, /stdin is the terminal/);
+  // And it has to say what to do instead. A refusal a person cannot act on is the
+  // same dead end as the hang it replaced, which is why both halves are asserted.
+  assert.match(r.message, /pipe/i);
+  assert.match(r.message, /drop the flag/i);
+});
+
 test("backupPasswordSource: a terminal asks, and a pipe with nothing to read fails", () => {
   assert.equal(cli.backupPasswordSource("", ["backup", "f.json"], true).kind, "prompt");
   const r = cli.backupPasswordSource("", ["backup", "f.json"], false);
   assert.equal(r.kind, "error");
   assert.match(r.message, /TVBOX_BACKUP_PASSWORD/);
+  assert.match(r.message, /--password-stdin/);
 });
