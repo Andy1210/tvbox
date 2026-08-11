@@ -99,6 +99,14 @@ MAX_QUEUED = 256
 RUN_TIMEOUT = 60.0
 WATCHDOG_INTERVAL = 5.0
 
+# What counts as this run making progress, i.e. what clears the debt the watchdog
+# collects on. Everything here is Home Assistant handing over something it
+# produced; `transcribe`, `voice-started`, `ping` and the rest are it saying it is
+# alive, which is exactly the state the watchdog exists to end.
+PROGRESS_EVENTS = frozenset(
+    {"transcript", "synthesize", "audio-start", "audio-chunk", "audio-stop", "error"}
+)
+
 
 def _number(value, default, cast):
     """A config value is hand-edited JSON: a typo must not take the service down."""
@@ -664,8 +672,13 @@ class Satellite:
     async def _on_event(self, event, payload):
         etype = event["type"]
         data = event["data"]
-        # Anything at all means the run is still being worked on.
-        self._awaiting_since = None
+        # Only output clears the debt. "Anything at all" was too generous, and it
+        # cost a living-room microphone an hour: Home Assistant answered every new
+        # press with `transcribe` while its pipeline delivered nothing, and each of
+        # those reset the clock, so a run that was already dead kept the session
+        # alive. A pipeline saying it is alive is not this run making progress.
+        if etype in PROGRESS_EVENTS:
+            self._awaiting_since = None
         if etype == "describe":
             await self._send_info()
         elif etype == "ping":
