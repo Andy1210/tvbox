@@ -123,6 +123,25 @@ test("a raw capture is accepted only within what a keymap action can hold", () =
   );
 });
 
+test("a parsed code is taken in either hex case and stored in one", () => {
+  // The generator uppercases what it publishes, but a hand-written plan carries whatever
+  // was copied out of a `.ir` file and the python side parses both - so the case is
+  // normalized rather than refused, and downstream only ever sees one form.
+  const lower = irindex.sanitizeCode({
+    protocol: "Samsung32",
+    entry: { flipper: { protocol: "Samsung32", address: "07 00 00 00", command: "0b ff 00 00" } },
+  });
+  assert.equal(lower.entry.flipper.command, "0B FF 00 00");
+  assert.equal(lower.entry.flipper.address, "07 00 00 00");
+  for (const bad of ["7 00", "07 0", "0700", "zz", "", "07 00 00 0g"]) {
+    const code = irindex.sanitizeCode({
+      protocol: "Samsung32",
+      entry: { flipper: { protocol: "Samsung32", address: bad, command: "0B 00" } },
+    });
+    assert.equal(code, null, JSON.stringify(bad));
+  }
+});
+
 test("the index is fetched once and then answered from memory", () => {
   const { out } = inBox(`
     serve({ "index.json": ${JSON.stringify(index())} });

@@ -152,10 +152,15 @@ function sanitizeCode(raw) {
   }
   if (e.flipper) {
     const f = e.flipper;
-    const hex = /^[0-9A-F]{2}( [0-9A-F]{2})*$/;
-    if (!/^[A-Za-z0-9_-]{1,24}$/.test(String(f.protocol || ""))) return null;
-    if (!hex.test(String(f.address || "")) || !hex.test(String(f.command || ""))) return null;
-    return { protocol, entry: { flipper: { protocol: f.protocol, address: f.address, command: f.command } } };
+    // Either case, stored as one. The generator uppercases what it publishes, but a
+    // hand-written plan carries whatever was copied out of a `.ir` file, and the python
+    // side parses both - so refusing lowercase would drop a device for a difference that
+    // does not exist.
+    const hex = (v) => (/^[0-9a-fA-F]{2}( [0-9a-fA-F]{2})*$/.test(String(v || "")) ? String(v).toUpperCase() : null);
+    const address = hex(f.address);
+    const command = hex(f.command);
+    if (!/^[A-Za-z0-9_-]{1,24}$/.test(String(f.protocol || "")) || !address || !command) return null;
+    return { protocol, entry: { flipper: { protocol: f.protocol, address, command } } };
   }
   if (e.irdb) {
     const i = e.irdb;
