@@ -96,8 +96,8 @@ A capture of such a remote has to reach the keymap unchanged, which is what
 
 The box converts a code to IR itself: `remote/ir_protocols.py` for an irdb row
 (NEC/NECx/RC5/RC6/Sony SIRC/Panasonic) and `remote/flipper_protocols.py` for a
-Flipper `parsed` block (NEC/NECext/NEC42/Samsung32/RC5/RC5X/RC6/SIRC 12-15-20/
-Kaseikyo/RCA/Pioneer, ported from the Flipper firmware's own encoder tables). A raw
+Flipper `parsed` block (NEC/NECext/NEC42/NEC42ext/Samsung32/RC5/RC5X/RC6/
+SIRC 12-15-20/Kaseikyo/RCA/Pioneer, ported from the Flipper firmware's own encoder tables). A raw
 capture needs no encoder - it is sent verbatim. Anything else is offered as
 unpressable rather than blasting garbage, and the box decides that from ITS OWN
 python rather than trusting the index, because a box updates on its own schedule.

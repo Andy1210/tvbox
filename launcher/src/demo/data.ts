@@ -171,6 +171,43 @@ export const IR_DEVICES: Record<string, unknown[]> = {
       },
     },
   ],
+  "sony-000003": [
+    {
+      id: "6f70819203a4",
+      label: "TV",
+      kind: "tv",
+      count: 12,
+      types: ["TV"],
+      sources: ["irdb"],
+      protocols: ["Sony12"],
+      variant: "Sony12 1",
+      usable: true,
+      keys: {
+        VolumeUp: irdb("Sony12", 1, -1, 18),
+        VolumeDown: irdb("Sony12", 1, -1, 19),
+        Mute: irdb("Sony12", 1, -1, 20),
+        Power: irdb("Sony12", 1, -1, 21),
+      },
+    },
+  ],
+  "panasonic-000004": [
+    {
+      id: "70819203a4b5",
+      label: "TV",
+      kind: "tv",
+      count: 8,
+      types: ["TV", "TVs"],
+      sources: ["flipper", "irdb"],
+      protocols: ["Kaseikyo"],
+      variant: "Kaseikyo 2002,0",
+      usable: true,
+      keys: {
+        VolumeUp: irdb("Panasonic", 160, 0, 32),
+        VolumeDown: irdb("Panasonic", 160, 0, 33),
+        Power: irdb("Panasonic", 160, 0, 61),
+      },
+    },
+  ],
   "samsung-000002": [
     {
       id: "3c4d5e6f7081",

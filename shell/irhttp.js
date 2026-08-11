@@ -1,66 +1,76 @@
-// The one outbound path the TV-code index is fetched over (shell/irindex.js): a
-// size-capped https GET, and where an index or brand answer is cached.
+// The one outbound path the TV-code index is fetched over (shell/irindex.js), and where
+// its answers are cached.
 //
-// A Location header is the one part of a response the server chooses freely, so a
-// redirect may only stay on the host that was asked or move inside GitHub - the
-// index is published on GitHub Pages, and what it answers decides what gets written
-// onto a remote.
+// The request goes through netguard's `guardedFetch`, like every other non-broker fetch
+// on this box: it re-validates EVERY redirect hop rather than only the first, and an
+// https chain can never be redirected down onto http (the box's own control API and the
+// metadata service both live there). On top of that this one is ORIGIN-PINNED - the
+// index and every brand file sit under one base URL, so a hop to another host is never
+// legitimate, whoever configured that base.
 const fs = require("fs");
-const https = require("https");
 const os = require("os");
 const path = require("path");
+const { guardedFetch } = require("./netguard");
 
 const CACHE_DIR = path.join(os.homedir(), ".tvbox", "cache");
-const ALLOWED_HOSTS = new Set(["api.github.com", "raw.githubusercontent.com", "objects.githubusercontent.com"]);
+const TIMEOUT_MS = 30000;
 
-// The callback fires EXACTLY once. Destroying the request on the size cap raises an
-// `error` right after, and a caller that keeps a counter in this callback (a brand
-// downloader's concurrency) would then double-count it and either finish early or
-// never finish at all.
-function httpsGet(url, maxBytes, cb, redirected) {
-  let done = false;
-  const once = (err, body) => {
-    if (done) return;
-    done = true;
-    cb(err, body);
+// The cap is the point, so the body is counted as it arrives: a "brand file" that turns
+// out to be a gigabyte must not be buffered to find that out. `content-length` is only a
+// first refusal - the server chooses both it and what it then sends.
+async function readCapped(res, maxBytes) {
+  const claimed = Number(res.headers.get("content-length"));
+  if (Number.isFinite(claimed) && claimed > maxBytes) throw new Error("response too large");
+  if (!res.body) return "";
+  const reader = res.body.getReader();
+  const chunks = [];
+  let size = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    size += value.length;
+    if (size > maxBytes) {
+      await reader.cancel().catch(() => {});
+      throw new Error("response too large");
+    }
+    chunks.push(Buffer.from(value));
+  }
+  return Buffer.concat(chunks).toString("utf8");
+}
+
+// cb(err, text), exactly once.
+function fetchText(url, maxBytes, cb) {
+  let origin = "";
+  try {
+    origin = new URL(url).origin;
+  } catch (e) {
+    return process.nextTick(() => cb(new Error("bad url")));
+  }
+  const sameOrigin = (u) => {
+    try {
+      return new URL(u).origin === origin;
+    } catch (e) {
+      return false;
+    }
   };
-  const req = https.get(url, { headers: { "User-Agent": "tvbox", Accept: "*/*" }, timeout: 30000 }, (res) => {
-    if (res.statusCode >= 301 && res.statusCode <= 308 && res.headers.location && !redirected) {
-      res.resume();
-      let next;
+  guardedFetch(url, {
+    signal: AbortSignal.timeout(TIMEOUT_MS),
+    headers: { "User-Agent": "tvbox", Accept: "application/json" },
+    allow: sameOrigin,
+  }).then(
+    async (res) => {
+      if (!res.ok) {
+        if (res.body) await res.body.cancel().catch(() => {});
+        return cb(new Error("HTTP " + res.status));
+      }
       try {
-        next = new URL(res.headers.location, url);
+        cb(null, await readCapped(res, maxBytes));
       } catch (e) {
-        return once(new Error("bad redirect"));
+        cb(e);
       }
-      let from = "";
-      try {
-        from = new URL(url).hostname;
-      } catch (e) {}
-      if (next.protocol !== "https:" || !(next.hostname === from || ALLOWED_HOSTS.has(next.hostname))) {
-        return once(new Error("redirect off the host asked: " + next.hostname));
-      }
-      done = true; // the retry owns the callback from here
-      return httpsGet(next.href, maxBytes, cb, true);
-    }
-    if (res.statusCode !== 200) {
-      res.resume();
-      return once(new Error("HTTP " + res.statusCode + (res.statusCode === 403 ? " (rate limited? retry later)" : "")));
-    }
-    const chunks = [];
-    let size = 0;
-    res.on("data", (d) => {
-      size += d.length;
-      if (size > maxBytes) {
-        req.destroy();
-        return once(new Error("response too large"));
-      }
-      chunks.push(d);
-    });
-    res.on("end", () => once(null, Buffer.concat(chunks).toString("utf8")));
-  });
-  req.on("timeout", () => req.destroy(new Error("timeout")));
-  req.on("error", (e) => once(e));
+    },
+    (e) => cb(e),
+  );
 }
 
 // Cache writes never fail loudly: a box with a full or read-only ~/.tvbox still has
@@ -84,4 +94,4 @@ function readCache(file, maxBytes) {
   }
 }
 
-module.exports = { CACHE_DIR, ALLOWED_HOSTS, httpsGet, writeCache, readCache };
+module.exports = { CACHE_DIR, fetchText, writeCache, readCache };

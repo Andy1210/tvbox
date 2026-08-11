@@ -47,6 +47,24 @@ VOL UP,NEC1,4,-1,2
   assert.equal(codesFromText(csv).VolumeUp.entry.irdb.function, 2, "a combo row is the last resort");
 });
 
+test("a name that must not bind does not bind here either", () => {
+  // A contains-match is what makes `KEY_VOLUMEUP` work, and it is also what binds
+  // `SUBWOOFER VOL+` to the TV's volume and `POWERFUL` to its power. The Flipper reader
+  // rejects these names, and one index cannot hold two answers for one spelling.
+  const csv = `functionname,protocol,device,subdevice,function
+SUBWOOFER VOL+,NEC1,4,-1,20
+POWERFUL,NEC1,4,-1,21
+CENTER VOL-,NEC1,4,-1,22
+`;
+  assert.deepEqual(codesFromText(csv), {});
+  // The real rows still bind, with the rejected ones in the same codeset.
+  const mixed = csv + "VOL+,NEC1,4,-1,2\nPOWER,NEC1,4,-1,8\n";
+  const keys = codesFromText(mixed);
+  assert.equal(keys.VolumeUp.entry.irdb.function, 2);
+  assert.equal(keys.Power.entry.irdb.function, 8);
+  assert.ok(!keys.VolumeDown, "a centre-channel row is not the volume down button");
+});
+
 test("a row with no usable numbers is not a code", () => {
   const csv = `functionname,protocol,device,subdevice,function
 KEY_POWER,NECx2,x,7,y

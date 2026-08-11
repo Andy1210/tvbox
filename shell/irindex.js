@@ -16,7 +16,8 @@
 const fs = require("fs");
 const path = require("path");
 const config = require("./config");
-const { CACHE_DIR, httpsGet, readCache, writeCache } = require("./irhttp");
+const { isAllowedFetchUrl } = require("./netguard");
+const { CACHE_DIR, fetchText, readCache, writeCache } = require("./irhttp");
 
 const DEFAULT_BASE = "https://andy1210.github.io/tvbox/ir/";
 const INDEX_CACHE = path.join(CACHE_DIR, "ir-index-v1.json");
@@ -26,21 +27,21 @@ const MAX_BRAND_BYTES = 2e6; // the biggest brand file is ~40 KB
 const FORMAT = 1;
 
 // A fork points its boxes at its own build with `firetvir.indexBase` in
-// ~/.tvbox/config.json. https only: this answer decides what a remote is programmed
-// with, and the request carries no credentials that a downgrade could leak, but a
-// plaintext one could be rewritten in flight.
+// ~/.tvbox/config.json. Vetted by netguard's one rule for a self-hosted override -
+// https to any host, plain http only to the LAN - which is the same rule
+// `update.feed` gets, and this answer is less dangerous than that one.
 function base() {
   let v = "";
   try {
     v = String((config.rawFiretvir() || {}).indexBase || "");
   } catch (e) {}
-  if (!/^https:\/\/[^\s]+$/.test(v)) return DEFAULT_BASE;
+  if (!isAllowedFetchUrl(v)) return DEFAULT_BASE;
   return v.endsWith("/") ? v : v + "/";
 }
 
 // Injectable so the tests can answer without a network (the same reason
 // shell/system.js takes an execFile).
-let get = httpsGet;
+let get = fetchText;
 
 const validSlug = (s) => typeof s === "string" && /^[a-z0-9][a-z0-9-]{0,45}$/.test(s) && !s.includes("--");
 
@@ -75,9 +76,12 @@ function sanitizeIndex(raw) {
     });
   }
   if (!brands.length) return null;
+  // The revision becomes part of a CACHE FILE NAME, so it is a token here, not just a
+  // bounded string: a `../` in it would put a write outside the cache directory.
+  const revision = String(raw.revision || "").slice(0, 40);
   return {
     format: FORMAT,
-    revision: String(raw.revision || "").slice(0, 40) || "0",
+    revision: /^[a-z0-9]+$/.test(revision) ? revision : "0",
     generated: String(raw.generated || "").slice(0, 40),
     notice: String(raw.notice || "").slice(0, 2000),
     brands,
@@ -237,7 +241,7 @@ module.exports = {
     sanitizeIndex,
     sanitizeDevice,
     setFetch: (fn) => {
-      get = fn || httpsGet;
+      get = fn || fetchText;
     },
     reset: () => {
       indexMemo = null;

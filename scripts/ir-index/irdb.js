@@ -31,11 +31,24 @@ const canon = (s) =>
     .replace(/^KEY[_ ]/, "")
     .replace(/[^A-Z0-9+-]/g, "");
 
-function pickRow(rows, synonyms) {
+// A name that must never bind, whatever it contains. `SUBWOOFER VOL+` contains the
+// synonym `VOL+` and `POWERFUL` contains `POWER`, so a contains-match binds them to the
+// TV's volume or power without this. The Flipper reader guards the same names
+// (scripts/ir-index/flipper.js `REJECT`); one index cannot hold two answers for one
+// spelling.
+const REJECT = {
+  VolumeUp: /WOOFER|BASS|TREBLE|SUB|CENTER|SURROUND|MIC|ZOOM/,
+  VolumeDown: /WOOFER|BASS|TREBLE|SUB|CENTER|SURROUND|MIC|ZOOM/,
+  Mute: /MIC|VIDEO|SCREEN/,
+  Power: /POWERFUL|SUBWOOFER|MIC/,
+};
+
+function pickRow(rows, synonyms, key) {
   let best = null;
   let bestScore = -1;
   for (const r of rows) {
     const name = canon(r.functionname);
+    if (key && REJECT[key] && REJECT[key].test(name)) continue;
     const slashy = r.functionname.includes("/");
     for (let i = 0; i < synonyms.length; i++) {
       const syn = canon(synonyms[i]);
@@ -115,7 +128,7 @@ function codesFromText(text) {
   const rows = parseCsv(text);
   const keys = {};
   for (const [key, syn] of Object.entries(KEY_SYNONYMS)) {
-    const row = pickRow(rows, syn);
+    const row = pickRow(rows, syn, key);
     if (row && Number.isFinite(row.device) && Number.isFinite(row.function)) keys[key] = normalizeRow(row);
   }
   return keys;
@@ -151,4 +164,15 @@ function sets(root) {
   return out;
 }
 
-module.exports = { KEY_SYNONYMS, canon, parseCsv, pickRow, typeLabel, deviceKind, normalizeRow, codesFromText, sets };
+module.exports = {
+  KEY_SYNONYMS,
+  REJECT,
+  canon,
+  parseCsv,
+  pickRow,
+  typeLabel,
+  deviceKind,
+  normalizeRow,
+  codesFromText,
+  sets,
+};

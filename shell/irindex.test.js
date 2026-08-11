@@ -8,7 +8,7 @@ const path = require("node:path");
 const { execFileSync } = require("node:child_process");
 const irindex = require("./irindex");
 
-const { sanitizeIndex, sanitizeDevice, setFetch, reset, base, DEFAULT_BASE } = irindex._test;
+const { sanitizeIndex, sanitizeDevice, setFetch, reset, DEFAULT_BASE } = irindex._test;
 
 const code = () => ({
   protocol: "NECx2",
@@ -71,7 +71,7 @@ test("an index of another format is not read", () => {
 test("every field a URL or a screen is built from is bounded", () => {
   const dirty = sanitizeIndex(
     index({
-      revision: "r".repeat(80),
+      revision: "../../escape",
       notice: "n".repeat(5000),
       brands: [
         { brand: "Samsung", slug: "../../etc/passwd", devices: 5 },
@@ -81,7 +81,7 @@ test("every field a URL or a screen is built from is bounded", () => {
       ],
     }),
   );
-  assert.equal(dirty.revision.length, 40);
+  assert.equal(dirty.revision, "0", "a revision that is not a token cannot become a cache file name");
   assert.equal(dirty.notice.length, 2000);
   assert.deepEqual(
     dirty.brands.map((b) => b.slug),
@@ -161,7 +161,7 @@ test("a brand is only fetched if the index lists it", () => {
   assert.equal(out.n, 1, "the junk device is dropped, the good one kept");
 });
 
-test("a fork can point its boxes at its own build, over https only", () => {
+test("a fork can point its boxes at its own build, under netguard's rule", () => {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), "irx-"));
   fs.mkdirSync(path.join(home, ".tvbox"));
   const run = (cfg) => {
@@ -178,8 +178,10 @@ test("a fork can point its boxes at its own build, over https only", () => {
   };
   assert.equal(run({}), DEFAULT_BASE);
   assert.equal(run({ firetvir: { indexBase: "https://example.test/ir" } }), "https://example.test/ir/");
-  assert.equal(run({ firetvir: { indexBase: "http://example.test/ir" } }), DEFAULT_BASE, "plaintext is refused");
-  assert.equal(base(), DEFAULT_BASE);
+  // Plain http only to the LAN, which is netguard's rule for a self-hosted override.
+  assert.equal(run({ firetvir: { indexBase: "http://example.test/ir" } }), DEFAULT_BASE);
+  assert.equal(run({ firetvir: { indexBase: "http://192.168.1.5/ir" } }), "http://192.168.1.5/ir/");
+  assert.equal(run({ firetvir: { indexBase: "https://" } }), DEFAULT_BASE, "a malformed override falls back");
 });
 
 test("a cached answer is checked again, not trusted because it is ours", () => {

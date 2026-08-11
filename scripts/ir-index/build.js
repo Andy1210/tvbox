@@ -120,7 +120,18 @@ function main() {
     b.sets.push(s);
   }
 
-  fs.rmSync(out, { recursive: true, force: true });
+  // The output directory is deleted before it is written, so it has to be a directory
+  // this script made: `--out .` would otherwise erase the working tree, and a mistyped
+  // existing path erases whatever was there.
+  if (fs.existsSync(out)) {
+    const held = fs.readdirSync(out);
+    const ours = held.includes("index.json") && held.includes("brands");
+    if (held.length && !ours) {
+      console.error("refusing to replace %s: not empty and not a generated index", out);
+      process.exit(2);
+    }
+    fs.rmSync(out, { recursive: true, force: true });
+  }
   fs.mkdirSync(path.join(out, "brands"), { recursive: true });
 
   const listed = [];

@@ -395,7 +395,7 @@ function BrandListPage({ mac, home, forKey: onlyFor, replaceId, letter }: PickPr
 }
 
 function BrandPickerPage({ mac, home, forKey: onlyFor, replaceId }: PickProps) {
-  const { t } = useI18n();
+  const { t, tag } = useI18n();
   const nav = useSettingsNav();
   const [brands, setBrands] = useState<IrBrandListing[] | null>(null);
   const [error, setError] = useState("");
@@ -411,9 +411,11 @@ function BrandPickerPage({ mac, home, forKey: onlyFor, replaceId }: PickProps) {
       // When the list was built. It is a downloaded file the box keeps for a month, so
       // "my new TV is not in here" has an answer that is not a shrug.
       const d = new Date(r.generated || "");
-      setBuilt(isNaN(d.getTime()) ? "" : d.toLocaleDateString());
+      // The launcher's own locale, not the browser's: a Hungarian UI must not print an
+      // English date.
+      setBuilt(isNaN(d.getTime()) ? "" : d.toLocaleDateString(tag));
     } else setError(r.error || "error");
-  }, []);
+  }, [tag]);
 
   useEffect(() => {
     void load();
