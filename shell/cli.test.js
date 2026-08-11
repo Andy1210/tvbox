@@ -85,6 +85,14 @@ test("backupPasswordSource: --password-stdin is the non-interactive path", () =>
   assert.equal(cli.backupPasswordSource("", ["restore", "f.json", "--password-stdin"], false).kind, "stdin");
 });
 
+test("backupPasswordSource: --password-stdin at a terminal is refused, not read", () => {
+  // Reading fd 0 from a TTY waits for EOF with the echo on: it would hang with the
+  // password on screen.
+  const r = cli.backupPasswordSource("", ["backup", "f.json", "--password-stdin"], true);
+  assert.equal(r.kind, "error");
+  assert.match(r.message, /stdin is the terminal/);
+});
+
 test("backupPasswordSource: a terminal asks, and a pipe with nothing to read fails", () => {
   assert.equal(cli.backupPasswordSource("", ["backup", "f.json"], true).kind, "prompt");
   const r = cli.backupPasswordSource("", ["backup", "f.json"], false);
