@@ -102,6 +102,6 @@ less trusted, tunnel it (ssh, WireGuard) rather than exposing the port.
 - `shell/config.js` - the `fileserver` section (`setFileserver` / `rawFileserver`).
 - `shell/main.js` - `applyFileserver()` on boot and on every save,
   `GET`/`POST /tvbox/api/fileserver`, `POST /tvbox/api/fileserver/install-rclone`.
-- `launcher/src/components/FileServerSettings.tsx` - the screen; it renders whatever
-  the box reports and knows nothing about specific folders.
+- `launcher/src/settings/pages/fileserver.tsx` - the screen; it renders whatever the
+  box reports and knows nothing about specific folders.
 - `tvbox fileserver-deps` - fetch rclone from a shell (what the UI button runs).

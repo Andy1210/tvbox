@@ -553,3 +553,10 @@ test("a stale cached copy is refetched past the cache, not called corrupt", asyn
     delete require.cache[require.resolve("./install")];
   }
 });
+
+// The legacy Spotify token is the one shell sidecar whose name was wrong in both
+// lists for a while, so pin the name that is actually on disk.
+test("the legacy Spotify token is reserved under the name that exists", () => {
+  assert.ok(apps.RESERVED_STATE_FILES.has("spotify-token"));
+  assert.equal(apps.stateFileOk("spotify", "spotify-token"), false);
+});

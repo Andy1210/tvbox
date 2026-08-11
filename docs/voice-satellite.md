@@ -164,7 +164,8 @@ language model has promised a length.
 
 A note with a `message` is drawn in a strip at the bottom of the screen that sits
 over whatever is running, including a fullscreen app, without taking the remote
-from it (`tvbox-overlay`, see the compositor's `docs/ipc.md`).
+from it (`tvbox-overlay`, see the compositor's
+[IPC protocol](https://github.com/Andy1210/tvbox-wc/blob/main/docs/ipc.md)).
 
 **On a box whose compositor predates that** (tvbox-wc 0.1.7), the strip is not used
 at all and the note stays in the launcher, visible only while the launcher is what
