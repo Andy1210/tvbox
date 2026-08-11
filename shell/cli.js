@@ -111,7 +111,7 @@ function installAptRepo(m, r, log) {
 // stays in the history of whoever typed it. Pure, so the precedence is testable
 // without a terminal; the reading itself is below.
 //   env    - what a script should use
-//   stdin  - `--password-stdin`, for a password that comes out of a secret store
+//   stdin  - `--password-stdin`, for a password piped in from a secret store
 //   prompt - a terminal, with the echo off
 function backupPasswordSource(env, argv, isTty) {
   // `--password=pw` too, and not as a nicety: the point of refusing the flag is
@@ -123,7 +123,19 @@ function backupPasswordSource(env, argv, isTty) {
       message: "--password is gone: any user can read a command line. Use TVBOX_BACKUP_PASSWORD or --password-stdin.",
     };
   if (env) return { kind: "env" };
-  if (argv.includes("--password-stdin")) return { kind: "stdin" };
+  if (argv.includes("--password-stdin")) {
+    // Reading fd 0 from a terminal waits for EOF with the echo still on, so the
+    // flag would hang there with the password on screen. Someone who asked for
+    // stdin and has no pipe wants to hear about it, not to be quietly prompted:
+    // a script whose pipe went missing should fail, not wait for a keystroke.
+    if (isTty)
+      return {
+        kind: "error",
+        message:
+          "--password-stdin has nothing to read: stdin is the terminal. Pipe the password in, or drop the flag and be asked for it.",
+      };
+    return { kind: "stdin" };
+  }
   if (isTty) return { kind: "prompt" };
   return {
     kind: "error",
