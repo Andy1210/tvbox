@@ -114,7 +114,10 @@ function installAptRepo(m, r, log) {
 //   stdin  - `--password-stdin`, for a password that comes out of a secret store
 //   prompt - a terminal, with the echo off
 function backupPasswordSource(env, argv, isTty) {
-  if (argv.includes("--password"))
+  // `--password=pw` too, and not as a nicety: the point of refusing the flag is
+  // that the password must not be in argv, and that form puts it there just as
+  // plainly while looking like an unknown option to a naive check.
+  if (argv.some((a) => a === "--password" || a.startsWith("--password=")))
     return {
       kind: "error",
       message: "--password is gone: any user can read a command line. Use TVBOX_BACKUP_PASSWORD or --password-stdin.",
@@ -128,21 +131,27 @@ function backupPasswordSource(env, argv, isTty) {
   };
 }
 
+// Whatever a paste delivered past the Enter that ended the previous prompt.
+// Raw mode hands over bytes, not lines, so "pw\npw\n" pasted into the backup's
+// first question carries the answer to its second one inside the same chunk.
+let typedAhead = "";
+
 // Read one line with the echo off. Raw mode is the only way to keep the
-// characters off the screen, so this owns the whole keyboard for the duration:
-// Ctrl-C has to be honoured here, and an escape sequence (an arrow key) arrives
-// as its own chunk and must not become part of the password.
+// characters off the screen, so this owns the whole keyboard for the duration,
+// which means honouring Ctrl-C and reading the terminal's own language. A chunk
+// is not a keystroke: an arrow key's escape sequence has to be recognised
+// wherever it falls, not only at the start of one, and what it spans is dropped
+// rather than typed into the password.
 function promptHidden(label) {
   return new Promise((resolve, reject) => {
     const stdin = process.stdin;
     // The prompt goes to stderr so `tvbox backup /dev/stdout > file` still works.
     process.stderr.write(label);
     const wasRaw = stdin.isRaw;
-    stdin.setRawMode(true);
-    stdin.resume();
-    stdin.setEncoding("utf8");
     let pw = "";
-    const finish = (err, val) => {
+    let esc = 0; // 0 = typing, 1 = just saw ESC, 2 = inside a CSI, 3 = inside an SS3
+    const finish = (err, val, rest) => {
+      typedAhead = rest || "";
       stdin.off("data", onData);
       stdin.setRawMode(wasRaw);
       stdin.pause();
@@ -150,15 +159,37 @@ function promptHidden(label) {
       if (err) reject(err);
       else resolve(val);
     };
-    const onData = (chunk) => {
-      if (chunk.startsWith("\u001b")) return; // arrow keys and friends
-      for (const ch of chunk) {
-        if (ch === "\r" || ch === "\n" || ch === "\u0004") return finish(null, pw);
-        if (ch === "\u0003") return finish(new Error("cancelled"));
-        if (ch === "\u007f" || ch === "\b") pw = pw.slice(0, -1);
+    // True once the line has ended; anything past that belongs to the next one.
+    const feed = (text) => {
+      let used = 0;
+      for (const ch of text) {
+        used += ch.length;
+        if (esc === 1) esc = ch === "[" ? 2 : ch === "O" ? 3 : 0;
+        else if (esc === 2)
+          esc = ch >= "@" && ch <= "~" ? 0 : 2; // a CSI ends on its final byte
+        else if (esc === 3)
+          esc = 0; // an SS3 is exactly one more character
+        else if (ch === "\u001b") esc = 1;
+        else if (ch === "\r" || ch === "\n" || ch === "\u0004") {
+          finish(null, pw, text.slice(used));
+          return true;
+        } else if (ch === "\u0003") {
+          finish(new Error("cancelled"), null, "");
+          return true;
+        } else if (ch === "\u007f" || ch === "\b") pw = pw.slice(0, -1);
         else if (ch >= " ") pw += ch;
       }
+      return false;
     };
+    const onData = (chunk) => feed(chunk);
+    if (typedAhead) {
+      const ahead = typedAhead;
+      typedAhead = "";
+      if (feed(ahead)) return;
+    }
+    stdin.setRawMode(true);
+    stdin.resume();
+    stdin.setEncoding("utf8");
     stdin.on("data", onData);
   });
 }

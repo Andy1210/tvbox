@@ -63,12 +63,17 @@ test("aptRepoPlan: rejects a deb line whose repo URL has no host", () => {
 
 // --- where a backup password is allowed to come from ---
 
-test("backupPasswordSource: --password is refused, whatever else is set", () => {
+test("backupPasswordSource: --password is refused in both spellings, whatever else is set", () => {
   // Not just dropped: without this the file argument would be the password,
   // since `backup --password pw file` has "pw" as its first non-flag word.
-  const r = cli.backupPasswordSource("from-env", ["backup", "--password", "pw", "f.json"], true);
-  assert.equal(r.kind, "error");
-  assert.match(r.message, /--password/);
+  for (const argv of [
+    ["backup", "--password", "pw", "f.json"],
+    ["backup", "--password=pw", "f.json"], // one word, and just as readable in ps
+  ]) {
+    const r = cli.backupPasswordSource("from-env", argv, true);
+    assert.equal(r.kind, "error", argv.join(" "));
+    assert.match(r.message, /--password/);
+  }
 });
 
 test("backupPasswordSource: the environment wins over the prompt", () => {
