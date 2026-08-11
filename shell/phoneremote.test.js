@@ -235,7 +235,11 @@ test("a key needs a token this box issued", async () => {
   const armed = await arm();
   const token = (await post("/adopt", { code: armed.code, name: "p" })).body.token;
 
-  for (const bad of ["", "x", "0".repeat(64), token.slice(0, 63) + "0", null, 1234]) {
+  // The near-miss has to differ from the token, and a fixed last character does
+  // not: one token in sixteen already ends in "0", and then this case handed the
+  // box its own valid token and expected a 403.
+  const nearMiss = token.slice(0, 63) + (token.endsWith("0") ? "1" : "0");
+  for (const bad of ["", "x", "0".repeat(64), nearMiss, null, 1234]) {
     const r = await post("/key", { token: bad, action: "up" });
     assert.equal(r.status, 403, JSON.stringify(bad));
   }
