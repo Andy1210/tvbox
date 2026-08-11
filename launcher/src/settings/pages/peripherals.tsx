@@ -13,7 +13,7 @@ import { useSummary, invalidateSummary } from "../summary";
 import { btGlyph } from "../icons";
 import { RemoteRemap } from "../../components/RemoteRemap";
 import { IrPage } from "./ir";
-import { radioState, setBuiltinRadio, type RadioState } from "../../lib/radios";
+import { radioState, applyBuiltinRadio, type RadioState } from "../../lib/radios";
 
 // Settings -> Remotes & accessories. Bluetooth, the per-remote button map, and the
 // IR blaster that gives a CEC-volume-less TV its volume back.
@@ -141,6 +141,8 @@ function BluetoothPage() {
   // is entitled to that too. Nothing here checks for a dongle: the box cannot know
   // what is about to be plugged in, and the warning says what is lost either way.
   const [radios, setRadios] = useState<RadioState | null>(null);
+  const [confirmBt, setConfirmBt] = useState(false);
+  const [radioDetail, setRadioDetail] = useState("");
   useEffect(() => {
     void radioState().then(setRadios);
   }, []);
@@ -149,8 +151,11 @@ function BluetoothPage() {
     if (!radios) return;
     const want = radios.bt !== "on";
     setMsg(t("radios.applying"));
-    const r = await setBuiltinRadio("bt", want);
-    setMsg(r.ok ? t("radios.needsRestart") : t("radios.failed"));
+    setRadioDetail("");
+    const r = await applyBuiltinRadio("bt", want, confirmBt);
+    setMsg(t(r.key));
+    setRadioDetail(r.detail || "");
+    setConfirmBt(r.needsConfirm); // the next press is the confirmation
     setRadios(await radioState());
   };
 
@@ -267,15 +272,18 @@ function BluetoothPage() {
                   : t("radios.builtinBtOffHint")
             }
             on={radios.bt === "on"}
-            onToggle={() => {
-              if (radios.helper) void toggleBuiltinBt();
-            }}
+            // A row that cannot act must not look actionable: `disabled` takes it
+            // out of spatial navigation and dims it, where swallowing the press
+            // inside the handler left it lit and silently ignoring every OK.
+            disabled={!radios.helper}
+            onToggle={() => void toggleBuiltinBt()}
             onWord={t("common.on")}
             offWord={t("common.off")}
           />
-          {radios.bt === "on" && <Note tone="warn">{t("radios.btOffLosesRemotes")}</Note>}
         </Group>
       )}
+      {radios?.readable && radios.bt === "on" && <Note tone="warn">{t("radios.btOffLosesRemotes")}</Note>}
+      {radioDetail && <Note>{radioDetail}</Note>}
 
       <Group title={t("bt.groupTroubleshooting")} hint={t("bt.ertmHint")}>
         <ToggleRow

@@ -19,7 +19,7 @@ import { Group, InfoRow, Note, Row, StatusBanner, ToggleRow } from "../Rows";
 import { useSettingsNav } from "../nav";
 import { invalidateSummary } from "../summary";
 import { icons } from "../icons";
-import { radioState, setBuiltinRadio, type RadioState } from "../../lib/radios";
+import { radioState, applyBuiltinRadio, type RadioState } from "../../lib/radios";
 
 // Settings -> Network -> Wi-Fi. What used to be one column holding the radio
 // switch, the scan, the network list, the hidden-network entry and the regulatory
@@ -222,6 +222,7 @@ export function WifiPage({ embedded = false }: { embedded?: boolean } = {}) {
   // switch above: that one lasts until the next boot, this one is what actually
   // frees the antenna. Loaded next to the wifi status so one refresh covers both.
   const [radios, setRadios] = useState<RadioState | null>(null);
+  const [confirmWifi, setConfirmWifi] = useState(false);
   useEffect(() => {
     void radioState().then(setRadios);
   }, []);
@@ -230,8 +231,11 @@ export function WifiPage({ embedded = false }: { embedded?: boolean } = {}) {
     if (!radios) return;
     const want = radios.wifi !== "on"; // "on" means the radio is not disabled in config.txt
     setMsg(t("radios.applying"));
-    const r = await setBuiltinRadio("wifi", want);
-    setMsg(r.ok ? t("radios.needsRestart") : t("radios.failed"));
+    setDetail("");
+    const r = await applyBuiltinRadio("wifi", want, confirmWifi);
+    setMsg(t(r.key));
+    setDetail(r.detail || "");
+    setConfirmWifi(r.needsConfirm); // the next press is the confirmation
     setRadios(await radioState());
   };
 
@@ -301,7 +305,26 @@ export function WifiPage({ embedded = false }: { embedded?: boolean } = {}) {
             offWord={t("common.off")}
           />
         )}
-        {radios?.readable && radios.wifi !== null && (
+        <Row
+          id="rescan"
+          label={t("wifi.rescan")}
+          value={scanning ? t("wifi.scanning") : undefined}
+          trailing="none"
+          autoFocus
+          onEnter={refresh}
+        />
+      </Group>
+
+      {/* A group of its own, and not part of "Connection" above: the switch there
+          parks the radio until the next boot, this one writes the boot config, and
+          two adjacent rows that read the same but mean different things need the
+          group's own "takes effect at the next restart" to tell them apart.
+          Not during first-time setup - the wizard runs on a freshly flashed box,
+          which has never been provisioned, so the row could only ever be the
+          disabled one, and a dead row is what a keyboardless first boot can least
+          afford. */}
+      {!embedded && radios?.readable && radios.wifi !== null && (
+        <Group title={t("radios.groupBuiltin")} hint={t("radios.builtinHint")}>
           <ToggleRow
             id="builtin-wifi"
             label={t("radios.builtinWifi")}
@@ -313,25 +336,19 @@ export function WifiPage({ embedded = false }: { embedded?: boolean } = {}) {
                   : t("radios.builtinWifiOffHint")
             }
             on={radios.wifi === "on"}
-            onToggle={() => {
-              if (radios.helper) void toggleBuiltinWifi();
-            }}
+            // A row that cannot act must not look actionable: `disabled` takes it
+            // out of spatial navigation and dims it, where swallowing the press
+            // inside the handler left it lit and silently ignoring every OK.
+            disabled={!radios.helper}
+            onToggle={() => void toggleBuiltinWifi()}
             onWord={t("common.on")}
             offWord={t("common.off")}
           />
-        )}
-        {radios?.readable && radios.wifi === "on" && !radios.ethernet?.connected && (
-          <Note tone="warn">{t("radios.wifiOffGoesOffline")}</Note>
-        )}
-        <Row
-          id="rescan"
-          label={t("wifi.rescan")}
-          value={scanning ? t("wifi.scanning") : undefined}
-          trailing="none"
-          autoFocus
-          onEnter={refresh}
-        />
-      </Group>
+        </Group>
+      )}
+      {!embedded && radios?.readable && radios.wifi === "on" && !radios.ethernet?.connected && (
+        <Note tone="warn">{t("radios.wifiOffGoesOffline")}</Note>
+      )}
 
       <Group title={t("wifi.groupNetworks")}>
         {nets.map((n) => (

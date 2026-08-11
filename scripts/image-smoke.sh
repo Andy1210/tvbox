@@ -103,14 +103,15 @@ PARTS
   echo fake >"$B/kernel8.img"
   echo fake >"$B/bcm2712-rpi-5-b.dtb"
   mkdir -p "$R/etc/ssh" "$R/usr/local/sbin" "$R/usr/local/bin" "$R/etc/greetd" \
-    "$R/etc/systemd/system" \
+    "$R/etc/systemd/system" "$R/etc/polkit-1/rules.d" \
     "$R/home/tv/.tvbox/shell/launcher-dist/assets" \
     "$R/home/tv/.tvbox/shell/node_modules/electron/dist"
   printf 'PARTUUID=%s /boot/firmware vfat defaults 0 2\nPARTUUID=%s / ext4 defaults,noatime 0 1\n' "$BU" "$RU" >"$R/etc/fstab"
   echo 'tv:x:1000:1000::/home/tv:/bin/bash' >"$R/etc/passwd"
   echo 'tv:!:20000:0:99999:7:::' >"$R/etc/shadow"
-  for f in usr/local/sbin/tvbox-diag usr/local/sbin/tvbox-safemode \
+  for f in usr/local/sbin/tvbox-diag usr/local/sbin/tvbox-safemode usr/local/sbin/tvbox-radio \
     etc/systemd/system/tvbox-diag.service etc/systemd/system/tvbox-safemode.service \
+    etc/systemd/system/tvbox-radio@.service etc/polkit-1/rules.d/53-tvbox-radio.rules \
     usr/local/bin/tvbox-wc usr/local/bin/tvbox-session home/tv/.tvbox/session.sh \
     home/tv/.tvbox/shell/main.js home/tv/.tvbox/run-shell.sh \
     home/tv/.tvbox/shell/launcher-dist/index.html \
@@ -288,8 +289,11 @@ check "the tv account password is locked" sh -c "awk -F: '/^tv:/ {print \$2}' '$
 for f in \
   usr/local/sbin/tvbox-diag \
   usr/local/sbin/tvbox-safemode \
+  usr/local/sbin/tvbox-radio \
   etc/systemd/system/tvbox-diag.service \
   etc/systemd/system/tvbox-safemode.service \
+  etc/systemd/system/tvbox-radio@.service \
+  etc/polkit-1/rules.d/53-tvbox-radio.rules \
   usr/local/bin/tvbox-wc \
   usr/local/bin/tvbox-session \
   home/tv/.tvbox/session.sh \

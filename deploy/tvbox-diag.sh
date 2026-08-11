@@ -303,6 +303,25 @@ RAW="$(
     grep -q 'vc4.force_hotplug=1' "$CMDLINE" ||
       warn "vc4.force_hotplug=1 is not on the kernel command line - with the TV off, the session spins on a CPU core. Re-run provision.sh."
   fi
+  # config.txt is written at runtime too - the built-in radio switch in Settings
+  # edits it (tvbox-radio) - and it is the file that carries the display driver,
+  # so an empty one is a box that never reaches the TV at all.
+  CONFIGTXT="$BOOT/config.txt"
+  if [ ! -f "$CONFIGTXT" ]; then
+    echo "config.txt:   MISSING"
+    warn "$CONFIGTXT is missing - the box boots with firmware defaults: no KMS display driver, so nothing reaches the TV."
+  elif [ ! -s "$CONFIGTXT" ]; then
+    echo "config.txt:   EMPTY (0 bytes)"
+    warn "$CONFIGTXT is EMPTY - the box boots with firmware defaults and nothing reaches the TV. Restore it from config.txt.bak-tvbox-radio or a FSCK*.REC file."
+  else
+    echo "config.txt:   $(wc -c < "$CONFIGTXT" | tr -d ' ') bytes"
+    grep -qE '^[[:space:]]*dtoverlay=vc4-kms-v3d' "$CONFIGTXT" ||
+      warn "$CONFIGTXT has no vc4-kms-v3d overlay - the display driver is not loaded and the session cannot start."
+    for R in wifi bt; do
+      grep -qE "^[[:space:]]*dtoverlay=disable-$R([[:space:],]|\$)" "$CONFIGTXT" &&
+        echo "built-in $R:  OFF (dtoverlay=disable-$R)"
+    done
+  fi
   # fsck.fat writes orphaned cluster chains here. One next to a truncated file is
   # that file's lost contents, so it is worth pointing at rather than ignoring.
   for r in "$BOOT"/FSCK*.REC; do

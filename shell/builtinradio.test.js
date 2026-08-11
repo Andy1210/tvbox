@@ -11,6 +11,9 @@ const test = require("node:test");
 const radio = require("./builtinradio");
 const { overlayPresent } = radio._test;
 
+/** An injected async reader that answers with one fixed config text. */
+const mockRead = (text) => ({ readFile: (_p, _enc, cb) => cb(null, text) });
+
 const CONFIG_PLAIN = `# For more options and information see
 dtparam=audio=on
 [all]
@@ -43,31 +46,48 @@ test("a longer overlay name is not a match", () => {
   assert.strictEqual(overlayPresent("dtoverlay=disable-bt,param=1\n", "bt"), true, "parameters still count");
 });
 
-test("state comes from the file, and an unreadable file is not an answer", () => {
-  const readable = radio.readState({ readFile: () => CONFIG_BT_OFF });
-  assert.deepStrictEqual(readable, { readable: true, wifi: "on", bt: "off" });
-
-  const missing = radio.readState({
-    readFile: () => {
-      throw new Error("ENOENT");
-    },
-  });
-  assert.deepStrictEqual(missing, { readable: false, wifi: null, bt: null });
+test("state comes from the file, and an unreadable file is not an answer", (t, done) => {
+  radio.readState((readable) => {
+    assert.deepStrictEqual(readable, { readable: true, wifi: "on", bt: "off" });
+    radio.readState(
+      (missing) => {
+        assert.deepStrictEqual(missing, { readable: false, wifi: null, bt: null });
+        done();
+      },
+      { readFile: (_p, _enc, cb) => cb(new Error("ENOENT")) },
+    );
+  }, mockRead(CONFIG_BT_OFF));
 });
 
-test("nothing is refused - the owner is warned instead", () => {
-  // Every one of these is recoverable from the couch: this setting lives in
-  // Settings on the TV, which needs no network and answers the remote.
-  const off = { radio: "wifi", on: false };
-  assert.strictEqual(radio.warningFor({ ...off, ethernet: { connected: false } }), "goes-offline");
-  assert.strictEqual(radio.warningFor({ ...off, ethernet: null }), "goes-offline");
-  assert.strictEqual(radio.warningFor({ ...off, ethernet: { connected: true } }), null, "a cabled box loses nothing");
-  assert.strictEqual(radio.warningFor({ radio: "bt", on: false, ethernet: null }), "loses-bluetooth");
+test("the boot partition is never read synchronously", () => {
+  // It is FAT on an SD card, and this runs in the Electron main process: a card
+  // that stalls would take the whole UI with it, and both settings pages ask on
+  // mount. Pinned because the sync form is the easy one to reach for.
+  assert.doesNotMatch(require("fs").readFileSync(require.resolve("./builtinradio"), "utf8"), /readFileSync/);
 });
 
-test("turning a radio back on warns about nothing", () => {
-  assert.strictEqual(radio.warningFor({ radio: "wifi", on: true, ethernet: null }), null);
-  assert.strictEqual(radio.warningFor({ radio: "bt", on: true, ethernet: null }), null);
+test("only the compound dead end asks for a confirmation", () => {
+  // A single radio off is recoverable from the couch, so it is warned about and
+  // not gated. Both off with no cable leaves no network, no BT remote and no
+  // phone - and it survives a reboot.
+  const strand = (o) => radio.wouldStrand(o);
+  assert.strictEqual(strand({ state: { wifi: "on", bt: "off" }, radio: "wifi", on: false, ethernet: null }), true);
+  assert.strictEqual(strand({ state: { wifi: "off", bt: "on" }, radio: "bt", on: false, ethernet: null }), true);
+  assert.strictEqual(
+    strand({ state: { wifi: "on", bt: "on" }, radio: "wifi", on: false, ethernet: null }),
+    false,
+    "the first radio is only a warning",
+  );
+  assert.strictEqual(
+    strand({ state: { wifi: "on", bt: "off" }, radio: "wifi", on: false, ethernet: { connected: true } }),
+    false,
+    "a cabled box keeps a way in",
+  );
+  assert.strictEqual(
+    strand({ state: { wifi: "off", bt: "off" }, radio: "wifi", on: true, ethernet: null }),
+    false,
+    "turning one back ON is never gated",
+  );
 });
 
 test("apply starts the one unit that matches the action", () => {
@@ -93,6 +113,23 @@ test("an unknown radio never reaches systemctl", () => {
   radio.apply({ radio: "zigbee", on: false }, (e) => (err = e), { run });
   assert.ok(err, "it errors");
   assert.strictEqual(ran, false, "and nothing was started");
+});
+
+test("a direction that is not a boolean never reaches systemctl", () => {
+  // `on: "false"` is truthy, so reading it loosely would start `wifi-on` for a
+  // request to turn the radio off. The route checks the type too; the module
+  // should not depend on its caller for that.
+  let ran = false;
+  for (const on of ["false", 0, null, undefined]) {
+    let err = null;
+    radio.apply({ radio: "wifi", on }, (e) => (err = e), {
+      run: () => {
+        ran = true;
+      },
+    });
+    assert.ok(err, `${JSON.stringify(on)} is refused`);
+  }
+  assert.strictEqual(ran, false);
 });
 
 test("systemd's own message survives, because the box user cannot read the journal", () => {

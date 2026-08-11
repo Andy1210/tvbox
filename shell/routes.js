@@ -583,9 +583,18 @@ function post(p, data, res, ctx) {
   // The same radios, turned off for GOOD. The one above parks the wifi until the
   // next boot; this writes `dtoverlay=disable-*` into the boot config, which is
   // what actually frees the antenna for a USB dongle - they share one on this
-  // chip. Nothing is refused here, unlike the runtime switch: this screen is on
-  // the TV, reachable with the remote and no network, so every change it makes can
-  // be undone from the same place. The UI carries the warning instead.
+  // chip. A single radio is not refused, unlike the runtime switch: an owner may
+  // simply want one off, and Settings is on the TV, so the change is undone from
+  // the same couch. The UI carries that warning.
+  //
+  // Turning off the SECOND one is the exception, and it is a confirmation rather
+  // than a refusal. With both radios off and no cable there is no network, no BT
+  // remote and no phone left, and the setting survives a reboot - so the door to
+  // that state is the one press that cannot be a stray POST. Note what this is
+  // not: the gate is same-origin, and an installed app's `web/` bundle shares
+  // that origin, so an app that MEANS to reach this state can send the field too.
+  // What it stops is the drive-by, and it makes the intent explicit in the one
+  // request here that a reboot does not undo.
   if (p === "/tvbox/api/radios") {
     // A real boolean and one of two names, or nothing - same reason as above: a
     // malformed body must never read as "turn a radio off".
@@ -593,13 +602,21 @@ function post(p, data, res, ctx) {
     if (!data || (radio !== "wifi" && radio !== "bt") || typeof data.on !== "boolean") {
       return httpserver.jsonRes(res, { ok: false, error: "bad-request" });
     }
-    return builtinradio.apply({ radio, on: data.on }, (err) =>
-      httpserver.jsonRes(
-        res,
-        err
-          ? { ok: false, error: "apply-failed", detail: String(err.message || err) }
-          : { ok: true, radio, on: data.on, rebootRequired: true },
-      ),
+    const on = data.on;
+    return builtinradio.readState((state) =>
+      system.ethernetStatus((ethernet) => {
+        if (data.confirm !== true && builtinradio.wouldStrand({ state, radio, on, ethernet })) {
+          return httpserver.jsonRes(res, { ok: false, error: "needs-confirm", radio, on, state, ethernet });
+        }
+        builtinradio.apply({ radio, on }, (err) =>
+          httpserver.jsonRes(
+            res,
+            err
+              ? { ok: false, error: "apply-failed", detail: String(err.message || err) }
+              : { ok: true, radio, on, rebootRequired: true },
+          ),
+        );
+      }),
     );
   }
   // A USB stick is mounted when someone opens it on the TV and unmounted from the

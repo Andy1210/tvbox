@@ -27,16 +27,39 @@ export async function radioState(): Promise<RadioState> {
 export async function setBuiltinRadio(
   radio: "wifi" | "bt",
   on: boolean,
+  confirm = false,
 ): Promise<{ ok: boolean; error?: string; detail?: string }> {
   try {
     return await (
       await fetch("/tvbox/api/radios", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ radio, on }),
+        body: JSON.stringify({ radio, on, confirm }),
       })
     ).json();
   } catch {
     return { ok: false, error: "apply-failed" };
   }
+}
+
+/** One press of a built-in radio toggle, including the confirm round trip.
+ *
+ * Turning off the SECOND radio on a box with no cable leaves nothing to reach it
+ * by - no network, no BT remote, no phone - and it survives a reboot, so the box
+ * asks once. `confirm` is what the next press sends back. Both settings pages go
+ * through this so the two cannot drift apart.
+ *
+ * Returns a message KEY rather than a string: this file has no i18n context.
+ */
+export async function applyBuiltinRadio(
+  radio: "wifi" | "bt",
+  on: boolean,
+  confirm: boolean,
+): Promise<{ key: string; detail?: string; needsConfirm: boolean }> {
+  const r = await setBuiltinRadio(radio, on, confirm);
+  if (r.ok) return { key: "radios.needsRestart", needsConfirm: false };
+  if (r.error === "needs-confirm") return { key: "radios.confirmStrand", needsConfirm: true };
+  // systemd's own first line, which is what tells "the box was never provisioned"
+  // apart from "this user may not ask" - neither is guessable from the screen.
+  return { key: "radios.failed", detail: r.detail, needsConfirm: false };
 }

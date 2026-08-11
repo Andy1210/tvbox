@@ -938,11 +938,12 @@
     "builtinWifi": "Built-in Wi-Fi",
     "builtinWifiOnHint": "On. Turn it off if the box is on a cable, or if you use a USB Wi-Fi adapter.",
     "builtinWifiOffHint": "Off in the boot settings. Turn it back on to use Wi-Fi again.",
-    "btOffLosesRemotes": "Turning it off means Bluetooth remotes stop working until a USB adapter is plugged in, and every remote has to be paired again with the new adapter. The TV remote over HDMI keeps working.",
+    "btOffLosesRemotes": "Turning it off means Bluetooth remotes stop working until a USB adapter is plugged in, and every remote has to be paired again with the new adapter. If your TV forwards its remote over HDMI, that keeps working.",
     "wifiOffGoesOffline": "This box has no network cable, so turning Wi-Fi off takes it off the network. You can turn it back on here, on the TV.",
     "applying": "Saving…",
     "needsRestart": "Saved. Restart the box for it to take effect.",
     "failed": "Could not save it.",
-    "needsProvision": "This box cannot change it yet - it needs to be set up again from a computer."
+    "needsProvision": "This box cannot change it yet - it needs to be set up again from a computer.",
+    "confirmStrand": "Both radios would then be off and this box has no network cable, so nothing would be able to reach it - no Wi-Fi, no Bluetooth remote, no phone - and it stays that way after a restart. Press again to confirm."
   }
 }

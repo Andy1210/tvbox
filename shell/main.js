@@ -1094,12 +1094,14 @@ function serve() {
     // box has this screen and not the unit (root files are provision's), and the
     // UI has to say so rather than offer a switch that cannot work.
     if (p === "/tvbox/api/radios") {
-      system.ethernetStatus((eth) =>
-        httpserver.jsonRes(res, {
-          ...builtinradio.readState(),
-          helper: builtinradio.helperInstalled(),
-          ethernet: eth,
-        }),
+      builtinradio.readState((state) =>
+        system.ethernetStatus((eth) =>
+          httpserver.jsonRes(res, {
+            ...state,
+            helper: builtinradio.helperInstalled(),
+            ethernet: eth,
+          }),
+        ),
       );
       return;
     }

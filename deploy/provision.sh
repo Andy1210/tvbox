@@ -651,7 +651,7 @@ echo "==> built-in radios as a setting (config.txt, applied by a root unit)"
 # and a polkit grant for a unit that is not there.
 if [ -f "$HERE/tvbox-radio" ] && [ -f "$HERE/tvbox-radio@.service" ] &&
   install -m 755 -o root -g root "$HERE/tvbox-radio" /usr/local/sbin/tvbox-radio &&
-  install -m 644 "$HERE/tvbox-radio@.service" /etc/systemd/system/tvbox-radio@.service; then
+  install -m 644 -o root -g root "$HERE/tvbox-radio@.service" /etc/systemd/system/tvbox-radio@.service; then
   # The ACTION is the instance name, so the grant names all four instances rather
   # than a prefix - `tvbox-radio@anything.service` would be a wider door than this
   # needs, and the script would reject it anyway.
@@ -679,7 +679,18 @@ polkit.addRule(function (action, subject) {
 });
 RULES
   systemctl daemon-reload 2>/dev/null || true
-  ok "built-in radio switch installed (tvbox-radio)"
+  # The grant above matches on netdev, so membership is what decides whether the
+  # switch works at all - and a box whose mirroring block took its `else` branch
+  # never got it. Reporting success without checking leaves a healthy-looking
+  # toggle that answers "Access denied" on every press, with the reason in a
+  # journal the box user cannot read.
+  if id -nG "$TVBOX_USER" 2>/dev/null | tr ' ' '\n' | grep -qx netdev; then
+    ok "built-in radio switch installed (tvbox-radio)"
+  else
+    usermod -aG netdev "$TVBOX_USER" 2>/dev/null &&
+      warn "built-in radio switch installed; $TVBOX_USER added to netdev - REBOOT before it can apply a change" ||
+      warn "built-in radio switch installed but $TVBOX_USER is not in netdev - it will not be able to apply a change"
+  fi
 else
   warn "tvbox-radio helper or unit missing - the built-in radio switch is unavailable"
 fi

@@ -278,6 +278,16 @@ can grant, so an over-the-air update cannot deliver it.
   the box directly, so a box on WiFi goes offline for the session and reconnects
   afterwards. Freshly installed boxes only, for the same reason as voice.
   [docs/screen-mirroring.md](docs/screen-mirroring.md)
+- **Turning the box's own WiFi or Bluetooth off for good.** Settings → Network →
+  WiFi, and Settings → Remotes & accessories for Bluetooth. This is not the WiFi
+  switch above it: that one lasts until the next restart, this one writes the boot
+  settings, which is what actually frees the antenna. Worth doing if you plug in a
+  USB WiFi or Bluetooth adapter - the Pi's own two radios share **one** antenna, so
+  a box in a metal case with a Bluetooth remote connected measured under 0.7 Mbit/s
+  on 2.4 GHz where it otherwise had ~4.7 - or if you simply want a radio off. Each
+  change takes effect at the next restart and can be undone from the same screen;
+  turning off the second radio on a box with no network cable asks you to confirm,
+  because nothing would then be able to reach it.
 
 ## The App Store
 

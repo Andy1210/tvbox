@@ -15,9 +15,13 @@
 # ~4.7 Mbit/s to under 0.7, and the reported RSSI dropped 5 dB with it. Handing a
 # radio to a USB dongle - which has its own antenna, outside the metal - is the
 # fix, and the built-in one has to get out of the way for that.
+#
+# TVBOX_TEST_ROOT prefixes the config path, the same hook and for the same reason
+# as tvbox-diag.sh: what is worth testing here is the FAILURE paths, and they have
+# to be testable without a boot partition. See tvbox-radio.test.js.
 set -eu
 
-CONFIG=/boot/firmware/config.txt
+CONFIG="${TVBOX_TEST_ROOT:-}/boot/firmware/config.txt"
 ACTION="${1:-}"
 
 case "$ACTION" in
@@ -32,33 +36,78 @@ case "$ACTION" in
 esac
 
 [ -f "$CONFIG" ] || { echo "no $CONFIG" >&2; exit 1; }
+# An empty config.txt is the FAT truncation below, already happened. Editing it
+# would write a two-line config - no vc4-kms-v3d, no force_hotplug - and take the
+# backup with it on the way. Say so instead; tvbox-diag.sh reports the same file.
+[ -s "$CONFIG" ] || {
+  echo "$CONFIG is EMPTY - restore it from config.txt.bak-tvbox-radio or a FSCK*.REC first" >&2
+  exit 1
+}
+
+# One writer at a time: `bt-off` and `wifi-off` are DIFFERENT units, so systemd
+# starts them in parallel, and two read-modify-write passes over one file lose one
+# of the two changes while both report success. The lock is this script's own file,
+# so there is nothing to create and nothing to clean up afterwards.
+if command -v flock > /dev/null 2>&1; then
+  exec 9< "$0"
+  flock -x 9
+fi
 
 # A commented-out line is not a setting: only a line that starts with the overlay
 # counts, so a box whose owner left `#dtoverlay=disable-bt` as a note is read as
-# enabled, and re-enabling never deletes that note either.
+# enabled, and re-enabling never deletes that note either. Not section-aware - an
+# overlay under a `[pi4]` block reads as in force here and in builtinradio.js,
+# which is one wrong answer on a file nothing but this script writes.
+OVERLAY_RE="^[[:space:]]*dtoverlay=$OVERLAY([[:space:],]|\$)"
 has_overlay() {
-  grep -qE "^[[:space:]]*dtoverlay=$OVERLAY([[:space:],]|$)" "$CONFIG"
+  grep -qE "$OVERLAY_RE" "$CONFIG"
 }
+
+# Its own statement, deliberately: inside a `$(cat "$CONFIG")` that feeds printf,
+# a FAILED read is printf's success, `set -e` sees nothing, and the config gets
+# REPLACED by the couple of lines appended to nothing at all - reported as a
+# successful change. A failing boot partition is exactly when that happens.
+ORIG=$(cat "$CONFIG")
 
 if [ "$WANT" = present ]; then
   if has_overlay; then echo "already set: dtoverlay=$OVERLAY"; exit 0; fi
-  # `[all]` first, because a bare append lands in whatever section the file ends
-  # in - a `[pi5]` or `[cm4]` block would silently scope the overlay to one model.
-  NEW=$(printf '%s\n[all]\ndtoverlay=%s\n' "$(cat "$CONFIG")" "$OVERLAY")
+  # A bare append lands in whatever section the file ends in, so a `[pi5]` or
+  # `[cm4]` block would silently scope the overlay to one model. `[all]` reopens
+  # the unconditional one - and only when the file is not already in it, or every
+  # off/on cycle leaves another `[all]` behind and the file grows forever.
+  LAST_SECTION=$(printf '%s\n' "$ORIG" | sed -n 's/^[[:space:]]*\(\[[^]]*\]\).*/\1/p' | tail -n 1)
+  if [ "$LAST_SECTION" = "[all]" ]; then
+    NEW=$(printf '%s\ndtoverlay=%s\n' "$ORIG" "$OVERLAY")
+  else
+    NEW=$(printf '%s\n[all]\ndtoverlay=%s\n' "$ORIG" "$OVERLAY")
+  fi
 else
   if ! has_overlay; then echo "already clear: dtoverlay=$OVERLAY"; exit 0; fi
-  NEW=$(grep -vE "^[[:space:]]*dtoverlay=$OVERLAY([[:space:],]|$)" "$CONFIG")
+  # `|| true` because grep answers 1 when it prints nothing: under `set -e` a
+  # config whose every line matched would abort here silently, leaving a radio
+  # that can never be turned back on. The emptiness guard below catches it.
+  NEW=$(printf '%s\n' "$ORIG" | grep -vE "$OVERLAY_RE" || true)
 fi
 
 # The boot partition is FAT: the cluster chain is allocated before the directory
 # entry is flushed, so a box cut off mid-write comes back with a ZERO-BYTE config
 # and its old contents orphaned into a FSCK*.REC. Temp file on the same
-# filesystem, sync, then rename - the same discipline provision.sh uses for
-# cmdline.txt, and the reason tvbox-diag.sh knows to look for an empty one.
+# filesystem, sync, then rename narrows that window to milliseconds - the same
+# discipline provision.sh uses for cmdline.txt. It does not close it (a vfat
+# rename is not crash-atomic), which is what the backup and the diagnostics
+# report are for.
 TMP="$CONFIG.tvbox-radio.$$"
+trap 'rm -f "$TMP"' EXIT
 printf '%s\n' "$NEW" > "$TMP"
-[ -s "$TMP" ] || { rm -f "$TMP"; echo "refusing to write an empty config" >&2; exit 1; }
-cp -p "$CONFIG" "$CONFIG.bak-tvbox-radio" 2>/dev/null || true
+[ -s "$TMP" ] || { echo "refusing to write an empty config" >&2; exit 1; }
+# Never change the boot config without a way back, and keep the FIRST backup:
+# overwritten on every change, the "backup" would hold the previous edit rather
+# than the pristine file. A backup that cannot be written stops the change, as it
+# does in provision.sh - this file is what makes the box able to boot.
+if [ ! -f "$CONFIG.bak-tvbox-radio" ] && ! cp "$CONFIG" "$CONFIG.bak-tvbox-radio"; then
+  echo "could not back up $CONFIG - leaving it unchanged" >&2
+  exit 1
+fi
 sync
 mv "$TMP" "$CONFIG"
 sync
