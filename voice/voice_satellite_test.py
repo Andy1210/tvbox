@@ -215,6 +215,42 @@ async def test_the_watchdog_drops_a_run_that_is_never_answered():
     assert writer.closed
 
 
+async def test_a_liveness_event_does_not_pay_the_debt():
+    """The failure this exists for: a pipeline that talks but never delivers.
+
+    Measured on tvbox-livingroom, 2026-08-11: Home Assistant answered every press
+    with `transcribe` and delivered no transcript for an hour. Each of those events
+    cleared the debt, so the watchdog never reached RUN_TIMEOUT and the dead run
+    kept the session.
+    """
+    satellite, writer = connected()
+    owed = time.monotonic() - vs.RUN_TIMEOUT - 1
+    for etype in ("transcribe", "voice-started", "voice-stopped", "ping", "run-satellite"):
+        satellite._awaiting_since = owed
+        await satellite._on_event({"type": etype, "data": {}}, b"")
+        assert satellite._awaiting_since == owed, f"{etype} must not clear the debt"
+    async with watchdog_running(satellite):
+        await asyncio.sleep(0.05)
+    assert satellite.writer is None, "a run that only gets chatter must not hold the session"
+    assert writer.closed
+
+
+async def test_real_output_pays_the_debt():
+    """Anything Home Assistant actually produced means the run advanced."""
+    for etype in sorted(vs.PROGRESS_EVENTS):
+        satellite, writer = connected()
+        satellite._awaiting_since = time.monotonic() - vs.RUN_TIMEOUT - 1
+        # Read off PROGRESS_EVENTS rather than listed here: a name added there
+        # without a test is exactly the regression this is meant to catch.
+        payload = b"\x00\x00" if etype == "audio-chunk" else b""
+        await satellite._on_event({"type": etype, "data": {"text": "x", "rate": 16000}}, payload)
+        assert satellite._awaiting_since is None, f"{etype} must clear the debt"
+        async with watchdog_running(satellite):
+            await asyncio.sleep(0.05)
+        assert satellite.writer is writer, f"{etype} means the run is alive"
+        assert not writer.closed
+
+
 async def test_the_watchdog_leaves_a_run_in_progress_alone():
     satellite, writer = connected()
     satellite._awaiting_since = time.monotonic()
@@ -290,11 +326,18 @@ async def test_a_dropped_audio_chunk_keeps_the_session():
     assert not writer.closed
 
 
-async def test_anything_home_assistant_says_clears_the_debt():
+async def test_a_ping_keeps_the_socket_but_not_the_run():
+    """This test used to assert the opposite, and that is why the bug shipped.
+
+    "Anything Home Assistant says clears the debt" reads as generous and is what a
+    ping deserves - but a ping proves the socket, not the run, and the watchdog
+    exists precisely to drop a live socket whose run is dead.
+    """
     satellite, _ = connected()
-    satellite._awaiting_since = time.monotonic()
+    owed = time.monotonic()
+    satellite._awaiting_since = owed
     await satellite._on_event({"type": "ping", "data": {}}, b"")
-    assert satellite._awaiting_since is None
+    assert satellite._awaiting_since == owed
 
 
 async def main():

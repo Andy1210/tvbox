@@ -91,13 +91,23 @@ MAX_PAYLOAD = 1 << 20
 # queue is bounded and chunks are what gets dropped when a peer stops reading.
 MAX_QUEUED = 256
 
-# How long a run may owe an answer before the connection is dropped. Home
-# Assistant sends nothing at all while a pipeline is stuck - no transcript, no
-# error, not even a ping - so silence for this long means the run is lost, and
-# closing our side is what lets its satellite reconnect into a working one.
+# How long a run may owe an answer before the connection is dropped. A stuck
+# pipeline is not necessarily a silent one: measured on 2026-08-11, Home Assistant
+# kept answering every press with `transcribe` while delivering no transcript for
+# an hour, so what times out here is the absence of OUTPUT, not of traffic (see
+# PROGRESS_EVENTS).
+# Closing our side is what lets its satellite reconnect into a working run.
 # Generously above a real turn, which is seconds even with a local model.
 RUN_TIMEOUT = 60.0
 WATCHDOG_INTERVAL = 5.0
+
+# What counts as this run making progress, i.e. what clears the debt the watchdog
+# collects on. Everything here is Home Assistant handing over something it
+# produced; `transcribe`, `voice-started`, `ping` and the rest are it saying it is
+# alive, which is exactly the state the watchdog exists to end.
+PROGRESS_EVENTS = frozenset(
+    {"transcript", "synthesize", "audio-start", "audio-chunk", "audio-stop", "error"}
+)
 
 
 def _number(value, default, cast):
@@ -551,7 +561,8 @@ class Satellite:
         self._peer_host = None
         # A run is open from the first audio chunk sent to the audio-stop that
         # ends it; `_awaiting_since` is when that stop went out, and is cleared by
-        # the next thing Home Assistant says.
+        # the next thing Home Assistant PRODUCES - a transcript, an answer, audio,
+        # an error. Chatter that only says it is alive leaves the debt standing.
         self._run_open = False
         self._awaiting_since = None
         self.player = Player(duck=config["duck"])
@@ -664,8 +675,13 @@ class Satellite:
     async def _on_event(self, event, payload):
         etype = event["type"]
         data = event["data"]
-        # Anything at all means the run is still being worked on.
-        self._awaiting_since = None
+        # Only output clears the debt. "Anything at all" was too generous, and it
+        # cost a living-room microphone an hour: Home Assistant answered every new
+        # press with `transcribe` while its pipeline delivered nothing, and each of
+        # those reset the clock, so a run that was already dead kept the session
+        # alive. A pipeline saying it is alive is not this run making progress.
+        if etype in PROGRESS_EVENTS:
+            self._awaiting_since = None
         if etype == "describe":
             await self._send_info()
         elif etype == "ping":
