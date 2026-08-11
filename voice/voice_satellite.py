@@ -91,11 +91,11 @@ MAX_PAYLOAD = 1 << 20
 # queue is bounded and chunks are what gets dropped when a peer stops reading.
 MAX_QUEUED = 256
 
-# How long a run may owe an answer before the connection is dropped. Home
-# How long a run may owe an answer. A stuck pipeline is not necessarily a silent
-# one: measured on 2026-08-11, Home Assistant kept answering every press with
-# `transcribe` while delivering no transcript for an hour, so what times out here
-# is the absence of OUTPUT, not the absence of traffic (see PROGRESS_EVENTS).
+# How long a run may owe an answer before the connection is dropped. A stuck
+# pipeline is not necessarily a silent one: measured on 2026-08-11, Home Assistant
+# kept answering every press with `transcribe` while delivering no transcript for
+# an hour, so what times out here is the absence of OUTPUT, not of traffic (see
+# PROGRESS_EVENTS).
 # Closing our side is what lets its satellite reconnect into a working run.
 # Generously above a real turn, which is seconds even with a local model.
 RUN_TIMEOUT = 60.0
