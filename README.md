@@ -471,7 +471,7 @@ RetroArch draws its own fullscreen window instead
 | **[homeassistant/](homeassistant/)**            | the custom integration that makes the box a real `media_player`                                                                                 |
 | **[deploy/](deploy/)**                          | provision + deploy scripts, the compositor installer, the session, diagnostics and safe mode                                                    |
 | **[image/](image/)** + **[scripts/](scripts/)** | pi-gen SD image stage, release + image builds, the IR code index                                                                                |
-| **[docs/](docs/)**                              | the guides linked throughout this page                                                                                                          |
+| **[docs/](docs/README.md)**                     | the guides linked throughout this page, with an index of what each one covers                                                                   |
 
 ## Development
 

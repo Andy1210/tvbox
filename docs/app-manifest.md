@@ -101,20 +101,23 @@ flatpak app is not simply killing what you spawned: **[native-apps.md](native-ap
 
 Top level:
 
-| Field             | Req | What                                                                               |
-| ----------------- | --- | ---------------------------------------------------------------------------------- |
-| `id`              | ✔   | `[a-z0-9_-]+`. Tile focus key, `apps-data/<id>` bundle dir, URL mount.             |
-| `manifestVersion` |     | Format version; omitted = `1`. The shell skips versions it doesn't know.           |
-| `name`, `tagline` | ✔ / | A string, or a `{ "<locale>": … }` map.                                            |
-| `type`            | ✔   | `webclient` (a web package) \| `native` (its own full-screen window).              |
-| `status`          | ✔   | `ready` \| `coming_soon` (teaser tile, not launchable).                            |
-| `accent`          |     | Tile accent, **hex only** - anything else is dropped (it's interpolated into CSS). |
-| `icon`            |     | Inline SVG. Rendered sandboxed (`<img>` data: URI) - it can't run script.          |
-| `service`         |     | Shell-side plugin (below).                                                         |
-| `version`         |     | Your app's version, informational.                                                 |
-| `pairing`         |     | Phone actions the app offers (below).                                              |
-| `backup`          |     | Files of its own a settings backup should carry (below).                           |
-| `shares`          |     | Folders of its own another tvbox may read over the LAN (below).                    |
+| Field             | Req | What                                                                                                |
+| ----------------- | --- | --------------------------------------------------------------------------------------------------- |
+| `id`              | ✔   | `[a-z0-9_-]+`. Tile focus key, `apps-data/<id>` bundle dir, URL mount.                              |
+| `manifestVersion` |     | Format version; omitted = `1`. The shell skips versions it doesn't know.                            |
+| `name`, `tagline` | ✔ / | A string, or a `{ "<locale>": … }` map.                                                             |
+| `type`            | ✔   | `webclient` (a web package) \| `native` (its own full-screen window).                               |
+| `status`          | ✔   | `ready` \| `coming_soon` (teaser tile, not launchable).                                             |
+| `accent`          |     | Tile accent, **hex only** - anything else is dropped (it's interpolated into CSS).                  |
+| `icon`            |     | Inline SVG. Rendered sandboxed (`<img>` data: URI) - it can't run script.                           |
+| `service`         |     | Shell-side plugin (below).                                                                          |
+| `version`         |     | Semver. Bumping it is what offers every box an Update in the store.                                 |
+| `description`     |     | The store's detail view, under the tagline. A string or a locale map.                               |
+| `changelog`       |     | What the detail view's "What's new" shows: `[{ version, notes: […] }]`, newest first, English only. |
+| `screenshots`     |     | Up to 8 https URLs for the detail view (host them in the registry repo).                            |
+| `pairing`         |     | Phone actions the app offers (below).                                                               |
+| `backup`          |     | Files of its own a settings backup should carry (below).                                            |
+| `shares`          |     | Folders of its own another tvbox may read over the LAN (below).                                     |
 
 `requires` - dependencies; a missing binary greys the tile with "needs X",
 nothing crash-loops:

@@ -12,8 +12,17 @@ behaviours normally need a Fire TV to set up; this box does both without one.
    keylayouts. A stock Pi kernel doesn't, so they look dead - we remap them so
    they become ordinary buttons you can bind to any app or action.
 
-Protocol notes / reverse-engineering: the assistant-stack repo
-`firetv-re/FINDINGS.md` (from Fire OS 7.7.1.3, Fire TV Stick 4K Max / AFTKA).
+Both were reverse-engineered from Fire OS 7.7.1.3 on a Fire TV Stick 4K Max
+(AFTKA). Those working notes are not part of this repo; what a reader needs is
+below and in the Python modules it names.
+
+- [TV volume, power and mute from the remote's own blaster](#1-tv-volume-power-and-mute-from-the-remotes-own-blaster)
+  - [The easy way: set it up from the TV](#the-easy-way-set-it-up-from-the-tv)
+  - [Where the codes come from](#where-the-codes-come-from)
+  - [Why a brand's list is short](#why-a-brands-list-is-short)
+  - [The manual way over SSH](#the-manual-way-ssh)
+- [App buttons, and every other button that is not a key](#2-app-buttons-netflix-prime-and-friends)
+- [If a remap goes wrong](#3-if-a-remap-goes-wrong)
 
 All tools ship into `~/.tvbox/`. Run them on the box over SSH. The remote must be
 BLE-**paired/bonded** to the box (as you already do for HID) - the keymap
@@ -23,9 +32,9 @@ write it.
 
 ---
 
-## 1. TV volume / power / mute from the remote's IR blaster
+## 1. TV volume, power and mute from the remote's own blaster
 
-### The easy way: Settings → Remotes & accessories → "Fire TV remote → TV IR"
+### The easy way: set it up from the TV
 
 The guided on-TV flow does everything below for you, with no SSH. It is built around
 **devices**, not codesets: you add what is in the room, then say which button
@@ -201,7 +210,7 @@ BLE tool runner) plus `shell/irindex.js` (the published index); endpoints under
 `/tvbox/api/firetvir/*`. The index generator and its tests live in
 `scripts/ir-index/`.
 
-## 2. App buttons (Netflix / Prime / …) → any action
+## 2. App buttons (Netflix, Prime and friends)
 
 The dedicated app buttons don't arrive as normal keys: they're an Amazon
 **vendor HID report** the Linux kernel maps to no keycode at all, so they never
