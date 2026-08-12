@@ -1,0 +1,25 @@
+[Unit]
+# One instance per action: bt-off, bt-on, wifi-off, wifi-on. The action is the
+# INSTANCE NAME, which is why the box user needs no writable request file for the
+# shell to ask for a change - polkit grants exactly those FOUR unit names and the
+# verb `start` (provision.sh), and the script matches the name against its own
+# fixed list on top of that. Do not widen the rule to `tvbox-radio@*`: the point of
+# enumerating them is that the set of things the box user may start stays readable.
+Description=tvbox: apply the built-in radio setting %i to the boot config
+Documentation=file:///usr/local/sbin/tvbox-radio
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/tvbox-radio %i
+# One root-owned file on the boot partition is everything this needs to reach, and
+# the grant in front of it is narrow, so its reach should be too - a future bug in
+# the script then still cannot touch anything else. The leading `-` keeps a box
+# with no boot partition mounted starting the unit at all, so the script's own
+# "no config.txt" is what the owner sees rather than a namespace error.
+ProtectSystem=strict
+ReadWritePaths=-/boot/firmware
+ProtectHome=yes
+PrivateTmp=yes
+NoNewPrivileges=yes
+# Writing a file it already owns needs none of them.
+CapabilityBoundingSet=

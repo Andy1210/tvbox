@@ -99,6 +99,9 @@ const INFRA_FILES = [
   // until its next provision rather than gaining the feature straight away.
   "tvbox-miracast",
   "tvbox-miracast.service",
+  // The built-in radio switch, same shape: root installs it, OTA only carries it.
+  "tvbox-radio",
+  "tvbox-radio@.service",
 ];
 // Files an earlier release installed and this one does not: they are removed on
 // update rather than left to be found by something that still looks for them.
@@ -127,6 +130,7 @@ const EXECUTABLE = [
   "tvbox-session",
   "install-compositor.sh",
   "tvbox-miracast", // provision copies it to /usr/local/sbin; systemd exec's it
+  "tvbox-radio", // same: /usr/local/sbin, exec'd by tvbox-radio@.service
 ];
 // Where each shipped user unit gets its "enable" symlink (its [Install]
 // WantedBy). syncInfra creates these directly - same trick as the image build:
