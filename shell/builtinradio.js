@@ -99,7 +99,13 @@ function apply({ radio, on }, cb, deps) {
   if (typeof on !== "boolean") return cb(new Error("`on` must be a boolean"));
   const action = `${radio}-${on ? "on" : "off"}`;
   if (!ACTIONS.has(action)) return cb(new Error(`unknown action: ${action}`));
-  run("systemctl", ["start", UNIT(action)], { timeout: 20000 }, (err, _out, errOut) => {
+  // `--no-ask-password` for the reason the power menu learned the hard way: this
+  // call has a polkit grant, but a box provisioned before that grant existed does
+  // not have it - and without the flag systemctl answers "interactive
+  // authentication required" by spawning pkttyagent, which reads a terminal, takes
+  // SIGTTIN, and stops the whole process group including the shell's respawn loop.
+  // A missing grant has to fail, not freeze the box.
+  run("systemctl", ["--no-ask-password", "start", UNIT(action)], { timeout: 20000 }, (err, _out, errOut) => {
     if (!err) return cb(null);
     // systemd's own message is the useful one here: a missing polkit rule and a
     // missing unit fail differently, and the box user cannot read the journal.

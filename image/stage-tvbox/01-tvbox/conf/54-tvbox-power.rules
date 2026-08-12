@@ -1,0 +1,44 @@
+// tvbox: let the box user reboot and shut the box down from the power menu.
+//
+// Two actions, named exactly. `halt` is deliberately absent: it stops the machine
+// without cutting power, which on a headless TV box is indistinguishable from a
+// hang.
+//
+// The `-multiple-sessions` and `-ignore-inhibit` variants are left out too, and it
+// is worth being precise about what that costs, because logind does NOT fall back
+// to the plain action - it picks exactly one: with another uid's session present it
+// checks only `...reboot-multiple-sessions`, with a block-mode shutdown inhibitor
+// only `...reboot-ignore-inhibit`, and the plain `reboot` only when neither holds.
+// So in those two cases the power menu is DENIED rather than merely delayed. Both
+// are narrow here (a second uid logged in over SSH while someone presses Restart on
+// the TV; a block-mode shutdown inhibitor, which nothing on this box takes -
+// unattended-upgrades takes a delay lock and Chromium's blockers are idle/sleep),
+// and the failure is now visible on screen rather than silent. Widen it here if a
+// real box ever hits it.
+//
+// Matches on the GROUP rather than on `subject.active`, because the shell has no
+// logind session at all: Electron moves its main process into its own systemd app
+// scope, so the seat's session does not contain it and `subject.active` is false.
+// This is the same trap the udisks grant documents, and the reason logind's own
+// "an active local session may shut down" default never applied here.
+//
+// `video` is the group every tvbox user is in - provision.sh and the image both put
+// it there - which is why it is the one that works on a flashed box as well as a
+// dev-deployed one. Be honest about what it is not: it is a device-access group,
+// not "the user that drives the screen", and this rule tests neither `subject.local`
+// nor `subject.active`, so any member can also power the box off over SSH without
+// authenticating. On a single-user appliance that is inside the threat model and is
+// the price of the grant working at all; on a box with a second account it is a
+// widening, and the answer there is to match `subject.user` instead - which the
+// provision copy could do (it knows $TVBOX_USER) but the image copy cannot, since
+// the imager picks the name.
+//
+// KEEP IN SYNC with the heredoc in deploy/provision.sh.
+polkit.addRule(function (action, subject) {
+  if (
+    (action.id === "org.freedesktop.login1.reboot" || action.id === "org.freedesktop.login1.power-off") &&
+    subject.isInGroup("video")
+  ) {
+    return polkit.Result.YES;
+  }
+});

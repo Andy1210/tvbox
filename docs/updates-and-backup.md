@@ -126,7 +126,8 @@ equivalents of the last two.
 Raspberry Pi OS archive as origins and **`Automatic-Reboot "false"`** - a TV
 box must never restart itself mid-movie. When an update wants a reboot
 (`/var/run/reboot-required`), Settings → System → Software update shows a hint and a
-"Restart now" button (logind polkit, no root); the timing is always the
+"Restart now" button (a polkit grant provision installs, no root - logind's own
+active-session default never covered the shell); the timing is always the
 user's. Major OS jumps (Debian release upgrades) are intentionally NOT
 in-place: back up to your phone, re-flash the SD image, restore.
 

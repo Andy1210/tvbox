@@ -124,7 +124,10 @@ test("stopping always hands the radio back, even when nothing was armed", () => 
     stopped = true;
   });
   assert.ok(stopped);
-  assert.deepStrictEqual(calls, [["systemctl", "stop " + miracast.UNIT]]);
+  // The flag belongs to the call: without it a missing polkit grant does not fail
+  // but freezes the box, because systemctl spawns pkttyagent, which reads a
+  // terminal and takes SIGTTIN - stopping the shell and its respawn loop.
+  assert.deepStrictEqual(calls, [["systemctl", "--no-ask-password stop " + miracast.UNIT]]);
 });
 
 test("the push button is re-opened on the group interface, without root", () => {

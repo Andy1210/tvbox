@@ -520,7 +520,14 @@ function installDownload(entry, log) {
       execFileSync("tar", ["-xzf", archive, "-C", tmp], { stdio: "inherit" });
       src = path.join(tmp, spec.extract || bin);
     } else if (/\.zip$/i.test(spec.url)) {
-      execFileSync("unzip", ["-q", archive, "-d", tmp], { stdio: "inherit" });
+      // `-P ""` is not about encrypted archives working, it is about them FAILING.
+      // unzip asks for a password by opening /dev/tty itself, so `stdio` cannot
+      // stop it: with no answer coming it blocks forever (there is no timeout on
+      // this call), and because cli.js runs in the shell's own process group with
+      // the session's terminal, a background group reading that terminal takes
+      // SIGTTIN - which stops the shell and its respawn loop, the same freeze the
+      // power menu had. An empty password makes it exit non-zero instead.
+      execFileSync("unzip", ["-P", "", "-q", archive, "-d", tmp], { stdio: "inherit" });
       src = path.join(tmp, spec.extract || bin);
     }
     if (!fs.existsSync(src)) throw new Error(bin + ": extract path not found: " + (spec.extract || bin));
@@ -715,7 +722,10 @@ function acquireSource(source, log) {
     }
     const out = path.join(tmp, "out");
     fs.mkdirSync(out);
-    if (isZip) execFileSync("unzip", ["-q", file, "-d", out], { stdio: "inherit" });
+    // `-P ""` for the reason at the other unzip: a password prompt here reads
+    // /dev/tty and hangs forever. This site is the worse of the two - its sha256
+    // is optional, so the archive need not be pinned at all.
+    if (isZip) execFileSync("unzip", ["-P", "", "-q", file, "-d", out], { stdio: "inherit" });
     else execFileSync("tar", ["-xzf", file, "-C", out], { stdio: "inherit" });
     return out;
   }
