@@ -23,5 +23,5 @@
     "deploy/tvbox-sysupdate.service",
     "scripts/install-libcec8.sh"
   ],
-  "sha256": "d36715406fbe41ebea396dc8961defe1f2cf727a5c9b3fd4986e39fed0f2fd37"
+  "sha256": "41447ff342806a2a5b71e8ab7203204d35fa4a16a1b44bd95053358a3eab4b0b"
 }

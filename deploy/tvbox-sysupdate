@@ -175,6 +175,9 @@ def write_atomic(path, data, mode=0o644):
 
 _run_id = None
 _started_at = 0
+# Whether this run got as far as spending real bandwidth. Recorded in the status
+# so the cooldown can tell an expensive failure from a cheap one.
+_downloaded = False
 
 
 def set_status(code, **extra):
@@ -193,6 +196,7 @@ def set_status(code, **extra):
         "finishedAt": int(time.time() * 1000) if code != "running" else None,
         "revision": applied_revision(),
         "version": applied_version(),
+        "downloaded": _downloaded,
     }
     doc.update(extra)
     try:
@@ -305,6 +309,35 @@ class _NoSchemeChange(urllib.request.HTTPRedirectHandler):
 
 _opener = urllib.request.build_opener(_NoSchemeChange())
 _opener.addheaders = [("User-Agent", "tvbox-sysupdate")]
+
+
+def fetch_retrying(url, limit, timeout, attempts=3, pause=2):
+    """One fetch, tried a few times.
+
+    Measured on a deployed box against the real GitHub feed: the same request
+    with the same client answers OK, then closes the connection without a
+    response, then answers OK again - the failure happens before any redirect, so
+    it is the first hop that drops it, and `curl` in a loop from the same box
+    never saw it. One attempt therefore turns an ordinary flake into
+    `feed-unreachable` on a television, which is a wrong answer more often than it
+    is a right one.
+
+    Only the small documents are retried here. The tarball is hundreds of
+    megabytes, and a blind retry of that is a cost the box should not pay without
+    someone asking for it.
+    """
+    last = None
+    for i in range(attempts):
+        try:
+            return fetch(url, limit, timeout)
+        except urllib.error.HTTPError:
+            raise  # a 404 is an answer, not a flake - the caller tells them apart
+        except (urllib.error.URLError, OSError, ValueError) as e:
+            last = e
+            if i + 1 < attempts:
+                log("fetch failed (%s), retrying in %ds" % (str(e)[:60], pause))
+                time.sleep(pause)
+    raise last
 
 
 def fetch(url, limit, timeout, dest=None):
@@ -578,18 +611,24 @@ def free_bytes(path):
 
 
 def recent_failure():
-    """When the last FAILED run finished, if that was recent enough to matter.
+    """When the last EXPENSIVE failed run finished, if recently enough to matter.
 
     Returns the original timestamp rather than a boolean so the refusal can keep
     it: writing a fresh one would push the window out on every press, and someone
     retrying once a minute after a network blip would never get a second real
     attempt - with nothing on screen to say why.
+
+    Only a run that got as far as downloading counts. That is what the cooldown is
+    for: a few hundred megabytes and minutes of apt, worth doing once rather than
+    in a loop. A run that fell over on a 2 kB feed fetch cost nothing, and making
+    someone wait two minutes for it is a worse answer than letting them press
+    again - especially since that fetch is the flakiest step there is.
     """
     try:
         doc = json.loads(read_text(STATUS_FILE))
     except Exception:
         return None
-    if doc.get("code") in OK_CODES:
+    if doc.get("code") in OK_CODES or not doc.get("downloaded"):
         return None
     fin = doc.get("finishedAt")
     if isinstance(fin, (int, float)) and (time.time() * 1000 - fin) < COOLDOWN_S * 1000:
@@ -690,7 +729,9 @@ def run(argv):
             # just failed, give it a moment" are different things to be told, and
             # only one of them is worth pressing again straight away.
             log("failed: cooldown - a run failed less than %d minutes ago" % (COOLDOWN_S // 60))
-            set_status("cooldown", finishedAt=since)
+            # `downloaded` is carried forward: without it this refusal would look
+            # like a cheap failure and the NEXT press would sail past the window.
+            set_status("cooldown", finishedAt=since, downloaded=True)
             return 1
         why = box_busy()
         if why:
@@ -716,11 +757,11 @@ def run(argv):
 
     log("%s: feed %s" % (action, url))
     try:
-        raw = fetch(url, MAX_FEED_BYTES, FEED_TIMEOUT_S)
+        raw = fetch_retrying(url, MAX_FEED_BYTES, FEED_TIMEOUT_S)
     except (urllib.error.URLError, OSError, ValueError) as e:
         fail("feed-unreachable", str(e)[:120])
     try:
-        sig = fetch(url + ".sig", MAX_SIG_BYTES, FEED_TIMEOUT_S)
+        sig = fetch_retrying(url + ".sig", MAX_SIG_BYTES, FEED_TIMEOUT_S)
     except urllib.error.HTTPError as e:
         # Told apart from a network fault on purpose: a release built without the
         # signing key publishes the feed and no signature at all, and reporting
@@ -755,6 +796,8 @@ def run(argv):
     os.makedirs(STAGE_DIR, mode=0o700)
     try:
         tarball = os.path.join(STAGE_DIR, "release.tar.gz")
+        global _downloaded
+        _downloaded = True
         log("downloading %s" % feed["url"])
         try:
             fetch(feed["url"], MAX_TARBALL_BYTES, TARBALL_TIMEOUT_S, dest=tarball)
