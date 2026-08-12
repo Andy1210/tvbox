@@ -83,6 +83,12 @@ function fakeBox(overrides = {}, stubs = {}) {
     path.join(root, "boot", "firmware", "cmdline.txt"),
     "root=PARTUUID=x rootwait vc4.force_hotplug=1\n",
   );
+  // A real Pi always has one, and it is now written at runtime as well (the
+  // built-in radio switch edits it), so a healthy box has to carry one here.
+  fs.writeFileSync(
+    path.join(root, "boot", "firmware", "config.txt"),
+    "dtparam=audio=on\ndtoverlay=vc4-kms-v3d\n[all]\n",
+  );
   fs.writeFileSync(path.join(root, "home", "tv", ".tvbox", "shell", "package.json"), '{ "version": "9.9.9" }\n');
   for (const k of ["ed25519", "rsa"]) {
     fs.writeFileSync(path.join(root, "etc", "ssh", "ssh_host_" + k + "_key"), "x");
@@ -204,6 +210,35 @@ test("an empty cmdline.txt is called out - it boots on the firmware fallback", (
     "and says where the lost text may still be",
   );
   assert.match(out, /verdict: *1 problem/);
+});
+
+test("an empty config.txt is called out - nothing would reach the TV", () => {
+  // config.txt is written at runtime now (the built-in radio switch), so it can
+  // hit the same FAT truncation as cmdline.txt - and losing it costs the display
+  // driver, i.e. a box that boots to nothing at all.
+  const box = fakeBox({ "boot/firmware/config.txt": "" });
+  const out = report(box);
+  assert.match(out, /config\.txt: *EMPTY/);
+  assert.ok(
+    warnings(out).some((w) => /EMPTY/.test(w) && /bak-tvbox-radio|FSCK/.test(w)),
+    "and says where the lost text may still be",
+  );
+});
+
+test("a config.txt without the display overlay is reported", () => {
+  const box = fakeBox({ "boot/firmware/config.txt": "dtparam=audio=on\n" });
+  assert.ok(
+    warnings(report(box)).some((w) => /vc4-kms-v3d/.test(w)),
+    "the session cannot start without it, and nothing on the box says so",
+  );
+});
+
+test("a radio turned off in the boot config is stated, not guessed at", () => {
+  // Someone reading this report is usually asking why a box is not on the network.
+  const box = fakeBox({ "boot/firmware/config.txt": "dtoverlay=vc4-kms-v3d\n[all]\ndtoverlay=disable-wifi\n" });
+  const out = report(box);
+  assert.match(out, /built-in wifi: *OFF/);
+  assert.doesNotMatch(out, /built-in bt: *OFF/);
 });
 
 test("a missing vc4.force_hotplug=1 is reported, since nothing else would notice", () => {

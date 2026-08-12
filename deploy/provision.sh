@@ -643,6 +643,58 @@ else
   warn "tvbox-miracast helper or unit missing - screen mirroring unavailable"
 fi
 
+echo "==> built-in radios as a setting (config.txt, applied by a root unit)"
+# Turning the Pi's OWN wifi or Bluetooth off is a boot-config change, so it is
+# root's - and a USB dongle is only worth having once the built-in radio is out of
+# the antenna's way (they share one on this chip). Same both-halves-or-neither rule
+# as mirroring: a helper without its unit leaves a Settings switch that cannot work,
+# and a polkit grant for a unit that is not there.
+if [ -f "$HERE/tvbox-radio" ] && [ -f "$HERE/tvbox-radio@.service" ] &&
+  install -m 755 -o root -g root "$HERE/tvbox-radio" /usr/local/sbin/tvbox-radio &&
+  install -m 644 -o root -g root "$HERE/tvbox-radio@.service" /etc/systemd/system/tvbox-radio@.service; then
+  # The ACTION is the instance name, so the grant names all four instances rather
+  # than a prefix - `tvbox-radio@anything.service` would be a wider door than this
+  # needs, and the script would reject it anyway.
+  cat > /etc/polkit-1/rules.d/53-tvbox-radio.rules <<'RULES'
+// tvbox: let the box user turn the built-in wifi/Bluetooth off and back on.
+// Four exact instances and only `start` - the unit is a oneshot, and a prefix
+// match or a general manage-units grant would cover far more than this needs.
+// Matches on the GROUP: the shell has no logind session (Electron moves its main
+// process into its own app scope), so subject.active is false for it.
+polkit.addRule(function (action, subject) {
+  var units = [
+    "tvbox-radio@bt-off.service",
+    "tvbox-radio@bt-on.service",
+    "tvbox-radio@wifi-off.service",
+    "tvbox-radio@wifi-on.service",
+  ];
+  if (
+    action.id === "org.freedesktop.systemd1.manage-units" &&
+    units.indexOf(action.lookup("unit")) >= 0 &&
+    action.lookup("verb") === "start" &&
+    subject.isInGroup("netdev")
+  ) {
+    return polkit.Result.YES;
+  }
+});
+RULES
+  systemctl daemon-reload 2>/dev/null || true
+  # The grant above matches on netdev, so membership is what decides whether the
+  # switch works at all - and a box whose mirroring block took its `else` branch
+  # never got it. Reporting success without checking leaves a healthy-looking
+  # toggle that answers "Access denied" on every press, with the reason in a
+  # journal the box user cannot read.
+  if id -nG "$TVBOX_USER" 2>/dev/null | tr ' ' '\n' | grep -qx netdev; then
+    ok "built-in radio switch installed (tvbox-radio)"
+  else
+    usermod -aG netdev "$TVBOX_USER" 2>/dev/null &&
+      warn "built-in radio switch installed; $TVBOX_USER added to netdev - REBOOT before it can apply a change" ||
+      warn "built-in radio switch installed but $TVBOX_USER is not in netdev - it will not be able to apply a change"
+  fi
+else
+  warn "tvbox-radio helper or unit missing - the built-in radio switch is unavailable"
+fi
+
 # A core dump is written by a root unit, so its time limit is root's to set. The
 # session's own coredump_filter (session.sh) is what keeps dumps small; this is
 # the ceiling for when it cannot, so the box can never be held for minutes by an

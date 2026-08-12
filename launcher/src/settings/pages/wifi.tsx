@@ -19,6 +19,7 @@ import { Group, InfoRow, Note, Row, StatusBanner, ToggleRow } from "../Rows";
 import { useSettingsNav } from "../nav";
 import { invalidateSummary } from "../summary";
 import { icons } from "../icons";
+import { radioState, applyBuiltinRadio, type RadioState } from "../../lib/radios";
 
 // Settings -> Network -> Wi-Fi. What used to be one column holding the radio
 // switch, the scan, the network list, the hidden-network entry and the regulatory
@@ -217,6 +218,29 @@ export function WifiPage({ embedded = false }: { embedded?: boolean } = {}) {
     if (r.ok) refresh();
   };
 
+  // The BOOT-CONFIG state of both radios, which is a different thing from the
+  // switch above: that one lasts until the next boot, this one is what actually
+  // frees the antenna. Loaded next to the wifi status so one refresh covers both.
+  const [radios, setRadios] = useState<RadioState | null>(null);
+  // The direction the box asked us to confirm, not a bare flag: a sticky `true`
+  // would ride along on whatever the NEXT press happens to be.
+  const [confirmWifi, setConfirmWifi] = useState<boolean | null>(null);
+  useEffect(() => {
+    void radioState().then(setRadios);
+  }, []);
+
+  const toggleBuiltinWifi = async () => {
+    if (!radios) return;
+    const want = radios.wifi !== "on"; // "on" means the radio is not disabled in config.txt
+    setMsg(t("radios.applying"));
+    setDetail("");
+    const r = await applyBuiltinRadio("wifi", want, confirmWifi === want);
+    setMsg(t(r.key));
+    setDetail(r.detail || "");
+    setConfirmWifi(r.needsConfirm ? want : null); // the next press confirms THIS change
+    setRadios(await radioState());
+  };
+
   const toggleRadio = async () => {
     const want = !status?.radio;
     setMsg(want ? t("wifi.radioTurningOn") : t("wifi.radioTurningOff"));
@@ -292,6 +316,41 @@ export function WifiPage({ embedded = false }: { embedded?: boolean } = {}) {
           onEnter={refresh}
         />
       </Group>
+
+      {/* A group of its own, and not part of "Connection" above: the switch there
+          parks the radio until the next boot, this one writes the boot config, and
+          two adjacent rows that read the same but mean different things need the
+          group's own "takes effect at the next restart" to tell them apart.
+          Not during first-time setup - the wizard runs on a freshly flashed box,
+          which has never been provisioned, so the row could only ever be the
+          disabled one, and a dead row is what a keyboardless first boot can least
+          afford. */}
+      {!embedded && radios?.readable && radios.wifi !== null && (
+        <Group title={t("radios.groupBuiltin")} hint={t("radios.builtinHint")}>
+          <ToggleRow
+            id="builtin-wifi"
+            label={t("radios.builtinWifi")}
+            hint={
+              !radios.helper
+                ? t("radios.needsProvision")
+                : radios.wifi === "on"
+                  ? t("radios.builtinWifiOnHint")
+                  : t("radios.builtinWifiOffHint")
+            }
+            on={radios.wifi === "on"}
+            // A row that cannot act must not look actionable: `disabled` takes it
+            // out of spatial navigation and dims it, where swallowing the press
+            // inside the handler left it lit and silently ignoring every OK.
+            disabled={!radios.helper}
+            onToggle={() => void toggleBuiltinWifi()}
+            onWord={t("common.on")}
+            offWord={t("common.off")}
+          />
+        </Group>
+      )}
+      {!embedded && radios?.readable && radios.wifi === "on" && !radios.ethernet?.connected && (
+        <Note tone="warn">{t("radios.wifiOffGoesOffline")}</Note>
+      )}
 
       <Group title={t("wifi.groupNetworks")}>
         {nets.map((n) => (

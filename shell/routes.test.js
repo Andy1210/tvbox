@@ -31,6 +31,18 @@ function fakeRes() {
   return res;
 }
 
+// Some routes answer only after a couple of async hops (the boot config, then
+// nmcli), so the test has to wait for the response rather than read it straight
+// after the call returns.
+function wrapRes(res, done) {
+  const end = res.end;
+  res.end = (body) => {
+    end(body);
+    done();
+  };
+  return res;
+}
+
 // The shell, as far as a route can tell.
 function fakeCtx(over = {}) {
   return {
@@ -261,6 +273,80 @@ test("the wifi radio is never turned off by a malformed body", async () => {
     assert.strictEqual(jsonOf(res).error, "bad-request", JSON.stringify(body));
   }
   assert.deepStrictEqual(ran, [], "nothing may reach nmcli for a body that is not a boolean");
+});
+
+test("the built-in radio route refuses a body that is not a boolean", () => {
+  const started = [];
+  const radio = require("./builtinradio");
+  const realApply = radio.apply;
+  radio.apply = (a, cb) => {
+    started.push(a);
+    cb(null);
+  };
+  for (const body of [{}, { radio: "wifi" }, { radio: "wifi", on: "false" }, { radio: "zigbee", on: false }, null]) {
+    const res = fakeRes();
+    routes.post("/tvbox/api/radios", body, res, fakeCtx());
+    assert.strictEqual(jsonOf(res).error, "bad-request", JSON.stringify(body));
+  }
+  radio.apply = realApply;
+  assert.deepStrictEqual(started, [], "nothing may reach systemd for a malformed body");
+});
+
+test("turning off the second radio on a cableless box asks first", async () => {
+  // Both radios off with no cable leaves nothing that can reach the box, and it
+  // survives a reboot - so this one state costs a confirmation. It is NOT a
+  // refusal: the second press carries `confirm` and goes through.
+  const radio = require("./builtinradio");
+  const real = { apply: radio.apply, readState: radio.readState };
+  const started = [];
+  radio.readState = (cb) => cb({ readable: true, wifi: "on", bt: "off" });
+  radio.apply = (a, cb) => {
+    started.push(a);
+    cb(null);
+  };
+  system.init({
+    execFile: (cmd, args, opts, cb) => {
+      const done = typeof opts === "function" ? opts : cb;
+      // No carrier: nmcli reports the wired device disconnected.
+      setImmediate(() => done(null, "eth0:ethernet:unavailable:\n", ""));
+    },
+  });
+
+  const asked = fakeRes();
+  await new Promise((r) => {
+    routes.post("/tvbox/api/radios", { radio: "wifi", on: false }, wrapRes(asked, r), fakeCtx());
+  });
+  assert.strictEqual(jsonOf(asked).error, "needs-confirm");
+  assert.deepStrictEqual(started, [], "and nothing was applied");
+
+  const confirmed = fakeRes();
+  await new Promise((r) => {
+    routes.post("/tvbox/api/radios", { radio: "wifi", on: false, confirm: true }, wrapRes(confirmed, r), fakeCtx());
+  });
+  assert.strictEqual(jsonOf(confirmed).ok, true);
+  assert.deepStrictEqual(started, [{ radio: "wifi", on: false }]);
+
+  radio.apply = real.apply;
+  radio.readState = real.readState;
+});
+
+test("turning a radio back ON is never gated", async () => {
+  const radio = require("./builtinradio");
+  const real = { apply: radio.apply, readState: radio.readState };
+  const started = [];
+  radio.readState = (cb) => cb({ readable: true, wifi: "off", bt: "off" });
+  radio.apply = (a, cb) => {
+    started.push(a);
+    cb(null);
+  };
+  const res = fakeRes();
+  await new Promise((r) => {
+    routes.post("/tvbox/api/radios", { radio: "wifi", on: true }, wrapRes(res, r), fakeCtx());
+  });
+  assert.strictEqual(jsonOf(res).ok, true);
+  assert.deepStrictEqual(started, [{ radio: "wifi", on: true }]);
+  radio.apply = real.apply;
+  radio.readState = real.readState;
 });
 
 test.after(() => {

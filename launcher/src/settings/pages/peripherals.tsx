@@ -13,6 +13,7 @@ import { useSummary, invalidateSummary } from "../summary";
 import { btGlyph } from "../icons";
 import { RemoteRemap } from "../../components/RemoteRemap";
 import { IrPage } from "./ir";
+import { radioState, applyBuiltinRadio, type RadioState } from "../../lib/radios";
 
 // Settings -> Remotes & accessories. Bluetooth, the per-remote button map, and the
 // IR blaster that gives a CEC-volume-less TV its volume back.
@@ -134,6 +135,32 @@ function BluetoothPage() {
   busyRef.current = busy;
   scanningRef.current = scanning;
 
+  // The BUILT-IN controller as a boot-config setting. A USB dongle brings its own
+  // antenna, outside the case, and is only worth having once the built-in radio
+  // stops sharing the one on the chip - and an owner who wants no Bluetooth at all
+  // is entitled to that too. Nothing here checks for a dongle: the box cannot know
+  // what is about to be plugged in, and the warning says what is lost either way.
+  const [radios, setRadios] = useState<RadioState | null>(null);
+  // The direction the box asked us to confirm, not a bare flag: a sticky `true`
+  // would ride along on whatever the NEXT press happens to be.
+  const [confirmBt, setConfirmBt] = useState<boolean | null>(null);
+  const [radioDetail, setRadioDetail] = useState("");
+  useEffect(() => {
+    void radioState().then(setRadios);
+  }, []);
+
+  const toggleBuiltinBt = async () => {
+    if (!radios) return;
+    const want = radios.bt !== "on";
+    setMsg(t("radios.applying"));
+    setRadioDetail("");
+    const r = await applyBuiltinRadio("bt", want, confirmBt === want);
+    setMsg(t(r.key));
+    setRadioDetail(r.detail || "");
+    setConfirmBt(r.needsConfirm ? want : null); // the next press confirms THIS change
+    setRadios(await radioState());
+  };
+
   const alive = useRef(true);
   const refresh = useCallback(() => {
     invalidateSummary("bt");
@@ -233,6 +260,32 @@ function BluetoothPage() {
         ))}
         {devices && !devices.length && <InfoRow label={t("bt.none")} value="" />}
       </Group>
+
+      {radios?.readable && radios.bt !== null && (
+        <Group title={t("radios.groupBuiltin")} hint={t("radios.builtinHint")}>
+          <ToggleRow
+            id="builtin-bt"
+            label={t("radios.builtinBt")}
+            hint={
+              !radios.helper
+                ? t("radios.needsProvision")
+                : radios.bt === "on"
+                  ? t("radios.builtinBtOnHint")
+                  : t("radios.builtinBtOffHint")
+            }
+            on={radios.bt === "on"}
+            // A row that cannot act must not look actionable: `disabled` takes it
+            // out of spatial navigation and dims it, where swallowing the press
+            // inside the handler left it lit and silently ignoring every OK.
+            disabled={!radios.helper}
+            onToggle={() => void toggleBuiltinBt()}
+            onWord={t("common.on")}
+            offWord={t("common.off")}
+          />
+        </Group>
+      )}
+      {radios?.readable && radios.bt === "on" && <Note tone="warn">{t("radios.btOffLosesRemotes")}</Note>}
+      {radioDetail && <Note>{radioDetail}</Note>}
 
       <Group title={t("bt.groupTroubleshooting")} hint={t("bt.ertmHint")}>
         <ToggleRow

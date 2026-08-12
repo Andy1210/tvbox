@@ -34,6 +34,7 @@ done
 # 2) device access + polkit + OS auto-updates (no auto-reboot) - see conf/
 install -m 644 conf/99-tvbox.rules "${ROOTFS_DIR}/etc/udev/rules.d/"
 install -m 644 conf/50-tvbox-networkmanager.rules conf/51-tvbox-locale.rules conf/50-tvbox-udisks.rules \
+  conf/53-tvbox-radio.rules \
   "${ROOTFS_DIR}/etc/polkit-1/rules.d/"
 install -m 644 conf/20auto-upgrades conf/52tvbox-unattended-upgrades "${ROOTFS_DIR}/etc/apt/apt.conf.d/"
 # logind: a BT remote's Power button reaches the box as KEY_POWER; without this
@@ -346,6 +347,13 @@ ln -sf ../tvbox-expand-rootfs.service \
 #     launcher. Both are shipped as real files via deploy/infra.list and installed
 #     from ~/.tvbox/ - same files deploy/provision.sh installs, so there is no
 #     second copy of the logic to keep in sync, and CI unit-tests them.
+# The built-in radio switch's root half. Same shape and the same reason as the
+# pair below: a flashed box never runs provision.sh, so without this the Settings
+# toggle would say "this box needs to be set up from a computer" for its whole
+# life. The polkit grant that goes with it is conf/53-tvbox-radio.rules above.
+install -m 755 "${ROOTFS_DIR}${USER_HOME}/.tvbox/tvbox-radio" "${ROOTFS_DIR}/usr/local/sbin/tvbox-radio"
+install -m 644 "${ROOTFS_DIR}${USER_HOME}/.tvbox/tvbox-radio@.service" \
+  "${ROOTFS_DIR}/etc/systemd/system/tvbox-radio@.service"
 install -m 755 "${ROOTFS_DIR}${USER_HOME}/.tvbox/tvbox-diag.sh" "${ROOTFS_DIR}/usr/local/sbin/tvbox-diag"
 install -m 755 "${ROOTFS_DIR}${USER_HOME}/.tvbox/tvbox-safemode.sh" "${ROOTFS_DIR}/usr/local/sbin/tvbox-safemode"
 for u in tvbox-diag.service tvbox-diag.timer tvbox-safemode.service tvbox-safemode-screen.service; do
