@@ -42,11 +42,14 @@ const MAX_TEXT = 400; // a login/search field, not a document
 // The strip is the preload's, repeated. That one runs in the RENDERER, on text the
 // page wrote, so it is not a guarantee this side may lean on - and a bidi override
 // or a zero-width character reaching the TV and the phone page makes the text read
-// as something other than what it is.
+// as something other than what it is. It reaches the C1 block and U+061C as well as
+// the obvious ranges: the mark is a bidi control whose siblings are already here,
+// and an invisible character is precisely the kind that survives a glance at a TV
+// two metres away.
 function offerableValue(text, password) {
   if (password || !deps.canReplace()) return "";
   const value = String(text == null ? "" : text).replace(
-    /[\u0000-\u001f\u007f\u200b-\u200f\u202a-\u202e\u2066-\u2069]/g,
+    /[\u0000-\u001f\u007f-\u009f\u061c\u200b-\u200f\u202a-\u202e\u2066-\u2069]/g,
     "",
   );
   return value.length > MAX_TEXT ? "" : value;

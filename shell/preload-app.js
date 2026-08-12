@@ -252,7 +252,7 @@ if (info.language) {
       // something else entirely - and a C0 control is dropped on the way back out
       // anyway, so showing one would be showing a character that cannot survive.
       var text = String(raw == null ? "" : raw).replace(
-        /[\u0000-\u001f\u007f\u200b-\u200f\u202a-\u202e\u2066-\u2069]/g,
+        /[\u0000-\u001f\u007f-\u009f\u061c\u200b-\u200f\u202a-\u202e\u2066-\u2069]/g,
         "",
       );
       return text.slice(0, VALUE_TRANSPORT_MAX);
@@ -273,7 +273,7 @@ if (info.language) {
     // ends up on the TV and on the phone page, and a right-to-left override can make a
     // label read as something else entirely.
     return String(t)
-      .replace(/[\u0000-\u001f\u007f\u200b-\u200f\u202a-\u202e\u2066-\u2069]/g, "")
+      .replace(/[\u0000-\u001f\u007f-\u009f\u061c\u200b-\u200f\u202a-\u202e\u2066-\u2069]/g, "")
       .trim()
       .slice(0, 80);
   }

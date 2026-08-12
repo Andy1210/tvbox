@@ -259,3 +259,21 @@ test("bidi and zero-width characters never reach the screen", () => {
   textinput.focused("xcloud", wc, { kind: "text", label, value: sneaky });
   assert.strictEqual(log.shown[0].value, "abcdef");
 });
+
+test("the invisible ones with no obvious range go too", () => {
+  const label = reset();
+  const { log, wc } = harness();
+  // U+061C is a bidi control like the marks above it, and every one of its siblings
+  // was already stripped - it is only unusual in sitting outside their block. The
+  // C1 controls are the other half: they show nothing on a TV two metres away, so a
+  // prefill carrying them reads as a shorter string than the one being submitted.
+  const invisible =
+    "a" +
+    String.fromCharCode(0x061c) +
+    "b" +
+    String.fromCharCode(0x0085) + // NEL, in the middle of C1
+    "c" +
+    String.fromCharCode(0x009f); // the last of them
+  textinput.focused("xcloud", wc, { kind: "text", label, value: invisible });
+  assert.strictEqual(log.shown[0].value, "abc");
+});
