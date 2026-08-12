@@ -141,3 +141,29 @@ describe("TypingOverlay session reporting", () => {
     await pushNav("typing"); // must not throw
   });
 });
+
+// The keyboard opens ON what the field already holds. The shell types the result
+// back as a REPLACEMENT of the whole field, so an empty keyboard meant a field with
+// anything in it could only be retyped from scratch - and its contents were never on
+// screen to read. What may be offered (never a password, never a value too long to
+// type back) is the shell's decision; the overlay's job is only to pass it on.
+describe("TypingOverlay prefill", () => {
+  it("opens the keyboard on the text the field already holds", async () => {
+    stubShell({ ...SESSION, value: "daniel@example.com" });
+    await mount();
+
+    await pushNav("typing");
+    expect(screen.queryByText("daniel@example.com")).not.toBeNull();
+  });
+
+  it("opens empty when the shell offers no value", async () => {
+    // A password field, a value longer than the shell will type back, or simply an
+    // empty input: all three arrive here as nothing, and all three mean an empty
+    // keyboard rather than a guess.
+    stubShell(SESSION);
+    await mount();
+
+    await pushNav("typing");
+    expect(screen.queryByText("daniel@example.com")).toBeNull();
+  });
+});

@@ -122,6 +122,12 @@ export function TypingOverlay({ onActiveChange }: { onActiveChange?: (active: bo
     <>
       <Osk
         title={t("typing.title")}
+        // What the field already holds. The shell types the result back as a
+        // REPLACEMENT, so opening empty meant a field with anything in it could only
+        // be retyped from scratch - and its contents were never on screen to read.
+        // `initial` is read once, when the keyboard mounts: a page that rewrites its
+        // own field afterwards must not move the caret under the user.
+        initial={st.value}
         onDone={done}
         onCancel={cancel}
         extra={{ label: t("typing.phoneKey"), onPress: () => armPhoneTyping().then(setPhone) }}

@@ -96,7 +96,15 @@
       var FIELD_LABEL = {{labelJson}};
       if (FIELD_LABEL) document.getElementById("fieldLabel").textContent = FIELD_LABEL;
       if ("{{isPassword}}") document.getElementById("secretWarn").style.display = "block";
+      // What the field on the TV already holds, so this edits it rather than replacing
+      // it blind. A property assignment, never markup - same handling as the label.
+      input.value = {{valueJson}};
       input.focus();
+      // Caret at the end rather than a selected value: the first key a phone sends
+      // would otherwise wipe what we just offered, which is the state this replaces.
+      try {
+        input.setSelectionRange(input.value.length, input.value.length);
+      } catch (e) {}
       async function send() {
         var text = input.value;
         if (!text) {

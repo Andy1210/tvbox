@@ -20,7 +20,42 @@
 // dropped rather than delivered somewhere else.
 const MAX_TEXT = 400; // a login/search field, not a document
 
-let session = null; // { appId, wc, kind, password, label, url, code }
+// What the field already holds, offered to the keyboard so it opens ON the text
+// rather than empty. Delivery REPLACES the field (see submit), so without this a
+// field with anything in it could only be retyped from scratch.
+//
+// Everything that can go wrong with that is decided here, and each rule is a way it
+// could do harm:
+//
+//   - Never a password. The preload withholds that value and this refuses it a
+//     second time, because the session's own flag is what the phone page - served
+//     over the LAN in clear - keys off.
+//   - Never unless delivery actually REPLACES. `canReplace` asks the RUNNING
+//     compositor, not the installed one: on a build whose select-all chord loses its
+//     modifier, typing appends, so offering the field's own text back would submit
+//     it twice. It fails closed, and a box that answers no simply gets the empty
+//     keyboard it had before.
+//   - Never TRUNCATED. A value longer than we will type back is dropped whole: a
+//     prefill silently cut short looks complete, and submitting it would replace the
+//     field with the part that fit and destroy text the user never saw.
+//
+// The strip is the preload's, repeated. That one runs in the RENDERER, on text the
+// page wrote, so it is not a guarantee this side may lean on - and a bidi override
+// or a zero-width character reaching the TV and the phone page makes the text read
+// as something other than what it is. It reaches the C1 block and U+061C as well as
+// the obvious ranges: the mark is a bidi control whose siblings are already here,
+// and an invisible character is precisely the kind that survives a glance at a TV
+// two metres away.
+function offerableValue(text, password) {
+  if (password || !deps.canReplace()) return "";
+  const value = String(text == null ? "" : text).replace(
+    /[\u0000-\u001f\u007f-\u009f\u061c\u200b-\u200f\u202a-\u202e\u2066-\u2069]/g,
+    "",
+  );
+  return value.length > MAX_TEXT ? "" : value;
+}
+
+let session = null; // { appId, wc, kind, password, label, value, url, code }
 let lastEnded = null; // { appId, sig, at } - see the cooldown in focused()
 let ourPairing = false; // did WE start the pairing session? (photos/backup share it)
 const RETRIGGER_MS = 2500;
@@ -32,6 +67,9 @@ let deps = {
   pairingStop: () => {},
   isForeground: () => true, // is this app still the one on screen?
   typeText: () => {}, // deliver the string to whatever holds the keyboard
+  // Does delivery REPLACE the field, or only append to it? Fails closed: with no
+  // answer the keyboard opens empty, which is what it always did.
+  canReplace: () => false,
 };
 
 function init(d) {
@@ -46,6 +84,9 @@ function focused(appId, wc, field) {
     session.kind = field.kind;
     session.password = !!field.password;
     session.label = field.label || session.label;
+    // Re-read through the flag we just set, so a field that turns into a password
+    // one under us takes its value back out of the session with it.
+    session.value = offerableValue(field.value, session.password);
     return;
   }
   // Putting the app window back in front can re-fire focusin on the field we just
@@ -61,6 +102,7 @@ function focused(appId, wc, field) {
     kind: String(field.kind || "text"),
     password: !!field.password,
     label: String(field.label || ""),
+    value: offerableValue(field.value, !!field.password),
     // No pairing session yet: starting one opens a LAN server, mints a code and
     // resets its lockout counter, so it waits for the user to ask for the phone
     // (startPhone) instead of happening because a page focused a field.
@@ -102,6 +144,7 @@ function status() {
     kind: session.kind,
     password: session.password,
     label: session.label,
+    value: session.value,
     url: session.url,
     code: session.code,
   };

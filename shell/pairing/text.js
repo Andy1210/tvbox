@@ -9,6 +9,22 @@
 // ../textinput.submit() and the session ends.
 const textinput = require("../textinput");
 
+// A JS string literal for a value that goes inside a <script> block. `render` does
+// raw substitution with no escaping of its own, so JSON.stringify is not enough on
+// its own: the one sequence that ends a script block is `</script>`, and JSON leaves
+// it exactly as it came. Escaping every `<` closes that without changing the string
+// the browser ends up with. U+2028/2029 go with it - a line terminator inside a
+// literal is a parse error in older engines, and a phone's browser is not ours to
+// choose. The label reaches the page the same way but is charset-stripped first (no
+// `<` survives it); a field's own contents cannot be stripped like that without
+// corrupting perfectly ordinary text, so they are escaped instead.
+function jsString(text) {
+  return JSON.stringify(String(text == null ? "" : text))
+    .replace(/</g, "\\u003c")
+    .replace(/\u2028/g, "\\u2028")
+    .replace(/\u2029/g, "\\u2029");
+}
+
 const STR = {
   hu: {
     title: "tvbox - Beírás",
@@ -47,7 +63,12 @@ module.exports = {
       .trim();
     return ctx.render("text.html", {
       lang: ctx.locale,
-      labelJson: JSON.stringify(label),
+      labelJson: jsString(label),
+      // What the field already holds, so the phone edits it instead of replacing it
+      // blind - the TV types the result back over the whole field either way. Never a
+      // password and never longer than the shell will type: textinput.js decides both
+      // and hands over an empty string when it says no.
+      valueJson: jsString(st.active ? st.value || "" : ""),
       isPassword: st.active && st.password ? "1" : "",
       inputType: st.active && st.password ? "password" : "text",
       maxlen: String(textinput.MAX_TEXT),
