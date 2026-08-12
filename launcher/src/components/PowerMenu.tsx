@@ -14,6 +14,13 @@ export function PowerMenu({ onClose }: { onClose: () => void }) {
   const { ref, focusKey } = useFocusable({ focusKey: "power", isFocusBoundary: true });
   const entryAnim = useEntryAnim();
   const [confirm, setConfirm] = useState<PowerAction | null>(null);
+  // What the box said when it would not go down. A restart that WORKS tears the
+  // connection down mid-request, so `power()` catches that and answers {ok:false}
+  // with no error - which is why "no error" counts as success here. An error means
+  // the shell answered, i.e. it really refused, and on a TV with no keyboard that
+  // has to be on screen: the alternative is a button that closes the menu and does
+  // nothing, which is the dead end hard rule 7 is about.
+  const [refused, setRefused] = useState<string | null>(null);
   // sleep timer: cycles Off -> 30 -> 60 -> 90 min; the shell owns the countdown
   const TIMER_STEPS = [0, 30, 60, 90];
   const [timerAt, setTimerAt] = useState<number | null>(null);
@@ -32,9 +39,9 @@ export function PowerMenu({ onClose }: { onClose: () => void }) {
   };
 
   useEffect(() => {
-    setFocus(confirm ? "power-yes" : "power-sleep");
-  }, [confirm]);
-  useBackspace(() => (confirm ? setConfirm(null) : onClose()));
+    setFocus(refused ? "power-refused-ok" : confirm ? "power-yes" : "power-sleep");
+  }, [confirm, refused]);
+  useBackspace(() => (refused ? setRefused(null) : confirm ? setConfirm(null) : onClose()));
 
   const item = "w-full px-[3vw] py-[2vh] rounded-[1.2vh] bg-white/5 text-[2.4vh] font-semibold text-left flex flex-col";
 
@@ -50,7 +57,20 @@ export function PowerMenu({ onClose }: { onClose: () => void }) {
           {/* key= mirrors focusKey: useFocusable registers its key mount-only, so a
               FocusButton instance reused across the confirm flip keeps the stale key
               and the whole overlay goes focus-dead. Keys force a remount. */}
-          {confirm ? (
+          {refused ? (
+            <>
+              <div className="text-[2.4vh] font-semibold text-center mb-[0.6vh]">{t("power.failed")}</div>
+              <div className="text-[1.8vh] text-fg-dim text-center break-words mb-[1vh]">{refused}</div>
+              <FocusButton
+                key="power-refused-ok"
+                focusKey="power-refused-ok"
+                onEnter={onClose}
+                className={item + " items-center"}
+              >
+                {t("power.ok")}
+              </FocusButton>
+            </>
+          ) : confirm ? (
             <>
               <div className="text-[2.6vh] font-semibold text-center mb-[1vh]">
                 {t(confirm === "reboot" ? "power.confirmRestart" : "power.confirmShutdown")}
@@ -58,9 +78,10 @@ export function PowerMenu({ onClose }: { onClose: () => void }) {
               <FocusButton
                 key="power-yes"
                 focusKey="power-yes"
-                onEnter={() => {
-                  power(confirm);
-                  onClose();
+                onEnter={async () => {
+                  const r = await power(confirm);
+                  if (r.ok || !r.error) return onClose(); // gone, or going down
+                  setRefused(r.error);
                 }}
                 className={item + " items-center bg-[#b3261e]/30"}
               >

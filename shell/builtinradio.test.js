@@ -98,9 +98,14 @@ test("apply starts the one unit that matches the action", () => {
   };
   radio.apply({ radio: "bt", on: false }, () => {}, { run });
   radio.apply({ radio: "wifi", on: true }, () => {}, { run });
+  // `--no-ask-password` is part of the call, not decoration: a box provisioned
+  // before this feature's polkit grant existed has no grant, and without the flag
+  // systemctl would answer the missing authorisation by spawning pkttyagent -
+  // which reads a terminal, takes SIGTTIN, and stops the shell and its respawn
+  // loop with it. A missing grant has to fail, not freeze the TV.
   assert.deepStrictEqual(calls, [
-    ["systemctl", "start", "tvbox-radio@bt-off.service"],
-    ["systemctl", "start", "tvbox-radio@wifi-on.service"],
+    ["systemctl", "--no-ask-password", "start", "tvbox-radio@bt-off.service"],
+    ["systemctl", "--no-ask-password", "start", "tvbox-radio@wifi-on.service"],
   ]);
 });
 

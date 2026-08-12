@@ -109,7 +109,9 @@
     "cancel": "Mégse",
     "sleepTimer": "Elalvásidőzítő",
     "sleepTimerIn": "{min} perc múlva",
-    "sleepTimerHint": "A megadott idő után kikapcsolja a TV-t (a box megy tovább)."
+    "sleepTimerHint": "A megadott idő után kikapcsolja a TV-t (a box megy tovább).",
+    "failed": "A box nem tudott lekapcsolni",
+    "ok": "Rendben"
   },
   "ambient": {
     "enable": "Bekapcsolva tétlenség esetén",

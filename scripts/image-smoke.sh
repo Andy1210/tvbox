@@ -112,6 +112,7 @@ PARTS
   for f in usr/local/sbin/tvbox-diag usr/local/sbin/tvbox-safemode usr/local/sbin/tvbox-radio \
     etc/systemd/system/tvbox-diag.service etc/systemd/system/tvbox-safemode.service \
     etc/systemd/system/tvbox-radio@.service etc/polkit-1/rules.d/53-tvbox-radio.rules \
+    etc/polkit-1/rules.d/54-tvbox-power.rules \
     usr/local/bin/tvbox-wc usr/local/bin/tvbox-session home/tv/.tvbox/session.sh \
     home/tv/.tvbox/shell/main.js home/tv/.tvbox/run-shell.sh \
     home/tv/.tvbox/shell/launcher-dist/index.html \
@@ -294,6 +295,7 @@ for f in \
   etc/systemd/system/tvbox-safemode.service \
   etc/systemd/system/tvbox-radio@.service \
   etc/polkit-1/rules.d/53-tvbox-radio.rules \
+  etc/polkit-1/rules.d/54-tvbox-power.rules \
   usr/local/bin/tvbox-wc \
   usr/local/bin/tvbox-session \
   home/tv/.tvbox/session.sh \

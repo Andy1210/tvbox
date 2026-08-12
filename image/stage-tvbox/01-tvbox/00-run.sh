@@ -34,7 +34,7 @@ done
 # 2) device access + polkit + OS auto-updates (no auto-reboot) - see conf/
 install -m 644 conf/99-tvbox.rules "${ROOTFS_DIR}/etc/udev/rules.d/"
 install -m 644 conf/50-tvbox-networkmanager.rules conf/51-tvbox-locale.rules conf/50-tvbox-udisks.rules \
-  conf/53-tvbox-radio.rules \
+  conf/53-tvbox-radio.rules conf/54-tvbox-power.rules \
   "${ROOTFS_DIR}/etc/polkit-1/rules.d/"
 install -m 644 conf/20auto-upgrades conf/52tvbox-unattended-upgrades "${ROOTFS_DIR}/etc/apt/apt.conf.d/"
 # logind: a BT remote's Power button reaches the box as KEY_POWER; without this
