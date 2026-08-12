@@ -6,7 +6,8 @@
 # Everything root-flavoured lives here so the rest of the system never needs
 # elevation: deploy syncs files and manages *user* services, app bundles
 # install user-space (flatpak --user / url / git), and the shell runs without
-# sudo (reboot/poweroff go through logind's active-session polkit grant).
+# sudo (reboot/poweroff go through the polkit grant below - NOT logind's
+# active-session default, which never covered the shell: it has no session).
 # Idempotent - safe to re-run after an OS upgrade or a tvbox update.
 #
 # What it does:
@@ -258,11 +259,17 @@ echo "==> polkit: reboot / shut down from the power menu (no sudo needed)"
 # the shell AND its respawn loop - leaving a box that looks bricked.
 cat > /etc/polkit-1/rules.d/54-tvbox-power.rules <<'RULES'
 // tvbox: let the box user reboot and shut the box down from the power menu.
-// Two actions, named exactly: `halt` stays out (it stops the machine without
-// cutting power, indistinguishable from a hang on a headless box), and so do the
-// -multiple-sessions / -ignore-inhibit variants.
+// Two actions, named exactly. `halt` stays out (it stops the machine without
+// cutting power, indistinguishable from a hang on a headless box). The
+// -multiple-sessions / -ignore-inhibit variants stay out too - note that logind
+// picks ONE action rather than falling back, so with a second uid's session or a
+// block-mode inhibitor the menu is denied, not delayed. Narrow, and now visible on
+// screen instead of silent.
 // Matches on the GROUP because the shell has no logind session - Electron moves
 // its main process into its own app scope, so subject.active is false for it.
+// `video` is a device-access group, not "whoever drives the screen": every member
+// can also power the box off over SSH unauthenticated, which is the price of a
+// grant that works on a flashed box too.
 // KEEP IN SYNC with image/stage-tvbox/01-tvbox/conf/54-tvbox-power.rules.
 polkit.addRule(function (action, subject) {
   if (

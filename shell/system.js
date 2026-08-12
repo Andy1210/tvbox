@@ -102,15 +102,22 @@ function systemRegion(cb) {
 // timedatectl set-timezone works from the box user's active session (polkit
 // allows timedate1.set-timezone). localectl set-x11-keymap needs the locale1
 // polkit grant provision installs (auth is required by default).
+//
+// All three pass `--no-ask-password` for the reason the power menu was fixed for:
+// where the grant is missing, a systemd client tool asks polkit interactively and
+// can spawn an agent that reads the session's terminal - and a background process
+// group reading a terminal takes SIGTTIN, which stops the shell and its respawn
+// loop. Reproduced on a box through Settings -> Reboot. A missing grant has to
+// come back as the error string below, not as a frozen TV.
 function setTimezone(tz, cb) {
   if (!/^[A-Za-z0-9_+/][A-Za-z0-9_+/-]{0,63}$/.test(tz)) return cb({ ok: false, error: "bad timezone" });
-  execFile("timedatectl", ["set-timezone", tz], { timeout: 8000 }, (e) =>
+  execFile("timedatectl", ["--no-ask-password", "set-timezone", tz], { timeout: 8000 }, (e) =>
     cb(e ? { ok: false, error: String(e.message || e).slice(0, 120) } : { ok: true }),
   );
 }
 function setKeymap(layout, cb) {
   if (!/^[a-z0-9][a-z0-9,_-]{0,31}$/.test(layout)) return cb({ ok: false, error: "bad layout" });
-  execFile("localectl", ["set-x11-keymap", layout], { timeout: 8000 }, (e) =>
+  execFile("localectl", ["--no-ask-password", "set-x11-keymap", layout], { timeout: 8000 }, (e) =>
     cb(e ? { ok: false, error: String(e.message || e).slice(0, 120) } : { ok: true }),
   );
 }
@@ -121,7 +128,7 @@ function setKeymap(layout, cb) {
 // label (letters/digits/hyphen, 1-63, no leading/trailing hyphen).
 function setHostname(name, cb) {
   if (!/^[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?$/.test(name)) return cb({ ok: false, error: "bad hostname" });
-  execFile("hostnamectl", ["set-hostname", name], { timeout: 8000 }, (e) => {
+  execFile("hostnamectl", ["--no-ask-password", "set-hostname", name], { timeout: 8000 }, (e) => {
     if (e) return cb({ ok: false, error: String(e.message || e).slice(0, 120) });
     // The MQTT device id is DERIVED from the hostname when unset (identity.js), so a
     // rename changes which topics the box belongs on. Tell the caller, so it can

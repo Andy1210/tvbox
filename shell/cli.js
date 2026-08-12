@@ -280,6 +280,13 @@ function main() {
         if (m.install) console.log(`then install its bundle from the HOME screen, or run:  tvbox install ${m.id}`);
         return;
       }
+      // polkit-safety: human-terminal. Everything below can ask for a password -
+      // `sudo` here has no `-n`, deliberately, because a person running `tvbox deps`
+      // from a shell can type one. What keeps that out of the SHELL's hands is this
+      // line: every invocation the shell spawns passes `--download-only`, so it
+      // throws here and never reaches root. That gate is load-bearing - without it
+      // a prompt would be read from the session's terminal by a background process
+      // group, and SIGTTIN would stop the shell and its respawn loop.
       if (downloadOnly) throw new Error("missing after download (needs apt / tvbox deps): " + still.missing.join(", "));
       if (!apt.length) throw new Error("missing after download: " + still.missing.join(", "));
       const badPkg = apt.filter((p) => !validAptName(String(p)));
@@ -287,6 +294,9 @@ function main() {
       // Optional third-party APT repo (e.g. raspotify for librespot). Validation
       // + orchestration live in installAptRepo/aptRepoPlan (unit-tested).
       if (req.aptRepo) installAptRepo(m, req.aptRepo, log);
+      // polkit-safety: human-terminal. Everything from here can ask for a password
+      // (`sudo` deliberately has no `-n`), and that is safe only because of the
+      // `downloadOnly` gate above - see the note there.
       log("apt-get install " + apt.join(" "));
       execFileSync("sudo", ["apt-get", "update", "-qq"], { stdio: "inherit" });
       execFileSync("sudo", ["apt-get", "install", "-y", ...apt], { stdio: "inherit" });
@@ -295,6 +305,7 @@ function main() {
       for (const svc of req.disableService || []) {
         log("systemctl disable --now " + svc);
         try {
+          // polkit-safety: human-terminal (see the downloadOnly gate above).
           execFileSync("sudo", ["systemctl", "disable", "--now", svc], { stdio: "inherit" });
         } catch (e) {
           /* not present */

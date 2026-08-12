@@ -392,9 +392,20 @@ def cec_cmd(cmd):
 
 
 def poweroff_box():
-    """Power the box off via logind (active-session polkit - no root/sudo)."""
+    """Power the box off via logind.
+
+    NOT "the active session's polkit grant", which is what this used to claim: this
+    bridge is a systemd USER service started under linger, so it belongs to no
+    logind session at all and `subject.active` is false for it. What allows it is
+    the group rule provision.sh installs (54-tvbox-power.rules).
+
+    `--no-ask-password` because the alternative to failing is worse than failing:
+    without it a missing grant makes systemctl ask polkit interactively and spawn
+    an agent that reads a terminal, and a background process group that reads a
+    terminal is stopped by SIGTTIN - the whole group with it.
+    """
     try:
-        subprocess.Popen(["systemctl", "poweroff"])
+        subprocess.Popen(["systemctl", "--no-ask-password", "poweroff"])
     except Exception as ex:
         log("poweroff failed:", ex)
 

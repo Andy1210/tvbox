@@ -109,7 +109,9 @@
     "cancel": "Cancel",
     "sleepTimer": "Sleep timer",
     "sleepTimerIn": "in {min} min",
-    "sleepTimerHint": "Turns the TV off after the set time (the box stays on)."
+    "sleepTimerHint": "Turns the TV off after the set time (the box stays on).",
+    "failed": "The box could not power down",
+    "ok": "OK"
   },
   "ambient": {
     "enable": "Turn on when idle",
