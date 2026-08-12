@@ -240,6 +240,10 @@ export async function handleApi(
       return updateStatus();
     case "/tvbox/api/update/apply":
       return updateStatus();
+    case "/tvbox/api/update/apply-system":
+      // The demo has no root half to run, and the real one takes minutes - so
+      // answer the same document rather than pretending to install something.
+      return updateStatus();
     case "/tvbox/api/ambient/weather":
       return data.WEATHER;
     case "/tvbox/api/ambient/photos":

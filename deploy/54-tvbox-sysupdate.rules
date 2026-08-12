@@ -1,0 +1,33 @@
+// tvbox: let the box user ask for a system update (Settings -> Software update).
+//
+// ONE unit and only `start`. A general manage-units grant would cover greetd,
+// NetworkManager and everything else that brings the box up; `stop` would let
+// the shell kill a provision run half way through.
+//
+// Matches on the GROUP, not on subject.active: Electron moves the shell's main
+// process into its own systemd app scope, so polkit sees it with no logind
+// session at all and every `allow_active` default misses it. netdev is the group
+// provision already guarantees the box user is in (the mirroring and radio
+// grants match on it too) - a fresh group would not reach the running session
+// until a reboot, so the feature would look installed and answer "Access denied"
+// until someone restarted the box.
+//
+// What this grant CANNOT do is choose what the update installs. `systemctl
+// start` carries no properties, drop-ins are root-only, and a system unit's
+// environment comes from the manager - so nothing the caller supplies reaches
+// the script. The blast radius is whatever the SIGNED release's provision.sh
+// does, which is the point of the signature.
+//
+// KEEP IN SYNC: this file is installed by deploy/provision.sh and by
+// image/stage-tvbox - it ships in deploy/infra.list so both install the same
+// copy rather than two heredocs that drift.
+polkit.addRule(function (action, subject) {
+  if (
+    action.id === "org.freedesktop.systemd1.manage-units" &&
+    action.lookup("unit") === "tvbox-sysupdate.service" &&
+    action.lookup("verb") === "start" &&
+    subject.isInGroup("netdev")
+  ) {
+    return polkit.Result.YES;
+  }
+});

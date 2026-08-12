@@ -1,0 +1,845 @@
+#!/usr/bin/env python3
+"""Apply a release's ROOT half - the one step an OTA update cannot take.
+
+An OTA release is user-space by design (hard rule #1: nothing in the running
+system holds root), so a version that needs an apt package, a udev or polkit
+grant, a new root unit or a refreshed diagnostics script cannot install itself.
+Until now that meant a re-flash, and an end-user box has no ssh.
+
+This is the narrow root half that closes it, and the whole design follows from
+one invariant: *a root unit must never exec a file out of the box user's home*,
+or a user app's plugin.js - trusted Node, but only as the box user - would get
+root at the next boot. So the shell asks for a system update and passes NOTHING.
+This script fetches the feed, verifies its signature against a key pinned in
+/etc, downloads and checksums the tarball, extracts it into a root-only
+directory, and runs THAT copy's provision.sh. Nothing the box user can write
+decides what runs here.
+
+    tvbox-sysupdate check    look, write the status file, change nothing
+    tvbox-sysupdate apply    the above, then run the release's provision.sh
+
+Started as tvbox-sysupdate.service; the box user may start that one unit
+(polkit rule 54-tvbox-sysupdate.rules) and nothing else.
+
+Two things are load-bearing beyond the signature. The revision floor is
+MONOTONIC, because a signature says "we published this", never "this is
+current": the box user can set the box's DNS (the NetworkManager polkit grant
+covers group netdev), so a replayed older release - public artifacts, no key
+needed - would otherwise let root re-run a historical provision.sh with its
+historical grants and its historical pinned key. And the feed carries its own
+publication date INSIDE the signed bytes, so a stale document is refused even
+when its revision would pass.
+"""
+
+import atexit
+import fcntl
+import json
+import os
+import pwd
+import re
+import shutil
+import signal
+import subprocess
+import sys
+import tarfile
+import tempfile
+import time
+import urllib.error
+import urllib.request
+from urllib.parse import urlparse
+
+# Everything this script trusts lives under a fixed root. TVBOX_SYSUPDATE_TEST_ROOT
+# moves it for the test suite and is honoured ONLY when this is not running as
+# root - so the real thing, which systemd starts as uid 0 with an environment the
+# caller cannot influence, can never be pointed somewhere else. Without the uid
+# gate an env-settable prefix would be a way to hand root a different key.
+_TEST_ROOT = os.environ.get("TVBOX_SYSUPDATE_TEST_ROOT", "") if os.geteuid() != 0 else ""
+
+
+def _p(*parts):
+    return os.path.join(_TEST_ROOT, *[p.lstrip("/") for p in parts]) if _TEST_ROOT else os.path.join(*parts)
+
+
+CONF = _p("/etc/tvbox/sysupdate.conf")
+KEYS_DIR = _p("/etc/tvbox/release-keys.d")
+STATE_DIR = _p("/var/lib/tvbox")
+REVISION_FILE = os.path.join(STATE_DIR, "system-revision")
+STATUS_FILE = os.path.join(STATE_DIR, "sysupdate-status.json")
+LOG_FILE = os.path.join(STATE_DIR, "sysupdate.log")
+LOCK_FILE = os.path.join(STATE_DIR, ".sysupdate.lock")
+STAGE_DIR = os.path.join(STATE_DIR, "sysupdate")
+RUN_DIR = _p("/run/tvbox")
+RUNNING_FILE = os.path.join(RUN_DIR, "sysupdate-running")
+
+DEFAULT_FEED = "https://github.com/Andy1210/tvbox/releases/latest/download/update.json"
+
+FEED_TIMEOUT_S = 20
+TARBALL_TIMEOUT_S = 15 * 60
+# A socket timeout is per read, not a deadline: a server that dribbles one byte
+# before each timeout keeps a transfer alive for ever. That matters here because
+# the box user can choose which server answers (they can set the box's DNS), the
+# unit has no start timeout - provision genuinely takes minutes - and a run that
+# never ends holds the lock, so every later request is refused in silence until
+# somebody reboots the box.
+DOWNLOAD_DEADLINE_S = 30 * 60
+MAX_FEED_BYTES = 256 * 1024
+MAX_SIG_BYTES = 4 * 1024
+MAX_TARBALL_BYTES = 300_000_000
+# The tarball, its extraction and provision's own apt downloads. updater.js
+# reserves the same for the user-space half; both land on the one rootfs.
+MIN_FREE_BYTES = 2_000_000_000
+# A signed document is valid until it is replaced, so age is the only thing that
+# bounds a replay to releases that are at least plausibly current. Generous:
+# a box switched off for a season must still be able to update itself.
+MAX_FEED_AGE_DAYS = 180
+MAX_FEED_SKEW_HOURS = 48
+# How long after a FAILED run the next one is refused. The box user can start the
+# unit at will, and a run that got as far as downloading costs a few hundred MB
+# and minutes of apt, so a tight retry loop is worth blunting - but only just:
+# a person whose network was down when they pressed the button should be able to
+# press it again. A SUCCESSFUL run needs no cooldown at all, because it raised the
+# revision and the floor below turns the next one into a cheap no-op.
+COOLDOWN_S = 2 * 60
+PROVISION_TIMEOUT_S = 60 * 60
+
+# The closed set of outcomes. The launcher translates these; nothing from the
+# feed is ever put in front of a user, because the main window runs with
+# contextIsolation:false and renders whatever the status file says.
+# Outcomes that are not a failure, so the cooldown below does not treat them as
+# one. `available` is what a `check` writes: without it here, looking before
+# pressing would answer "that just failed" to a run that never failed.
+OK_CODES = ("ok", "ok-warnings", "up-to-date", "available")
+
+
+MAX_LOG_BYTES = 1_000_000
+
+
+def log(msg):
+    line = "%s %s\n" % (time.strftime("%Y-%m-%dT%H:%M:%S%z"), msg)
+    sys.stderr.write(line)
+    try:
+        # The box user can start a run whenever they like and each one appends a
+        # whole provision transcript, so this is capped rather than left to grow
+        # on a rootfs that a full disk takes read-only.
+        if os.path.exists(LOG_FILE) and os.path.getsize(LOG_FILE) > MAX_LOG_BYTES:
+            os.replace(LOG_FILE, LOG_FILE + ".1")
+        with open(LOG_FILE, "a") as fh:
+            fh.write(line)
+    except OSError:
+        pass  # the journal already has it
+
+
+def read_text(path, limit=64 * 1024):
+    try:
+        with open(path, "r") as fh:
+            return fh.read(limit)
+    except OSError:
+        return ""
+
+
+def applied_revision():
+    """The highest revision ever applied. Unreadable or unparsable means 0.
+
+    Fail closed in the direction of doing the work: claiming a revision the box
+    has not got is the one failure this mechanism must never have, and a
+    needless re-run of an idempotent script costs a few minutes.
+    """
+    m = re.match(r"^\s*(\d{1,6})\s*$", read_text(REVISION_FILE, 64))
+    return int(m.group(1)) if m else 0
+
+
+def applied_version():
+    return read_text(os.path.join(STATE_DIR, "system-version"), 64).strip()
+
+
+def write_atomic(path, data, mode=0o644):
+    """Write via a temp file in the same (root-only) directory, then rename.
+
+    The status file is read by the shell while this runs, so it must never be
+    observed half-written, and it must never be followed through a symlink.
+    """
+    d = os.path.dirname(path)
+    fd, tmp = tempfile.mkstemp(dir=d, prefix=".tmp-")
+    try:
+        with os.fdopen(fd, "w") as fh:
+            fh.write(data)
+        os.chmod(tmp, mode)
+        os.replace(tmp, path)
+    except BaseException:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
+
+
+_run_id = None
+_started_at = 0
+
+
+def set_status(code, **extra):
+    """Record where this run got to.
+
+    `runId` and `startedAt` are what let the shell tell this run's result from
+    the previous one's: `systemctl start --no-block` returns as soon as the job
+    is queued, so a status file that predates the request would otherwise read
+    as an instant success - and a unit that fails to exec, or a polkit denial,
+    writes nothing at all.
+    """
+    doc = {
+        "code": code,
+        "runId": _run_id,
+        "startedAt": _started_at,
+        "finishedAt": int(time.time() * 1000) if code != "running" else None,
+        "revision": applied_revision(),
+        "version": applied_version(),
+    }
+    doc.update(extra)
+    try:
+        write_atomic(STATUS_FILE, json.dumps(doc) + "\n")
+    except OSError as e:
+        log("could not write the status file: %s" % e)
+
+
+def fail(code, detail=""):
+    log("failed: %s%s" % (code, (" - " + detail) if detail else ""))
+    set_status(code)
+    sys.exit(1)
+
+
+# --------------------------------------------------------------------------
+# configuration
+
+
+def read_conf():
+    """The feed URL and the box user, from a ROOT-owned file.
+
+    Deliberately not ~/.tvbox/config.json: that file is the box user's, and its
+    `update.feed` override accepts plain http to a LAN host. Reading it here
+    would let anything running as that user choose where root downloads from.
+    """
+    conf = {}
+    for line in read_text(CONF).splitlines():
+        line = line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        k, v = line.split("=", 1)
+        conf[k.strip()] = v.strip().strip('"')
+    return conf
+
+
+# https anywhere, or plain http ONLY to a literal private address. A NAME over
+# http would be resolved by a resolver the box user can point wherever they like,
+# and the userinfo form (`http://10.0.0.1@evil.com/`) is why this anchors the
+# whole authority rather than testing a prefix.
+#
+# One function for both the feed and the tarball it names: two nearly-identical
+# regexes drifted apart on the first attempt, and the looser one was the one
+# guarding the download.
+_PRIVATE_HOST = r"(?:(?:10|127)\.\d{1,3}|192\.168|172\.(?:1[6-9]|2\d|3[01]))\.\d{1,3}\.\d{1,3}"
+_ALLOWED_URL = re.compile(r"^(?:https://[^/@\s]+|http://" + _PRIVATE_HOST + r"(?::\d{1,5})?)(?:/|$)")
+
+
+def is_allowed_url(url):
+    return bool(_ALLOWED_URL.match(str(url or "")))
+
+
+def feed_url(conf):
+    url = conf.get("FEED_URL") or DEFAULT_FEED
+    if is_allowed_url(url):
+        return url
+    fail("bad-config", "FEED_URL must be https, or http to a literal private address")
+
+
+def box_user(conf):
+    """Which account provision.sh grants things to.
+
+    Pinned in the root-owned conf rather than discovered: provision writes a
+    sudoers line and group memberships for this name, so "whichever home has a
+    .tvbox in it" is the wrong shape - directory order must not decide who gets
+    them.
+    """
+    name = conf.get("TVBOX_USER", "")
+    if not re.match(r"^[a-z_][a-z0-9_-]{0,31}$", name) or name == "root":
+        fail("bad-config", "TVBOX_USER is missing or not a plain user name")
+    try:
+        pwd.getpwnam(name)
+    except KeyError:
+        fail("bad-config", "TVBOX_USER does not exist on this box")
+    return name
+
+
+def self_check():
+    """Refuse to run if this script is not root's.
+
+    /usr/local is root:staff 2775 on Debian, so a box whose user is in `staff`
+    could otherwise rewrite the very file the polkit grant lets it start.
+    """
+    if _TEST_ROOT:
+        return  # nothing here is root-owned under a test root, and nothing is root
+    try:
+        st = os.stat(os.path.realpath(__file__))
+    except OSError:
+        return
+    if st.st_uid != 0 or (st.st_mode & 0o022):
+        fail("insecure-install", "%s is not owned by root or is writable by others" % __file__)
+
+
+# --------------------------------------------------------------------------
+# fetching
+
+
+class _NoSchemeChange(urllib.request.HTTPRedirectHandler):
+    """A redirect may move the host, never the scheme.
+
+    GitHub's release assets redirect to object storage, so redirects have to be
+    followed - but an https feed that lands on http would silently drop the
+    transport the operator asked for.
+    """
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        if urlparse(newurl).scheme != urlparse(req.full_url).scheme:
+            raise urllib.error.URLError("redirect changed the scheme")
+        return urllib.request.HTTPRedirectHandler.redirect_request(self, req, fp, code, msg, headers, newurl)
+
+
+_opener = urllib.request.build_opener(_NoSchemeChange())
+_opener.addheaders = [("User-Agent", "tvbox-sysupdate")]
+
+
+def fetch(url, limit, timeout, dest=None):
+    """Read at most `limit` bytes, counting as they arrive.
+
+    A declared Content-Length is a claim, not a fact, so the cap is enforced on
+    the real byte count - a lying or absent header must not be able to fill the
+    rootfs before a post-hoc check.
+    """
+    total = 0
+    out = open(dest, "wb") if dest else None
+    chunks = []
+    try:
+        with _opener.open(url, timeout=timeout) as res:
+            declared = res.headers.get("content-length")
+            if declared and declared.isdigit() and int(declared) > limit:
+                raise urllib.error.URLError("too large")
+            while True:
+                chunk = res.read(64 * 1024)
+                if not chunk:
+                    break
+                total += len(chunk)
+                if total > limit:
+                    raise urllib.error.URLError("too large")
+                if out:
+                    out.write(chunk)
+                else:
+                    chunks.append(chunk)
+    finally:
+        if out:
+            out.close()
+    return b"".join(chunks) if out is None else b""
+
+
+# --------------------------------------------------------------------------
+# signature
+
+
+def public_keys():
+    try:
+        names = sorted(n for n in os.listdir(KEYS_DIR) if n.endswith(".pem"))
+    except OSError:
+        names = []
+    keys = []
+    for n in names:
+        p = os.path.join(KEYS_DIR, n)
+        try:
+            st = os.stat(p)
+        except OSError:
+            continue
+        # A key the box user could rewrite is not a trust anchor.
+        if not _TEST_ROOT and (st.st_uid != 0 or (st.st_mode & 0o022)):
+            log("ignoring %s: not owned by root, or writable by others" % p)
+            continue
+        keys.append(p)
+    return keys
+
+
+def verify(doc_bytes, sig_bytes):
+    """Detached ed25519 over the EXACT bytes fetched, verified before parsing.
+
+    More than one key is accepted so that rotation is not a flag day and a lost
+    signing key does not brick the feature on every box in the field - there is
+    no remote way to fix that.
+    """
+    keys = public_keys()
+    if not keys:
+        fail("no-keys", "no release key in " + KEYS_DIR)
+    # Stripped before decoding, not merely allowed by the shape test: b64decode
+    # with validate=True rejects whitespace, so a signature that picked up a
+    # trailing newline anywhere between openssl and the box would read as a
+    # tampered feed on the whole fleet rather than as the formatting it is.
+    sig_bytes = sig_bytes.strip()
+    if not re.match(rb"^[A-Za-z0-9+/=]{16,4096}$", sig_bytes):
+        fail("bad-signature", "signature is not base64")
+    with tempfile.TemporaryDirectory(dir=STATE_DIR) as tmp:
+        doc = os.path.join(tmp, "doc")
+        sig = os.path.join(tmp, "sig")
+        with open(doc, "wb") as fh:
+            fh.write(doc_bytes)
+        try:
+            import base64
+
+            with open(sig, "wb") as fh:
+                fh.write(base64.b64decode(sig_bytes, validate=True))
+        except Exception:
+            fail("bad-signature", "signature is not base64")
+        for key in keys:
+            try:
+                subprocess.run(
+                    ["openssl", "pkeyutl", "-verify", "-pubin", "-inkey", key, "-rawin", "-in", doc, "-sigfile", sig],
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    timeout=30,
+                    check=True,
+                )
+                return key
+            except FileNotFoundError:
+                fail("no-openssl", "openssl is not installed")
+            except subprocess.TimeoutExpired:
+                continue
+            except subprocess.CalledProcessError:
+                continue
+    fail("bad-signature", "no pinned key verifies this feed")
+
+
+# --------------------------------------------------------------------------
+# the feed
+
+
+def parse_feed(raw):
+    try:
+        feed = json.loads(raw.decode("utf-8"))
+    except Exception:
+        fail("bad-feed", "not JSON")
+    if not isinstance(feed, dict) or feed.get("feedVersion") != 1:
+        fail("bad-feed", "unexpected shape")
+    if not re.match(r"^[0-9A-Za-z._-]{1,40}$", str(feed.get("version", ""))):
+        fail("bad-feed", "bad version")
+    if not re.match(r"^[0-9a-fA-F]{64}$", str(feed.get("sha256", ""))):
+        fail("bad-feed", "bad sha256")
+    rev = feed.get("systemRevision")
+    if not isinstance(rev, int) or isinstance(rev, bool) or not 0 <= rev <= 999999:
+        fail("bad-feed", "bad systemRevision")
+    if not is_allowed_url(feed.get("url", "")):
+        fail("bad-feed", "tarball url must be https or LAN http")
+    published = str(feed.get("publishedAt", ""))
+    try:
+        import datetime
+
+        ts = datetime.datetime.fromisoformat(published.replace("Z", "+00:00")).timestamp()
+    except Exception:
+        fail("bad-feed", "publishedAt is missing or unparsable")
+    age_days = (time.time() - ts) / 86400.0
+    if age_days > MAX_FEED_AGE_DAYS:
+        fail("stale-feed", "published %d days ago" % age_days)
+    if age_days < -(MAX_FEED_SKEW_HOURS / 24.0):
+        fail("stale-feed", "published in the future")
+    return feed
+
+
+def cmp_ver(a, b):
+    """The same numeric-aware order updater.js uses, so the two halves agree."""
+
+    def parts(v):
+        return re.split(r"[.-]", str(v))
+
+    pa, pb = parts(a), parts(b)
+    for i in range(max(len(pa), len(pb))):
+        x = pa[i] if i < len(pa) else ""
+        y = pb[i] if i < len(pb) else ""
+        if x.isdigit() and y.isdigit():
+            if int(x) != int(y):
+                return int(x) - int(y)
+        elif x != y:
+            return -1 if x < y else 1
+    return 0
+
+
+# --------------------------------------------------------------------------
+# the tarball
+
+
+def validate_members(tar_path):
+    """Every member must be a plain file or a directory, under a known top level.
+
+    The tarball is authenticated by a sha256 that came out of the signed feed,
+    and its provision.sh is then run as root ON PURPOSE - so this is a tripwire
+    for a bug in the verify path, not a boundary. It earns its place on one
+    specific shape: provision installs its siblings with `install`, which
+    FOLLOWS a symlink at the source, so a member that is a link to somewhere
+    else in the filesystem would be copied out as a root-owned 755 file.
+    """
+    with tarfile.open(tar_path, "r:gz") as tf:
+        for m in tf.getmembers():
+            if not (m.isfile() or m.isdir()):
+                fail("bad-tarball", "member %r is not a file or a directory" % m.name[:80])
+            # Tested BEFORE the leading "./" is stripped: `/shell/x` would
+            # otherwise pass as `shell/x`, and on a python without extraction
+            # filters os.path.join would then write it to the filesystem root.
+            if m.name.startswith("/"):
+                fail("bad-tarball", "member %r is an absolute path" % m.name[:80])
+            name = m.name.lstrip("./")
+            if ".." in name.split("/"):
+                fail("bad-tarball", "member %r escapes the staging directory" % m.name[:80])
+            top = name.split("/", 1)[0]
+            if top not in ("shell", "infra", "manifest.json"):
+                fail("bad-tarball", "unexpected top-level member %r" % top[:40])
+
+
+def extract(tar_path, dest):
+    os.makedirs(dest, mode=0o700)
+    with tarfile.open(tar_path, "r:gz") as tf:
+        # `data` refuses absolute paths, parent traversal, device nodes and the
+        # setuid bit; the member sweep above has already ruled out links.
+        try:
+            tf.extractall(dest, filter="data")
+        except TypeError:  # python < 3.12
+            tf.extractall(dest)
+    # The archive's own uid/gid are the release builder's; everything root will
+    # read out of this tree has to be root's. (`--no-same-owner` only applies to
+    # a non-root extractor, which this never is outside the test suite.)
+    if os.geteuid() == 0:
+        for root, dirs, files in os.walk(dest):
+            for n in dirs + files:
+                os.chown(os.path.join(root, n), 0, 0)
+
+
+def sha256_of(path):
+    import hashlib
+
+    h = hashlib.sha256()
+    with open(path, "rb") as fh:
+        for chunk in iter(lambda: fh.read(1024 * 1024), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def staged_revision(provision_path):
+    """provision.sh's own revision, read as DATA.
+
+    Never sourced - the same reason install-compositor.sh parses
+    compositor.version with sed rather than dotting it in.
+    """
+    m = re.search(r"^PROVISION_REVISION=(\d{1,6})\s*$", read_text(provision_path, 256 * 1024), re.M)
+    return int(m.group(1)) if m else -1
+
+
+# --------------------------------------------------------------------------
+# gates
+
+
+def box_busy():
+    """Don't take the television away from whoever is watching it.
+
+    Asked here rather than trusted from the shell: the shell is the thing that
+    requested this, and provision spends minutes in apt, reloads udev rules and
+    reloads NetworkManager.
+    """
+    try:
+        subprocess.run(["pgrep", "-x", "mpv"], stdout=subprocess.DEVNULL, check=True)
+        return "something is playing"
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        pass
+    # An OTA that has flipped the symlink but not yet booted healthy is counting
+    # boot attempts. Restarting the session under it would spend those attempts
+    # and roll a perfectly good release back.
+    for home in _homes():
+        if os.path.exists(os.path.join(home, ".tvbox", "update", "pending")):
+            return "an app update is still settling"
+    return ""
+
+
+def _homes():
+    if _TEST_ROOT:
+        base = _p("/home")
+        try:
+            return [os.path.join(base, n) for n in os.listdir(base)]
+        except OSError:
+            return []
+    out = []
+    for p in pwd.getpwall():
+        if p.pw_dir.startswith("/home/") and os.path.isdir(os.path.join(p.pw_dir, ".tvbox")):
+            out.append(p.pw_dir)
+    return out
+
+
+def free_bytes(path):
+    st = os.statvfs(path)
+    return st.f_bavail * st.f_frsize
+
+
+def recent_failure():
+    """When the last FAILED run finished, if that was recent enough to matter.
+
+    Returns the original timestamp rather than a boolean so the refusal can keep
+    it: writing a fresh one would push the window out on every press, and someone
+    retrying once a minute after a network blip would never get a second real
+    attempt - with nothing on screen to say why.
+    """
+    try:
+        doc = json.loads(read_text(STATUS_FILE))
+    except Exception:
+        return None
+    if doc.get("code") in OK_CODES:
+        return None
+    fin = doc.get("finishedAt")
+    if isinstance(fin, (int, float)) and (time.time() * 1000 - fin) < COOLDOWN_S * 1000:
+        return fin
+    return None
+
+
+# --------------------------------------------------------------------------
+# apt
+
+
+def apt_recover():
+    """Leave dpkg in a state provision.sh can actually work in.
+
+    Two things happen on a box nobody administers: unattended-upgrades holds the
+    lock when the request arrives, and a power cut mid-install leaves packages
+    half-configured. Without this, every later system update fails at the first
+    apt line, permanently, on a box with no ssh.
+    """
+    if _TEST_ROOT:
+        return
+    env = dict(os.environ, DEBIAN_FRONTEND="noninteractive")
+    for cmd in (["dpkg", "--configure", "-a"], ["apt-get", "-y", "-f", "install"]):
+        try:
+            subprocess.run(cmd, env=env, stdout=subprocess.DEVNULL, stderr=subprocess.STDOUT, timeout=15 * 60)
+        except (subprocess.SubprocessError, FileNotFoundError) as e:
+            log("apt preflight %s: %s" % (cmd[0], e))
+
+
+# --------------------------------------------------------------------------
+# main
+
+
+def clear_running():
+    try:
+        os.unlink(RUNNING_FILE)
+    except OSError:
+        pass
+
+
+def finish():
+    """ExecStopPost: make sure the run left a terminal status.
+
+    `apply` writes its own outcome and this then has nothing to do. It matters
+    for the ways a run can end WITHOUT reaching that line - a timeout, an OOM
+    kill, the unit being stopped - where the status file would otherwise still
+    claim the run is going and the Settings screen would wait for ever.
+    """
+    clear_running()
+    try:
+        doc = json.loads(read_text(STATUS_FILE))
+    except Exception:
+        doc = {}
+    if doc.get("code") != "running":
+        return 0
+    result = os.environ.get("SERVICE_RESULT", "")
+    code = "timeout" if result == "timeout" else "provision-failed"
+    doc.update({"code": code, "finishedAt": int(time.time() * 1000)})
+    try:
+        write_atomic(STATUS_FILE, json.dumps(doc) + "\n")
+    except OSError:
+        pass
+    log("run ended without a verdict (%s) - recorded as %s" % (result or "unknown", code))
+    return 0
+
+
+def run(argv):
+    global _run_id, _started_at
+    action = argv[1] if len(argv) > 1 else "check"
+    if action not in ("check", "apply", "finish"):
+        sys.stderr.write("usage: tvbox-sysupdate [check|apply|finish]\n")
+        return 2
+
+    os.makedirs(STATE_DIR, mode=0o755, exist_ok=True)
+    self_check()
+
+    if action == "finish":
+        return finish()
+
+    lock = open(LOCK_FILE, "w")
+    try:
+        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError:
+        log("another run holds the lock")
+        return 0
+
+    _run_id = "%d-%d" % (int(time.time()), os.getpid())
+    _started_at = int(time.time() * 1000)
+
+    conf = read_conf()
+    url = feed_url(conf)
+    user = box_user(conf)
+
+    if action == "apply":
+        since = recent_failure()
+        if since is not None:
+            # Its own code, not `busy`: "wait, something is playing" and "that
+            # just failed, give it a moment" are different things to be told, and
+            # only one of them is worth pressing again straight away.
+            log("failed: cooldown - a run failed less than %d minutes ago" % (COOLDOWN_S // 60))
+            set_status("cooldown", finishedAt=since)
+            return 1
+        why = box_busy()
+        if why:
+            fail("busy", why)
+        set_status("running")
+        # The durable status says "running"; this says "still running, in THIS
+        # boot". /run is a tmpfs, so a box that lost power mid-provision comes
+        # back with the status file still claiming a run is going and this marker
+        # gone - which is the only way the shell can tell the two apart. Without
+        # it that box shows a frozen progress line for ever, and since the same
+        # state disables the update screen, it could never update again.
+        # Registered with atexit so every exit path clears it, including the ones
+        # that leave through fail().
+        os.makedirs(RUN_DIR, mode=0o755, exist_ok=True)
+        write_atomic(RUNNING_FILE, _run_id + "\n")
+        atexit.register(clear_running)
+
+    # Everything up to the provision run is bounded by one wall clock. provision
+    # itself is bounded by its own subprocess timeout, which is why the alarm is
+    # cancelled before it starts rather than covering the whole run.
+    signal.signal(signal.SIGALRM, lambda *_: fail("timeout", "the download took longer than %d minutes" % (DOWNLOAD_DEADLINE_S // 60)))
+    signal.alarm(DOWNLOAD_DEADLINE_S)
+
+    log("%s: feed %s" % (action, url))
+    try:
+        raw = fetch(url, MAX_FEED_BYTES, FEED_TIMEOUT_S)
+    except (urllib.error.URLError, OSError, ValueError) as e:
+        fail("feed-unreachable", str(e)[:120])
+    try:
+        sig = fetch(url + ".sig", MAX_SIG_BYTES, FEED_TIMEOUT_S)
+    except urllib.error.HTTPError as e:
+        # Told apart from a network fault on purpose: a release built without the
+        # signing key publishes the feed and no signature at all, and reporting
+        # that as "check your network" sends everyone looking in the wrong place.
+        fail("unsigned-feed" if e.code == 404 else "feed-unreachable", "signature: %s" % e)
+    except (urllib.error.URLError, OSError, ValueError) as e:
+        fail("feed-unreachable", str(e)[:120])
+
+    key = verify(raw, sig)
+    feed = parse_feed(raw)
+    log("feed verified with %s: version %s, systemRevision %d" % (os.path.basename(key), feed["version"], feed["systemRevision"]))
+
+    have = applied_revision()
+    if feed["systemRevision"] <= have:
+        # Strictly greater, and against the highest ever applied: a signature
+        # says a release was published, never that it is the current one.
+        set_status("up-to-date", feedRevision=feed["systemRevision"])
+        log("nothing to do: box at revision %d, feed offers %d" % (have, feed["systemRevision"]))
+        return 0
+    prev = applied_version()
+    if prev and cmp_ver(feed["version"], prev) < 0:
+        fail("rollback-refused", "feed offers %s, this box applied %s" % (feed["version"], prev))
+
+    if action == "check":
+        set_status("available", feedRevision=feed["systemRevision"], feedVersion=feed["version"])
+        return 0
+
+    if free_bytes(STATE_DIR) < MIN_FREE_BYTES:
+        fail("no-space")
+
+    shutil.rmtree(STAGE_DIR, ignore_errors=True)
+    os.makedirs(STAGE_DIR, mode=0o700)
+    try:
+        tarball = os.path.join(STAGE_DIR, "release.tar.gz")
+        log("downloading %s" % feed["url"])
+        try:
+            fetch(feed["url"], MAX_TARBALL_BYTES, TARBALL_TIMEOUT_S, dest=tarball)
+        except (urllib.error.URLError, OSError, ValueError) as e:
+            fail("download-failed", str(e)[:120])
+        if sha256_of(tarball) != feed["sha256"].lower():
+            fail("bad-checksum")
+
+        validate_members(tarball)
+        tree = os.path.join(STAGE_DIR, "tree")
+        extract(tarball, tree)
+        os.unlink(tarball)
+
+        provision = os.path.join(tree, "infra", "provision.sh")
+        if not os.path.isfile(provision):
+            fail("bad-tarball", "the release carries no provision.sh")
+        staged = staged_revision(provision)
+        if staged != feed["systemRevision"]:
+            # Both sides are covered by the same signature, so this is a
+            # release-engineering check rather than a security one - it catches
+            # a feed built from a different tree than the tarball.
+            fail("revision-mismatch", "tarball says %d, feed says %d" % (staged, feed["systemRevision"]))
+
+        signal.alarm(0)  # past the network; provision has its own bound
+        apt_recover()
+        log("running provision.sh revision %d for user %s" % (staged, user))
+        env = dict(
+            os.environ,
+            DEBIAN_FRONTEND="noninteractive",
+            # provision is written for a human at a terminal as well as for
+            # this. Unattended it must skip the two things that are a person's
+            # to decide: the opt-in passwordless-sudo affordance, and replacing
+            # the compositor - a release's root half lands BEFORE its shell has
+            # proved itself, and a shell rollback cannot put an old compositor
+            # back.
+            TVBOX_UNATTENDED="1",
+            TVBOX_USER=user,
+        )
+        try:
+            proc = subprocess.run(
+                ["bash", provision, user],
+                env=env,
+                cwd=os.path.dirname(provision),
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                timeout=PROVISION_TIMEOUT_S,
+            )
+        except subprocess.TimeoutExpired:
+            fail("provision-failed", "timed out")
+        out = proc.stdout.decode("utf-8", "replace")
+        try:
+            with open(LOG_FILE, "a") as fh:
+                fh.write(out)
+        except OSError:
+            pass
+
+        # provision exits 0 for a great many partial outcomes: most of its
+        # failure branches only `warn`. Its last line is the machine-readable
+        # verdict, and a run that did not reach it did not finish.
+        # The LAST match: the verdict is the last line provision writes, and a
+        # line earlier in the transcript that merely looks like one must not be
+        # able to stand in for it.
+        found = re.findall(r"^PROVISION_RESULT rev=(\d+) bad=(\d+) warn=(\d+)\s*$", out, re.M)
+        if proc.returncode != 0 or not found:
+            fail("provision-failed", "exit %d" % proc.returncode)
+        rev, bad, warn = (int(x) for x in found[-1])
+        if bad or rev != staged:
+            fail("provision-failed", "%d step(s) failed" % bad)
+
+        write_atomic(REVISION_FILE, "%d\n" % rev)
+        write_atomic(os.path.join(STATE_DIR, "system-version"), feed["version"] + "\n")
+        reboot = os.path.exists(_p("/var/run/reboot-required"))
+        set_status("ok-warnings" if warn else "ok", warnings=warn, rebootRequired=reboot)
+        log("applied revision %d (%d warning(s))" % (rev, warn))
+        return 0
+    finally:
+        shutil.rmtree(STAGE_DIR, ignore_errors=True)
+
+
+if __name__ == "__main__":
+    try:
+        sys.exit(run(sys.argv))
+    except SystemExit:
+        raise
+    except Exception as e:  # never leave the status file saying "running"
+        log("internal error: %r" % (e,))
+        set_status("internal")
+        sys.exit(1)

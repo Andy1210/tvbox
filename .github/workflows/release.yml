@@ -36,8 +36,29 @@ jobs:
       - name: build launcher
         run: cd launcher && npm ci --no-audit --no-fund && npm run build
 
-      - name: pack release (tarball + update.json)
-        run: ./scripts/make-release.sh --skip-build --out dist
+      - name: pack release (tarball + signed update.json)
+        # The signature is what lets a box run the release's ROOT half
+        # (tvbox-sysupdate verifies the feed against a key pinned in /etc). Without
+        # the secret the release still packs and boxes still take the shell - they
+        # just refuse the root half, which is a feature that stays off rather than
+        # a broken release. The key file is written under RUNNER_TEMP and the step
+        # deletes it, so it never lands in the workspace or an artifact.
+        env: { TVBOX_RELEASE_KEY: "${{ secrets.TVBOX_RELEASE_KEY }}" }
+        run: |
+          if [ -n "$TVBOX_RELEASE_KEY" ]; then
+            KEY="$RUNNER_TEMP/release-key.pem"
+            # The umask stays inside the subshell: leaving it set would follow
+            # make-release.sh into copy-infra.sh, whose plain `cp` would then ship
+            # every infra/ member of the tarball 0700/0600 instead of 0755/0644 -
+            # and only on the signed branch, so signed and unsigned releases would
+            # not be the same artifact.
+            ( umask 077; printf '%s\n' "$TVBOX_RELEASE_KEY" > "$KEY" )
+            trap 'rm -f "$KEY"' EXIT
+            ./scripts/make-release.sh --skip-build --out dist --sign-key "$KEY"
+          else
+            echo "::warning::TVBOX_RELEASE_KEY is not set - publishing an UNSIGNED feed; boxes will refuse system updates from it"
+            ./scripts/make-release.sh --skip-build --out dist
+          fi
 
       - name: create GitHub release with the OTA assets
         env: { GH_TOKEN: "${{ github.token }}" }
@@ -56,11 +77,21 @@ jobs:
             if (process.env.COMPARE) body += "\n\n**Full changelog:** " + process.env.COMPARE;
             require("fs").writeFileSync("dist/RELEASE_NOTES.md", body + "\n");
           '
+          # update.json and its .sig go up TOGETHER, in one invocation and with a
+          # glob that covers both: a re-run that refreshed the feed but left the
+          # old signature beside it would look exactly like a tampered feed, and
+          # every box in the field would refuse system updates until someone
+          # noticed. The feed carries a publishedAt, so its bytes differ on every
+          # run - the pair is never interchangeable across runs.
           if gh release view "${GITHUB_REF_NAME}" >/dev/null 2>&1; then
             gh release edit "${GITHUB_REF_NAME}" --notes-file dist/RELEASE_NOTES.md
-            gh release upload "${GITHUB_REF_NAME}" dist/tvbox-shell-*.tar.gz dist/update.json --clobber
+            # An UNSIGNED re-run produces no .sig, so the glob would leave the
+            # previous run's signature in place next to a freshly generated feed -
+            # which every box reads as a tampered release, not as a missing key.
+            [ -f dist/update.json.sig ] || gh release delete-asset "${GITHUB_REF_NAME}" update.json.sig --yes 2>/dev/null || true
+            gh release upload "${GITHUB_REF_NAME}" dist/tvbox-shell-*.tar.gz dist/update.json* --clobber
           else
-            gh release create "${GITHUB_REF_NAME}" dist/tvbox-shell-*.tar.gz dist/update.json \
+            gh release create "${GITHUB_REF_NAME}" dist/tvbox-shell-*.tar.gz dist/update.json* \
               --title "tvbox ${GITHUB_REF_NAME}" --notes-file dist/RELEASE_NOTES.md
           fi
 
