@@ -19,10 +19,16 @@ const assert = require("node:assert");
 // test root has to be in the environment before the require.
 const ROOT = fs.mkdtempSync(path.join(os.tmpdir(), "shell-sysupd-"));
 process.env.TVBOX_STATE_DIR = path.join(ROOT, "var/lib/tvbox");
-process.env.TVBOX_KEYS_DIR = path.join(ROOT, "etc/tvbox/release-keys.d");
 process.env.TVBOX_RUN_DIR = path.join(ROOT, "run/tvbox");
-for (const d of ["TVBOX_STATE_DIR", "TVBOX_KEYS_DIR", "TVBOX_RUN_DIR"])
+// The root-owned side goes under the fake root too, so "is the applier
+// installed?" is answered by the fixture rather than by whatever the machine
+// running the tests happens to have in /usr/local.
+process.env.TVBOX_SBIN_DIR = path.join(ROOT, "usr/local/sbin");
+process.env.TVBOX_ETC_DIR = path.join(ROOT, "etc");
+for (const d of ["TVBOX_STATE_DIR", "TVBOX_RUN_DIR", "TVBOX_SBIN_DIR"])
   fs.mkdirSync(process.env[d], { recursive: true });
+for (const d of ["systemd/system", "polkit-1/rules.d", "tvbox/release-keys.d"])
+  fs.mkdirSync(path.join(process.env.TVBOX_ETC_DIR, d), { recursive: true });
 const sysupdate = require("./sysupdate.js");
 const updater = require("./updater.js");
 
@@ -141,6 +147,48 @@ test("every outcome the shell can report has a Hungarian and an English string",
   }
 });
 
+test("a press is not answered with the previous run's result, and does not wait for ever", () => {
+  // The three states between pressing and hearing back. `systemctl start
+  // --no-block` reports success as soon as the job is QUEUED, so all of them are
+  // reachable without anything having gone wrong on the box.
+  const before = { code: "ok", startedAt: 1000, finishedAt: 2000 };
+  const now = 10_000_000; // comfortably past the grace window, so both sides of it are reachable
+  // A document older than the request belongs to the run before it, so it is not
+  // reported - the screen waits instead.
+  assert.equal(sysupdate.resolveCode(before, { requestedAt: now - 1000, now }), "starting");
+  // ...but not for ever: a unit that never activates, or a run blocked behind
+  // another holding the lock, would otherwise leave every button disabled.
+  assert.equal(sysupdate.resolveCode(before, { requestedAt: now - sysupdate.START_GRACE_MS - 1, now }), "internal");
+  // Once the run does write something, that is the answer.
+  assert.equal(sysupdate.resolveCode({ code: "ok", startedAt: now - 500 }, { requestedAt: now - 1000, now }), "ok");
+  // With no request in this session, whatever is on disk stands.
+  assert.equal(sysupdate.resolveCode(before, {}), "ok");
+  assert.equal(sysupdate.resolveCode(null, {}), "idle");
+  // A run that says it is going, in a boot with no marker for it, was cut off.
+  assert.equal(sysupdate.resolveCode({ code: "running", startedAt: 0 }, { running: true }), "running");
+  assert.equal(sysupdate.resolveCode({ code: "running", startedAt: 0 }, { running: false }), "interrupted");
+  // And a start systemd refused beats anything on disk.
+  assert.equal(sysupdate.resolveCode(before, { denied: true }), "start-denied");
+});
+
+test("a button is offered only when every piece a press needs is there", () => {
+  // Each of these is separately absent on a real box, and each absence is a press
+  // that can only fail: no rule means polkit denies the start, no key means the
+  // applier cannot verify anything it downloads.
+  const pieces = [sysupdate.HELPER, sysupdate.UNIT_FILE, sysupdate.RULE_FILE];
+  const key = path.join(sysupdate.KEYS_DIR, "tvbox-release.pem");
+  for (const f of pieces) fs.writeFileSync(f, "x");
+  fs.writeFileSync(key, "-----BEGIN PUBLIC KEY-----\n");
+  assert.equal(sysupdate.available(), true);
+  for (const f of [...pieces, key]) {
+    fs.rmSync(f);
+    assert.equal(sysupdate.available(), false, "still available without " + path.basename(f));
+    fs.writeFileSync(f, "x");
+  }
+  for (const f of [...pieces, key]) fs.rmSync(f, { force: true });
+  assert.equal(sysupdate.available(), false);
+});
+
 test("the box reports no applier when the root half is not installed", () => {
   // Every box in the field is running a shell older than tvbox-sysupdate, so the
   // UI has to be able to tell the two situations apart - offering a button that
@@ -185,8 +233,14 @@ test("the system unit is never enabled, and never treated as a user unit", () =>
   assert.doesNotMatch(unit, /^\[Install\]/m);
   assert.ok(!updater.USER_UNITS.includes("tvbox-sysupdate.service"));
   assert.ok(updater.INFRA_FILES.includes("tvbox-sysupdate.service"));
-  // provision spends minutes in apt; the default 90 s would SIGTERM it mid-install.
-  assert.match(unit, /^TimeoutStartSec=infinity$/m);
+  // Long enough for provision (the default 90 s would SIGTERM it mid-apt) and
+  // still finite: a run that never ends holds the lock, and every later request
+  // is then refused in silence until someone reboots the box. RuntimeMaxSec
+  // cannot stand in for this - systemd ignores it for Type=oneshot.
+  const timeout = /^TimeoutStartSec=(\d+)$/m.exec(unit);
+  assert.ok(timeout, "no finite TimeoutStartSec");
+  assert.ok(Number(timeout[1]) >= 3600, "too short for a provision run");
+  assert.doesNotMatch(unit, /^RuntimeMaxSec=/m);
   // and whatever ends the run has to leave a terminal status behind
   assert.match(unit, /^ExecStopPost=/m);
 });

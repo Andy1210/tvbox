@@ -14,16 +14,16 @@ ExecStart=/usr/local/sbin/tvbox-sysupdate apply
 # 2775. The box user is not in `staff` today, so this is one group membership
 # away rather than a hole; naming the system directories costs nothing.
 Environment=PATH=/usr/sbin:/usr/bin:/sbin:/bin
-# provision.sh spends minutes in apt and can build libcec from source. The
-# default TimeoutStartSec of 90 s applies to a oneshot too, and it would SIGTERM
-# the run mid-install - leaving dpkg half-configured on a box with no ssh.
-TimeoutStartSec=infinity
-# But not literally for ever. With no bound, a feed server that dribbles bytes
-# keeps a run alive indefinitely - and that run holds the lock, so every later
-# request is refused in silence until somebody reboots the box. The script has its
-# own deadline for the download and its own timeout for provision; this is the
-# backstop for the ways neither fires. Comfortably above both.
-RuntimeMaxSec=5400
+# Long, but not for ever, and this is the only knob that does both: the default
+# TimeoutStartSec of 90 s applies to a oneshot too and would SIGTERM a run
+# mid-apt, leaving dpkg half-configured on a box with no ssh - while `infinity`
+# would let a feed server that dribbles bytes keep a run, and the lock it holds,
+# alive until someone reboots the box. (RuntimeMaxSec is not the answer here:
+# systemd ignores it for Type=oneshot.)
+# Two hours sits above the script's own bounds - 30 min for the download, 60 for
+# provision - so it only ever fires for the ways neither of those does, and then
+# ExecStopPost records the outcome.
+TimeoutStartSec=7200
 # Whatever ends the run - a timeout, an OOM kill, a power cut recovered into the
 # next boot - must leave a terminal status behind. Without this the Settings
 # screen has nothing to move on from and spins on "running".

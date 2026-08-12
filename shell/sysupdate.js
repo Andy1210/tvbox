@@ -15,9 +15,15 @@ const path = require("path");
 const { execFile } = require("child_process");
 
 const UNIT = "tvbox-sysupdate.service";
-const HELPER = "/usr/local/sbin/tvbox-sysupdate";
-const UNIT_FILE = "/etc/systemd/system/" + UNIT;
-const KEYS_DIR = process.env.TVBOX_KEYS_DIR || "/etc/tvbox/release-keys.d";
+// The three root-owned prefixes, overridable only so the tests can answer
+// "installed" and "not installed" without depending on what the machine running
+// them happens to have in /usr/local. Not a boundary: see TVBOX_STATE_DIR below.
+const SBIN = process.env.TVBOX_SBIN_DIR || "/usr/local/sbin";
+const ETC = process.env.TVBOX_ETC_DIR || "/etc";
+const HELPER = path.join(SBIN, "tvbox-sysupdate");
+const UNIT_FILE = path.join(ETC, "systemd/system", UNIT);
+const RULE_FILE = path.join(ETC, "polkit-1/rules.d/54-tvbox-sysupdate.rules");
+const KEYS_DIR = process.env.TVBOX_KEYS_DIR || path.join(ETC, "tvbox/release-keys.d");
 // /run is a tmpfs, so this exists only while a run is going IN THIS BOOT. A box
 // that lost power mid-provision comes back with a durable status still saying
 // "running" and no marker, and that difference is the only way to tell a live
@@ -47,19 +53,23 @@ const STATUS_FILE = path.join(STATE_DIR, "sysupdate-status.json");
 let requestedAt = 0;
 let startError = null;
 
-// Is the root half there at all? Every box already in the field is running a
-// shell that predates it, so the answer decides whether Settings offers a button
-// or the older "this box has to be set up again" sentence. Cheap enough to ask
-// per call - it is two stats, and the answer changes once in a box's life.
+// Can this box run a system update at all? Every box already in the field is
+// running a shell that predates the applier, so the answer decides whether
+// Settings offers a button or the older "this box has to be set up again"
+// sentence. Cheap enough to ask per call - a few stats, and the answer changes
+// once in a box's life.
+//
+// Every piece a press needs, not just the script: each of these is separately
+// absent on a real box, and each absence is a button that can only fail.
+//   - the polkit rule, or the box user cannot start the unit at all;
+//   - a pinned key, because provision installs the applier whatever happens but
+//     refuses to pin a key out of a directory the box user can write, so
+//     "installed" and "able to verify anything" are different states.
+// Where any of them is missing the honest older sentence - this box has to be set
+// up again - is the better answer, and it is what the UI falls back to.
 function available() {
   try {
-    if (!fs.statSync(HELPER).isFile() || !fs.statSync(UNIT_FILE).isFile()) return false;
-    // A pinned key too, not just the two files. provision installs the applier
-    // whatever happens but refuses to pin a key out of a directory the box user
-    // can write, so "installed" and "able to verify anything" are genuinely
-    // different states - and offering a button whose every press can only answer
-    // "this box has no release key" is worse than the older, honest sentence
-    // about setting the box up again.
+    for (const f of [HELPER, UNIT_FILE, RULE_FILE]) if (!fs.statSync(f).isFile()) return false;
     return fs.readdirSync(KEYS_DIR).some((n) => n.endsWith(".pem"));
   } catch (e) {
     return false;
@@ -124,29 +134,49 @@ const CODES = [
   "start-denied",
 ];
 
-function status() {
-  const doc = readStatus();
-  const revision = appliedRevision();
-  const base = { available: available(), revision, code: "idle", warnings: 0, rebootRequired: false, at: null };
-  if (startError) return { ...base, code: "start-denied" };
-  // A status document from before this session's request describes the previous
-  // run. Reporting it would turn a press into an instant "done" - but only for a
-  // couple of minutes, because a start that never produces one at all must not
+// Which outcome a status document describes. Pure, and exported, because the
+// combinations that matter are the ones a test cannot easily reach through a real
+// systemctl: a request whose run has not written anything yet, one that never
+// will, and a document left behind by a run that was cut off.
+function resolveCode(doc, { requestedAt = 0, now = Date.now(), running = false, denied = false } = {}) {
+  if (denied) return "start-denied";
+  // A status document from before this session's request describes the PREVIOUS
+  // run, so reporting it would turn a press into an instant "done" - but only for
+  // a couple of minutes, because a start that never produces one at all must not
   // leave the screen waiting with its buttons disabled.
   const fresh = doc && Number(doc.startedAt) >= requestedAt;
-  if (requestedAt && !fresh) {
-    if (Date.now() - requestedAt < START_GRACE_MS) return { ...base, code: "starting", at: requestedAt };
-    return { ...base, code: "internal", at: requestedAt };
+  if (requestedAt && !fresh) return now - requestedAt < START_GRACE_MS ? "starting" : "internal";
+  if (!doc) return "idle";
+  const code = CODES.includes(doc.code) ? doc.code : "internal";
+  // A run that says it is going, in a boot with no marker for it, was cut off - a
+  // power loss mid-provision, most likely. Left as "running" this would disable
+  // the whole update screen for the life of the box, OTA included.
+  if (code === "running" && !running) return "interrupted";
+  return code;
+}
+
+function status() {
+  const doc = readStatus();
+  const code = resolveCode(doc, {
+    requestedAt,
+    running: fs.existsSync(RUNNING_FILE),
+    denied: !!startError,
+  });
+  const base = {
+    available: available(),
+    revision: appliedRevision(),
+    code,
+    warnings: 0,
+    rebootRequired: false,
+    at: null,
+  };
+  // Only a document this run actually produced may contribute detail; the rest
+  // are decided above and carry none.
+  if (!doc || code === "starting" || code === "start-denied") {
+    return { ...base, at: requestedAt || null };
   }
-  if (!doc) return base;
-  let code = CODES.includes(doc.code) ? doc.code : "internal";
-  // A run that says it is going, in a boot that has no marker for it, was cut
-  // off - a power loss mid-provision, most likely. Left as "running" this would
-  // disable the whole update screen for the life of the box, OTA included.
-  if (code === "running" && !fs.existsSync(RUNNING_FILE)) code = "interrupted";
   return {
     ...base,
-    code,
     warnings: Number(doc.warnings) || 0,
     rebootRequired: !!doc.rebootRequired,
     at: Number(doc.finishedAt) || Number(doc.startedAt) || null,
@@ -180,10 +210,13 @@ module.exports = {
   available,
   appliedRevision,
   status,
+  resolveCode,
   apply,
   CODES,
   UNIT,
   HELPER,
+  UNIT_FILE,
+  RULE_FILE,
   KEYS_DIR,
   STATE_DIR,
   REVISION_FILE,
