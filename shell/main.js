@@ -860,11 +860,27 @@ function watchDisplayMode() {
 }
 
 // Power menu actions from Home. sleep = display off over CEC (the box keeps
-// running; wake by turning the TV on). reboot/poweroff run as the session user:
-// logind's polkit policy allows them for an active local session (that's how
-// desktop shutdown buttons work), so no root is needed; passwordless sudo is
-// kept only as a fallback for exotic setups. On reboot/poweroff the box goes
-// down, so the JSON response may never reach the client - that's fine.
+// running; wake by turning the TV on).
+//
+// reboot/poweroff run as the session user, and the thing that makes that work is
+// a polkit rule provision.sh installs - NOT logind's own "an active local session
+// may shut down" default, which this comment used to claim. The shell is not such
+// a session: Electron moves its main process into its own systemd app scope, so
+// `loginctl` knows nothing about it and `subject.active` is false. Same trap the
+// udisks and miracast grants already document.
+//
+// `--no-ask-password` is what keeps a missing grant survivable, and it is
+// load-bearing rather than tidy. Without it systemctl answers polkit's
+// "interactive authentication required" by spawning **pkttyagent**, which reads a
+// controlling terminal; a background process group that reads a terminal is sent
+// SIGTTIN, and SIGTTIN stops THE WHOLE GROUP - Electron and session.sh, the
+// respawn loop, together. The box then looks bricked: the remote does nothing,
+// the HTTP port is dead, and `pkill` cannot fix it because the loop that would
+// respawn the shell is stopped too (recovery is `kill -CONT` on session.sh). With
+// the flag, systemctl simply fails and the sudo fallback below does the reboot.
+//
+// On reboot/poweroff the box goes down, so the JSON response may never reach the
+// client - that's fine.
 // User-set sleep timer ("turn the TV off in N minutes") - unconditional by
 // design (the user explicitly asked for it), unlike the screensaver auto-sleep.
 let sleepTimerAt = null;
@@ -904,9 +920,12 @@ function handlePower(action, res) {
   const sub = action === "reboot" || action === "poweroff" ? action : null;
   if (!sub) return httpserver.jsonRes(res, { ok: false, error: "bad action" });
   console.log("[power]", sub);
-  execFile("systemctl", [sub], { timeout: 8000 }, (e, _o, err) => {
+  execFile("systemctl", ["--no-ask-password", sub], { timeout: 8000 }, (e, _o, err) => {
     if (!e) return httpserver.jsonRes(res, { ok: true });
-    execFile("sudo", ["-n", "systemctl", sub], { timeout: 8000 }, (e2, _o2, err2) => {
+    // The flag rides along under sudo as well. It changes nothing while sudo
+    // succeeds (root never consults polkit), and it is the difference between a
+    // clean failure and a frozen session if it ever does not.
+    execFile("sudo", ["-n", "systemctl", "--no-ask-password", sub], { timeout: 8000 }, (e2, _o2, err2) => {
       httpserver.jsonRes(
         res,
         e2

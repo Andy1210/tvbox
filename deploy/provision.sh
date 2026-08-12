@@ -246,6 +246,35 @@ polkit.addRule(function(action, subject) {
 RULES
 ok "polkit rule (netdev -> NetworkManager)"
 
+echo "==> polkit: reboot / shut down from the power menu (no sudo needed)"
+# The power menu ran on an assumption that was never true here: that logind's own
+# "an active local session may shut down" default covers the shell. It does not -
+# Electron moves its main process into its own systemd app scope, so the seat's
+# session does not contain it and polkit sees a subject with no session at all,
+# exactly as for udisks below. Without this rule the menu worked only where the
+# opt-in passwordless sudo was granted, and on every other box it did something
+# worse than fail: systemctl asked polkit interactively, spawned pkttyagent to
+# read a terminal, and the SIGTTIN that follows stopped the whole process group -
+# the shell AND its respawn loop - leaving a box that looks bricked.
+cat > /etc/polkit-1/rules.d/54-tvbox-power.rules <<'RULES'
+// tvbox: let the box user reboot and shut the box down from the power menu.
+// Two actions, named exactly: `halt` stays out (it stops the machine without
+// cutting power, indistinguishable from a hang on a headless box), and so do the
+// -multiple-sessions / -ignore-inhibit variants.
+// Matches on the GROUP because the shell has no logind session - Electron moves
+// its main process into its own app scope, so subject.active is false for it.
+// KEEP IN SYNC with image/stage-tvbox/01-tvbox/conf/54-tvbox-power.rules.
+polkit.addRule(function (action, subject) {
+  if (
+    (action.id === "org.freedesktop.login1.reboot" || action.id === "org.freedesktop.login1.power-off") &&
+    subject.isInGroup("video")
+  ) {
+    return polkit.Result.YES;
+  }
+});
+RULES
+ok "polkit rule (video -> reboot/power-off)"
+
 echo "==> polkit: mounting a USB stick from the box user (local media on the TV)"
 # The desktop default would already allow this - udisks grants `filesystem-mount`
 # to an ACTIVE local session - but the shell is not one: Electron moves its main

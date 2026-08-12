@@ -302,7 +302,10 @@ function create(deps) {
   function start(cb) {
     const done = cb || (() => {});
     if (armed) return done(null, state());
-    run("systemctl", ["start", UNIT], { timeout: 45000 }, (err, out, errOut) => {
+    // `--no-ask-password`: without it a missing polkit grant does not fail, it
+    // FREEZES the box - systemctl spawns pkttyagent, which reads a terminal and
+    // takes SIGTTIN, stopping the whole process group with the respawn loop in it.
+    run("systemctl", ["--no-ask-password", "start", UNIT], { timeout: 45000 }, (err, out, errOut) => {
       if (err) {
         // `systemctl start` reports its own boilerplate - "the control process
         // exited with error code" - and the helper's actual sentence goes to the
@@ -407,7 +410,7 @@ function create(deps) {
       fifo = null;
     }
     armed = false;
-    run("systemctl", ["stop", UNIT], { timeout: 45000 }, (err) => {
+    run("systemctl", ["--no-ask-password", "stop", UNIT], { timeout: 45000 }, (err) => {
       emit({ type: "stopped" });
       done(err || null);
     });

@@ -1,0 +1,28 @@
+// tvbox: let the box user reboot and shut the box down from the power menu.
+//
+// Two actions, named exactly, and nothing around them: `halt` is deliberately
+// absent (it stops the machine without cutting power, which on a headless TV box
+// is indistinguishable from a hang), and so are the `-multiple-sessions` and
+// `-ignore-inhibit` variants - a box with one session never needs the first, and
+// the second exists to override an app that asked to be left alone.
+//
+// Matches on the GROUP rather than on `subject.active`, because the shell has no
+// logind session at all: Electron moves its main process into its own systemd app
+// scope, so the seat's session does not contain it and `subject.active` is false.
+// This is the same trap the udisks grant documents, and the reason logind's own
+// "an active local session may shut down" default never applied here.
+//
+// `video` is the group every tvbox user is in - provision.sh and the image both
+// put it there - and on this appliance it means "the user that drives the screen",
+// which is exactly who the power menu belongs to. The name is inherited from the
+// device-access convention rather than chosen for this.
+//
+// KEEP IN SYNC with the heredoc in deploy/provision.sh.
+polkit.addRule(function (action, subject) {
+  if (
+    (action.id === "org.freedesktop.login1.reboot" || action.id === "org.freedesktop.login1.power-off") &&
+    subject.isInGroup("video")
+  ) {
+    return polkit.Result.YES;
+  }
+});
