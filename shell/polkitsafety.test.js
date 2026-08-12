@@ -74,16 +74,20 @@ function sources() {
 function callsOf(source, tools) {
   const found = [];
   for (const tool of tools) {
-    const quoted = '"' + tool + '"';
-    for (let i = source.indexOf(quoted); i >= 0; i = source.indexOf(quoted, i + 1)) {
-      found.push({
-        tool,
-        window: source.slice(i, i + WINDOW),
-        // The one legitimate exception is a path only a HUMAN at a terminal can
-        // reach, and it has to say so in a comment above itself rather than live in
-        // a list here - an exemption nobody can grep for is one nobody re-checks.
-        exempt: source.slice(Math.max(0, i - WINDOW * 3), i).includes("polkit-safety: human-terminal"),
-      });
+    // Both quote styles: prettier keeps this repo's JS on double quotes, but the
+    // input bridges are Python, where either is ordinary - and a check that only
+    // sees one of them is a check that a future single-quoted call walks past.
+    for (const quoted of ['"' + tool + '"', "'" + tool + "'"]) {
+      for (let i = source.indexOf(quoted); i >= 0; i = source.indexOf(quoted, i + 1)) {
+        found.push({
+          tool,
+          window: source.slice(i, i + WINDOW),
+          // The one legitimate exception is a path only a HUMAN at a terminal can
+          // reach, and it has to say so in a comment above itself rather than live in
+          // a list here - an exemption nobody can grep for is one nobody re-checks.
+          exempt: source.slice(Math.max(0, i - WINDOW * 3), i).includes("polkit-safety: human-terminal"),
+        });
+      }
     }
   }
   return found;
@@ -115,7 +119,10 @@ test("unzip is never left able to ask for a password", () => {
     for (const call of callsOf(source, ["unzip"])) {
       checked++;
       assert.ok(
-        call.exempt || call.window.includes('"-P"'),
+        // `-P` followed by an EMPTY string. A `-P` carrying an actual password would
+        // satisfy a flag-only check while still being able to prompt for a second,
+        // differently-encrypted entry.
+        call.exempt || /["']-P["']\s*,\s*["']["']/.test(call.window),
         `${name}: unzip can prompt on an encrypted archive - pass "-P", "": ${call.window.slice(0, 90)}`,
       );
     }
