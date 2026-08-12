@@ -1,0 +1,21 @@
+// tvbox: let the box user arm and disarm screen mirroring.
+// Only this unit and only start/stop/restart - a general manage-units grant
+// would cover greetd, NetworkManager and everything else besides.
+// The shell has no logind session (Electron moves its main process into its own
+// app scope), so this matches on the GROUP, not on subject.active.
+//
+// KEEP IN SYNC: this file is installed by deploy/provision.sh and by
+// image/stage-tvbox - it ships in deploy/infra.list so both install the same
+// copy. It used to be a heredoc in provision.sh alone, and the image never grew
+// its own: every flashed box had the helper missing and this grant absent, so
+// Settings offered mirroring that could not start.
+polkit.addRule(function (action, subject) {
+  if (
+    action.id === "org.freedesktop.systemd1.manage-units" &&
+    action.lookup("unit") === "tvbox-miracast.service" &&
+    ["start", "stop", "restart"].indexOf(action.lookup("verb")) >= 0 &&
+    subject.isInGroup("netdev")
+  ) {
+    return polkit.Result.YES;
+  }
+});

@@ -42,7 +42,7 @@ fi
 # is not a reason to re-provision a fleet. scripts/provision_revision_check.js
 # is the reminder: it fails when the root payload's content moved and this did
 # not.
-PROVISION_REVISION=1
+PROVISION_REVISION=2
 
 # Set by tvbox-sysupdate: this run has nobody in front of it. Two things are a
 # person's to decide and are skipped in that mode - see where each is used.
@@ -676,23 +676,15 @@ if [ -f "$HERE/tvbox-miracast" ] && [ -f "$HERE/tvbox-miracast.service" ] &&
   # ONE unit, three verbs, one group. Not a blanket manage-units grant: that
   # would hand the box user every service on the machine, including the ones
   # that bring the session up.
-  cat > /etc/polkit-1/rules.d/52-tvbox-miracast.rules <<'RULES'
-// tvbox: let the box user arm and disarm screen mirroring.
-// Only this unit and only start/stop/restart - a general manage-units grant
-// would cover greetd, NetworkManager and everything else besides.
-// The shell has no logind session (Electron moves its main process into its own
-// app scope), so this matches on the GROUP, not on subject.active.
-polkit.addRule(function (action, subject) {
-  if (
-    action.id === "org.freedesktop.systemd1.manage-units" &&
-    action.lookup("unit") === "tvbox-miracast.service" &&
-    ["start", "stop", "restart"].indexOf(action.lookup("verb")) >= 0 &&
-    subject.isInGroup("netdev")
-  ) {
-    return polkit.Result.YES;
-  }
-});
-RULES
+  # A real file rather than a heredoc, so the image build installs the same copy.
+  # As a heredoc it existed in provision alone, and every flashed box got neither
+  # the helper nor this grant - mirroring was offered and could not start.
+  if [ -f "$HERE/52-tvbox-miracast.rules" ]; then
+    install -m 644 -o root -g root "$HERE/52-tvbox-miracast.rules" \
+      /etc/polkit-1/rules.d/52-tvbox-miracast.rules
+  else
+    warn "52-tvbox-miracast.rules missing - the box user cannot arm mirroring"
+  fi
   systemctl daemon-reload 2>/dev/null || true
   # wpa_supplicant's control socket is group netdev, which is what lets the shell
   # re-open the WPS push button without root. On Raspberry Pi OS the box user is

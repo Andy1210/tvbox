@@ -110,7 +110,8 @@ PARTS
   echo 'tv:x:1000:1000::/home/tv:/bin/bash' >"$R/etc/passwd"
   echo 'tv:!:20000:0:99999:7:::' >"$R/etc/shadow"
   for f in usr/local/sbin/tvbox-diag usr/local/sbin/tvbox-safemode usr/local/sbin/tvbox-radio \
-    usr/local/sbin/tvbox-sysupdate \
+    usr/local/sbin/tvbox-sysupdate usr/local/sbin/tvbox-miracast \
+    etc/systemd/system/tvbox-miracast.service etc/polkit-1/rules.d/52-tvbox-miracast.rules \
     etc/systemd/system/tvbox-diag.service etc/systemd/system/tvbox-safemode.service \
     etc/systemd/system/tvbox-radio@.service etc/polkit-1/rules.d/53-tvbox-radio.rules \
     etc/polkit-1/rules.d/54-tvbox-power.rules \
@@ -306,6 +307,9 @@ for f in \
   usr/local/sbin/tvbox-safemode \
   usr/local/sbin/tvbox-radio \
   usr/local/sbin/tvbox-sysupdate \
+  usr/local/sbin/tvbox-miracast \
+  etc/systemd/system/tvbox-miracast.service \
+  etc/polkit-1/rules.d/52-tvbox-miracast.rules \
   etc/systemd/system/tvbox-diag.service \
   etc/systemd/system/tvbox-safemode.service \
   etc/systemd/system/tvbox-radio@.service \
