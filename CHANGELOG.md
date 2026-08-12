@@ -5,6 +5,45 @@ updates). `scripts/make-release.sh` lifts the current version's `hu`/`en`
 blocks into the OTA feed's `notes` - keep both languages, keep it short, and
 write for the person on the couch (what changes for THEM), not for developers.
 
+## 3.0.0
+
+### hu
+
+- **A nagyobb frissítések is felmennek maguktól.** Eddig, ha egy frissítéshez a
+  rendszerhez is hozzá kellett nyúlni, a boxot újra kellett telepíteni egy
+  számítógépről, és így a frissítésnek pont akkor nem volt haszna, amikor a
+  legnagyobb lett volna. Mostantól a box ezt magától megcsinálja: Beállítások →
+  Szoftverfrissítés, egy gomb, néhány perc, újraindítás nélkül, és közben végig
+  használható marad. Csak olyan frissítést enged fel, amelyik igazoltan ettől a
+  projekttől való, régebbit pedig soha.
+
+- **A képernyőtükrözés a memóriakártyáról telepített boxokon is működik.** Eddig
+  ott megjelent a beállítás, de a telefon nem talált semmit, mert a tükrözés fele
+  fel sem került a boxra.
+
+- Egyszeri teendő, számítógépről: minden meglévő boxnak kell egyszer egy
+  `./deploy/deploy.sh <box>` vagy egy újratelepítés, hogy ezt megkapja. Enélkül
+  minden a régiben működik, csak a nagyobb frissítéseket nem tudja majd magától
+  felrakni.
+
+### en
+
+- **Bigger updates install themselves now.** Until now an update that also had to
+  touch the system meant re-flashing the box from a computer, so updating was
+  least useful exactly when it mattered most. The box does it by itself now:
+  Settings → Software update, one button, a few minutes, no restart, and the box
+  keeps working throughout. It only accepts an update that is provably from this
+  project, and never an older one.
+
+- **Screen mirroring works on boxes flashed from the SD image.** The setting was
+  there, but your phone found nothing, because half of mirroring was never put on
+  the box.
+
+- One thing to do once, from a computer: every box you already have needs a single
+  `./deploy/deploy.sh <box>` or a re-flash to gain this. Without it everything
+  keeps working as before, the box just cannot install the bigger updates by
+  itself.
+
 ## 2.18.0
 
 ### hu
