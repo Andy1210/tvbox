@@ -189,9 +189,16 @@ if (info.language) {
 
 // ---- text input: tell the shell when a field takes focus ----------------------
 // The 10-foot UI has no keyboard, so a focused <input> is a dead end unless the
-// shell offers a way to type. Only the SIGNAL leaves the page (kind + label, never
-// the value); the text itself is typed back as real key events by the main
-// process, so this side never touches the field.
+// shell offers a way to type. What leaves the page is the signal (kind + label) and
+// the field's CURRENT TEXT, so the keyboard can open on it and a typo can be fixed
+// rather than retyped - delivery replaces the whole field, so an empty keyboard
+// meant nobody could edit anything. The text is typed back as real key events by
+// the main process, so this side still never writes to the field.
+//
+// The one value that does NOT leave: a password field's. It is the one thing on a
+// page deliberately not on screen, and this reaches the TV and - once the phone is
+// armed - a page served over the LAN in clear. Withheld here, and refused again in
+// ../textinput.js, which is where every other rule about the offer lives too.
 (function () {
   var TEXTY = /^(|text|search|email|url|tel|number|password)$/i;
   // Ten times what the shell will type back, so the shell always sees enough to judge
@@ -263,8 +270,10 @@ if (info.language) {
       return "";
     }
   }
-  // A label for the TV screen so the user knows WHAT they're typing. Never the
-  // field's value - a placeholder/aria-label is authored text, a value is secret.
+  // What the app CALLS the field, for the TV screen, so the user knows what they are
+  // typing. Authored text - a placeholder, an aria-label - and never the contents,
+  // which valueOf above answers for under rules of their own: a label is shown for
+  // every field, including the one whose value must not be.
   function labelFor(el) {
     var t =
       el.getAttribute("aria-label") ||
