@@ -1,6 +1,7 @@
 {
-  "revision": 1,
+  "revision": 2,
   "files": [
+    "deploy/52-tvbox-miracast.rules",
     "deploy/54-tvbox-sysupdate.rules",
     "deploy/coredump-tvbox-runtimemax.conf",
     "deploy/greetd-tvbox-safemode.conf",
@@ -22,5 +23,5 @@
     "deploy/tvbox-sysupdate.service",
     "scripts/install-libcec8.sh"
   ],
-  "sha256": "a47feac0f447273a026c8201fe218c5bddc5f8898d7dd494a27096a2a02f048d"
+  "sha256": "d36715406fbe41ebea396dc8961defe1f2cf727a5c9b3fd4986e39fed0f2fd37"
 }
