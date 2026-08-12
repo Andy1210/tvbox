@@ -432,10 +432,12 @@
       "bad-signature": "The update is not signed by this project. Nothing was installed.",
       "bad-tarball": "The downloaded update looks wrong. Nothing was installed.",
       "busy": "The box was in use, so the system update was postponed. Try again when nothing is playing.",
+      "cooldown": "That just failed. Give it a couple of minutes before trying again.",
       "download-failed": "The system update could not be downloaded.",
       "feed-unreachable": "Could not reach the update server.",
       "insecure-install": "The system updater on this box is not installed safely, so it refused to run.",
       "internal": "The system update stopped unexpectedly.",
+      "interrupted": "The system update was cut off part way through - a power cut, most likely. The box works; try again.",
       "no-keys": "This box has no release key, so it cannot tell whether an update is genuine. Set the box up again.",
       "no-openssl": "A tool the box needs to check the update is missing. Set the box up again.",
       "no-space": "Not enough free space for the system update.",
@@ -449,8 +451,10 @@
       "start-denied": "The box would not let the system update start. Restart the box and try again.",
       "starting": "Starting the system update…",
       "timeout": "The system update took too long and was stopped. Try again.",
+      "unsigned-feed": "This update is not signed, so the box will not install its system part.",
       "up-to-date": "The system part is up to date."
-    }
+    },
+    "sysFeedMismatch": "The system part is up to date, but this version wants a newer one - the box and the update server disagree."
   },
   "hostname": {
     "title": "Device name",

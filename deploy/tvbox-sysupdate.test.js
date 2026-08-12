@@ -53,7 +53,7 @@ function sign(priv, file) {
 // A release tarball with the shape make-release.sh produces: shell/, infra/ and
 // manifest.json at the top. The provision.sh in it is a stand-in that prints the
 // same last line the real one does.
-function makeTarball(dir, { revision = 2, bad = 0, warn = 0, resultLine = true, extra } = {}) {
+function makeTarball(dir, { revision = 2, bad = 0, warn = 0, resultLine = true, extra, rename, decoyResult } = {}) {
   const stage = fs.mkdtempSync(path.join(dir, "stage-"));
   fs.mkdirSync(path.join(stage, "shell"), { recursive: true });
   fs.mkdirSync(path.join(stage, "infra"), { recursive: true });
@@ -65,12 +65,30 @@ function makeTarball(dir, { revision = 2, bad = 0, warn = 0, resultLine = true, 
     'echo "ran as $1 unattended=${TVBOX_UNATTENDED:-0}" > "$(dirname "$0")/../../../ran.txt" 2>/dev/null || true',
     'echo "   [ok]   pretend"',
   ];
+  // A line that looks like the verdict but is not the last one.
+  if (decoyResult) lines.push(`echo "PROVISION_RESULT rev=${revision} bad=0 warn=0"`);
   if (resultLine) lines.push(`echo "PROVISION_RESULT rev=${revision} bad=${bad} warn=${warn}"`);
   lines.push(`exit ${bad ? 1 : 0}`);
   fs.writeFileSync(path.join(stage, "infra", "provision.sh"), lines.join("\n") + "\n");
   if (extra) extra(stage);
   const tar = path.join(dir, "release-" + Math.random().toString(36).slice(2) + ".tar.gz");
-  sh("tar", ["-czf", tar, "-C", stage, "shell", "infra", "manifest.json"]);
+  // `rename` puts a member in under a name tar would not create from a path -
+  // an absolute one, for instance.
+  const args = rename
+    ? [
+        "-czf",
+        tar,
+        "-C",
+        stage,
+        "shell",
+        "infra",
+        "manifest.json",
+        "--transform",
+        `s@^${rename[0]}$@${rename[1]}@`,
+        rename[0],
+      ]
+    : ["-czf", tar, "-C", stage, "shell", "infra", "manifest.json"];
+  sh("tar", args);
   fs.rmSync(stage, { recursive: true, force: true });
   return tar;
 }
@@ -317,12 +335,134 @@ test("an OTA still settling postpones the system update", async () => {
   b.close();
 });
 
-test("an http feed to a NAME is refused; only a literal private address is allowed", async () => {
+test("which feed addresses are allowed at all", () => {
+  // Asked of the rule directly rather than through a run: every case here would
+  // otherwise be a real connection attempt, and half of them are addresses that
+  // exist on somebody's LAN.
+  const probe = (urls) =>
+    JSON.parse(
+      sh("python3", [
+        "-c",
+        [
+          "import importlib.util,json,sys",
+          "s=importlib.util.spec_from_loader('a',importlib.machinery.SourceFileLoader('a',sys.argv[1]))",
+          "m=importlib.util.module_from_spec(s); s.loader.exec_module(m)",
+          "print(json.dumps([m.is_allowed_url(u) for u in sys.argv[2:]]))",
+        ].join("\n"),
+        SCRIPT,
+        ...urls,
+      ]),
+    );
+
+  // https anywhere, and plain http only to a literal private address. The
+  // 192.168 branch once demanded five octets, which refused the commonest home
+  // network there is while accepting 192.168.1.5.9.
+  const allowed = [
+    "https://github.com/Andy1210/tvbox/releases/latest/download/update.json",
+    "http://192.168.1.5/update.json",
+    "http://10.0.0.7:8080/update.json",
+    "http://127.0.0.1:8391/update.json",
+    "http://172.16.3.4/update.json",
+  ];
+  // Each of these is a way to look private and resolve somewhere else - and the
+  // box user can set the box's DNS, so a NAME over http is a feed they choose.
+  const refused = [
+    "http://updates.example.com/update.json",
+    "http://10.evil.com/update.json",
+    "http://10.0.0.1@evil.com/update.json",
+    "http://172.99.0.1/update.json",
+    "http://172.32.0.1/update.json",
+    "http://192.168.1.5.9/update.json",
+    "http://167772161/update.json",
+    "https://good.example@evil.example/update.json",
+    "ftp://192.168.1.5/update.json",
+  ];
+  assert.deepEqual(
+    probe(allowed),
+    allowed.map(() => true),
+  );
+  assert.deepEqual(
+    probe(refused),
+    refused.map(() => false),
+  );
+});
+
+test("a feed address the rule refuses stops the run before anything is fetched", async () => {
   const b = await box();
   b.publish({ revision: 2 });
   b.writeConf("http://updates.example.com/update.json");
   const r = await b.run();
   assert.equal(r.status.code, "bad-config", r.out);
+  b.close();
+});
+
+test("looking before pressing is not treated as a failure", async () => {
+  // `check` writes its own status; if that counted as a failed run, the very next
+  // press would be refused for two minutes with "that just failed".
+  const b = await box();
+  b.publish({ revision: 2 });
+  assert.equal((await b.run("check")).status.code, "available");
+  assert.equal((await b.run()).status.code, "ok");
+  b.close();
+});
+
+test("the cooldown after a failure does not push itself out on every press", async () => {
+  const b = await box();
+  b.writeConf("http://127.0.0.1:1/update.json"); // nothing listening
+  const first = await b.run();
+  assert.equal(first.status.code, "feed-unreachable");
+  const failedAt = first.status.finishedAt;
+  const second = await b.run();
+  assert.equal(second.status.code, "cooldown", second.out);
+  // The window still runs from the ORIGINAL failure. Rewriting it here is how
+  // someone pressing once a minute would never get a second real attempt.
+  assert.equal(second.status.finishedAt, failedAt);
+  b.close();
+});
+
+test("a release published without a signature says so, not 'check your network'", async () => {
+  const b = await box();
+  b.publish({ revision: 2 });
+  delete b.served["/update.json.sig"]; // what an unsigned CI run publishes
+  const r = await b.run();
+  assert.equal(r.status.code, "unsigned-feed", r.out);
+  b.close();
+});
+
+test("a signature that picked up whitespace still verifies", async () => {
+  // b64decode(validate=True) rejects whitespace, so a trailing newline anywhere
+  // between openssl and the box would read as a tampered feed on the whole fleet.
+  const b = await box();
+  b.publish({ revision: 2 });
+  b.served["/update.json.sig"] = "\n" + b.served["/update.json.sig"] + "\n";
+  assert.equal((await b.run()).status.code, "ok");
+  b.close();
+});
+
+test("a member named with a leading slash is refused", async () => {
+  const b = await box();
+  const tar = makeTarball(b.dir, {
+    revision: 2,
+    extra: (stage) => {
+      fs.writeFileSync(path.join(stage, "evil"), "x");
+    },
+    rename: ["evil", "/shell/evil"],
+  });
+  b.publish({ revision: 2, tarball: tar });
+  const r = await b.run();
+  assert.equal(r.status.code, "bad-tarball", r.out);
+  b.close();
+});
+
+test("the LAST verdict line is the one that counts", async () => {
+  // Nothing untrusted reaches provision's stdout today, but the verdict is
+  // defined as its last line and an earlier lookalike must not stand in for it.
+  const b = await box();
+  const tar = makeTarball(b.dir, { revision: 2, bad: 1, decoyResult: true });
+  b.publish({ revision: 2, tarball: tar });
+  const r = await b.run();
+  assert.equal(r.status.code, "provision-failed", r.out);
+  assert.equal(b.revision(), null);
   b.close();
 });
 

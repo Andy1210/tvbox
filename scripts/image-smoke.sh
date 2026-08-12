@@ -122,6 +122,11 @@ PARTS
     home/tv/.tvbox/shell/launcher-dist/assets/index-fake.js; do
     echo placeholder >"$R/$f"
   done
+  # Two of those are checked for CONTENT, not just presence, so the fixture has to
+  # carry the real shape or the self-test would only ever prove the checks fire.
+  printf 'FEED_URL=https://example.invalid/update.json\nTVBOX_USER=tv\n' >"$R/etc/tvbox/sysupdate.conf"
+  printf -- '-----BEGIN PUBLIC KEY-----\nplaceholder\n-----END PUBLIC KEY-----\n' \
+    >"$R/etc/tvbox/release-keys.d/tvbox-release.pem"
   chmod 755 "$R/usr/local/bin/tvbox-wc" "$R/usr/local/bin/tvbox-session" "$R/home/tv/.tvbox/session.sh"
   printf '[default_session]\ncommand = "tvbox-wc -- /usr/local/bin/tvbox-session"\nuser = "tv"\n' \
     >"$R/etc/greetd/config.toml"
@@ -318,6 +323,14 @@ for f in \
   home/tv/.tvbox/shell/launcher-dist/index.html; do
   check "shipped: /$f" test -s "$ROOTMNT/$f"
 done
+# The applier refuses to run without a valid box user, and this file is the only
+# place it can learn one - a substitution that silently missed would ship a box
+# whose every system update ends in bad-config, with no ssh to find that out over.
+# Presence is not enough here; the line has to name the user.
+check "the image names the box user for system updates" \
+  grep -q "^TVBOX_USER=tv$" "$ROOTMNT/etc/tvbox/sysupdate.conf"
+check "the pinned release key is a public key" \
+  grep -q "BEGIN PUBLIC KEY" "$ROOTMNT/etc/tvbox/release-keys.d/tvbox-release.pem"
 # The session chain, end to end: greetd starts the compositor, the compositor starts
 # the wrapper, the wrapper execs the box user's session script. Any one of them
 # missing is a flashed box that shows nothing - and tvbox-session deliberately

@@ -161,10 +161,12 @@ back to the previous binary.
 one as the `TVBOX_RELEASE_KEY` Actions secret. A box pins the first key it is
 given and provision will **not** silently replace it (`TVBOX_ROTATE_KEY=1` is the
 explicit act), and it refuses to pin one out of a directory the box user can
-write at all - `deploy.sh` passes `TVBOX_TRUST_LOCAL_KEY=1` because there the
-tree came from the developer's own checkout. Keys are read from a directory, so a
-second one can be added before the first is retired; do it in that order, because
-a lost signing key cannot be replaced remotely.
+write **at all** - there is no flag for that, because every OTA rewrites
+`~/.tvbox` and a key pinned from there would turn one past compromise into a
+standing root channel. The two places that legitimately hold a trusted copy put
+it there directly: the image build, and `deploy.sh` over ssh. Keys are read from a
+directory, so a second one can be added before the first is retired; do it in that
+order, because a lost signing key cannot be replaced remotely.
 
 **A LAN test loop needs a root-side edit now.** `config.json`'s `update.feed`
 still redirects the shell's half, but the applier reads `/etc/tvbox/sysupdate.conf`
@@ -173,11 +175,24 @@ to a name. Point both, or the box takes a release from one feed and its root
 payload from another.
 
 **Still a re-flash:** the kernel, firmware, the bootloader, a Debian release
-upgrade, the partition layout - and, once, the applier itself. A box already in
-the field is running a shell that predates it, so it needs one
-`sudo bash ~/.tvbox/provision.sh` or a re-flash to gain it. After that, never
-again. Settings can tell the two situations apart and offers the button only when
-the box actually has the applier.
+upgrade, the partition layout - and, once, the applier itself.
+
+A box already in the field is running a shell that predates it, so it needs one
+pass from a computer. **Two steps, and the second is not optional** - provision
+installs the applier but will not pin a key out of `~/.tvbox`, so a box that gets
+only the first ends every press with "this box has no release key":
+
+```sh
+./deploy/deploy.sh <box>            # does both, and is the normal answer
+# or by hand, from a checkout:
+ssh <box> 'sudo bash ~/.tvbox/provision.sh'
+ssh <box> 'sudo install -m644 -o root -g root -D /dev/stdin \
+    /etc/tvbox/release-keys.d/tvbox-release.pem' < deploy/release-key.pem
+```
+
+A re-flash does both by itself. After either, never again: Settings knows whether
+this box can actually run a system update - it checks for a pinned key, not just
+the applier - and offers the button only where pressing it can work.
 
 ## Flatpak-backed apps (RetroArch, Plex)
 

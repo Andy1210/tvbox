@@ -17,6 +17,20 @@ const { execFile } = require("child_process");
 const UNIT = "tvbox-sysupdate.service";
 const HELPER = "/usr/local/sbin/tvbox-sysupdate";
 const UNIT_FILE = "/etc/systemd/system/" + UNIT;
+const KEYS_DIR = process.env.TVBOX_KEYS_DIR || "/etc/tvbox/release-keys.d";
+// /run is a tmpfs, so this exists only while a run is going IN THIS BOOT. A box
+// that lost power mid-provision comes back with a durable status still saying
+// "running" and no marker, and that difference is the only way to tell a live
+// run from an interrupted one.
+const RUNNING_FILE = process.env.TVBOX_RUN_DIR
+  ? path.join(process.env.TVBOX_RUN_DIR, "sysupdate-running")
+  : "/run/tvbox/sysupdate-running";
+// How long a start may take to produce its first status line before the screen
+// stops waiting on it. `systemctl start --no-block` reports success as soon as
+// the job is QUEUED, so a unit that then fails to activate - or one whose run is
+// blocked behind another holding the lock - would otherwise leave the page
+// waiting for ever, with every button on it disabled.
+const START_GRACE_MS = 2 * 60 * 1000;
 // TVBOX_STATE_DIR is for the test suite. It is not a boundary and does not need
 // to be: everything under here is READ, and the root half never trusts a word of
 // what this process says - it re-reads its own root-owned config and verifies the
@@ -39,7 +53,14 @@ let startError = null;
 // per call - it is two stats, and the answer changes once in a box's life.
 function available() {
   try {
-    return fs.statSync(HELPER).isFile() && fs.statSync(UNIT_FILE).isFile();
+    if (!fs.statSync(HELPER).isFile() || !fs.statSync(UNIT_FILE).isFile()) return false;
+    // A pinned key too, not just the two files. provision installs the applier
+    // whatever happens but refuses to pin a key out of a directory the box user
+    // can write, so "installed" and "able to verify anything" are genuinely
+    // different states - and offering a button whose every press can only answer
+    // "this box has no release key" is worse than the older, honest sentence
+    // about setting the box up again.
+    return fs.readdirSync(KEYS_DIR).some((n) => n.endsWith(".pem"));
   } catch (e) {
     return false;
   }
@@ -75,12 +96,15 @@ const CODES = [
   "idle",
   "starting",
   "running",
+  "interrupted",
   "available",
   "up-to-date",
   "ok",
   "ok-warnings",
   "timeout",
   "busy",
+  "cooldown",
+  "unsigned-feed",
   "no-space",
   "no-keys",
   "no-openssl",
@@ -106,11 +130,20 @@ function status() {
   const base = { available: available(), revision, code: "idle", warnings: 0, rebootRequired: false, at: null };
   if (startError) return { ...base, code: "start-denied" };
   // A status document from before this session's request describes the previous
-  // run. Reporting it would turn a press into an instant "done".
+  // run. Reporting it would turn a press into an instant "done" - but only for a
+  // couple of minutes, because a start that never produces one at all must not
+  // leave the screen waiting with its buttons disabled.
   const fresh = doc && Number(doc.startedAt) >= requestedAt;
-  if (requestedAt && !fresh) return { ...base, code: "starting", at: requestedAt };
+  if (requestedAt && !fresh) {
+    if (Date.now() - requestedAt < START_GRACE_MS) return { ...base, code: "starting", at: requestedAt };
+    return { ...base, code: "internal", at: requestedAt };
+  }
   if (!doc) return base;
-  const code = CODES.includes(doc.code) ? doc.code : "internal";
+  let code = CODES.includes(doc.code) ? doc.code : "internal";
+  // A run that says it is going, in a boot that has no marker for it, was cut
+  // off - a power loss mid-provision, most likely. Left as "running" this would
+  // disable the whole update screen for the life of the box, OTA included.
+  if (code === "running" && !fs.existsSync(RUNNING_FILE)) code = "interrupted";
   return {
     ...base,
     code,
@@ -151,7 +184,10 @@ module.exports = {
   CODES,
   UNIT,
   HELPER,
+  KEYS_DIR,
   STATE_DIR,
   REVISION_FILE,
   STATUS_FILE,
+  RUNNING_FILE,
+  START_GRACE_MS,
 };

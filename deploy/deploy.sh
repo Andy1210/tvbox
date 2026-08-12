@@ -61,12 +61,18 @@ if [ "$SKIP_PROVISION" = 1 ]; then
   echo "==> provision skipped (--skip-provision)"
 else
   echo "==> provisioning (root, one-time; you may be asked for the sudo password)"
-  # TVBOX_TRUST_LOCAL_KEY: provision will not pin a release key out of a directory
-  # the box user can write, and ~/.tvbox is exactly that - every OTA refreshes it.
-  # A deploy is the case where the tree came from the developer's own checkout a
-  # moment ago, so the caller can say so; nothing else may.
-  ssh -t "$PI" 'sudo TVBOX_TRUST_LOCAL_KEY=1 bash ~/.tvbox/provision.sh' \
+  ssh -t "$PI" 'sudo bash ~/.tvbox/provision.sh' \
     || { echo "   provision FAILED - fix and re-run deploy"; exit 1; }
+  # The release key goes over the wire from THIS checkout, not through ~/.tvbox.
+  # provision refuses to pin one out of the box user's home - every OTA rewrites
+  # that directory, so a key taken from there would turn one past compromise into
+  # a standing root channel - and this is the trusted copy it cannot have.
+  # Pinned once: provision keeps whatever is already there.
+  if [ -f "$HERE/release-key.pem" ]; then
+    ssh "$PI" 'sudo install -m644 -o root -g root -D /dev/stdin /etc/tvbox/release-keys.d/tvbox-release.pem' \
+      < "$HERE/release-key.pem" && echo "   release key pinned" \
+      || echo "   could not pin the release key - system updates will not verify"
+  fi
 fi
 
 # ---- user-space setup (no root from here on) ----

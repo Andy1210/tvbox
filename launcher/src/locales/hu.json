@@ -432,10 +432,12 @@
       "bad-signature": "A frissítést nem ez a projekt írta alá. Semmi nem került fel.",
       "bad-tarball": "A letöltött frissítés hibásnak tűnik. Semmi nem került fel.",
       "busy": "A doboz használatban volt, ezért a rendszerfrissítés elmaradt. Próbáld újra, amikor semmi nem megy.",
+      "cooldown": "Ez az imént nem sikerült. Várj pár percet, mielőtt újra próbálod.",
       "download-failed": "A rendszerfrissítést nem sikerült letölteni.",
       "feed-unreachable": "A frissítési kiszolgáló nem érhető el.",
       "insecure-install": "A dobozon lévő rendszerfrissítő nincs biztonságosan telepítve, ezért nem futott le.",
       "internal": "A rendszerfrissítés váratlanul leállt.",
+      "interrupted": "A rendszerfrissítés félbeszakadt - valószínűleg áramszünet miatt. A doboz működik; próbáld újra.",
       "no-keys": "Ezen a dobozon nincs kiadási kulcs, így nem tudja eldönteni, valódi-e a frissítés. Állítsd be újra a dobozt.",
       "no-openssl": "Hiányzik egy eszköz, ami a frissítés ellenőrzéséhez kell. Állítsd be újra a dobozt.",
       "no-space": "Nincs elég szabad hely a rendszerfrissítéshez.",
@@ -449,8 +451,10 @@
       "start-denied": "A doboz nem engedte elindítani a rendszerfrissítést. Indítsd újra a dobozt, és próbáld újra.",
       "starting": "Rendszerfrissítés indítása…",
       "timeout": "A rendszerfrissítés túl sokáig tartott, ezért leállt. Próbáld újra.",
+      "unsigned-feed": "Ez a frissítés nincs aláírva, ezért a doboz nem telepíti a rendszer részét.",
       "up-to-date": "A rendszer része naprakész."
-    }
+    },
+    "sysFeedMismatch": "A rendszer része naprakész, de ez a verzió újabbat kér - a doboz és a frissítési kiszolgáló nincs szinkronban."
   },
   "hostname": {
     "title": "Eszköz neve",

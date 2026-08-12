@@ -497,8 +497,11 @@ message, line, src)` signature.
   fleet. The COMPOSITOR is deliberately excluded from an unattended run - a
   release's root half lands before its shell has proved itself, and greetd execs
   `tvbox-wc` directly, so there is no rollback for it. And every box in the field
-  predates the applier: one manual provision or one re-flash, once. Details and
-  the replay/rollback reasoning: [docs/updates-and-backup.md](docs/updates-and-backup.md).
+  predates the applier: `deploy/deploy.sh` or a re-flash, once - a bare
+  `sudo bash ~/.tvbox/provision.sh` installs the applier but pins NO key (provision
+  refuses to take one out of the box user's home), which leaves a button that can
+  only answer "this box has no release key". Details and the replay/rollback
+  reasoning: [docs/updates-and-backup.md](docs/updates-and-backup.md).
 - Nothing on the box ever reboots it or restarts the shell on its own while
   something plays: OS updates run with `Automatic-Reboot "false"` (Settings
   shows the reboot hint), and the OTA auto-apply is gated on `boxIdle()` +

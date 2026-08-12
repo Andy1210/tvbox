@@ -358,6 +358,12 @@ function UpdatePage() {
       {sys && !sysBusy && sys.code !== "idle" && sys.code !== "ok" && sys.code !== "up-to-date" && (
         <Note tone="warn">{t("update.sys." + sys.code)}</Note>
       )}
+      {/* The applier read a feed that offers less than this release asks for -
+          the two halves are pointed at different servers. Without this the button
+          runs, reports "up to date", and nothing on screen changes at all. */}
+      {sys && !sysBusy && sys.needs != null && sys.code === "up-to-date" && (
+        <Note tone="warn">{t("update.sysFeedMismatch")}</Note>
+      )}
       {sys?.rebootRequired && !sysBusy && <Note>{t("update.sysRebootHint")}</Note>}
       {notes && (
         // Release notes are written as lines and can be long: without pre-line they
@@ -542,10 +548,13 @@ export function SystemPane() {
           hint={t("system.updateHint")}
           // `available` is false for a release whose requirements the box cannot meet,
           // so "up to date" would be wrong exactly when there IS something waiting.
+          // And a requirement the box CAN satisfy by itself is not "needs setting up
+          // again" - that sentence sends someone to a computer for a button that is
+          // one level down this very row.
           value={
             !update
               ? undefined
-              : update.available
+              : update.available || (update.system.needs != null && update.system.available)
                 ? t("update.availableShort")
                 : update.unmet?.length
                   ? t("update.needsSetup")

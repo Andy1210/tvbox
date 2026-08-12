@@ -31,12 +31,14 @@ publication date INSIDE the signed bytes, so a stale document is refused even
 when its revision would pass.
 """
 
+import atexit
 import fcntl
 import json
 import os
 import pwd
 import re
 import shutil
+import signal
 import subprocess
 import sys
 import tarfile
@@ -73,6 +75,13 @@ DEFAULT_FEED = "https://github.com/Andy1210/tvbox/releases/latest/download/updat
 
 FEED_TIMEOUT_S = 20
 TARBALL_TIMEOUT_S = 15 * 60
+# A socket timeout is per read, not a deadline: a server that dribbles one byte
+# before each timeout keeps a transfer alive for ever. That matters here because
+# the box user can choose which server answers (they can set the box's DNS), the
+# unit has no start timeout - provision genuinely takes minutes - and a run that
+# never ends holds the lock, so every later request is refused in silence until
+# somebody reboots the box.
+DOWNLOAD_DEADLINE_S = 30 * 60
 MAX_FEED_BYTES = 256 * 1024
 MAX_SIG_BYTES = 4 * 1024
 MAX_TARBALL_BYTES = 300_000_000
@@ -96,13 +105,24 @@ PROVISION_TIMEOUT_S = 60 * 60
 # The closed set of outcomes. The launcher translates these; nothing from the
 # feed is ever put in front of a user, because the main window runs with
 # contextIsolation:false and renders whatever the status file says.
-OK_CODES = ("ok", "ok-warnings", "up-to-date")
+# Outcomes that are not a failure, so the cooldown below does not treat them as
+# one. `available` is what a `check` writes: without it here, looking before
+# pressing would answer "that just failed" to a run that never failed.
+OK_CODES = ("ok", "ok-warnings", "up-to-date", "available")
+
+
+MAX_LOG_BYTES = 1_000_000
 
 
 def log(msg):
     line = "%s %s\n" % (time.strftime("%Y-%m-%dT%H:%M:%S%z"), msg)
     sys.stderr.write(line)
     try:
+        # The box user can start a run whenever they like and each one appends a
+        # whole provision transcript, so this is capped rather than left to grow
+        # on a rootfs that a full disk takes read-only.
+        if os.path.exists(LOG_FILE) and os.path.getsize(LOG_FILE) > MAX_LOG_BYTES:
+            os.replace(LOG_FILE, LOG_FILE + ".1")
         with open(LOG_FILE, "a") as fh:
             fh.write(line)
     except OSError:
@@ -208,15 +228,25 @@ def read_conf():
     return conf
 
 
+# https anywhere, or plain http ONLY to a literal private address. A NAME over
+# http would be resolved by a resolver the box user can point wherever they like,
+# and the userinfo form (`http://10.0.0.1@evil.com/`) is why this anchors the
+# whole authority rather than testing a prefix.
+#
+# One function for both the feed and the tarball it names: two nearly-identical
+# regexes drifted apart on the first attempt, and the looser one was the one
+# guarding the download.
+_PRIVATE_HOST = r"(?:(?:10|127)\.\d{1,3}|192\.168|172\.(?:1[6-9]|2\d|3[01]))\.\d{1,3}\.\d{1,3}"
+_ALLOWED_URL = re.compile(r"^(?:https://[^/@\s]+|http://" + _PRIVATE_HOST + r"(?::\d{1,5})?)(?:/|$)")
+
+
+def is_allowed_url(url):
+    return bool(_ALLOWED_URL.match(str(url or "")))
+
+
 def feed_url(conf):
     url = conf.get("FEED_URL") or DEFAULT_FEED
-    if url.startswith("https://"):
-        return url
-    # http is for the operator's own LAN feed, and only to a literal private
-    # address: a NAME would be resolved through a resolver the box user can
-    # point wherever they like.
-    m = re.match(r"^http://((?:10|127|192\.168)\.\d{1,3}\.\d{1,3}\.\d{1,3}|172\.(?:1[6-9]|2\d|3[01])\.\d{1,3}\.\d{1,3})(?::\d+)?/", url)
-    if m:
+    if is_allowed_url(url):
         return url
     fail("bad-config", "FEED_URL must be https, or http to a literal private address")
 
@@ -343,7 +373,12 @@ def verify(doc_bytes, sig_bytes):
     keys = public_keys()
     if not keys:
         fail("no-keys", "no release key in " + KEYS_DIR)
-    if not re.match(rb"^[A-Za-z0-9+/=\s]{16,4096}$", sig_bytes):
+    # Stripped before decoding, not merely allowed by the shape test: b64decode
+    # with validate=True rejects whitespace, so a signature that picked up a
+    # trailing newline anywhere between openssl and the box would read as a
+    # tampered feed on the whole fleet rather than as the formatting it is.
+    sig_bytes = sig_bytes.strip()
+    if not re.match(rb"^[A-Za-z0-9+/=]{16,4096}$", sig_bytes):
         fail("bad-signature", "signature is not base64")
     with tempfile.TemporaryDirectory(dir=STATE_DIR) as tmp:
         doc = os.path.join(tmp, "doc")
@@ -394,8 +429,7 @@ def parse_feed(raw):
     rev = feed.get("systemRevision")
     if not isinstance(rev, int) or isinstance(rev, bool) or not 0 <= rev <= 999999:
         fail("bad-feed", "bad systemRevision")
-    url = str(feed.get("url", ""))
-    if not (url.startswith("https://") or re.match(r"^http://(?:10|127|192\.168|172)\.", url)):
+    if not is_allowed_url(feed.get("url", "")):
         fail("bad-feed", "tarball url must be https or LAN http")
     published = str(feed.get("publishedAt", ""))
     try:
@@ -448,8 +482,13 @@ def validate_members(tar_path):
         for m in tf.getmembers():
             if not (m.isfile() or m.isdir()):
                 fail("bad-tarball", "member %r is not a file or a directory" % m.name[:80])
+            # Tested BEFORE the leading "./" is stripped: `/shell/x` would
+            # otherwise pass as `shell/x`, and on a python without extraction
+            # filters os.path.join would then write it to the filesystem root.
+            if m.name.startswith("/"):
+                fail("bad-tarball", "member %r is an absolute path" % m.name[:80])
             name = m.name.lstrip("./")
-            if name.startswith("/") or ".." in name.split("/"):
+            if ".." in name.split("/"):
                 fail("bad-tarball", "member %r escapes the staging directory" % m.name[:80])
             top = name.split("/", 1)[0]
             if top not in ("shell", "infra", "manifest.json"):
@@ -539,14 +578,23 @@ def free_bytes(path):
 
 
 def recent_failure():
+    """When the last FAILED run finished, if that was recent enough to matter.
+
+    Returns the original timestamp rather than a boolean so the refusal can keep
+    it: writing a fresh one would push the window out on every press, and someone
+    retrying once a minute after a network blip would never get a second real
+    attempt - with nothing on screen to say why.
+    """
     try:
         doc = json.loads(read_text(STATUS_FILE))
     except Exception:
-        return False
+        return None
     if doc.get("code") in OK_CODES:
-        return False
+        return None
     fin = doc.get("finishedAt")
-    return isinstance(fin, (int, float)) and (time.time() * 1000 - fin) < COOLDOWN_S * 1000
+    if isinstance(fin, (int, float)) and (time.time() * 1000 - fin) < COOLDOWN_S * 1000:
+        return fin
+    return None
 
 
 # --------------------------------------------------------------------------
@@ -575,6 +623,13 @@ def apt_recover():
 # main
 
 
+def clear_running():
+    try:
+        os.unlink(RUNNING_FILE)
+    except OSError:
+        pass
+
+
 def finish():
     """ExecStopPost: make sure the run left a terminal status.
 
@@ -583,6 +638,7 @@ def finish():
     kill, the unit being stopped - where the status file would otherwise still
     claim the run is going and the Settings screen would wait for ever.
     """
+    clear_running()
     try:
         doc = json.loads(read_text(STATUS_FILE))
     except Exception:
@@ -597,10 +653,6 @@ def finish():
     except OSError:
         pass
     log("run ended without a verdict (%s) - recorded as %s" % (result or "unknown", code))
-    try:
-        os.unlink(RUNNING_FILE)
-    except OSError:
-        pass
     return 0
 
 
@@ -632,19 +684,48 @@ def run(argv):
     user = box_user(conf)
 
     if action == "apply":
-        if recent_failure():
-            fail("busy", "a run failed less than %d minutes ago" % (COOLDOWN_S // 60))
+        since = recent_failure()
+        if since is not None:
+            # Its own code, not `busy`: "wait, something is playing" and "that
+            # just failed, give it a moment" are different things to be told, and
+            # only one of them is worth pressing again straight away.
+            log("failed: cooldown - a run failed less than %d minutes ago" % (COOLDOWN_S // 60))
+            set_status("cooldown", finishedAt=since)
+            return 1
         why = box_busy()
         if why:
             fail("busy", why)
         set_status("running")
+        # The durable status says "running"; this says "still running, in THIS
+        # boot". /run is a tmpfs, so a box that lost power mid-provision comes
+        # back with the status file still claiming a run is going and this marker
+        # gone - which is the only way the shell can tell the two apart. Without
+        # it that box shows a frozen progress line for ever, and since the same
+        # state disables the update screen, it could never update again.
+        # Registered with atexit so every exit path clears it, including the ones
+        # that leave through fail().
         os.makedirs(RUN_DIR, mode=0o755, exist_ok=True)
         write_atomic(RUNNING_FILE, _run_id + "\n")
+        atexit.register(clear_running)
+
+    # Everything up to the provision run is bounded by one wall clock. provision
+    # itself is bounded by its own subprocess timeout, which is why the alarm is
+    # cancelled before it starts rather than covering the whole run.
+    signal.signal(signal.SIGALRM, lambda *_: fail("timeout", "the download took longer than %d minutes" % (DOWNLOAD_DEADLINE_S // 60)))
+    signal.alarm(DOWNLOAD_DEADLINE_S)
 
     log("%s: feed %s" % (action, url))
     try:
         raw = fetch(url, MAX_FEED_BYTES, FEED_TIMEOUT_S)
+    except (urllib.error.URLError, OSError, ValueError) as e:
+        fail("feed-unreachable", str(e)[:120])
+    try:
         sig = fetch(url + ".sig", MAX_SIG_BYTES, FEED_TIMEOUT_S)
+    except urllib.error.HTTPError as e:
+        # Told apart from a network fault on purpose: a release built without the
+        # signing key publishes the feed and no signature at all, and reporting
+        # that as "check your network" sends everyone looking in the wrong place.
+        fail("unsigned-feed" if e.code == 404 else "feed-unreachable", "signature: %s" % e)
     except (urllib.error.URLError, OSError, ValueError) as e:
         fail("feed-unreachable", str(e)[:120])
 
@@ -697,6 +778,7 @@ def run(argv):
             # a feed built from a different tree than the tarball.
             fail("revision-mismatch", "tarball says %d, feed says %d" % (staged, feed["systemRevision"]))
 
+        signal.alarm(0)  # past the network; provision has its own bound
         apt_recover()
         log("running provision.sh revision %d for user %s" % (staged, user))
         env = dict(
@@ -732,25 +814,24 @@ def run(argv):
         # provision exits 0 for a great many partial outcomes: most of its
         # failure branches only `warn`. Its last line is the machine-readable
         # verdict, and a run that did not reach it did not finish.
-        m = re.search(r"^PROVISION_RESULT rev=(\d+) bad=(\d+) warn=(\d+)\s*$", out, re.M)
-        if proc.returncode != 0 or not m:
+        # The LAST match: the verdict is the last line provision writes, and a
+        # line earlier in the transcript that merely looks like one must not be
+        # able to stand in for it.
+        found = re.findall(r"^PROVISION_RESULT rev=(\d+) bad=(\d+) warn=(\d+)\s*$", out, re.M)
+        if proc.returncode != 0 or not found:
             fail("provision-failed", "exit %d" % proc.returncode)
-        rev, bad, warn = int(m.group(1)), int(m.group(2)), int(m.group(3))
+        rev, bad, warn = (int(x) for x in found[-1])
         if bad or rev != staged:
             fail("provision-failed", "%d step(s) failed" % bad)
 
         write_atomic(REVISION_FILE, "%d\n" % rev)
         write_atomic(os.path.join(STATE_DIR, "system-version"), feed["version"] + "\n")
-        reboot = os.path.exists("/var/run/reboot-required")
+        reboot = os.path.exists(_p("/var/run/reboot-required"))
         set_status("ok-warnings" if warn else "ok", warnings=warn, rebootRequired=reboot)
         log("applied revision %d (%d warning(s))" % (rev, warn))
         return 0
     finally:
         shutil.rmtree(STAGE_DIR, ignore_errors=True)
-        try:
-            os.unlink(RUNNING_FILE)
-        except OSError:
-            pass
 
 
 if __name__ == "__main__":

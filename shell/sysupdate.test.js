@@ -19,7 +19,10 @@ const assert = require("node:assert");
 // test root has to be in the environment before the require.
 const ROOT = fs.mkdtempSync(path.join(os.tmpdir(), "shell-sysupd-"));
 process.env.TVBOX_STATE_DIR = path.join(ROOT, "var/lib/tvbox");
-fs.mkdirSync(process.env.TVBOX_STATE_DIR, { recursive: true });
+process.env.TVBOX_KEYS_DIR = path.join(ROOT, "etc/tvbox/release-keys.d");
+process.env.TVBOX_RUN_DIR = path.join(ROOT, "run/tvbox");
+for (const d of ["TVBOX_STATE_DIR", "TVBOX_KEYS_DIR", "TVBOX_RUN_DIR"])
+  fs.mkdirSync(process.env[d], { recursive: true });
 const sysupdate = require("./sysupdate.js");
 const updater = require("./updater.js");
 
@@ -107,6 +110,35 @@ test("a code the shell has never heard of is not passed through to the UI", () =
   const s = sysupdate.status();
   assert.equal(s.code, "ok-warnings");
   assert.equal(s.warnings, 2);
+});
+
+test("a run cut off by a power loss does not freeze the screen for ever", () => {
+  // /run is a tmpfs, so a status that says "running" in a boot with no marker
+  // beside it belongs to a run that never finished. Reported as `running` it
+  // would keep `working` true, which disables Check and hides BOTH install rows -
+  // the box could then never update again, OTA included, with no ssh to fix it.
+  fs.writeFileSync(STATUS, JSON.stringify({ code: "running", startedAt: 0, finishedAt: null }));
+  fs.rmSync(sysupdate.RUNNING_FILE, { force: true });
+  assert.equal(sysupdate.status().code, "interrupted");
+  fs.writeFileSync(sysupdate.RUNNING_FILE, "1-2\n");
+  assert.equal(sysupdate.status().code, "running");
+  fs.rmSync(sysupdate.RUNNING_FILE, { force: true });
+});
+
+test("every outcome the shell can report has a Hungarian and an English string", () => {
+  // locales.test.ts cannot see these: `update.sys.` is in its DYNAMIC list, which
+  // switches off the dead-key check in both directions. Without this a new code
+  // reaches a Hungarian TV as the literal string "update.sys.<code>".
+  const read = (l) =>
+    JSON.parse(fs.readFileSync(path.join(__dirname, "..", "launcher/src/locales", l + ".json"), "utf8"));
+  const en = read("en").update.sys;
+  const hu = read("hu").update.sys;
+  for (const code of sysupdate.CODES) {
+    // `idle` is the absence of news and is never rendered.
+    if (code === "idle") continue;
+    assert.ok(en[code], "no English string for update.sys." + code);
+    assert.ok(hu[code], "no Hungarian string for update.sys." + code);
+  }
 });
 
 test("the box reports no applier when the root half is not installed", () => {

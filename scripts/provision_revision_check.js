@@ -37,13 +37,16 @@ const INDIRECT = [
   "scripts/install-libcec8.sh",
 ];
 
-// Files provision.sh names but that are NOT part of what a SYSTEM UPDATE
-// installs. deploy/compositor.version belongs here by omission: an unattended
-// run skips the compositor entirely (a bumped tvbox-wc lands before the shell
+// Files provision.sh names but that a SYSTEM UPDATE never runs, so a change to
+// them cannot be what a `system:<n>` requirement is asking for. An unattended run
+// skips the compositor entirely - a bumped tvbox-wc would land before the shell
 // that drives it has proved itself, and greetd execs it directly, so there is no
-// way back), which means bumping the pinned tag changes nothing about what
-// tvbox-sysupdate does and must not ask anyone for a revision.
-const NOT_PAYLOAD = new Set([]);
+// way back - which cuts both ways: editing the installer would otherwise ask for
+// a fleet-wide bump that changes nothing, and a box would record a revision whose
+// only content it had skipped. Basenames, because that is what the $HERE scan
+// below yields. (deploy/compositor.version is not in the payload at all - nothing
+// reads it through `$HERE/`.)
+const NOT_PAYLOAD = new Set(["install-compositor.sh"]);
 
 function payloadFiles() {
   const src = fs.readFileSync(path.join(DEPLOY, "provision.sh"), "utf8");

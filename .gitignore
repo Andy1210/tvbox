@@ -29,3 +29,8 @@ image/stage-tvbox/01-tvbox/files/
 
 # local image build workdir (scripts/build-image.sh)
 .image-build/
+
+# A signing key must never be committed. gen-release-key.sh writes one next to
+# the public half it tells you to copy into deploy/, so the obvious invocation
+# puts it one `git add -A` away from the repo.
+*.priv.pem

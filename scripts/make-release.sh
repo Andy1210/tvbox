@@ -125,7 +125,10 @@ NOTES_EN="$NOTES_EN" NOTES_HU="$NOTES_HU" node -e "
   // A release may not ask for a root revision this tree does not carry: the box
   // cross-checks the staged provision.sh against what the feed announced and
   // refuses the pair, so this would ship a release nothing could ever install.
-  const rev = $PROVISION_REVISION;
+  // Number(), not a bare literal: a revision written 010 would be legacy octal
+  // here (8) and plain ten to the python side and to provision.sh, so the feed
+  // would announce a revision the tarball contradicts and no box could install it.
+  const rev = Number('$PROVISION_REVISION');
   for (const r of requires) {
     const m = /^system:(\d{1,6})\$/.exec(r);
     if (m && Number(m[1]) > rev) {

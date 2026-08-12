@@ -799,17 +799,19 @@ if [ -f "$HERE/tvbox-sysupdate" ] && [ -f "$HERE/tvbox-sysupdate.service" ] &&
     warn "no /etc/tvbox/sysupdate.conf - system updates will not know where to look"
   fi
 
-  # The pinned release key is root's trust anchor for everything the applier will
-  # ever run, so it is installed ONCE and never silently replaced.
+  # The pinned release key is root's trust anchor for everything a system update
+  # will ever run, so it is installed ONCE, never silently replaced, and never
+  # taken from a directory the box user can write.
   #
-  # The subtlety is where this script itself came from. `sudo bash
+  # That last rule is what rules out the obvious path. `sudo bash
   # ~/.tvbox/provision.sh` runs out of the box user's home, and every OTA
-  # refreshes that directory - so on that path the key beside this script is only
-  # as trustworthy as the box. Root trusting ~/.tvbox for the length of one
-  # human-driven run is how provision has always worked; PINNING a key from there
-  # would turn one compromise into a standing channel. So a key is taken from a
-  # user-writable directory only when the caller says the tree is theirs
-  # (deploy.sh does, from a developer's own checkout).
+  # refreshes that directory - so a key sitting beside this script is only as
+  # trustworthy as the box already is. Root trusting ~/.tvbox for the length of
+  # one human-driven run is how provision has always worked, but PINNING a key
+  # from there would turn a single past compromise into a standing root channel.
+  # There is deliberately no flag to override this: the two paths that legitimately
+  # have a trustworthy copy - the image build, and an admin over ssh - can both
+  # put the file in place directly, and the warn below says how.
   KEY_DST=/etc/tvbox/release-keys.d/tvbox-release.pem
   if [ -f "$KEY_DST" ]; then
     if [ -f "$HERE/release-key.pem" ] && ! cmp -s "$HERE/release-key.pem" "$KEY_DST"; then
@@ -823,23 +825,15 @@ if [ -f "$HERE/tvbox-sysupdate" ] && [ -f "$HERE/tvbox-sysupdate.service" ] &&
     fi
   elif [ ! -f "$HERE/release-key.pem" ]; then
     warn "no release-key.pem in $HERE - system updates cannot verify a feed"
+  elif [ "$(stat -c %u "$HERE" 2>/dev/null)" = 0 ] &&
+    [ -z "$(find "$HERE" -maxdepth 0 -perm /022 2>/dev/null)" ]; then
+    install -m 644 -o root -g root "$HERE/release-key.pem" "$KEY_DST" &&
+      ok "release key pinned ($KEY_DST)" ||
+      warn "could not pin the release key"
   else
-    # Root-owned and not writable by group or other, or the caller vouching for
-    # the tree. Written out rather than chained, because `A || B && C` groups as
-    # `(A || B) && C` in sh and would then refuse exactly the deploy.sh case.
-    KEY_TRUSTED=0
-    [ "${TVBOX_TRUST_LOCAL_KEY:-0}" = 1 ] && KEY_TRUSTED=1
-    if [ "$KEY_TRUSTED" = 0 ] && [ "$(stat -c %u "$HERE" 2>/dev/null)" = 0 ] &&
-      [ -z "$(find "$HERE" -maxdepth 0 -perm /022 2>/dev/null)" ]; then
-      KEY_TRUSTED=1
-    fi
-    if [ "$KEY_TRUSTED" = 1 ]; then
-      install -m 644 -o root -g root "$HERE/release-key.pem" "$KEY_DST" &&
-        ok "release key pinned ($KEY_DST)" ||
-        warn "could not pin the release key"
-    else
-      warn "$HERE is writable by the box user - not pinning a release key from it (TVBOX_TRUST_LOCAL_KEY=1 to accept)"
-    fi
+    warn "not pinning a release key out of $HERE (the box user can write it)."
+    warn "  install it from a trusted copy instead, e.g. from a checkout:"
+    warn "  ssh <box> 'sudo install -m644 -o root -g root /dev/stdin $KEY_DST' < deploy/release-key.pem"
   fi
 
   systemctl daemon-reload 2>/dev/null || true

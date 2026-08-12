@@ -47,8 +47,12 @@ jobs:
         run: |
           if [ -n "$TVBOX_RELEASE_KEY" ]; then
             KEY="$RUNNER_TEMP/release-key.pem"
-            umask 077
-            printf '%s\n' "$TVBOX_RELEASE_KEY" > "$KEY"
+            # The umask stays inside the subshell: leaving it set would follow
+            # make-release.sh into copy-infra.sh, whose plain `cp` would then ship
+            # every infra/ member of the tarball 0700/0600 instead of 0755/0644 -
+            # and only on the signed branch, so signed and unsigned releases would
+            # not be the same artifact.
+            ( umask 077; printf '%s\n' "$TVBOX_RELEASE_KEY" > "$KEY" )
             trap 'rm -f "$KEY"' EXIT
             ./scripts/make-release.sh --skip-build --out dist --sign-key "$KEY"
           else
@@ -81,6 +85,10 @@ jobs:
           # run - the pair is never interchangeable across runs.
           if gh release view "${GITHUB_REF_NAME}" >/dev/null 2>&1; then
             gh release edit "${GITHUB_REF_NAME}" --notes-file dist/RELEASE_NOTES.md
+            # An UNSIGNED re-run produces no .sig, so the glob would leave the
+            # previous run's signature in place next to a freshly generated feed -
+            # which every box reads as a tampered release, not as a missing key.
+            [ -f dist/update.json.sig ] || gh release delete-asset "${GITHUB_REF_NAME}" update.json.sig --yes 2>/dev/null || true
             gh release upload "${GITHUB_REF_NAME}" dist/tvbox-shell-*.tar.gz dist/update.json* --clobber
           else
             gh release create "${GITHUB_REF_NAME}" dist/tvbox-shell-*.tar.gz dist/update.json* \

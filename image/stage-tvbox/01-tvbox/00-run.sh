@@ -392,7 +392,13 @@ install -m 644 "${ROOTFS_DIR}${USER_HOME}/.tvbox/54-tvbox-sysupdate.rules" \
   "${ROOTFS_DIR}/etc/polkit-1/rules.d/54-tvbox-sysupdate.rules"
 install -d -m 755 "${ROOTFS_DIR}/etc/tvbox" "${ROOTFS_DIR}/etc/tvbox/release-keys.d" "${ROOTFS_DIR}/var/lib/tvbox"
 install -m 644 "${ROOTFS_DIR}${USER_HOME}/.tvbox/sysupdate.conf" "${ROOTFS_DIR}/etc/tvbox/sysupdate.conf"
+# The applier refuses to run without a valid TVBOX_USER, so a silent miss here
+# would ship a flashed box whose every system update ends in bad-config, on
+# hardware with no ssh. Same sed-then-append pair provision.sh uses, and
+# scripts/image-smoke.sh asserts the line is actually there in the built image.
 sed -i -E "s@^TVBOX_USER=.*@TVBOX_USER=${FIRST_USER_NAME}@" "${ROOTFS_DIR}/etc/tvbox/sysupdate.conf"
+grep -q "^TVBOX_USER=" "${ROOTFS_DIR}/etc/tvbox/sysupdate.conf" ||
+  printf 'TVBOX_USER=%s\n' "${FIRST_USER_NAME}" >> "${ROOTFS_DIR}/etc/tvbox/sysupdate.conf"
 # The pinned release key. This is the trust anchor for everything a system update
 # will ever run, and here is the one place it can be pinned from a tree that is
 # not the box user's - the build's own checkout - which is why provision.sh
