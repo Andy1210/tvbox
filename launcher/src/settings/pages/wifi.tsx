@@ -222,7 +222,9 @@ export function WifiPage({ embedded = false }: { embedded?: boolean } = {}) {
   // switch above: that one lasts until the next boot, this one is what actually
   // frees the antenna. Loaded next to the wifi status so one refresh covers both.
   const [radios, setRadios] = useState<RadioState | null>(null);
-  const [confirmWifi, setConfirmWifi] = useState(false);
+  // The direction the box asked us to confirm, not a bare flag: a sticky `true`
+  // would ride along on whatever the NEXT press happens to be.
+  const [confirmWifi, setConfirmWifi] = useState<boolean | null>(null);
   useEffect(() => {
     void radioState().then(setRadios);
   }, []);
@@ -232,10 +234,10 @@ export function WifiPage({ embedded = false }: { embedded?: boolean } = {}) {
     const want = radios.wifi !== "on"; // "on" means the radio is not disabled in config.txt
     setMsg(t("radios.applying"));
     setDetail("");
-    const r = await applyBuiltinRadio("wifi", want, confirmWifi);
+    const r = await applyBuiltinRadio("wifi", want, confirmWifi === want);
     setMsg(t(r.key));
     setDetail(r.detail || "");
-    setConfirmWifi(r.needsConfirm); // the next press is the confirmation
+    setConfirmWifi(r.needsConfirm ? want : null); // the next press confirms THIS change
     setRadios(await radioState());
   };
 

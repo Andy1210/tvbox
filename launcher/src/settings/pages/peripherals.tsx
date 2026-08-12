@@ -141,7 +141,9 @@ function BluetoothPage() {
   // is entitled to that too. Nothing here checks for a dongle: the box cannot know
   // what is about to be plugged in, and the warning says what is lost either way.
   const [radios, setRadios] = useState<RadioState | null>(null);
-  const [confirmBt, setConfirmBt] = useState(false);
+  // The direction the box asked us to confirm, not a bare flag: a sticky `true`
+  // would ride along on whatever the NEXT press happens to be.
+  const [confirmBt, setConfirmBt] = useState<boolean | null>(null);
   const [radioDetail, setRadioDetail] = useState("");
   useEffect(() => {
     void radioState().then(setRadios);
@@ -152,10 +154,10 @@ function BluetoothPage() {
     const want = radios.bt !== "on";
     setMsg(t("radios.applying"));
     setRadioDetail("");
-    const r = await applyBuiltinRadio("bt", want, confirmBt);
+    const r = await applyBuiltinRadio("bt", want, confirmBt === want);
     setMsg(t(r.key));
     setRadioDetail(r.detail || "");
-    setConfirmBt(r.needsConfirm); // the next press is the confirmation
+    setConfirmBt(r.needsConfirm ? want : null); // the next press confirms THIS change
     setRadios(await radioState());
   };
 
