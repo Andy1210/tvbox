@@ -132,6 +132,104 @@ function listSync() {
   }
 }
 
+// Which compositor is RUNNING, and what it can be relied on to do.
+//
+// Not the same question as "which binary is installed": the compositor IS the
+// session, so a newly installed one is only a file until greetd restarts, and
+// asking the file would answer yes during exactly the window where the answer is
+// no. `get_state` carries the running version from tvbox-wc 0.1.10; an older one
+// sends no such field, which is the honest answer for it.
+//
+// Cached because it changes at most once in the life of this process - a session
+// restart takes the shell with it. The cache starts EMPTY and every comparison
+// against an empty version is false, so a caller gated on this degrades to the
+// behaviour it had before the compositor could do the thing at all.
+let runningVersion = "";
+let versionAt = 0;
+let versionGoodFor = 0;
+let versionPending = false;
+let versionWaiting = [];
+const VERSION_TTL_MS = 5 * 60 * 1000;
+// A failed read is worth asking about again soon. Marking it fresh for the full TTL
+// would let one timed-out socket read cost five minutes of the feature it gates.
+const VERSION_RETRY_MS = 30 * 1000;
+
+// One question at a time, and every caller parks on the one in flight rather than
+// adding another. Not just tidiness: `atLeast` refreshes whenever the cache is cold,
+// and it is asked once per focused field, so a slow socket would otherwise turn a
+// page moving focus between inputs into a queue of identical reads.
+function refreshVersion(cb) {
+  if (cb) versionWaiting.push(cb);
+  if (versionPending) return;
+  versionPending = true;
+  request({ request: "get_state" }, (e, ok) => {
+    versionPending = false;
+    // A version we cannot place is not an answer: storing it would leave the cache
+    // holding something no comparison can use, and marking it fresh for the full TTL
+    // would buy five minutes of that. It gets the retry cooldown a failed read gets,
+    // and `runningVersion` only ever holds a version or nothing.
+    const answered = !e && ok && parseVersion(ok.version) !== null;
+    if (answered) runningVersion = ok.version;
+    // Stamped when the ANSWER lands rather than when the question went out, or a
+    // read that takes its time would be counted as fresh from before it started.
+    //
+    // A failed read deliberately does NOT clear what we already know. The running
+    // compositor cannot get older without taking this process with it - it IS the
+    // session - so a version that dropped is not a case that exists, while a busy
+    // or briefly unreachable socket certainly is, and forgetting on one of those
+    // would switch a working feature off for no reason.
+    versionAt = Date.now();
+    versionGoodFor = answered ? VERSION_TTL_MS : VERSION_RETRY_MS;
+    const waiting = versionWaiting;
+    versionWaiting = [];
+    for (const waiter of waiting) {
+      // One caller's throw must not swallow the next one's answer: this runs from a
+      // socket callback, which has nothing above it to catch anything.
+      try {
+        waiter(runningVersion);
+      } catch (err) {
+        console.warn("[compositor] version waiter threw:", err.message);
+      }
+    }
+  });
+}
+
+// Exactly three numeric components, or it is not a version this can place.
+//
+// Not a semver library: what arrives here is CARGO_PKG_VERSION from a release whose
+// tag CI has already checked against Cargo.toml, so three integers is the only shape
+// there is - and a gate whose job is to fail closed has no business inferring the
+// rest of one. Two ways that inference went wrong before this was pinned down:
+// parseInt stops at the first thing it cannot read, so "0.1.10-dev" passed as
+// 0.1.10; and padding a missing component with zero made "0.2" outrank "0.1.10" on
+// the strength of a component nobody sent.
+function parseVersion(v) {
+  const parts = String(v == null ? "" : v)
+    .trim()
+    .split(".");
+  if (parts.length !== 3 || !parts.every((n) => /^\d+$/.test(n))) return null;
+  return parts.map((n) => parseInt(n, 10));
+}
+
+// `a >= b`, with anything unplaceable losing to everything.
+function versionAtLeast(have, want) {
+  const a = parseVersion(have);
+  const b = parseVersion(want);
+  if (!a || !b) return false;
+  for (let i = 0; i < a.length; i++) {
+    if (a[i] !== b[i]) return a[i] > b[i];
+  }
+  return true;
+}
+
+// Is the running compositor at least this version? Answers from the cache, and
+// refreshes it in the background when it is stale - so a read that failed at
+// startup costs the caller one turn rather than the rest of the session.
+function atLeast(want) {
+  if (!runningVersion || Date.now() - versionAt > versionGoodFor) refreshVersion();
+  return versionAtLeast(runningVersion, want);
+}
+
 // A mode object as display.js parses them, so callers do not care which backend
 // applied it.
 function apply(output, mode, cb) {
@@ -201,6 +299,9 @@ function typeText(text, opts, cb) {
 module.exports = {
   available,
   request,
+  refreshVersion,
+  atLeast,
+  _test: { versionAtLeast },
   list,
   listSync,
   apply,

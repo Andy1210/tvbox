@@ -19,6 +19,9 @@ function harness(opts = {}) {
     pairingStop: () => log.pairingStops++,
     isForeground: opts.isForeground || (() => true),
     typeText: (text) => wc.sent.push(text),
+    // A box whose compositor replaces the field, which is what makes offering its
+    // contents back safe. `canReplace: false` is its own case, further down.
+    canReplace: opts.canReplace || (() => true),
   });
   return { log, wc };
 }
@@ -166,4 +169,113 @@ test("MAX_TEXT is enforced", async () => {
   assert.strictEqual(r.length, textinput.MAX_TEXT);
   await new Promise((res) => setTimeout(res, 500));
   assert.strictEqual(wc.sent[0].length, textinput.MAX_TEXT);
+});
+
+// ---- what the keyboard opens ON -----------------------------------------------
+// Delivery REPLACES the field, so a keyboard that opens empty means a field with
+// anything in it can only be retyped from scratch - and its contents were never on
+// screen to read in the first place. What may be offered is decided here rather than
+// in the preload, because this is the module that knows how much it will type back.
+
+test("the field's current text is what the keyboard opens on", () => {
+  const label = reset();
+  const { log, wc } = harness();
+  textinput.focused("xcloud", wc, { kind: "email", label, value: "daniel@example.com" });
+  assert.strictEqual(log.shown[0].value, "daniel@example.com");
+  assert.strictEqual(textinput.status().value, "daniel@example.com");
+});
+
+test("a password's value is never offered, however it arrives", () => {
+  const label = reset();
+  const { log, wc } = harness();
+  // The preload withholds it too; this is the second refusal, and it is the one that
+  // matters - the value would go on to a phone page served over the LAN in clear.
+  textinput.focused("xcloud", wc, { kind: "password", password: true, label, value: "hunter2" });
+  assert.strictEqual(log.shown[0].value, "");
+});
+
+test("a field that turns into a password takes its value back out of the session", () => {
+  const label = reset();
+  const { wc } = harness();
+  textinput.focused("xcloud", wc, { kind: "text", label, value: "visible" });
+  // The same window, the same session: a sign-in step that swaps the input's type
+  // under the user updates the live session rather than opening a new screen.
+  textinput.focused("xcloud", wc, { kind: "password", password: true, label, value: "secret" });
+  assert.strictEqual(textinput.status().value, "");
+});
+
+test("a value too long to type back is dropped whole, never truncated", () => {
+  const label = reset();
+  const { log, wc } = harness();
+  // Truncating would be worse than not offering: the prefill would LOOK complete, and
+  // submitting it replaces the field with the part that fit - destroying text that
+  // was never on screen. An empty keyboard is the old behaviour, and it is honest.
+  textinput.focused("xcloud", wc, { kind: "text", label, value: "x".repeat(textinput.MAX_TEXT + 1) });
+  assert.strictEqual(log.shown[0].value, "");
+
+  const label2 = reset();
+  textinput.focused("xcloud", wc, { kind: "text", label: label2, value: "x".repeat(textinput.MAX_TEXT) });
+  assert.strictEqual(textinput.status().value.length, textinput.MAX_TEXT);
+});
+
+test("control characters are stripped from the offered value", () => {
+  const label = reset();
+  const { log, wc } = harness();
+  // Delivery drops these too - submit strips C0 and DEL before anything is typed -
+  // so offering one would show the user a character the box removes on the way back.
+  // The offer is stripped of MORE than that (the invisible ones below), which is a
+  // display rule rather than a delivery one.
+  const withControl = "a" + String.fromCharCode(1) + "bc" + String.fromCharCode(127) + "d";
+  textinput.focused("xcloud", wc, { kind: "text", label, value: withControl });
+  assert.strictEqual(log.shown[0].value, "abcd");
+});
+
+test("a field reporting no value at all still opens the keyboard", () => {
+  const label = reset();
+  const { log, wc } = harness();
+  // An older app window - or any page whose field is simply empty - reports nothing
+  // here, and an empty keyboard is exactly what should happen.
+  textinput.focused("xcloud", wc, { kind: "text", label });
+  assert.strictEqual(log.shown[0].active, true);
+  assert.strictEqual(log.shown[0].value, "");
+});
+
+test("nothing is offered when delivery would only append", () => {
+  const label = reset();
+  // A compositor older than the one whose select-all chord carries its modifier.
+  // Typing there appends, so handing the field's own text back would submit it
+  // twice - the keyboard opens empty instead, exactly as it did before any of this.
+  const { log, wc } = harness({ canReplace: () => false });
+  textinput.focused("xcloud", wc, { kind: "email", label, value: "daniel@example.com" });
+  assert.strictEqual(log.shown[0].value, "");
+  assert.strictEqual(log.shown[0].active, true); // the keyboard still opens
+});
+
+test("bidi and zero-width characters never reach the screen", () => {
+  const label = reset();
+  const { log, wc } = harness();
+  // The preload strips these too, but it runs in the RENDERER on text the page
+  // wrote - so this side cannot lean on it. A right-to-left override makes the
+  // prefill read as something other than what would be submitted.
+  const sneaky = "abc" + String.fromCharCode(0x202e) + "def" + String.fromCharCode(0x200b);
+  textinput.focused("xcloud", wc, { kind: "text", label, value: sneaky });
+  assert.strictEqual(log.shown[0].value, "abcdef");
+});
+
+test("the invisible ones with no obvious range go too", () => {
+  const label = reset();
+  const { log, wc } = harness();
+  // U+061C is a bidi control like the marks above it, and every one of its siblings
+  // was already stripped - it is only unusual in sitting outside their block. The
+  // C1 controls are the other half: they show nothing on a TV two metres away, so a
+  // prefill carrying them reads as a shorter string than the one being submitted.
+  const invisible =
+    "a" +
+    String.fromCharCode(0x061c) +
+    "b" +
+    String.fromCharCode(0x0085) + // NEL, in the middle of C1
+    "c" +
+    String.fromCharCode(0x009f); // the last of them
+  textinput.focused("xcloud", wc, { kind: "text", label, value: invisible });
+  assert.strictEqual(log.shown[0].value, "abc");
 });

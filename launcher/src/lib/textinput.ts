@@ -13,6 +13,10 @@ export interface TypingStatus {
   kind?: string; // the field's input type ("text", "email", "password", …)
   password?: boolean;
   label?: string; // what the app calls the field (its placeholder/aria-label)
+  // What the field already holds, so the keyboard opens ON it and a typo can be
+  // fixed rather than retyped. Empty for a password field, and empty for a value
+  // longer than the shell will type back - both decided in shell/textinput.js.
+  value?: string;
   url?: string; // phone typing: the pairing URL behind the QR (only once armed)
   code?: string; // …and the 4-digit code that gates it
 }

@@ -189,11 +189,21 @@ if (info.language) {
 
 // ---- text input: tell the shell when a field takes focus ----------------------
 // The 10-foot UI has no keyboard, so a focused <input> is a dead end unless the
-// shell offers a way to type. Only the SIGNAL leaves the page (kind + label, never
-// the value); the text itself is typed back as real key events by the main
-// process, so this side never touches the field.
+// shell offers a way to type. What leaves the page is the signal (kind + label) and
+// the field's CURRENT TEXT, so the keyboard can open on it and a typo can be fixed
+// rather than retyped - delivery replaces the whole field, so an empty keyboard
+// meant nobody could edit anything. The text is typed back as real key events by
+// the main process, so this side still never writes to the field.
+//
+// The one value that does NOT leave: a password field's. It is the one thing on a
+// page deliberately not on screen, and this reaches the TV and - once the phone is
+// armed - a page served over the LAN in clear. Withheld here, and refused again in
+// ../textinput.js, which is where every other rule about the offer lives too.
 (function () {
   var TEXTY = /^(|text|search|email|url|tel|number|password)$/i;
+  // Ten times what the shell will type back, so the shell always sees enough to judge
+  // a value too long rather than a slice that looks short enough.
+  var VALUE_TRANSPORT_MAX = 4000;
   // Is this a text field at all? The question fieldInfo answers on the way in, with
   // none of the "can we usefully open a keyboard for it" conditions.
   function isField(el) {
@@ -227,8 +237,43 @@ if (info.language) {
     if (el.isContentEditable) return { kind: "contenteditable", password: false };
     return null;
   }
-  // A label for the TV screen so the user knows WHAT they're typing. Never the
-  // field's value - a placeholder/aria-label is authored text, a value is secret.
+  // What the field already holds, so the keyboard can open ON it rather than empty.
+  // The text is typed back as a REPLACEMENT, so without this a field with anything in
+  // it could only be retyped from scratch - there was no way to fix one character of
+  // an address, and no way to even see what was there.
+  //
+  // A password field is the exception and stays secret: its value is the one thing on
+  // a page that is deliberately not on screen, and this reaches both the TV and, once
+  // the phone is armed, a page served over the LAN in clear.
+  //
+  // The cap here is transport only - a page must not be able to push a novel through
+  // the IPC on a focus event. Whether a value is short enough to be OFFERED is the
+  // shell's call (MAX_TEXT in ../textinput.js), which is the one place that knows how
+  // much it will type back.
+  function valueOf(el, password) {
+    if (password) return "";
+    try {
+      var raw = el.isContentEditable ? el.innerText : el.value;
+      // Cut to the transport cap BEFORE the strip, not after. This runs inside a
+      // focusin handler on the renderer's own thread, and a page is free to focus an
+      // input holding megabytes - scanning all of it would stall the picture to
+      // produce a value the shell discards anyway, since its own limit is far below
+      // this one. Anything at or under the cap is untouched by the cut, so the
+      // ordinary case is the same string either way.
+      var text = String(raw == null ? "" : raw).slice(0, VALUE_TRANSPORT_MAX);
+      // The same strip labelFor does, and for the same reason: this text is put on
+      // the TV and on the phone page, where a bidi override can make it read as
+      // something else entirely - and a C0 control is dropped on the way back out
+      // anyway, so showing one would be showing a character that cannot survive.
+      return text.replace(/[\u0000-\u001f\u007f-\u009f\u061c\u200b-\u200f\u202a-\u202e\u2066-\u2069]/g, "");
+    } catch (e) {
+      return "";
+    }
+  }
+  // What the app CALLS the field, for the TV screen, so the user knows what they are
+  // typing. Authored text - a placeholder, an aria-label - and never the contents,
+  // which valueOf above answers for under rules of their own: a label is shown for
+  // every field, including the one whose value must not be.
   function labelFor(el) {
     var t =
       el.getAttribute("aria-label") ||
@@ -240,7 +285,7 @@ if (info.language) {
     // ends up on the TV and on the phone page, and a right-to-left override can make a
     // label read as something else entirely.
     return String(t)
-      .replace(/[\u0000-\u001f\u007f\u200b-\u200f\u202a-\u202e\u2066-\u2069]/g, "")
+      .replace(/[\u0000-\u001f\u007f-\u009f\u061c\u200b-\u200f\u202a-\u202e\u2066-\u2069]/g, "")
       .trim()
       .slice(0, 80);
   }
@@ -255,7 +300,12 @@ if (info.language) {
       var info = fieldInfo(el);
       if (!info) return;
       try {
-        ipcRenderer.send("kbd:focus", { kind: info.kind, password: info.password, label: labelFor(el) });
+        ipcRenderer.send("kbd:focus", {
+          kind: info.kind,
+          password: info.password,
+          label: labelFor(el),
+          value: valueOf(el, info.password),
+        });
       } catch (e) {}
     },
     true,
