@@ -406,17 +406,37 @@ test("looking before pressing is not treated as a failure", async () => {
   b.close();
 });
 
-test("the cooldown after a failure does not push itself out on every press", async () => {
+test("the cooldown after an expensive failure does not push itself out on every press", async () => {
   const b = await box();
-  b.writeConf("http://127.0.0.1:1/update.json"); // nothing listening
+  // A bad checksum is a failure that already spent the bandwidth, which is what
+  // the cooldown exists to bound.
+  b.publish({ revision: 2, sha: "0".repeat(64) });
   const first = await b.run();
-  assert.equal(first.status.code, "feed-unreachable");
+  assert.equal(first.status.code, "bad-checksum", first.out);
   const failedAt = first.status.finishedAt;
   const second = await b.run();
   assert.equal(second.status.code, "cooldown", second.out);
   // The window still runs from the ORIGINAL failure. Rewriting it here is how
   // someone pressing once a minute would never get a second real attempt.
   assert.equal(second.status.finishedAt, failedAt);
+  // And the refusal itself must stay "expensive", or the press after it would
+  // sail straight through the window.
+  const third = await b.run();
+  assert.equal(third.status.code, "cooldown", third.out);
+  assert.equal(third.status.finishedAt, failedAt);
+  b.close();
+});
+
+test("a failure that cost nothing may be retried at once", async () => {
+  // The feed fetch is the flakiest step there is - measured on a deployed box,
+  // the real GitHub endpoint closes the connection without a response now and
+  // then - and it costs 2 kB. Making someone wait two minutes for that is a
+  // worse answer than letting them press again.
+  const b = await box();
+  b.writeConf("http://127.0.0.1:1/update.json"); // nothing listening
+  assert.equal((await b.run()).status.code, "feed-unreachable");
+  const second = await b.run();
+  assert.equal(second.status.code, "feed-unreachable", second.out);
   b.close();
 });
 
