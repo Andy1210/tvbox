@@ -221,8 +221,10 @@ test("a value too long to type back is dropped whole, never truncated", () => {
 test("control characters are stripped from the offered value", () => {
   const label = reset();
   const { log, wc } = harness();
-  // They cannot survive delivery either (submit strips the same set), so offering one
-  // would show the user a character the box will silently drop on the way back.
+  // Delivery drops these too - submit strips C0 and DEL before anything is typed -
+  // so offering one would show the user a character the box removes on the way back.
+  // The offer is stripped of MORE than that (the invisible ones below), which is a
+  // display rule rather than a delivery one.
   const withControl = "a" + String.fromCharCode(1) + "bc" + String.fromCharCode(127) + "d";
   textinput.focused("xcloud", wc, { kind: "text", label, value: withControl });
   assert.strictEqual(log.shown[0].value, "abcd");

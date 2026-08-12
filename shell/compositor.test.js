@@ -233,8 +233,10 @@ test("a version is compared as numbers, and an unknown one loses", () => {
   assert.equal(versionAtLeast("0.2", "0.1.10"), true);
   assert.equal(versionAtLeast("0.1", "0.1.10"), false);
   // Nothing to compare - every one of these must fail closed, because they are what
-  // a compositor too old to report its version at all leaves behind.
-  for (const nothing of ["", null, undefined, "unknown", "v0.1.10"]) {
+  // a compositor too old to report its version at all leaves behind. The decorated
+  // ones are the trap: parseInt stops at the first thing it cannot read, so
+  // "0.1.10-dev" would otherwise read as 0.1.10 and pass a gate meant for a release.
+  for (const nothing of ["", null, undefined, "unknown", "v0.1.10", "0.1.10-dev", "0.1. 10", "0..10"]) {
     assert.equal(versionAtLeast(nothing, "0.1.10"), false, `"${nothing}" must not pass`);
   }
 });
@@ -264,6 +266,33 @@ test("the running version comes off the socket, and a build that omits it fails 
   assert.equal(older.atLeast("0.1.10"), false);
 
   server.close();
+  fs.rmSync(dir, { recursive: true, force: true });
+  delete process.env.TVBOX_WC_SOCKET;
+  delete require.cache[require.resolve("./compositor")];
+});
+
+test("a failed read keeps what it knew, and asks again soon", async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "tvbox-wc-retry-"));
+  const sock = path.join(dir, "wc.sock");
+  process.env.TVBOX_WC_SOCKET = sock;
+  delete require.cache[require.resolve("./compositor")];
+  const client = require("./compositor");
+
+  const server = net.createServer((c) =>
+    c.on("data", () => c.end(JSON.stringify({ id: 1, ok: { windows: [], version: "0.1.10" } }) + "\n")),
+  );
+  await new Promise((r) => server.listen(sock, r));
+  await new Promise((r) => client.refreshVersion(r));
+  assert.equal(client.atLeast("0.1.10"), true);
+
+  // The socket goes away. A version that dropped is not a case that exists - the
+  // compositor IS the session - so a read that merely failed must not switch a
+  // working feature off, and the answer stands.
+  await new Promise((r) => server.close(r));
+  fs.rmSync(sock, { force: true });
+  await new Promise((r) => client.refreshVersion(r));
+  assert.equal(client.atLeast("0.1.10"), true);
+
   fs.rmSync(dir, { recursive: true, force: true });
   delete process.env.TVBOX_WC_SOCKET;
   delete require.cache[require.resolve("./compositor")];

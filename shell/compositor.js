@@ -146,31 +146,53 @@ function listSync() {
 // behaviour it had before the compositor could do the thing at all.
 let runningVersion = "";
 let versionAt = 0;
+let versionGoodFor = 0;
+let versionPending = false;
 const VERSION_TTL_MS = 5 * 60 * 1000;
+// A failed read is worth asking about again soon. Marking it fresh for the full TTL
+// would let one timed-out socket read cost five minutes of the feature it gates.
+const VERSION_RETRY_MS = 30 * 1000;
 
 function refreshVersion(cb) {
-  versionAt = Date.now();
+  if (versionPending && !cb) return; // one question at a time; callers share the answer
+  versionPending = true;
   request({ request: "get_state" }, (e, ok) => {
-    if (!e && ok && typeof ok.version === "string") runningVersion = ok.version;
+    versionPending = false;
+    const answered = !e && ok && typeof ok.version === "string";
+    if (answered) runningVersion = ok.version;
+    // Stamped when the ANSWER lands rather than when the question went out, or a
+    // read that takes its time would be counted as fresh from before it started.
+    //
+    // A failed read deliberately does NOT clear what we already know. The running
+    // compositor cannot get older without taking this process with it - it IS the
+    // session - so a version that dropped is not a case that exists, while a busy
+    // or briefly unreachable socket certainly is, and forgetting on one of those
+    // would switch a working feature off for no reason.
+    versionAt = Date.now();
+    versionGoodFor = answered ? VERSION_TTL_MS : VERSION_RETRY_MS;
     if (cb) cb(runningVersion);
   });
 }
 
-// `a >= b` over dotted numbers, with a missing or unparsable version losing to
-// everything. Not a semver library: these are three integers the release tag and
-// Cargo.toml already agree on.
+// `a >= b` over dotted numbers, with anything else losing to everything. Not a
+// semver library: these are three integers the release tag and Cargo.toml already
+// agree on, and CI refuses a tag that disagrees.
+//
+// Every component has to be DIGITS, which parseInt alone would not give: it stops
+// at the first thing it does not understand, so "0.1.10-dev" would read as 0.1.10
+// and pass a gate meant for a release. A decorated version is one we cannot place,
+// and the whole point of this comparison is to fail closed when it cannot tell.
 function versionAtLeast(have, want) {
   const parts = (v) =>
     String(v || "")
       .trim()
-      .split(".")
-      .map((n) => parseInt(n, 10));
+      .split(".");
   const a = parts(have);
   const b = parts(want);
-  if (!a.length || a.some(isNaN)) return false;
+  if (!a.length || !a.every((n) => /^\d+$/.test(n))) return false;
   for (let i = 0; i < Math.max(a.length, b.length); i++) {
-    const x = a[i] || 0;
-    const y = b[i] || 0;
+    const x = parseInt(a[i], 10) || 0;
+    const y = parseInt(b[i], 10) || 0;
     if (x !== y) return x > y;
   }
   return true;
@@ -180,7 +202,7 @@ function versionAtLeast(have, want) {
 // refreshes it in the background when it is stale - so a read that failed at
 // startup costs the caller one turn rather than the rest of the session.
 function atLeast(want) {
-  if (!runningVersion || Date.now() - versionAt > VERSION_TTL_MS) refreshVersion();
+  if (!runningVersion || Date.now() - versionAt > versionGoodFor) refreshVersion();
   return versionAtLeast(runningVersion, want);
 }
 
