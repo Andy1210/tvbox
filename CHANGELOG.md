@@ -5,6 +5,23 @@ updates). `scripts/make-release.sh` lifts the current version's `hu`/`en`
 blocks into the OTA feed's `notes` - keep both languages, keep it short, and
 write for the person on the couch (what changes for THEM), not for developers.
 
+## 3.0.1
+
+### hu
+
+- **A rendszerfrissítés gombja most már meg is jelenik.** A 3.0.0-ban a box nem
+  tudta megállapítani magáról, hogy képes-e rendszerfrissítésre, ezért a gomb
+  akkor is rejtve maradt volna, amikor lett volna mit telepíteni. Semmi nem
+  romlott el tőle, csak nem lehetett volna használni azt, amiért a 3.0.0
+  készült.
+
+### en
+
+- **The system update button actually appears now.** In 3.0.0 the box could not
+  tell whether it was able to run a system update, so the button would have
+  stayed hidden even when there was something to install. Nothing broke because
+  of it, you just could not have used the thing 3.0.0 was for.
+
 ## 3.0.0
 
 ### hu
