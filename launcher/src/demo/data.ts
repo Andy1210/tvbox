@@ -317,6 +317,18 @@ export const UPDATE_STATUS: UpdateStatus = {
   failed: null,
   last: { from: "2.0.3", to: "2.1.0", at: Date.now() - 3 * 24 * 3600 * 1000 },
   os: { rebootRequired: false, packages: [] },
+  // A demo box has the root half and nothing to apply with it - the state a
+  // healthy box is in almost always.
+  system: {
+    available: true,
+    revision: 1,
+    needs: null,
+    feedRevision: 1,
+    code: "idle",
+    warnings: 0,
+    rebootRequired: false,
+    at: null,
+  },
 };
 
 const V = { version: "1.0.0", installedVersion: "1.0.0", updateAvailable: false, installing: false, progress: null };

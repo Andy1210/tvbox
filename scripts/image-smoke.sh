@@ -103,22 +103,30 @@ PARTS
   echo fake >"$B/kernel8.img"
   echo fake >"$B/bcm2712-rpi-5-b.dtb"
   mkdir -p "$R/etc/ssh" "$R/usr/local/sbin" "$R/usr/local/bin" "$R/etc/greetd" \
-    "$R/etc/systemd/system" "$R/etc/polkit-1/rules.d" \
+    "$R/etc/systemd/system" "$R/etc/polkit-1/rules.d" "$R/etc/tvbox/release-keys.d" \
     "$R/home/tv/.tvbox/shell/launcher-dist/assets" \
     "$R/home/tv/.tvbox/shell/node_modules/electron/dist"
   printf 'PARTUUID=%s /boot/firmware vfat defaults 0 2\nPARTUUID=%s / ext4 defaults,noatime 0 1\n' "$BU" "$RU" >"$R/etc/fstab"
   echo 'tv:x:1000:1000::/home/tv:/bin/bash' >"$R/etc/passwd"
   echo 'tv:!:20000:0:99999:7:::' >"$R/etc/shadow"
   for f in usr/local/sbin/tvbox-diag usr/local/sbin/tvbox-safemode usr/local/sbin/tvbox-radio \
+    usr/local/sbin/tvbox-sysupdate \
     etc/systemd/system/tvbox-diag.service etc/systemd/system/tvbox-safemode.service \
     etc/systemd/system/tvbox-radio@.service etc/polkit-1/rules.d/53-tvbox-radio.rules \
     etc/polkit-1/rules.d/54-tvbox-power.rules \
+    etc/systemd/system/tvbox-sysupdate.service etc/polkit-1/rules.d/54-tvbox-sysupdate.rules \
+    etc/tvbox/sysupdate.conf etc/tvbox/release-keys.d/tvbox-release.pem \
     usr/local/bin/tvbox-wc usr/local/bin/tvbox-session home/tv/.tvbox/session.sh \
     home/tv/.tvbox/shell/main.js home/tv/.tvbox/run-shell.sh \
     home/tv/.tvbox/shell/launcher-dist/index.html \
     home/tv/.tvbox/shell/launcher-dist/assets/index-fake.js; do
     echo placeholder >"$R/$f"
   done
+  # Two of those are checked for CONTENT, not just presence, so the fixture has to
+  # carry the real shape or the self-test would only ever prove the checks fire.
+  printf 'FEED_URL=https://example.invalid/update.json\nTVBOX_USER=tv\n' >"$R/etc/tvbox/sysupdate.conf"
+  printf -- '-----BEGIN PUBLIC KEY-----\nplaceholder\n-----END PUBLIC KEY-----\n' \
+    >"$R/etc/tvbox/release-keys.d/tvbox-release.pem"
   chmod 755 "$R/usr/local/bin/tvbox-wc" "$R/usr/local/bin/tvbox-session" "$R/home/tv/.tvbox/session.sh"
   printf '[default_session]\ncommand = "tvbox-wc -- /usr/local/bin/tvbox-session"\nuser = "tv"\n' \
     >"$R/etc/greetd/config.toml"
@@ -287,15 +295,26 @@ check "the tv account password is locked" sh -c "awk -F: '/^tv:/ {print \$2}' '$
 # Everything the box needs at runtime that OTA can never install - root-side
 # diagnostics and safe mode - plus the shell payload itself. A missing one here is
 # a box that boots and then cannot say why it is broken.
+#
+# The tvbox-sysupdate set is here for a sharper reason than the rest. This stage
+# does provision.sh's work independently and nothing else fails when the two
+# drift, so a forgotten line would ship a flashed box that can never install a
+# release's root half - on hardware with no ssh to fix it over. Here it is a
+# failed image build instead.
 for f in \
   usr/local/sbin/tvbox-diag \
   usr/local/sbin/tvbox-safemode \
   usr/local/sbin/tvbox-radio \
+  usr/local/sbin/tvbox-sysupdate \
   etc/systemd/system/tvbox-diag.service \
   etc/systemd/system/tvbox-safemode.service \
   etc/systemd/system/tvbox-radio@.service \
+  etc/systemd/system/tvbox-sysupdate.service \
   etc/polkit-1/rules.d/53-tvbox-radio.rules \
   etc/polkit-1/rules.d/54-tvbox-power.rules \
+  etc/polkit-1/rules.d/54-tvbox-sysupdate.rules \
+  etc/tvbox/sysupdate.conf \
+  etc/tvbox/release-keys.d/tvbox-release.pem \
   usr/local/bin/tvbox-wc \
   usr/local/bin/tvbox-session \
   home/tv/.tvbox/session.sh \
@@ -304,6 +323,14 @@ for f in \
   home/tv/.tvbox/shell/launcher-dist/index.html; do
   check "shipped: /$f" test -s "$ROOTMNT/$f"
 done
+# The applier refuses to run without a valid box user, and this file is the only
+# place it can learn one - a substitution that silently missed would ship a box
+# whose every system update ends in bad-config, with no ssh to find that out over.
+# Presence is not enough here; the line has to name the user.
+check "the image names the box user for system updates" \
+  grep -q "^TVBOX_USER=tv$" "$ROOTMNT/etc/tvbox/sysupdate.conf"
+check "the pinned release key is a public key" \
+  grep -q "BEGIN PUBLIC KEY" "$ROOTMNT/etc/tvbox/release-keys.d/tvbox-release.pem"
 # The session chain, end to end: greetd starts the compositor, the compositor starts
 # the wrapper, the wrapper execs the box user's session script. Any one of them
 # missing is a flashed box that shows nothing - and tvbox-session deliberately

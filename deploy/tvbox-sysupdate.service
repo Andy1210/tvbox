@@ -1,0 +1,38 @@
+[Unit]
+Description=tvbox system update (a release's root half)
+Documentation=https://github.com/Andy1210/tvbox/blob/main/docs/updates-and-backup.md
+# The first thing it does is fetch a feed, so a run started right after boot
+# would otherwise fail on a resolver that is not up yet.
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/tvbox-sysupdate apply
+# The script calls openssl, dpkg, apt-get and bash by name, and a unit's default
+# PATH starts with /usr/local/sbin:/usr/local/bin - which Debian ships root:staff
+# 2775. The box user is not in `staff` today, so this is one group membership
+# away rather than a hole; naming the system directories costs nothing.
+Environment=PATH=/usr/sbin:/usr/bin:/sbin:/bin
+# Long, but not for ever, and this is the only knob that does both: the default
+# TimeoutStartSec of 90 s applies to a oneshot too and would SIGTERM a run
+# mid-apt, leaving dpkg half-configured on a box with no ssh - while `infinity`
+# would let a feed server that dribbles bytes keep a run, and the lock it holds,
+# alive until someone reboots the box. (RuntimeMaxSec is not the answer here:
+# systemd ignores it for Type=oneshot.)
+# Two hours sits above the script's own bounds - 30 min for the download, 60 for
+# provision - so it only ever fires for the ways neither of those does, and then
+# ExecStopPost records the outcome.
+TimeoutStartSec=7200
+# Whatever ends the run - a timeout, an OOM kill, a power cut recovered into the
+# next boot - must leave a terminal status behind. Without this the Settings
+# screen has nothing to move on from and spins on "running".
+ExecStopPost=/usr/local/sbin/tvbox-sysupdate finish
+# Deliberately NOT hardened with ProtectSystem/PrivateDevices the way
+# tvbox-radio@.service is: the payload IS a provisioning script, and it has to
+# write /etc, /usr/local and the udev and polkit trees. The bound on what it can
+# do is the signature on what it runs, not the sandbox it runs in.
+
+# No [Install]: this is started on request (Settings -> Software update), never
+# enabled. The box user may start this one unit and nothing else - the polkit
+# grant is 54-tvbox-sysupdate.rules.

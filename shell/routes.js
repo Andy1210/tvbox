@@ -280,6 +280,13 @@ function post(p, data, res, ctx) {
     updater.apply();
     return httpserver.jsonRes(res, updater.status());
   }
+  if (p === "/tvbox/api/update/apply-system") {
+    // The ROOT half of a release. Async like apply: provision spends minutes in
+    // apt, so the unit is started with --no-block and the UI polls the same
+    // /update/status document. Nothing is passed - the applier reads its own
+    // root-owned config and verifies the feed itself.
+    return httpserver.jsonRes(res, updater.applySystem());
+  }
   if (p === "/tvbox/api/update/clear-failed") {
     return httpserver.jsonRes(res, updater.clearFailed());
   }

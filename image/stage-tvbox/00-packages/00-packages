@@ -29,5 +29,6 @@ curl
 git
 unzip
 ca-certificates
+openssl
 unattended-upgrades
 udisks2

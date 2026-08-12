@@ -29,6 +29,7 @@ BASE_URL=""
 SKIP_BUILD=0
 NOTES_EN=""
 NOTES_HU=""
+SIGN_KEY="${TVBOX_RELEASE_KEY_FILE:-}"
 while [ $# -gt 0 ]; do
   case "$1" in
     --out) OUT="$2"; shift 2 ;;
@@ -36,9 +37,20 @@ while [ $# -gt 0 ]; do
     --skip-build) SKIP_BUILD=1; shift ;;
     --notes-en) NOTES_EN="$2"; shift 2 ;;
     --notes-hu) NOTES_HU="$2"; shift 2 ;;
+    --sign-key) SIGN_KEY="$2"; shift 2 ;;
     *) echo "unknown arg: $1" >&2; exit 1 ;;
   esac
 done
+
+# What revision of the ROOT half this tree's provision.sh installs. Read as DATA
+# (anchored, digits only, never sourced) for the same reason install-compositor.sh
+# parses compositor.version rather than dotting it in.
+PROVISION_REVISION="$(sed -n 's/^PROVISION_REVISION=\([0-9]\{1,6\}\)$/\1/p' "$TVBOX/deploy/provision.sh" | head -1)"
+[ -n "$PROVISION_REVISION" ] || { echo "no PROVISION_REVISION in deploy/provision.sh" >&2; exit 1; }
+
+# The root payload must not have moved without the revision moving with it, or a
+# box would satisfy `system:N` while missing what N added.
+node "$HERE/provision_revision_check.js" || exit 1
 
 VERSION="$(node -p "require('$TVBOX/shell/package.json').version")"
 [ -n "$VERSION" ] || { echo "no version in shell/package.json" >&2; exit 1; }
@@ -104,11 +116,28 @@ NOTES_EN="$NOTES_EN" NOTES_HU="$NOTES_HU" node -e "
   // Absent means no requirements; anything else has to be a list of names. An ||
   // default would read false, 0 and the empty string as absent too, and the release
   // would then be offered to a box that cannot satisfy what it silently dropped.
-  const pkg = JSON.parse(fs.readFileSync('shell/package.json', 'utf8'));
+  const pkg = JSON.parse(fs.readFileSync('$TVBOX/shell/package.json', 'utf8'));
   const requires = pkg.tvboxRequires === undefined || pkg.tvboxRequires === null ? [] : pkg.tvboxRequires;
   if (!Array.isArray(requires) || requires.some((r) => typeof r !== 'string' || !r.trim())) {
     console.error('tvboxRequires must be a list of requirement names');
     process.exit(1);
+  }
+  // A release may not ask for a root revision this tree does not carry: the box
+  // cross-checks the staged provision.sh against what the feed announced and
+  // refuses the pair, so this would ship a release nothing could ever install.
+  // Number(), not a bare literal: a revision written 010 would be legacy octal
+  // here (8) and plain ten to the python side and to provision.sh, so the feed
+  // would announce a revision the tarball contradicts and no box could install it.
+  const rev = Number('$PROVISION_REVISION');
+  for (const r of requires) {
+    const m = /^system:(\d{1,6})\$/.exec(r);
+    if (m && Number(m[1]) > rev) {
+      console.error('tvboxRequires asks for system:' + m[1] + ' but deploy/provision.sh is revision ' + rev);
+      process.exit(1);
+    }
+  }
+  if (!requires.some((r) => /^system:/.test(r))) {
+    console.warn('note: this release declares no system: requirement, so a box will not run its root half (deploy/provision.sh is revision ' + rev + ')');
   }
   fs.writeFileSync('$OUT/update.json', JSON.stringify({
     feedVersion: 1,
@@ -116,10 +145,45 @@ NOTES_EN="$NOTES_EN" NOTES_HU="$NOTES_HU" node -e "
     url: '$BASE_URL/$TARBALL',
     sha256: '$SHA256',
     publishedAt: new Date().toISOString(),
+    // What this release's provision.sh would install. Informational for the UI;
+    // what actually GATES the shell install is a system: entry in requires.
+    // tvbox-sysupdate refuses a release whose staged provision.sh does not carry
+    // this number, which catches a feed built from a different tree.
+    systemRevision: rev,
     ...(requires.length ? { requires } : {}),
     ...(Object.keys(notes).length ? { notes } : {}),
   }, null, 2) + '\n');
 "
+
+# The feed is signed HERE, over the bytes just written, and never regenerated
+# afterwards: it carries a publishedAt, so re-running this script produces
+# different bytes and any signature made from a second run would never verify.
+#
+# Only the ROOT half needs the signature - tvbox-sysupdate refuses a feed it
+# cannot verify against a key pinned in /etc. The shell's own OTA still installs
+# from an unsigned feed (a self-hosted LAN test loop has no key), so an unsigned
+# release is a release whose root half can never run, not a broken one.
+if [ -n "$SIGN_KEY" ]; then
+  [ -f "$SIGN_KEY" ] || { echo "signing key not found: $SIGN_KEY" >&2; exit 1; }
+  openssl pkeyutl -sign -inkey "$SIGN_KEY" -rawin -in "$OUT/update.json" -out "$OUT/update.json.sig.bin"
+  openssl base64 -A -in "$OUT/update.json.sig.bin" -out "$OUT/update.json.sig"
+  rm -f "$OUT/update.json.sig.bin"
+  # Verify what we are about to publish with the PUBLIC key the boxes carry, not
+  # with the private one: a mismatched pair produces a feed that every box in the
+  # field rejects, and there is no way to notice that from here otherwise.
+  if [ -f "$TVBOX/deploy/release-key.pem" ]; then
+    openssl base64 -d -A -in "$OUT/update.json.sig" -out "$OUT/.sigcheck"
+    openssl pkeyutl -verify -pubin -inkey "$TVBOX/deploy/release-key.pem" -rawin \
+      -in "$OUT/update.json" -sigfile "$OUT/.sigcheck" >/dev/null \
+      || { rm -f "$OUT/.sigcheck"; echo "the signature does not verify against deploy/release-key.pem - wrong signing key?" >&2; exit 1; }
+    rm -f "$OUT/.sigcheck"
+  fi
+  echo "==> $OUT/update.json.sig  (signed, system updates enabled)"
+else
+  rm -f "$OUT/update.json.sig"
+  echo "warning: no signing key (--sign-key / TVBOX_RELEASE_KEY_FILE) - this feed is UNSIGNED," >&2
+  echo "         so boxes will install the shell but refuse its root half." >&2
+fi
 
 echo "==> $OUT/$TARBALL"
 echo "==> $OUT/update.json  (version $VERSION, sha256 $SHA256)"

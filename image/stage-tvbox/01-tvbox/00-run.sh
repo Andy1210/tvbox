@@ -380,6 +380,38 @@ install -d "${ROOTFS_DIR}/etc/systemd/system/systemd-coredump@.service.d"
 install -m 644 "${ROOTFS_DIR}${USER_HOME}/.tvbox/coredump-tvbox-runtimemax.conf" \
   "${ROOTFS_DIR}/etc/systemd/system/systemd-coredump@.service.d/10-tvbox-runtime-max.conf"
 
+# The root-side system updater: what lets a later release bring its OWN root half
+# (an apt package, a grant, a unit) instead of needing a re-flash. Installed from
+# ~/.tvbox/ like the pair above, so the image and provision.sh share one copy -
+# including the polkit rule, which ships as a real file rather than a heredoc for
+# exactly that reason.
+install -m 755 "${ROOTFS_DIR}${USER_HOME}/.tvbox/tvbox-sysupdate" "${ROOTFS_DIR}/usr/local/sbin/tvbox-sysupdate"
+install -m 644 "${ROOTFS_DIR}${USER_HOME}/.tvbox/tvbox-sysupdate.service" \
+  "${ROOTFS_DIR}/etc/systemd/system/tvbox-sysupdate.service"
+install -m 644 "${ROOTFS_DIR}${USER_HOME}/.tvbox/54-tvbox-sysupdate.rules" \
+  "${ROOTFS_DIR}/etc/polkit-1/rules.d/54-tvbox-sysupdate.rules"
+install -d -m 755 "${ROOTFS_DIR}/etc/tvbox" "${ROOTFS_DIR}/etc/tvbox/release-keys.d" "${ROOTFS_DIR}/var/lib/tvbox"
+install -m 644 "${ROOTFS_DIR}${USER_HOME}/.tvbox/sysupdate.conf" "${ROOTFS_DIR}/etc/tvbox/sysupdate.conf"
+# The applier refuses to run without a valid TVBOX_USER, so a silent miss here
+# would ship a flashed box whose every system update ends in bad-config, on
+# hardware with no ssh. Same sed-then-append pair provision.sh uses, and
+# scripts/image-smoke.sh asserts the line is actually there in the built image.
+sed -i -E "s@^TVBOX_USER=.*@TVBOX_USER=${FIRST_USER_NAME}@" "${ROOTFS_DIR}/etc/tvbox/sysupdate.conf"
+grep -q "^TVBOX_USER=" "${ROOTFS_DIR}/etc/tvbox/sysupdate.conf" ||
+  printf 'TVBOX_USER=%s\n' "${FIRST_USER_NAME}" >> "${ROOTFS_DIR}/etc/tvbox/sysupdate.conf"
+# The pinned release key. This is the trust anchor for everything a system update
+# will ever run, and here is the one place it can be pinned from a tree that is
+# not the box user's - the build's own checkout - which is why provision.sh
+# refuses to pin one out of ~/.tvbox unless told to.
+install -m 644 "${ROOTFS_DIR}${USER_HOME}/.tvbox/release-key.pem" \
+  "${ROOTFS_DIR}/etc/tvbox/release-keys.d/tvbox-release.pem"
+# No system-revision file is written, on purpose. This stage does provision.sh's
+# work independently and has drifted from it before, so a number claimed here
+# could be a revision the box has not actually got - and that reads as "met" and
+# skips the step for ever, silently. Absent parses as 0, so the first release that
+# needs a root half runs provision once on a flashed box; it is idempotent, and
+# the offer only appears when a release actually asks for it.
+
 # 2c) Headless provisioning WITHOUT custom.toml (which this image can't process).
 #     The account password is locked, so there's no way into a fresh box until
 #     an SSH key is present. First-boot config is driven by ONE file on the boot

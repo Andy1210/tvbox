@@ -31,6 +31,15 @@ tvbox is a LAN device with no cloud account. The interesting boundaries:
   processes; anything that exposes it beyond loopback matters.
 - **Secrets** - `~/.tvbox/config.json` and Spotify tokens are chmod 600; leaks
   into logs/API responses matter.
+- **The system updater** (`deploy/tvbox-sysupdate`) - the one path by which code
+  from the network runs as root. The box user may start its unit and nothing
+  else, and may pass it nothing: it reads a root-owned config, verifies a
+  detached ed25519 signature against a key pinned in `/etc/tvbox/release-keys.d`,
+  and runs the staged release's `provision.sh` - never the copy in `~/.tvbox`,
+  which the box user can write. Anything that lets unprivileged code choose what
+  it fetches, verifies or executes is a vulnerability, and so is a **replay**: a
+  validly signed but older release must be refused, because the artifacts stay
+  public and the box user can set the box's DNS.
 
 Shell-side **plugins are trusted code by design** (they run in the host
 process) - "a malicious plugin can do X" is expected, not a vulnerability;
