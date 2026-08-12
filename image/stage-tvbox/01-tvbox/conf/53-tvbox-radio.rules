@@ -1,0 +1,22 @@
+// tvbox: let the box user turn the built-in wifi/Bluetooth off and back on.
+// Four exact instances and only `start` - the unit is a oneshot, and a prefix
+// match or a general manage-units grant would cover far more than this needs.
+// Matches on the GROUP: the shell has no logind session (Electron moves its main
+// process into its own app scope), so subject.active is false for it.
+// KEEP IN SYNC with the heredoc in deploy/provision.sh.
+polkit.addRule(function (action, subject) {
+  var units = [
+    "tvbox-radio@bt-off.service",
+    "tvbox-radio@bt-on.service",
+    "tvbox-radio@wifi-off.service",
+    "tvbox-radio@wifi-on.service",
+  ];
+  if (
+    action.id === "org.freedesktop.systemd1.manage-units" &&
+    units.indexOf(action.lookup("unit")) >= 0 &&
+    action.lookup("verb") === "start" &&
+    subject.isInGroup("netdev")
+  ) {
+    return polkit.Result.YES;
+  }
+});

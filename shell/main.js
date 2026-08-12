@@ -25,6 +25,7 @@ const system = require("./system"); // network, clock, keyboard, name, About num
 const hdrout = require("./hdr"); // whether the output should be in PQ for this film
 const compositor = require("./compositor"); // the compositor's control socket
 const wifiradio = require("./wifiradio"); // the wifi radio as a setting, not just a pairing dip
+const builtinradio = require("./builtinradio"); // the same radios turned off for good, in the boot config
 const textinput = require("./textinput"); // typing into a keyboard-less app (OSK / phone)
 // The compositor build from which `type_text` REPLACES a field rather than appending
 // to it - before this its select-all chord went out without its modifier, so the
@@ -1094,6 +1095,22 @@ function serve() {
           wifiradio.state({ ...process.env, ...WL_ENV }, (radio) =>
             httpserver.jsonRes(res, { ...s, ethernet: eth, radio: radio === null ? null : radio === "enabled" }),
           ),
+        ),
+      );
+      return;
+    }
+    // The built-in radios as a lasting setting: what the boot config says, plus
+    // whether the root unit that can change it is installed at all. An OTA-only
+    // box has this screen and not the unit (root files are provision's), and the
+    // UI has to say so rather than offer a switch that cannot work.
+    if (p === "/tvbox/api/radios") {
+      builtinradio.readState((state) =>
+        system.ethernetStatus((eth) =>
+          httpserver.jsonRes(res, {
+            ...state,
+            helper: builtinradio.helperInstalled(),
+            ethernet: eth,
+          }),
         ),
       );
       return;
