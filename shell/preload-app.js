@@ -247,15 +247,18 @@ if (info.language) {
     if (password) return "";
     try {
       var raw = el.isContentEditable ? el.innerText : el.value;
+      // Cut to the transport cap BEFORE the strip, not after. This runs inside a
+      // focusin handler on the renderer's own thread, and a page is free to focus an
+      // input holding megabytes - scanning all of it would stall the picture to
+      // produce a value the shell discards anyway, since its own limit is far below
+      // this one. Anything at or under the cap is untouched by the cut, so the
+      // ordinary case is the same string either way.
+      var text = String(raw == null ? "" : raw).slice(0, VALUE_TRANSPORT_MAX);
       // The same strip labelFor does, and for the same reason: this text is put on
       // the TV and on the phone page, where a bidi override can make it read as
       // something else entirely - and a C0 control is dropped on the way back out
       // anyway, so showing one would be showing a character that cannot survive.
-      var text = String(raw == null ? "" : raw).replace(
-        /[\u0000-\u001f\u007f-\u009f\u061c\u200b-\u200f\u202a-\u202e\u2066-\u2069]/g,
-        "",
-      );
-      return text.slice(0, VALUE_TRANSPORT_MAX);
+      return text.replace(/[\u0000-\u001f\u007f-\u009f\u061c\u200b-\u200f\u202a-\u202e\u2066-\u2069]/g, "");
     } catch (e) {
       return "";
     }
