@@ -173,9 +173,14 @@ test("a press is not answered with the previous run's result, and does not wait 
 
 test("a button is offered only when every piece a press needs is there", () => {
   // Each of these is separately absent on a real box, and each absence is a press
-  // that can only fail: no rule means polkit denies the start, no key means the
-  // applier cannot verify anything it downloads.
-  const pieces = [sysupdate.HELPER, sysupdate.UNIT_FILE, sysupdate.RULE_FILE];
+  // that can only fail: no applier at all on a box that predates it, no key means
+  // it cannot verify anything it downloads.
+  //
+  // The polkit rule is NOT among them, and must not be: /etc/polkit-1/rules.d is
+  // 0750 root:polkitd, so the shell cannot stat what is inside it. Measured on a
+  // deployed box - the rule was installed and correct, and a stat of it raised
+  // EACCES, so requiring it here hid the button on every box in the fleet.
+  const pieces = [sysupdate.HELPER, sysupdate.UNIT_FILE];
   const key = path.join(sysupdate.KEYS_DIR, "tvbox-release.pem");
   for (const f of pieces) fs.writeFileSync(f, "x");
   fs.writeFileSync(key, "-----BEGIN PUBLIC KEY-----\n");

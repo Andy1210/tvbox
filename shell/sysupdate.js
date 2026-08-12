@@ -22,7 +22,6 @@ const SBIN = process.env.TVBOX_SBIN_DIR || "/usr/local/sbin";
 const ETC = process.env.TVBOX_ETC_DIR || "/etc";
 const HELPER = path.join(SBIN, "tvbox-sysupdate");
 const UNIT_FILE = path.join(ETC, "systemd/system", UNIT);
-const RULE_FILE = path.join(ETC, "polkit-1/rules.d/54-tvbox-sysupdate.rules");
 const KEYS_DIR = process.env.TVBOX_KEYS_DIR || path.join(ETC, "tvbox/release-keys.d");
 // /run is a tmpfs, so this exists only while a run is going IN THIS BOOT. A box
 // that lost power mid-provision comes back with a durable status still saying
@@ -59,17 +58,22 @@ let startError = null;
 // sentence. Cheap enough to ask per call - a few stats, and the answer changes
 // once in a box's life.
 //
-// Every piece a press needs, not just the script: each of these is separately
-// absent on a real box, and each absence is a button that can only fail.
-//   - the polkit rule, or the box user cannot start the unit at all;
-//   - a pinned key, because provision installs the applier whatever happens but
-//     refuses to pin a key out of a directory the box user can write, so
-//     "installed" and "able to verify anything" are different states.
-// Where any of them is missing the honest older sentence - this box has to be set
-// up again - is the better answer, and it is what the UI falls back to.
+// The script, its unit, and a pinned key. The key is checked because provision
+// installs the applier whatever happens but refuses to pin a key out of a
+// directory the box user can write, so "installed" and "able to verify anything"
+// are genuinely different states, and a press in the second one can only ever
+// answer "this box has no release key".
+//
+// The polkit grant is deliberately NOT checked, however much it belongs in that
+// list. `/etc/polkit-1/rules.d` is 0750 root:polkitd and the box user is in
+// neither, so a stat of the rule raises EACCES on every real box - a check that
+// cannot succeed anywhere would hide the button everywhere. A missing grant
+// surfaces at the press instead: `systemctl start` is refused, and `start-denied`
+// is the one status that tells the user to restart the box, which is exactly what
+// a fresh netdev membership needs.
 function available() {
   try {
-    for (const f of [HELPER, UNIT_FILE, RULE_FILE]) if (!fs.statSync(f).isFile()) return false;
+    for (const f of [HELPER, UNIT_FILE]) if (!fs.statSync(f).isFile()) return false;
     return fs.readdirSync(KEYS_DIR).some((n) => n.endsWith(".pem"));
   } catch (e) {
     return false;
@@ -216,7 +220,6 @@ module.exports = {
   UNIT,
   HELPER,
   UNIT_FILE,
-  RULE_FILE,
   KEYS_DIR,
   STATE_DIR,
   REVISION_FILE,
