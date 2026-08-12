@@ -164,7 +164,11 @@ function refreshVersion(cb) {
   versionPending = true;
   request({ request: "get_state" }, (e, ok) => {
     versionPending = false;
-    const answered = !e && ok && typeof ok.version === "string";
+    // A version we cannot place is not an answer: storing it would leave the cache
+    // holding something no comparison can use, and marking it fresh for the full TTL
+    // would buy five minutes of that. It gets the retry cooldown a failed read gets,
+    // and `runningVersion` only ever holds a version or nothing.
+    const answered = !e && ok && parseVersion(ok.version) !== null;
     if (answered) runningVersion = ok.version;
     // Stamped when the ANSWER lands rather than when the question went out, or a
     // read that takes its time would be counted as fresh from before it started.
@@ -190,26 +194,30 @@ function refreshVersion(cb) {
   });
 }
 
-// `a >= b` over dotted numbers, with anything else losing to everything. Not a
-// semver library: these are three integers the release tag and Cargo.toml already
-// agree on, and CI refuses a tag that disagrees.
+// Exactly three numeric components, or it is not a version this can place.
 //
-// Every component has to be DIGITS, which parseInt alone would not give: it stops
-// at the first thing it does not understand, so "0.1.10-dev" would read as 0.1.10
-// and pass a gate meant for a release. A decorated version is one we cannot place,
-// and the whole point of this comparison is to fail closed when it cannot tell.
+// Not a semver library: what arrives here is CARGO_PKG_VERSION from a release whose
+// tag CI has already checked against Cargo.toml, so three integers is the only shape
+// there is - and a gate whose job is to fail closed has no business inferring the
+// rest of one. Two ways that inference went wrong before this was pinned down:
+// parseInt stops at the first thing it cannot read, so "0.1.10-dev" passed as
+// 0.1.10; and padding a missing component with zero made "0.2" outrank "0.1.10" on
+// the strength of a component nobody sent.
+function parseVersion(v) {
+  const parts = String(v == null ? "" : v)
+    .trim()
+    .split(".");
+  if (parts.length !== 3 || !parts.every((n) => /^\d+$/.test(n))) return null;
+  return parts.map((n) => parseInt(n, 10));
+}
+
+// `a >= b`, with anything unplaceable losing to everything.
 function versionAtLeast(have, want) {
-  const parts = (v) =>
-    String(v || "")
-      .trim()
-      .split(".");
-  const a = parts(have);
-  const b = parts(want);
-  if (!a.length || !a.every((n) => /^\d+$/.test(n))) return false;
-  for (let i = 0; i < Math.max(a.length, b.length); i++) {
-    const x = parseInt(a[i], 10) || 0;
-    const y = parseInt(b[i], 10) || 0;
-    if (x !== y) return x > y;
+  const a = parseVersion(have);
+  const b = parseVersion(want);
+  if (!a || !b) return false;
+  for (let i = 0; i < a.length; i++) {
+    if (a[i] !== b[i]) return a[i] > b[i];
   }
   return true;
 }
