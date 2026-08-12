@@ -213,3 +213,70 @@ test("no socket means no compositor, and callers fall back", () => {
   delete process.env.TVBOX_WC_SOCKET;
   delete require.cache[require.resolve("./compositor")];
 });
+
+// ---- which compositor is RUNNING -----------------------------------------------
+// The shell gates a behaviour on this (the typing screen only offers a field's own
+// text back once `type_text` replaces rather than appends), so the comparison has to
+// be wrong in the SAFE direction when it cannot tell.
+
+test("a version is compared as numbers, and an unknown one loses", () => {
+  const { versionAtLeast } = require("./compositor")._test;
+
+  assert.equal(versionAtLeast("0.1.10", "0.1.10"), true);
+  assert.equal(versionAtLeast("0.1.11", "0.1.10"), true);
+  assert.equal(versionAtLeast("0.2.0", "0.1.10"), true);
+  assert.equal(versionAtLeast("1.0.0", "0.1.10"), true);
+  // The one a string comparison gets wrong: "0.1.9" > "0.1.10" as text.
+  assert.equal(versionAtLeast("0.1.9", "0.1.10"), false);
+  assert.equal(versionAtLeast("0.1.2", "0.1.10"), false);
+  // A shorter version is padded rather than refused: 0.2 is past 0.1.10.
+  assert.equal(versionAtLeast("0.2", "0.1.10"), true);
+  assert.equal(versionAtLeast("0.1", "0.1.10"), false);
+  // Nothing to compare - every one of these must fail closed, because they are what
+  // a compositor too old to report its version at all leaves behind.
+  for (const nothing of ["", null, undefined, "unknown", "v0.1.10"]) {
+    assert.equal(versionAtLeast(nothing, "0.1.10"), false, `"${nothing}" must not pass`);
+  }
+});
+
+test("the running version comes off the socket, and a build that omits it fails closed", async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "tvbox-wc-version-"));
+  const sock = path.join(dir, "wc.sock");
+  process.env.TVBOX_WC_SOCKET = sock;
+  delete require.cache[require.resolve("./compositor")];
+  const client = require("./compositor");
+
+  // What tvbox-wc 0.1.10 answers, trimmed to the field this asks about.
+  let reply = { id: 1, ok: { focus: { owner: "app" }, windows: [], version: "0.1.10" } };
+  const server = net.createServer((c) => c.on("data", () => c.end(JSON.stringify(reply) + "\n")));
+  await new Promise((r) => server.listen(sock, r));
+
+  await new Promise((r) => client.refreshVersion(r));
+  assert.equal(client.atLeast("0.1.10"), true);
+  assert.equal(client.atLeast("0.2.0"), false);
+
+  // An older build answers get_state without the field at all. The cached answer
+  // must not survive into it - a stale yes is the one that types the text twice.
+  delete require.cache[require.resolve("./compositor")];
+  const older = require("./compositor");
+  reply = { id: 1, ok: { focus: { owner: "app" }, windows: [] } };
+  await new Promise((r) => older.refreshVersion(r));
+  assert.equal(older.atLeast("0.1.10"), false);
+
+  server.close();
+  fs.rmSync(dir, { recursive: true, force: true });
+  delete process.env.TVBOX_WC_SOCKET;
+  delete require.cache[require.resolve("./compositor")];
+});
+
+test("with no compositor at all, nothing is claimed", async () => {
+  process.env.TVBOX_WC_SOCKET = path.join(os.tmpdir(), "tvbox-wc-absent.sock");
+  delete require.cache[require.resolve("./compositor")];
+  const client = require("./compositor");
+
+  await new Promise((r) => client.refreshVersion(r));
+  assert.equal(client.atLeast("0.1.10"), false);
+
+  delete process.env.TVBOX_WC_SOCKET;
+  delete require.cache[require.resolve("./compositor")];
+});

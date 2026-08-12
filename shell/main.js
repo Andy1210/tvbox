@@ -26,6 +26,12 @@ const hdrout = require("./hdr"); // whether the output should be in PQ for this 
 const compositor = require("./compositor"); // the compositor's control socket
 const wifiradio = require("./wifiradio"); // the wifi radio as a setting, not just a pairing dip
 const textinput = require("./textinput"); // typing into a keyboard-less app (OSK / phone)
+// The compositor build from which `type_text` REPLACES a field rather than appending
+// to it - before this its select-all chord went out without its modifier, so the
+// chord's own `a` landed in the field as a character. The typing screen only offers
+// a field's existing text back to the user when the running compositor is at least
+// this, or that offer would be submitted twice.
+const TYPING_REPLACES_MIN_COMPOSITOR = "0.1.10";
 const lang = require("./lang"); // what language a remote web app is told it runs in
 const audio = require("./audio"); // wpctl sink list + volume (device audio settings)
 const bluetooth = require("./bluetooth"); // bluetoothctl pair/connect (audio + input devices)
@@ -3267,6 +3273,10 @@ app.whenReady().then(async () => {
   // on-screen keyboard and can draw a QR), so the app is backgrounded for the
   // duration - its page keeps its state AND the focused field, and the text is sent
   // as keystrokes once it's back in front.
+  // Read once here rather than on the first focused field: the answer decides
+  // whether that field's text is offered back, and a cold read would spend the
+  // first typing session of the session answering "no".
+  compositor.refreshVersion();
   textinput.init({
     onShow: (st) => {
       const id = st.app;
@@ -3314,6 +3324,13 @@ app.whenReady().then(async () => {
     // The compositor types into whatever holds the keyboard, which by now is the
     // app window this session belongs to - onDone put it back in front.
     typeText: (text) => compositor.typeText(text, { selectAll: true }),
+    // ...and whether that REPLACES the field or merely appends to it, which is what
+    // makes it safe to open the keyboard on the field's own text. The select-all
+    // chord lost its modifier before tvbox-wc 0.1.10, so there a prefill would
+    // submit the text twice. Asked of the RUNNING compositor: an installed binary
+    // is only a file until greetd restarts, and this is the window where the
+    // difference matters.
+    canReplace: () => compositor.atLeast(TYPING_REPLACES_MIN_COMPOSITOR),
   });
   // A restore replaced config.json + user apps - plugins only read credentials
   // at boot, so restart the shell shortly after (the phone page + TV UI get a

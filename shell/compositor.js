@@ -132,6 +132,58 @@ function listSync() {
   }
 }
 
+// Which compositor is RUNNING, and what it can be relied on to do.
+//
+// Not the same question as "which binary is installed": the compositor IS the
+// session, so a newly installed one is only a file until greetd restarts, and
+// asking the file would answer yes during exactly the window where the answer is
+// no. `get_state` carries the running version from tvbox-wc 0.1.10; an older one
+// sends no such field, which is the honest answer for it.
+//
+// Cached because it changes at most once in the life of this process - a session
+// restart takes the shell with it. The cache starts EMPTY and every comparison
+// against an empty version is false, so a caller gated on this degrades to the
+// behaviour it had before the compositor could do the thing at all.
+let runningVersion = "";
+let versionAt = 0;
+const VERSION_TTL_MS = 5 * 60 * 1000;
+
+function refreshVersion(cb) {
+  versionAt = Date.now();
+  request({ request: "get_state" }, (e, ok) => {
+    if (!e && ok && typeof ok.version === "string") runningVersion = ok.version;
+    if (cb) cb(runningVersion);
+  });
+}
+
+// `a >= b` over dotted numbers, with a missing or unparsable version losing to
+// everything. Not a semver library: these are three integers the release tag and
+// Cargo.toml already agree on.
+function versionAtLeast(have, want) {
+  const parts = (v) =>
+    String(v || "")
+      .trim()
+      .split(".")
+      .map((n) => parseInt(n, 10));
+  const a = parts(have);
+  const b = parts(want);
+  if (!a.length || a.some(isNaN)) return false;
+  for (let i = 0; i < Math.max(a.length, b.length); i++) {
+    const x = a[i] || 0;
+    const y = b[i] || 0;
+    if (x !== y) return x > y;
+  }
+  return true;
+}
+
+// Is the running compositor at least this version? Answers from the cache, and
+// refreshes it in the background when it is stale - so a read that failed at
+// startup costs the caller one turn rather than the rest of the session.
+function atLeast(want) {
+  if (!runningVersion || Date.now() - versionAt > VERSION_TTL_MS) refreshVersion();
+  return versionAtLeast(runningVersion, want);
+}
+
 // A mode object as display.js parses them, so callers do not care which backend
 // applied it.
 function apply(output, mode, cb) {
@@ -201,6 +253,9 @@ function typeText(text, opts, cb) {
 module.exports = {
   available,
   request,
+  refreshVersion,
+  atLeast,
+  _test: { versionAtLeast },
   list,
   listSync,
   apply,

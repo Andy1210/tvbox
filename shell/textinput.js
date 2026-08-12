@@ -24,15 +24,31 @@ const MAX_TEXT = 400; // a login/search field, not a document
 // rather than empty. Delivery REPLACES the field (see submit), so without this a
 // field with anything in it could only be retyped from scratch.
 //
-// Two things it is not. It is never a password: the preload withholds that value and
-// this refuses it a second time, because the session's own flag is what the phone
-// page - served over the LAN in clear - keys off. And it is never TRUNCATED: a value
-// longer than we will type back is dropped whole, since a prefill silently cut short
-// looks complete, and submitting it would replace the field with the part that fit
-// and destroy text the user never saw. The keyboard then opens empty, as before.
+// Everything that can go wrong with that is decided here, and each rule is a way it
+// could do harm:
+//
+//   - Never a password. The preload withholds that value and this refuses it a
+//     second time, because the session's own flag is what the phone page - served
+//     over the LAN in clear - keys off.
+//   - Never unless delivery actually REPLACES. `canReplace` asks the RUNNING
+//     compositor, not the installed one: on a build whose select-all chord loses its
+//     modifier, typing appends, so offering the field's own text back would submit
+//     it twice. It fails closed, and a box that answers no simply gets the empty
+//     keyboard it had before.
+//   - Never TRUNCATED. A value longer than we will type back is dropped whole: a
+//     prefill silently cut short looks complete, and submitting it would replace the
+//     field with the part that fit and destroy text the user never saw.
+//
+// The strip is the preload's, repeated. That one runs in the RENDERER, on text the
+// page wrote, so it is not a guarantee this side may lean on - and a bidi override
+// or a zero-width character reaching the TV and the phone page makes the text read
+// as something other than what it is.
 function offerableValue(text, password) {
-  if (password) return "";
-  const value = String(text == null ? "" : text).replace(/[\u0000-\u001f\u007f]/g, "");
+  if (password || !deps.canReplace()) return "";
+  const value = String(text == null ? "" : text).replace(
+    /[\u0000-\u001f\u007f\u200b-\u200f\u202a-\u202e\u2066-\u2069]/g,
+    "",
+  );
   return value.length > MAX_TEXT ? "" : value;
 }
 
@@ -48,6 +64,9 @@ let deps = {
   pairingStop: () => {},
   isForeground: () => true, // is this app still the one on screen?
   typeText: () => {}, // deliver the string to whatever holds the keyboard
+  // Does delivery REPLACE the field, or only append to it? Fails closed: with no
+  // answer the keyboard opens empty, which is what it always did.
+  canReplace: () => false,
 };
 
 function init(d) {

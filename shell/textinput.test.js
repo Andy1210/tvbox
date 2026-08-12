@@ -19,6 +19,9 @@ function harness(opts = {}) {
     pairingStop: () => log.pairingStops++,
     isForeground: opts.isForeground || (() => true),
     typeText: (text) => wc.sent.push(text),
+    // A box whose compositor replaces the field, which is what makes offering its
+    // contents back safe. `canReplace: false` is its own case, further down.
+    canReplace: opts.canReplace || (() => true),
   });
   return { log, wc };
 }
@@ -233,4 +236,26 @@ test("a field reporting no value at all still opens the keyboard", () => {
   textinput.focused("xcloud", wc, { kind: "text", label });
   assert.strictEqual(log.shown[0].active, true);
   assert.strictEqual(log.shown[0].value, "");
+});
+
+test("nothing is offered when delivery would only append", () => {
+  const label = reset();
+  // A compositor older than the one whose select-all chord carries its modifier.
+  // Typing there appends, so handing the field's own text back would submit it
+  // twice - the keyboard opens empty instead, exactly as it did before any of this.
+  const { log, wc } = harness({ canReplace: () => false });
+  textinput.focused("xcloud", wc, { kind: "email", label, value: "daniel@example.com" });
+  assert.strictEqual(log.shown[0].value, "");
+  assert.strictEqual(log.shown[0].active, true); // the keyboard still opens
+});
+
+test("bidi and zero-width characters never reach the screen", () => {
+  const label = reset();
+  const { log, wc } = harness();
+  // The preload strips these too, but it runs in the RENDERER on text the page
+  // wrote - so this side cannot lean on it. A right-to-left override makes the
+  // prefill read as something other than what would be submitted.
+  const sneaky = "abc" + String.fromCharCode(0x202e) + "def" + String.fromCharCode(0x200b);
+  textinput.focused("xcloud", wc, { kind: "text", label, value: sneaky });
+  assert.strictEqual(log.shown[0].value, "abcdef");
 });
