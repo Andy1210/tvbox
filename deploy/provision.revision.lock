@@ -1,0 +1,27 @@
+{
+  "revision": 1,
+  "files": [
+    "deploy/54-tvbox-sysupdate.rules",
+    "deploy/coredump-tvbox-runtimemax.conf",
+    "deploy/greetd-tvbox-safemode.conf",
+    "deploy/install-compositor.sh",
+    "deploy/provision.sh",
+    "deploy/release-key.pem",
+    "deploy/sysupdate.conf",
+    "deploy/tvbox-diag.service",
+    "deploy/tvbox-diag.sh",
+    "deploy/tvbox-diag.timer",
+    "deploy/tvbox-miracast",
+    "deploy/tvbox-miracast.service",
+    "deploy/tvbox-radio",
+    "deploy/tvbox-radio@.service",
+    "deploy/tvbox-safemode-screen.service",
+    "deploy/tvbox-safemode.service",
+    "deploy/tvbox-safemode.sh",
+    "deploy/tvbox-session",
+    "deploy/tvbox-sysupdate",
+    "deploy/tvbox-sysupdate.service",
+    "scripts/install-libcec8.sh"
+  ],
+  "sha256": "fd5e95528a62653b835a1ab783cfa468e39a32de6ce25a3f28d5ce5d10b4c504"
+}

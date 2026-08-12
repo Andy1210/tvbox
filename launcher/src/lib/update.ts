@@ -19,7 +19,60 @@ export interface UpdateStatus {
   failed: { from: string; to: string } | null; // an update rolled back
   last: { from: string; to: string; at: number } | null; // last successful update
   os: { rebootRequired: boolean; packages: string[] };
+  system: SystemUpdate;
 }
+
+// The ROOT half of a release - the apt packages, grants and units an OTA cannot
+// install. Part of this document rather than its own poller so there is one
+// status shape to keep the demo mode and the UI in step with.
+//
+// Required, not optional: `launcher/src/demo/data.ts` types its fixture as
+// UpdateStatus, so a required field is the one thing that makes the typecheck
+// fail when the demo drifts from the shell.
+export interface SystemUpdate {
+  available: boolean; // is the root half installed on this box at all
+  revision: number; // highest provision revision ever applied (0 = never)
+  needs: number | null; // what the visible release is asking for, if anything
+  feedRevision: number | null; // what the feed says it would install
+  code: SystemUpdateCode;
+  warnings: number;
+  rebootRequired: boolean;
+  at: number | null;
+}
+
+// Closed set, mirrored from shell/sysupdate.js. The applier is a root script and
+// its own messages are English; only these codes cross into the UI, so a
+// Hungarian TV never shows root-script text.
+export type SystemUpdateCode =
+  | "idle"
+  | "starting"
+  | "running"
+  | "available"
+  | "up-to-date"
+  | "ok"
+  | "ok-warnings"
+  | "timeout"
+  | "busy"
+  | "no-space"
+  | "no-keys"
+  | "no-openssl"
+  | "bad-config"
+  | "bad-feed"
+  | "bad-signature"
+  | "bad-checksum"
+  | "bad-tarball"
+  | "stale-feed"
+  | "rollback-refused"
+  | "revision-mismatch"
+  | "feed-unreachable"
+  | "download-failed"
+  | "provision-failed"
+  | "insecure-install"
+  | "internal"
+  | "start-denied";
+
+// Codes that mean the run is still going, so the screen keeps polling.
+export const SYSTEM_UPDATE_BUSY: SystemUpdateCode[] = ["starting", "running"];
 
 export async function fetchUpdateStatus(): Promise<UpdateStatus | null> {
   try {
@@ -42,3 +95,7 @@ async function post(action: string): Promise<UpdateStatus | null> {
 
 export const checkUpdate = () => post("check");
 export const applyUpdate = () => post("apply");
+// The root half. Takes no arguments on purpose: the applier reads its own
+// root-owned config and verifies the release itself, so nothing chosen here -
+// or anywhere else the box user can write - decides what it installs.
+export const applySystemUpdate = () => post("apply-system");

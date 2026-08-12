@@ -32,15 +32,47 @@ if [ -z "$TVBOX_USER" ] || [ "$TVBOX_USER" = "root" ]; then
   exit 1
 fi
 
+# What revision of the ROOT half this script installs. Bumped by hand when
+# provision gains something a box must have - a package, a grant, a unit - and
+# read by two things that must agree: scripts/make-release.sh puts it in the feed
+# as `systemRevision`, and tvbox-sysupdate refuses to run a release whose
+# provision.sh does not carry the number the feed promised.
+#
+# Bumped by hand and not derived from a hash of this file, because a comment edit
+# is not a reason to re-provision a fleet. scripts/provision_revision_check.js
+# is the reminder: it fails when the root payload's content moved and this did
+# not.
+PROVISION_REVISION=1
+
+# Set by tvbox-sysupdate: this run has nobody in front of it. Two things are a
+# person's to decide and are skipped in that mode - see where each is used.
+UNATTENDED="${TVBOX_UNATTENDED:-0}"
+
 FAIL=0
+WARNINGS=0
 ok()   { echo "   [ok]   $1"; }
-warn() { echo "   [warn] $1"; }
+warn() { echo "   [warn] $1"; WARNINGS=$((WARNINGS + 1)); }
 bad()  { echo "   [FAIL] $1"; FAIL=1; }
+
+# The last line of a run, and the only thing an unattended caller reads. This
+# script exits 0 for a great many partial outcomes - most of its failure branches
+# only `warn` - so "exit 0" alone cannot mean "revision N is applied", and
+# recording the revision on it would let a release declare a requirement the box
+# only half has.
+result_line() { echo "PROVISION_RESULT rev=$PROVISION_REVISION bad=$FAIL warn=$WARNINGS"; }
+trap result_line EXIT
 
 echo "==> apt baseline"
 # apt stderr is let THROUGH (not sent to /dev/null): a failing install must be
 # diagnosable. -qq already keeps normal output quiet.
-apt-get update -qq || warn "apt update failed (stale package lists?)"
+#
+# Wait for the dpkg lock rather than failing on it. unattended-upgrades runs on
+# its own timer (enabled below), so an unattended provision arriving while it
+# holds the lock is an ordinary Tuesday - and on a box with no ssh, "apt was
+# busy" would otherwise be a system update that can never succeed.
+APT="apt-get -o DPkg::Lock::Timeout=600"
+apt_install() { $APT install -y -qq "$@"; }
+$APT update -qq || warn "apt update failed (stale package lists?)"
 # Hard deps: the box is non-functional without these (Electron, remote, audio,
 # the compositor). The lib* ones are what tvbox-wc links against; on a Lite image
 # nothing else pulls them in, and the box has no session without them.
@@ -48,8 +80,8 @@ apt-get update -qq || warn "apt update failed (stale package lists?)"
 # installs bleak into a user-space venv on demand; without these that one
 # feature can't set up (everything else is unaffected). dbus-fast ships an
 # aarch64 wheel, so no compiler is pulled in by it.
-HARD="cec-utils python3 python3-evdev python3-venv python3-pip pipewire pipewire-pulse wireplumber nodejs npm greetd seatd libgbm1 libseat1 libinput10 libxkbcommon0 libwayland-server0 libegl1 libgles2"
-apt-get install -y -qq $HARD && ok "core deps ($HARD)" || bad "core apt deps - install manually: $HARD"
+HARD="cec-utils openssl python3 python3-evdev python3-venv python3-pip pipewire pipewire-pulse wireplumber nodejs npm greetd seatd libgbm1 libseat1 libinput10 libxkbcommon0 libwayland-server0 libegl1 libgles2"
+apt_install $HARD && ok "core deps ($HARD)" || bad "core apt deps - install manually: $HARD"
 # Soft deps: on-demand app-install tooling (flatpak/curl/git) + output config.
 # gcc/libc6-dev: the CEC bridge compiles cec/cec_vendor_shim.c on the box (LG
 # SIMPLINK vendor identity - see the bridge docstring); without them LG TV
@@ -66,7 +98,7 @@ apt-get install -y -qq $HARD && ok "core deps ($HARD)" || bad "core apt deps - i
 # folders and says that USB is unavailable, which is also what an OTA-only box
 # gets, since OTA can never install an apt package.
 SOFT="jq flatpak curl git unzip ca-certificates gcc libc6-dev fonts-dejavu-core iw udisks2"
-apt-get install -y -qq $SOFT && ok "extra deps ($SOFT)" || warn "some extra deps missing: $SOFT"
+apt_install $SOFT && ok "extra deps ($SOFT)" || warn "some extra deps missing: $SOFT"
 
 # Shared media stack in the core (kept in sync with image/stage-tvbox): mpv is
 # the shared player for Live TV + Plex; libpulse0/libasound2 are the runtime
@@ -75,11 +107,11 @@ apt-get install -y -qq $SOFT && ok "extra deps ($SOFT)" || warn "some extra deps
 # librespot itself is NOT installed here - the Spotify app pulls it from the UI
 # as a no-root requires.download binary. Other app binaries stay opt-in.
 echo "==> media stack (mpv + audio libs)"
-apt-get install -y -qq mpv libpulse0 && ok "mpv + libpulse0" || warn "mpv/libpulse0 missing (Live TV/Plex/Spotify need it)"
+apt_install mpv libpulse0 && ok "mpv + libpulse0" || warn "mpv/libpulse0 missing (Live TV/Plex/Spotify need it)"
 # ALSA runtime lib for the librespot/mpv audio path. trixie renamed it to
 # libasound2t64 (64-bit time_t transition); fall back to the old name for a
 # bookworm box. Installed separately so a name miss can't drop mpv/libpulse0.
-apt-get install -y -qq libasound2t64 || apt-get install -y -qq libasound2 && ok "libasound2" || warn "libasound2 missing"
+apt_install libasound2t64 || apt_install libasound2 && ok "libasound2" || warn "libasound2 missing"
 
 # libcec >= 8 (built from source - no distro ships it yet). Gives cec-client
 # --vendor-id, so the LG SIMPLINK identity no longer needs the LD_PRELOAD shim.
@@ -172,7 +204,7 @@ echo "==> OS auto-updates (unattended-upgrades: install yes, reboot NEVER)"
 # wants a reboot (/var/run/reboot-required), the SHELL shows a gentle
 # "restart recommended" hint in Settings and the user reboots from the power
 # menu whenever convenient.
-if apt-get install -y -qq unattended-upgrades 2>/dev/null; then
+if apt_install unattended-upgrades 2>/dev/null; then
   cat > /etc/apt/apt.conf.d/20auto-upgrades <<'CONF'
 APT::Periodic::Update-Package-Lists "1";
 APT::Periodic::Unattended-Upgrade "1";
@@ -731,6 +763,98 @@ else
   warn "tvbox-radio helper or unit missing - the built-in radio switch is unavailable"
 fi
 
+echo "==> system update (the root half a release cannot install by itself)"
+# An OTA release is user-space, so a version needing an apt package, a grant or a
+# root unit could only ever arrive by re-flash - and an end-user box has no ssh.
+# tvbox-sysupdate is the narrow root half that closes that: the shell asks, and
+# the script fetches a SIGNED feed, verifies it against a key pinned here, and
+# runs the release's own provision.sh out of a root-only directory. It never
+# execs anything from the box user's home, which is the invariant that stops a
+# user app's plugin.js from becoming root at the next boot.
+# Both halves or neither, like mirroring and the radio: a helper without its unit
+# leaves a Settings button that cannot work and a polkit grant pointing at
+# nothing.
+if [ -f "$HERE/tvbox-sysupdate" ] && [ -f "$HERE/tvbox-sysupdate.service" ] &&
+  install -m 755 -o root -g root "$HERE/tvbox-sysupdate" /usr/local/sbin/tvbox-sysupdate &&
+  install -m 644 -o root -g root "$HERE/tvbox-sysupdate.service" /etc/systemd/system/tvbox-sysupdate.service; then
+  install -d -m 755 -o root -g root /etc/tvbox /etc/tvbox/release-keys.d /var/lib/tvbox
+  if [ -f "$HERE/54-tvbox-sysupdate.rules" ]; then
+    install -m 644 -o root -g root "$HERE/54-tvbox-sysupdate.rules" \
+      /etc/polkit-1/rules.d/54-tvbox-sysupdate.rules
+  else
+    warn "54-tvbox-sysupdate.rules missing - the box user cannot ask for a system update"
+  fi
+
+  # The feed URL is the operator's, so an existing file is never overwritten -
+  # a box pointed at a self-hosted feed keeps it across updates. TVBOX_USER is
+  # rewritten every time: it is this run's answer, and the name provision grants
+  # things to must not be able to drift from it.
+  if [ ! -f /etc/tvbox/sysupdate.conf ] && [ -f "$HERE/sysupdate.conf" ]; then
+    install -m 644 -o root -g root "$HERE/sysupdate.conf" /etc/tvbox/sysupdate.conf
+  fi
+  if [ -f /etc/tvbox/sysupdate.conf ]; then
+    sed -i -E "s@^TVBOX_USER=.*@TVBOX_USER=$TVBOX_USER@" /etc/tvbox/sysupdate.conf
+    grep -q "^TVBOX_USER=" /etc/tvbox/sysupdate.conf || printf 'TVBOX_USER=%s\n' "$TVBOX_USER" >> /etc/tvbox/sysupdate.conf
+  else
+    warn "no /etc/tvbox/sysupdate.conf - system updates will not know where to look"
+  fi
+
+  # The pinned release key is root's trust anchor for everything the applier will
+  # ever run, so it is installed ONCE and never silently replaced.
+  #
+  # The subtlety is where this script itself came from. `sudo bash
+  # ~/.tvbox/provision.sh` runs out of the box user's home, and every OTA
+  # refreshes that directory - so on that path the key beside this script is only
+  # as trustworthy as the box. Root trusting ~/.tvbox for the length of one
+  # human-driven run is how provision has always worked; PINNING a key from there
+  # would turn one compromise into a standing channel. So a key is taken from a
+  # user-writable directory only when the caller says the tree is theirs
+  # (deploy.sh does, from a developer's own checkout).
+  KEY_DST=/etc/tvbox/release-keys.d/tvbox-release.pem
+  if [ -f "$KEY_DST" ]; then
+    if [ -f "$HERE/release-key.pem" ] && ! cmp -s "$HERE/release-key.pem" "$KEY_DST"; then
+      warn "a DIFFERENT release key ships with this tree - keeping the pinned one (TVBOX_ROTATE_KEY=1 to replace)"
+      if [ "${TVBOX_ROTATE_KEY:-0}" = 1 ]; then
+        install -m 644 -o root -g root "$HERE/release-key.pem" "$KEY_DST" &&
+          ok "release key rotated on request"
+      fi
+    else
+      ok "release key already pinned"
+    fi
+  elif [ ! -f "$HERE/release-key.pem" ]; then
+    warn "no release-key.pem in $HERE - system updates cannot verify a feed"
+  else
+    # Root-owned and not writable by group or other, or the caller vouching for
+    # the tree. Written out rather than chained, because `A || B && C` groups as
+    # `(A || B) && C` in sh and would then refuse exactly the deploy.sh case.
+    KEY_TRUSTED=0
+    [ "${TVBOX_TRUST_LOCAL_KEY:-0}" = 1 ] && KEY_TRUSTED=1
+    if [ "$KEY_TRUSTED" = 0 ] && [ "$(stat -c %u "$HERE" 2>/dev/null)" = 0 ] &&
+      [ -z "$(find "$HERE" -maxdepth 0 -perm /022 2>/dev/null)" ]; then
+      KEY_TRUSTED=1
+    fi
+    if [ "$KEY_TRUSTED" = 1 ]; then
+      install -m 644 -o root -g root "$HERE/release-key.pem" "$KEY_DST" &&
+        ok "release key pinned ($KEY_DST)" ||
+        warn "could not pin the release key"
+    else
+      warn "$HERE is writable by the box user - not pinning a release key from it (TVBOX_TRUST_LOCAL_KEY=1 to accept)"
+    fi
+  fi
+
+  systemctl daemon-reload 2>/dev/null || true
+  # The grant matches netdev, the same group mirroring and the radio switch use.
+  if id -nG "$TVBOX_USER" 2>/dev/null | tr ' ' '\n' | grep -qx netdev; then
+    ok "system updates installed (tvbox-sysupdate, on request)"
+  else
+    usermod -aG netdev "$TVBOX_USER" 2>/dev/null &&
+      warn "system updates installed; $TVBOX_USER added to netdev - REBOOT before the button will work" ||
+      warn "system updates installed but $TVBOX_USER is not in netdev - the button will be denied"
+  fi
+else
+  warn "tvbox-sysupdate helper or unit missing - system updates unavailable"
+fi
+
 # A core dump is written by a root unit, so its time limit is root's to set. The
 # session's own coredump_filter (session.sh) is what keeps dumps small; this is
 # the ceiling for when it cannot, so the box can never be held for minutes by an
@@ -797,7 +921,17 @@ fi
 echo "==> power-user sudo (opt-in via boot-partition tvbox.conf SUDO=true)"
 BOOTP=/boot/firmware; [ -d "$BOOTP" ] || BOOTP=/boot
 SUDO_CONF="$(sed -n 's/^SUDO=//p' "$BOOTP/tvbox.conf" 2>/dev/null | head -n1 | tr -d '\r')"
-if [ "$SUDO_CONF" = "true" ] || [ "$SUDO_CONF" = "1" ] || [ "$SUDO_CONF" = "yes" ] || [ -f "$BOOTP/tvbox-sudo" ]; then
+if [ "$UNATTENDED" = 1 ]; then
+  # This block reads its answer off the boot partition, and a system update runs
+  # whenever the box user asks for one. Granting or revoking passwordless sudo is
+  # an admin's decision made at the box, so it stays on the paths a person
+  # drives: deploy.sh, a re-flash, or tvbox-firstboot. Today the boot partition
+  # is root-owned and the box user cannot remount it writable (the udisks grant
+  # is filesystem-mount only, deliberately not filesystem-mount-system) - this
+  # keeps that from being the only thing standing between a Settings button and
+  # a root shell.
+  ok "sudo grant left as it is (unattended run)"
+elif [ "$SUDO_CONF" = "true" ] || [ "$SUDO_CONF" = "1" ] || [ "$SUDO_CONF" = "yes" ] || [ -f "$BOOTP/tvbox-sudo" ]; then
   printf '%s ALL=(ALL) NOPASSWD: ALL\n' "$TVBOX_USER" > /etc/sudoers.d/010-tvbox.tmp
   if visudo -cf /etc/sudoers.d/010-tvbox.tmp >/dev/null 2>&1; then
     chmod 440 /etc/sudoers.d/010-tvbox.tmp && mv /etc/sudoers.d/010-tvbox.tmp /etc/sudoers.d/010-tvbox
@@ -816,7 +950,18 @@ fi
 # tvbox-wc puts the film on a display plane and the shell's translucent UI on an
 # overlay above it, and does no per-frame GPU work while a film plays.
 echo "==> compositor (tvbox-wc)"
-if [ -f "$HERE/install-compositor.sh" ]; then
+if [ "$UNATTENDED" = 1 ]; then
+  # A system update installs a release's ROOT half before that release's shell
+  # has run once, and the OTA that follows can still roll the shell back after
+  # three failed boots. There is no matching way back for the compositor: greetd
+  # execs it directly, so a bumped tvbox-wc that verifies but does not run on
+  # this box is a black screen with the rollback already spent - and the shell
+  # drives modes, HDR, focus and typing over its socket with no version
+  # negotiation at all (compositor.js `available()` is a stat).
+  # So a compositor bump stays a re-flash or a deploy.sh run until the session
+  # can fall back to the previous binary.
+  ok "compositor left as it is (unattended run)"
+elif [ -f "$HERE/install-compositor.sh" ]; then
   sh "$HERE/install-compositor.sh" && ok "tvbox-wc" \
     || bad "compositor install failed - the box will have no session"
 else

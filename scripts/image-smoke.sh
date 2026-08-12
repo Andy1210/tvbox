@@ -103,16 +103,19 @@ PARTS
   echo fake >"$B/kernel8.img"
   echo fake >"$B/bcm2712-rpi-5-b.dtb"
   mkdir -p "$R/etc/ssh" "$R/usr/local/sbin" "$R/usr/local/bin" "$R/etc/greetd" \
-    "$R/etc/systemd/system" "$R/etc/polkit-1/rules.d" \
+    "$R/etc/systemd/system" "$R/etc/polkit-1/rules.d" "$R/etc/tvbox/release-keys.d" \
     "$R/home/tv/.tvbox/shell/launcher-dist/assets" \
     "$R/home/tv/.tvbox/shell/node_modules/electron/dist"
   printf 'PARTUUID=%s /boot/firmware vfat defaults 0 2\nPARTUUID=%s / ext4 defaults,noatime 0 1\n' "$BU" "$RU" >"$R/etc/fstab"
   echo 'tv:x:1000:1000::/home/tv:/bin/bash' >"$R/etc/passwd"
   echo 'tv:!:20000:0:99999:7:::' >"$R/etc/shadow"
   for f in usr/local/sbin/tvbox-diag usr/local/sbin/tvbox-safemode usr/local/sbin/tvbox-radio \
+    usr/local/sbin/tvbox-sysupdate \
     etc/systemd/system/tvbox-diag.service etc/systemd/system/tvbox-safemode.service \
     etc/systemd/system/tvbox-radio@.service etc/polkit-1/rules.d/53-tvbox-radio.rules \
     etc/polkit-1/rules.d/54-tvbox-power.rules \
+    etc/systemd/system/tvbox-sysupdate.service etc/polkit-1/rules.d/54-tvbox-sysupdate.rules \
+    etc/tvbox/sysupdate.conf etc/tvbox/release-keys.d/tvbox-release.pem \
     usr/local/bin/tvbox-wc usr/local/bin/tvbox-session home/tv/.tvbox/session.sh \
     home/tv/.tvbox/shell/main.js home/tv/.tvbox/run-shell.sh \
     home/tv/.tvbox/shell/launcher-dist/index.html \
@@ -287,15 +290,26 @@ check "the tv account password is locked" sh -c "awk -F: '/^tv:/ {print \$2}' '$
 # Everything the box needs at runtime that OTA can never install - root-side
 # diagnostics and safe mode - plus the shell payload itself. A missing one here is
 # a box that boots and then cannot say why it is broken.
+#
+# The tvbox-sysupdate set is here for a sharper reason than the rest. This stage
+# does provision.sh's work independently and nothing else fails when the two
+# drift, so a forgotten line would ship a flashed box that can never install a
+# release's root half - on hardware with no ssh to fix it over. Here it is a
+# failed image build instead.
 for f in \
   usr/local/sbin/tvbox-diag \
   usr/local/sbin/tvbox-safemode \
   usr/local/sbin/tvbox-radio \
+  usr/local/sbin/tvbox-sysupdate \
   etc/systemd/system/tvbox-diag.service \
   etc/systemd/system/tvbox-safemode.service \
   etc/systemd/system/tvbox-radio@.service \
+  etc/systemd/system/tvbox-sysupdate.service \
   etc/polkit-1/rules.d/53-tvbox-radio.rules \
   etc/polkit-1/rules.d/54-tvbox-power.rules \
+  etc/polkit-1/rules.d/54-tvbox-sysupdate.rules \
+  etc/tvbox/sysupdate.conf \
+  etc/tvbox/release-keys.d/tvbox-release.pem \
   usr/local/bin/tvbox-wc \
   usr/local/bin/tvbox-session \
   home/tv/.tvbox/session.sh \

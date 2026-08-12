@@ -1,13 +1,14 @@
 # Updates & backup
 
-Three independent mechanisms keep a deployed box current and recoverable -
+Four independent mechanisms keep a deployed box current and recoverable -
 none of them ever reboots or interrupts playback on its own:
 
-| Layer        | Mechanism                                                                                   | Files                                                                                  |
-| ------------ | ------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------- |
-| tvbox itself | OTA self-update: versioned releases + `current` symlink flip, crash-count rollback          | [shell/updater.js](../shell/updater.js), [deploy/run-shell.sh](../deploy/run-shell.sh) |
-| OS packages  | `unattended-upgrades` (install yes, **reboot never**) + a Settings hint when a reboot helps | [deploy/provision.sh](../deploy/provision.sh)                                          |
-| App bundles  | nightly `flatpak update --user` timer                                                       | [deploy/tvbox-flatpak-update.timer](../deploy/tvbox-flatpak-update.timer)              |
+| Layer         | Mechanism                                                                                   | Files                                                                                            |
+| ------------- | ------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------ |
+| tvbox itself  | OTA self-update: versioned releases + `current` symlink flip, crash-count rollback          | [shell/updater.js](../shell/updater.js), [deploy/run-shell.sh](../deploy/run-shell.sh)           |
+| its root half | a signed release's `provision.sh`, run by a root-side applier on request                    | [deploy/tvbox-sysupdate](../deploy/tvbox-sysupdate), [shell/sysupdate.js](../shell/sysupdate.js) |
+| OS packages   | `unattended-upgrades` (install yes, **reboot never**) + a Settings hint when a reboot helps | [deploy/provision.sh](../deploy/provision.sh)                                                    |
+| App bundles   | nightly `flatpak update --user` timer                                                       | [deploy/tvbox-flatpak-update.timer](../deploy/tvbox-flatpak-update.timer)                        |
 
 Plus **backup/restore**: the box's settings as a password-encrypted file on
 your phone ([shell/backup.js](../shell/backup.js)).
@@ -46,6 +47,8 @@ update: Settings shows "needs the box to be set up again" instead of pretending
 to be up to date. Unknown requirement names count as unmet, so an older shell
 that has never heard of a requirement refuses rather than guesses. Requirements
 live in `REQUIREMENTS` in [shell/updater.js](../shell/updater.js).
+
+One of them a box can now satisfy by itself - see the next section.
 
 **Auto-update** is ON by default (Settings toggle): applies between 03:00 and
 06:00, only when nothing is playing (no mpv, no remote app, last now-playing
@@ -89,6 +92,92 @@ git tag v1.2.0 && git push origin v1.2.0
 **Dev deploys win over OTA:** `deploy.sh` deletes the `current` symlink, so a
 box you rsync to runs the dev tree again (release dirs stay for the next OTA).
 CLI on the box: `tvbox update [--check]`.
+
+## System updates (a release's root half)
+
+Everything above is user-space, which used to mean that a release needing an apt
+package, a udev or polkit grant, a new root unit or a refreshed diagnostics
+script could only arrive by re-flashing the box. An end-user box has no ssh, so
+OTA stopped being useful exactly when the update was big.
+
+**`tvbox-sysupdate` is the narrow root half that closes that**, and it keeps
+hard rule #1 intact: the shell, app plugins and every app window still run as the
+box user with no root path. What changed is only that root can now arrive over
+the network, under a signature.
+
+**The shell passes nothing.** It starts one unit and reads a status file; the
+applier fetches the feed, verifies it, downloads and checksums the tarball,
+extracts it into a root-only directory and runs **that copy's** `provision.sh`.
+`~/.tvbox/provision.sh` is refreshed by every OTA and is writable by the box
+user, so running it as root is the one thing this must never do - a user app's
+`plugin.js` is trusted Node, but only as the box user, and that is the whole
+distance between the two.
+
+```text
+Settings -> Software update -> "Install the system update"
+  shell/sysupdate.js       systemctl start --no-block tvbox-sysupdate.service
+  tvbox-sysupdate apply    feed + detached signature -> verify against
+                           /etc/tvbox/release-keys.d/*.pem
+                           revision must be strictly HIGHER than ever applied
+                           tarball -> sha256 from the SIGNED feed
+                           extract to /var/lib/tvbox/sysupdate/tree (root, 0700)
+                           bash tree/infra/provision.sh <box user>   [unattended]
+                           record /var/lib/tvbox/system-revision on success
+```
+
+**The signature is not optional here, and neither is the revision floor.** A
+signature says a release was published, never that it is the current one - and
+the box user can point the box's DNS anywhere (the NetworkManager polkit grant
+covers group `netdev`). Without a floor, replaying a years-old release's own
+artifacts would let root re-run a historical `provision.sh`, with its historical
+grants and its historical pinned key. So `systemRevision` must be strictly
+greater than the highest ever applied, and `publishedAt` is inside the signed
+bytes with a 180-day ceiling.
+
+**What `system:N` means.** `PROVISION_REVISION` in
+[provision.sh](../deploy/provision.sh) is bumped by hand when provision gains
+something a box must have; a release that needs it declares
+`tvboxRequires: ["system:7"]` in `shell/package.json`. An older shell does not
+recognise the name and fails closed, which is right - it has no applier either.
+[scripts/provision_revision_check.js](../scripts/provision_revision_check.js)
+fails the build when the root payload's content moved and the number did not.
+
+**Success is not exit 0.** Most of provision's failure branches only `warn`, so
+its last line is the verdict (`PROVISION_RESULT rev=… bad=… warn=…`) and the
+revision is recorded only when nothing failed. Warnings are applied and reported,
+so a half-provisioned box is visible rather than silently "up to date".
+
+**Two things an unattended run deliberately skips**, both because a person
+should decide them at the box: the opt-in passwordless-sudo grant
+(`SUDO=true` in the boot partition's `tvbox.conf`), and **the compositor**. A
+release's root half lands before its shell has proved itself, and while a bad
+shell rolls back after three failed boots, greetd execs `tvbox-wc` directly and
+there is no way back from a compositor that verifies but does not run. Compositor
+bumps therefore stay a re-flash or a `deploy.sh` run until the session can fall
+back to the previous binary.
+
+**Keys.** `deploy/release-key.pem` is the public half; mint a pair with
+[scripts/gen-release-key.sh](../scripts/gen-release-key.sh) and hold the private
+one as the `TVBOX_RELEASE_KEY` Actions secret. A box pins the first key it is
+given and provision will **not** silently replace it (`TVBOX_ROTATE_KEY=1` is the
+explicit act), and it refuses to pin one out of a directory the box user can
+write at all - `deploy.sh` passes `TVBOX_TRUST_LOCAL_KEY=1` because there the
+tree came from the developer's own checkout. Keys are read from a directory, so a
+second one can be added before the first is retired; do it in that order, because
+a lost signing key cannot be replaced remotely.
+
+**A LAN test loop needs a root-side edit now.** `config.json`'s `update.feed`
+still redirects the shell's half, but the applier reads `/etc/tvbox/sysupdate.conf`
+and nothing else - http is allowed there only to a literal private address, never
+to a name. Point both, or the box takes a release from one feed and its root
+payload from another.
+
+**Still a re-flash:** the kernel, firmware, the bootloader, a Debian release
+upgrade, the partition layout - and, once, the applier itself. A box already in
+the field is running a shell that predates it, so it needs one
+`sudo bash ~/.tvbox/provision.sh` or a re-flash to gain it. After that, never
+again. Settings can tell the two situations apart and offers the button only when
+the box actually has the applier.
 
 ## Flatpak-backed apps (RetroArch, Plex)
 

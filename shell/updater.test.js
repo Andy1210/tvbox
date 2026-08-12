@@ -61,6 +61,10 @@ test("every file in the infra source dirs is listed in infra.list or consciously
   const NOT_SHIPPED = new Set([
     "deploy.sh", // the dev-deploy driver itself
     "infra.list", // the list itself
+    // What the root payload looked like at the current PROVISION_REVISION. A
+    // build-time reminder (scripts/provision_revision_check.js) - the box learns
+    // the revision from the provision.sh it is about to run, never from this.
+    "provision.revision.lock",
   ]);
   const listed = new Set(infraListBasenames());
   const repo = path.join(__dirname, "..");

@@ -52,5 +52,17 @@ deploy/tvbox-miracast.service
 # root-side caveat again - provision.sh installs them, OTA only carries them.
 deploy/tvbox-radio
 deploy/tvbox-radio@.service
+# System updates: the root-side applier, its unit, the polkit grant that lets the
+# box user ask for one, the root-owned settings file and the pinned release key.
+# The applier is the one thing here an OTA release carries but can never activate
+# by itself - provision.sh installs it, and until it has, a box can only take a
+# release's user-space half. The key ships so that a box being provisioned from a
+# checkout has one to pin; provision refuses to pin it out of a directory the box
+# user can write (see the release-key block there).
+deploy/tvbox-sysupdate
+deploy/tvbox-sysupdate.service
+deploy/54-tvbox-sysupdate.rules
+deploy/sysupdate.conf
+deploy/release-key.pem
 deploy/greetd-tvbox-safemode.conf
 deploy/coredump-tvbox-runtimemax.conf

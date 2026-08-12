@@ -26,6 +26,7 @@ const crypto = require("crypto");
 const { execFile } = require("child_process");
 const config = require("./config");
 const compositor = require("./compositor"); // a release may require it (see REQUIREMENTS)
+const sysupdate = require("./sysupdate"); // the root half a release may require (see REQUIREMENTS)
 const { isLanUrl, isAllowedFetchUrl, guardedFetch } = require("./netguard"); // shared LAN/loopback trust rule (feed may be self-hosted http)
 const pkg = require("./package.json");
 
@@ -102,6 +103,14 @@ const INFRA_FILES = [
   // The built-in radio switch, same shape: root installs it, OTA only carries it.
   "tvbox-radio",
   "tvbox-radio@.service",
+  // The root-side system updater. Same shape again - and it is the piece that
+  // makes the shape survivable: once provision has installed it, a later release
+  // can bring its own root half instead of needing a re-flash.
+  "tvbox-sysupdate",
+  "tvbox-sysupdate.service",
+  "54-tvbox-sysupdate.rules",
+  "sysupdate.conf",
+  "release-key.pem",
 ];
 // Files an earlier release installed and this one does not: they are removed on
 // update rather than left to be found by something that still looks for them.
@@ -131,6 +140,7 @@ const EXECUTABLE = [
   "install-compositor.sh",
   "tvbox-miracast", // provision copies it to /usr/local/sbin; systemd exec's it
   "tvbox-radio", // same: /usr/local/sbin, exec'd by tvbox-radio@.service
+  "tvbox-sysupdate", // same: /usr/local/sbin, exec'd by tvbox-sysupdate.service
 ];
 // Where each shipped user unit gets its "enable" symlink (its [Install]
 // WantedBy). syncInfra creates these directly - same trick as the image build:
@@ -251,6 +261,29 @@ const REQUIREMENTS = {
   compositor: () => compositor.available(),
 };
 
+// The one requirement that carries a number, and the only one a box can now
+// satisfy by itself: `system:7` means "this release needs what provision.sh
+// revision 7 installs". A shell that predates this parse does not recognise the
+// name and fails closed, which is the right answer for it - it has no root half
+// to run either.
+//
+// Written into the name rather than added as a feed field on purpose: an old
+// shell ignores an unknown top-level field, and would then install a release
+// whose root half it silently skipped.
+const SYSTEM_REQUIREMENT = /^system:(\d{1,6})$/;
+
+// Which revision, if any, a set of unmet requirements is asking for. Null when
+// none of them is a system requirement - the difference between "press this
+// button" and the older "this box has to be set up again".
+function neededSystemRevision(unmet) {
+  let want = null;
+  for (const name of unmet || []) {
+    const m = SYSTEM_REQUIREMENT.exec(String(name));
+    if (m) want = Math.max(want == null ? 0 : want, Number(m[1]));
+  }
+  return want;
+}
+
 function unmetRequirements(feed) {
   const declared = feed && feed.requires;
   // A `requires` that is present but not a list is a broken feed, and reading it as
@@ -259,6 +292,17 @@ function unmetRequirements(feed) {
   if (declared != null && !Array.isArray(declared)) return ["malformed-requires"];
   const wanted = Array.isArray(declared) ? declared : [];
   return wanted.filter((name) => {
+    const sys = SYSTEM_REQUIREMENT.exec(String(name));
+    if (sys) {
+      try {
+        // Strict less-than against the highest revision ever applied. An
+        // unreadable marker reads as 0, so the box asks for the step rather than
+        // claiming one it cannot prove.
+        return sysupdate.appliedRevision() < Number(sys[1]);
+      } catch (e) {
+        return true;
+      }
+    }
     const met = REQUIREMENTS[name];
     if (!met) return true;
     try {
@@ -287,6 +331,17 @@ function status() {
     failed: readPair(FAILED),
     last: readLast(),
     os: osStatus(),
+    // The root half. Folded in here rather than given its own endpoint so the
+    // Settings screen keeps ONE poller and one document - two would be two
+    // things to keep in step with the demo mode and with each other.
+    system: {
+      ...sysupdate.status(),
+      // What the release in front of us is asking for, and what the feed says it
+      // would install. `needs` non-null AND `available` true is the only
+      // combination where pressing the button can do anything.
+      needs: neededSystemRevision(unmet),
+      feedRevision: latest && Number.isInteger(latest.systemRevision) ? latest.systemRevision : null,
+    },
   };
 }
 
@@ -601,6 +656,18 @@ function clearFailed() {
   return status();
 }
 
+// Ask the root half to run. Refused while this half is mid-update, because
+// provision reloads udev rules, reloads NetworkManager and spends minutes in
+// apt - during a pending release's first boots that would take the session down
+// and spend the three attempts run-shell.sh gives it, rolling back a release
+// that was fine. The applier makes the same check for itself; this one is so the
+// UI can say no rather than start something that immediately reports "busy".
+function applySystem() {
+  if (state === "downloading" || state === "installing" || state === "restarting") return status();
+  sysupdate.apply(() => {});
+  return status();
+}
+
 // Nightly auto-apply: only in the 3-6h window, only when the box is idle
 // (nothing playing, no app open), never right after boot, and never a version
 // that already rolled back once (that needs a human + a fixed release).
@@ -624,10 +691,12 @@ function startSchedulers() {
 
 module.exports = {
   unmetRequirements, // exported for the test: a release may demand what OTA cannot bring
+  neededSystemRevision, // same: which revision an unmet set is asking for
   init,
   status,
   check,
   apply,
+  applySystem,
   clearFailed,
   onLauncherLoaded,
   startSchedulers,
@@ -637,4 +706,5 @@ module.exports = {
   INFRA_FILES,
   USER_UNITS,
   UNIT_WANTS,
+  EXECUTABLE,
 };

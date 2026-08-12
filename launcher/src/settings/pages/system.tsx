@@ -3,7 +3,14 @@ import { useI18n, AVAILABLE_LOCALES } from "../../lib/i18n";
 import { useConfigStore } from "../../stores/config";
 import { fetchSystemInfo, setHostname } from "../../lib/system";
 import { fetchRegion, type RegionInfo } from "../../lib/region";
-import { fetchUpdateStatus, checkUpdate, applyUpdate, type UpdateStatus } from "../../lib/update";
+import {
+  fetchUpdateStatus,
+  checkUpdate,
+  applyUpdate,
+  applySystemUpdate,
+  SYSTEM_UPDATE_BUSY,
+  type UpdateStatus,
+} from "../../lib/update";
 import { power } from "../../lib/power";
 import { PinPad } from "@sdk/PinPad";
 import { PinGate } from "@sdk/PinGate";
@@ -299,28 +306,38 @@ function UpdatePage() {
     };
   }, []);
 
-  const working = !!st && st.state !== "idle" && st.state !== "error";
+  const sys = st?.system;
+  const sysBusy = !!sys && SYSTEM_UPDATE_BUSY.includes(sys.code);
+  // The root half can only help when this box HAS it: every box in the field is
+  // running a shell older than the applier, and for those the honest answer is
+  // still "set it up again".
+  const sysOffered = !!sys && sys.needs != null && sys.available;
+  const working = (!!st && st.state !== "idle" && st.state !== "error") || sysBusy;
   const auto = config?.update.auto ?? true;
   const appsAuto = config?.update.appsAuto ?? true;
 
   // The most relevant thing, in order.
   const statusLine = !st
     ? DASH
-    : st.state === "checking"
-      ? t("update.checking")
-      : st.state === "downloading"
-        ? t("update.downloading")
-        : st.state === "installing"
-          ? t("update.installing")
-          : st.state === "restarting"
-            ? t("update.restarting")
-            : st.state === "error"
-              ? t("update.error")
-              : st.available && st.latest
-                ? t("update.available", { version: st.latest.version })
-                : st.unmet?.length && st.latest
-                  ? t("update.needsReprovision", { version: st.latest.version })
-                  : t("update.upToDate");
+    : sysBusy
+      ? t("update.sys." + sys!.code)
+      : st.state === "checking"
+        ? t("update.checking")
+        : st.state === "downloading"
+          ? t("update.downloading")
+          : st.state === "installing"
+            ? t("update.installing")
+            : st.state === "restarting"
+              ? t("update.restarting")
+              : st.state === "error"
+                ? t("update.error")
+                : st.available && st.latest
+                  ? t("update.available", { version: st.latest.version })
+                  : sysOffered && st.latest
+                    ? t("update.needsSystem", { version: st.latest.version })
+                    : st.unmet?.length && st.latest
+                      ? t("update.needsReprovision", { version: st.latest.version })
+                      : t("update.upToDate");
 
   const notes =
     st?.available && st.latest?.notes
@@ -335,6 +352,13 @@ function UpdatePage() {
       <Note tone={st?.state === "error" ? "warn" : st?.available ? "accent" : "dim"}>{statusLine}</Note>
       {st?.state === "error" && st.error ? <Note>{st.error}</Note> : null}
       {st?.failed && <Note tone="warn">{t("update.failedRollback", { version: st.failed.to })}</Note>}
+      {/* How the last system update ended. Only when it is news: a plain "ok" is
+          already implied by the release becoming installable, and "idle" means
+          this box has never asked for one. */}
+      {sys && !sysBusy && sys.code !== "idle" && sys.code !== "ok" && sys.code !== "up-to-date" && (
+        <Note tone="warn">{t("update.sys." + sys.code)}</Note>
+      )}
+      {sys?.rebootRequired && !sysBusy && <Note>{t("update.sysRebootHint")}</Note>}
       {notes && (
         // Release notes are written as lines and can be long: without pre-line they
         // collapse into a paragraph, and without a cap they push the rows off screen.
@@ -370,6 +394,25 @@ function UpdatePage() {
             onEnter={async () => {
               setBusy(true);
               const s = await applyUpdate();
+              if (!alive.current) return;
+              if (s) setSt(s);
+              setBusy(false);
+            }}
+          />
+        )}
+        {/* The root half. Offered instead of the ordinary install, because the
+            release is not installable until it has run - and only when this box
+            carries the applier at all. */}
+        {sysOffered && !working && (
+          <Row
+            id="install-system"
+            label={t("update.sysInstall")}
+            hint={t("update.sysInstallHint")}
+            trailing="none"
+            disabled={busy}
+            onEnter={async () => {
+              setBusy(true);
+              const s = await applySystemUpdate();
               if (!alive.current) return;
               if (s) setSt(s);
               setBusy(false);

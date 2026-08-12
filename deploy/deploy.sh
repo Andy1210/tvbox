@@ -61,7 +61,11 @@ if [ "$SKIP_PROVISION" = 1 ]; then
   echo "==> provision skipped (--skip-provision)"
 else
   echo "==> provisioning (root, one-time; you may be asked for the sudo password)"
-  ssh -t "$PI" 'sudo bash ~/.tvbox/provision.sh' \
+  # TVBOX_TRUST_LOCAL_KEY: provision will not pin a release key out of a directory
+  # the box user can write, and ~/.tvbox is exactly that - every OTA refreshes it.
+  # A deploy is the case where the tree came from the developer's own checkout a
+  # moment ago, so the caller can say so; nothing else may.
+  ssh -t "$PI" 'sudo TVBOX_TRUST_LOCAL_KEY=1 bash ~/.tvbox/provision.sh' \
     || { echo "   provision FAILED - fix and re-run deploy"; exit 1; }
 fi
 
