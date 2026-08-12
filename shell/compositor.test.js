@@ -282,20 +282,62 @@ test("a failed read keeps what it knew, and asks again soon", async () => {
     c.on("data", () => c.end(JSON.stringify({ id: 1, ok: { windows: [], version: "0.1.10" } }) + "\n")),
   );
   await new Promise((r) => server.listen(sock, r));
-  await new Promise((r) => client.refreshVersion(r));
-  assert.equal(client.atLeast("0.1.10"), true);
+  // A listening server holds the event loop open, so the teardown has to run even
+  // when an assertion throws - otherwise a failing test hangs the file instead of
+  // reporting, and CI learns about it as a timeout.
+  try {
+    await new Promise((r) => client.refreshVersion(r));
+    assert.equal(client.atLeast("0.1.10"), true);
 
-  // The socket goes away. A version that dropped is not a case that exists - the
-  // compositor IS the session - so a read that merely failed must not switch a
-  // working feature off, and the answer stands.
-  await new Promise((r) => server.close(r));
-  fs.rmSync(sock, { force: true });
-  await new Promise((r) => client.refreshVersion(r));
-  assert.equal(client.atLeast("0.1.10"), true);
+    // The socket goes away. A version that dropped is not a case that exists - the
+    // compositor IS the session - so a read that merely failed must not switch a
+    // working feature off, and the answer stands.
+    await new Promise((r) => server.close(r));
+    fs.rmSync(sock, { force: true });
+    await new Promise((r) => client.refreshVersion(r));
+    assert.equal(client.atLeast("0.1.10"), true);
+  } finally {
+    server.close();
+    fs.rmSync(dir, { recursive: true, force: true });
+    delete process.env.TVBOX_WC_SOCKET;
+    delete require.cache[require.resolve("./compositor")];
+  }
+});
 
-  fs.rmSync(dir, { recursive: true, force: true });
-  delete process.env.TVBOX_WC_SOCKET;
+test("concurrent askers share one question", async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "tvbox-wc-single-"));
+  const sock = path.join(dir, "wc.sock");
+  process.env.TVBOX_WC_SOCKET = sock;
   delete require.cache[require.resolve("./compositor")];
+  const client = require("./compositor");
+
+  // `atLeast` refreshes whenever the cache is cold and is asked once per focused
+  // field, so a page moving focus between inputs would otherwise queue up identical
+  // reads against a socket that is already answering one.
+  let asked = 0;
+  const server = net.createServer((c) =>
+    c.on("data", () => {
+      asked++;
+      setTimeout(() => c.end(JSON.stringify({ id: 1, ok: { windows: [], version: "0.1.10" } }) + "\n"), 30);
+    }),
+  );
+  await new Promise((r) => server.listen(sock, r));
+  try {
+    const answers = await Promise.all([
+      new Promise((r) => client.refreshVersion(r)),
+      new Promise((r) => client.refreshVersion(r)),
+      new Promise((r) => client.refreshVersion(r)),
+    ]);
+    assert.equal(asked, 1, "three askers, one question");
+    assert.deepEqual(answers, ["0.1.10", "0.1.10", "0.1.10"]);
+  } finally {
+    // Same as above, and this is the test that found the need for it: with the guard
+    // broken the extra replies are still in flight when the assertion throws.
+    await new Promise((r) => server.close(r));
+    fs.rmSync(dir, { recursive: true, force: true });
+    delete process.env.TVBOX_WC_SOCKET;
+    delete require.cache[require.resolve("./compositor")];
+  }
 });
 
 test("with no compositor at all, nothing is claimed", async () => {

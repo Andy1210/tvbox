@@ -148,13 +148,19 @@ let runningVersion = "";
 let versionAt = 0;
 let versionGoodFor = 0;
 let versionPending = false;
+let versionWaiting = [];
 const VERSION_TTL_MS = 5 * 60 * 1000;
 // A failed read is worth asking about again soon. Marking it fresh for the full TTL
 // would let one timed-out socket read cost five minutes of the feature it gates.
 const VERSION_RETRY_MS = 30 * 1000;
 
+// One question at a time, and every caller parks on the one in flight rather than
+// adding another. Not just tidiness: `atLeast` refreshes whenever the cache is cold,
+// and it is asked once per focused field, so a slow socket would otherwise turn a
+// page moving focus between inputs into a queue of identical reads.
 function refreshVersion(cb) {
-  if (versionPending && !cb) return; // one question at a time; callers share the answer
+  if (cb) versionWaiting.push(cb);
+  if (versionPending) return;
   versionPending = true;
   request({ request: "get_state" }, (e, ok) => {
     versionPending = false;
@@ -170,7 +176,17 @@ function refreshVersion(cb) {
     // would switch a working feature off for no reason.
     versionAt = Date.now();
     versionGoodFor = answered ? VERSION_TTL_MS : VERSION_RETRY_MS;
-    if (cb) cb(runningVersion);
+    const waiting = versionWaiting;
+    versionWaiting = [];
+    for (const waiter of waiting) {
+      // One caller's throw must not swallow the next one's answer: this runs from a
+      // socket callback, which has nothing above it to catch anything.
+      try {
+        waiter(runningVersion);
+      } catch (err) {
+        console.warn("[compositor] version waiter threw:", err.message);
+      }
+    }
   });
 }
 
