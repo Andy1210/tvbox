@@ -32,6 +32,10 @@ const textinput = require("./textinput"); // typing into a keyboard-less app (OS
 // a field's existing text back to the user when the running compositor is at least
 // this, or that offer would be submitted twice.
 const TYPING_REPLACES_MIN_COMPOSITOR = "0.1.10";
+// One answer, read by both halves of the typing path - what we ASK the compositor
+// for and what we OFFER the user have to agree, or the keyboard opens on text that
+// delivery will not replace.
+const deliveryReplaces = () => compositor.atLeast(TYPING_REPLACES_MIN_COMPOSITOR);
 const lang = require("./lang"); // what language a remote web app is told it runs in
 const audio = require("./audio"); // wpctl sink list + volume (device audio settings)
 const bluetooth = require("./bluetooth"); // bluetoothctl pair/connect (audio + input devices)
@@ -3323,14 +3327,19 @@ app.whenReady().then(async () => {
     isForeground: (id) => currentAppId === id,
     // The compositor types into whatever holds the keyboard, which by now is the
     // app window this session belongs to - onDone put it back in front.
-    typeText: (text) => compositor.typeText(text, { selectAll: true }),
-    // ...and whether that REPLACES the field or merely appends to it, which is what
-    // makes it safe to open the keyboard on the field's own text. The select-all
-    // chord lost its modifier before tvbox-wc 0.1.10, so there a prefill would
-    // submit the text twice. Asked of the RUNNING compositor: an installed binary
-    // is only a file until greetd restarts, and this is the window where the
-    // difference matters.
-    canReplace: () => compositor.atLeast(TYPING_REPLACES_MIN_COMPOSITOR),
+    //
+    // Asking for the select-all is the SAME decision as offering the field's text
+    // back, so both read one answer. Before tvbox-wc 0.1.10 the chord went out
+    // without its modifier, which did not merely fail to replace: its own `a`
+    // landed in the field as a character, in front of everything the user typed.
+    // So on such a box we do not ask for it at all - delivery appends, which is
+    // what it effectively did anyway, and an empty field (the sign-in case this
+    // was reported from) gets exactly what was typed instead of an `a` and then
+    // what was typed.
+    typeText: (text) => compositor.typeText(text, { selectAll: deliveryReplaces() }),
+    // ...and the same answer decides whether the keyboard may open ON the field's
+    // own text: where typing appends, offering it back would submit it twice.
+    canReplace: deliveryReplaces,
   });
   // A restore replaced config.json + user apps - plugins only read credentials
   // at boot, so restart the shell shortly after (the phone page + TV UI get a
