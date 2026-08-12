@@ -5,6 +5,42 @@ updates). `scripts/make-release.sh` lifts the current version's `hu`/`en`
 blocks into the OTA feed's `notes` - keep both languages, keep it short, and
 write for the person on the couch (what changes for THEM), not for developers.
 
+## 2.18.0
+
+### hu
+
+- **A beírás oda kerül, ahová szántad.** Ha egy alkalmazásban egy mezőbe kellett
+  írni - például az e-mail-címedet a bejelentkezéshez -, a box egy fölösleges „a"
+  betűt tett a beírt szöveg elé, így a bejelentkezés nem sikerült. Ez elmúlt. A
+  billentyűzet ráadásul mostantól azzal nyílik, ami már a mezőben van, tehát egy
+  elgépelt betűt ki lehet javítani ahelyett, hogy az egészet újra kellene írni.
+
+- **Az Újraindítás tényleg újraindít.** Eddig a Beállítások → Újraindítás
+  megakaszthatta a boxot: a kép maradt, de a távirányító nem csinált semmit, és
+  csak az áramtalanítás segített. Mostantól rendesen újraindul, és ha valamiért
+  mégsem sikerül, kiírja a képernyőre, miért.
+
+- **A box saját wifije és Bluetooth-a kikapcsolható véglegesen.** A Beállításokban
+  külön-külön kikapcsolható mindkettő, és a kikapcsolás túléli az újraindítást is -
+  ez az, ami felszabadítja az antennát egy USB-s wifi- vagy Bluetooth-adapternek.
+
+### en
+
+- **What you type lands the way you typed it.** Filling in a field inside an app -
+  your e-mail address on a sign-in page, say - used to put a stray "a" in front of
+  the text, so signing in failed. That is gone. The keyboard also opens on what
+  the field already holds now, so a single wrong letter can be corrected instead of
+  retyping the lot.
+
+- **Restart actually restarts.** Settings → Restart could leave the box stuck: the
+  picture stayed up, the remote did nothing, and only unplugging it helped. It
+  reboots properly now, and if it ever cannot, it says so on screen instead of
+  going quiet.
+
+- **The box's own Wi-Fi and Bluetooth can be turned off for good.** Each can be
+  switched off in Settings and stays off across a reboot - which is what frees the
+  antenna for a USB Wi-Fi or Bluetooth adapter.
+
 ## 2.17.1
 
 ### hu
