@@ -380,6 +380,17 @@ install -d "${ROOTFS_DIR}/etc/systemd/system/systemd-coredump@.service.d"
 install -m 644 "${ROOTFS_DIR}${USER_HOME}/.tvbox/coredump-tvbox-runtimemax.conf" \
   "${ROOTFS_DIR}/etc/systemd/system/systemd-coredump@.service.d/10-tvbox-runtime-max.conf"
 
+# Screen mirroring's privileged half. A flashed box never runs provision.sh, and
+# this block did not exist - so every SD-image box offered mirroring in Settings
+# with no helper to start and no grant to start it with, and nothing said so. The
+# unit is deliberately NOT enabled: a group owner beacons continuously and holds
+# the radio this board shares with Bluetooth, so it is armed on request.
+install -m 755 "${ROOTFS_DIR}${USER_HOME}/.tvbox/tvbox-miracast" "${ROOTFS_DIR}/usr/local/sbin/tvbox-miracast"
+install -m 644 "${ROOTFS_DIR}${USER_HOME}/.tvbox/tvbox-miracast.service" \
+  "${ROOTFS_DIR}/etc/systemd/system/tvbox-miracast.service"
+install -m 644 "${ROOTFS_DIR}${USER_HOME}/.tvbox/52-tvbox-miracast.rules" \
+  "${ROOTFS_DIR}/etc/polkit-1/rules.d/52-tvbox-miracast.rules"
+
 # The root-side system updater: what lets a later release bring its OWN root half
 # (an apt package, a grant, a unit) instead of needing a re-flash. Installed from
 # ~/.tvbox/ like the pair above, so the image and provision.sh share one copy -

@@ -48,6 +48,7 @@ deploy/tvbox-safemode-screen.service
 # the pair above - provision.sh installs them, OTA only carries them.
 deploy/tvbox-miracast
 deploy/tvbox-miracast.service
+deploy/52-tvbox-miracast.rules
 # Built-in radio switch: the privileged helper and its template unit. Same
 # root-side caveat again - provision.sh installs them, OTA only carries them.
 deploy/tvbox-radio

@@ -100,6 +100,7 @@ const INFRA_FILES = [
   // until its next provision rather than gaining the feature straight away.
   "tvbox-miracast",
   "tvbox-miracast.service",
+  "52-tvbox-miracast.rules",
   // The built-in radio switch, same shape: root installs it, OTA only carries it.
   "tvbox-radio",
   "tvbox-radio@.service",
