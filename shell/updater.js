@@ -363,7 +363,12 @@ async function check() {
   state = "checking";
   error = null;
   try {
-    const feed = await fetchJson(feedUrl(), FEED_TIMEOUT_MS);
+    // Retried, and with a short pause because this runs on the boot path: one
+    // dropped connection would otherwise leave `state` at "error" until the next
+    // six-hourly check, and autoTick refuses to run unless the state is idle - so
+    // a single flake costs a whole night's auto-update and paints a red line on
+    // the television meanwhile.
+    const feed = await withRetries(() => fetchJson(feedUrl(), FEED_TIMEOUT_MS), 3, 2000, transient);
     if (!feed || feed.feedVersion !== 1) throw new Error("bad feed shape");
     if (!versionOk(feed.version)) throw new Error("bad feed version");
     if (!/^https:\/\//.test(feed.url || "") && !isLanUrl(feed.url))
@@ -413,21 +418,24 @@ function run(cmd, args, opts) {
 // Deliberately small and blunt: the failures worth surviving here are transient
 // (a 503, a connection closed without a response), and anything permanent fails
 // the same way it did before, just later.
-async function withRetries(fn, attempts = 3, pauseMs = 15000) {
-  let last = null;
+async function withRetries(fn, attempts = 4, pauseMs = 20000, retryable = () => true) {
+  let last = new Error("no attempt was made");
   for (let i = 0; i < attempts; i++) {
     try {
       return await fn();
     } catch (e) {
       last = e;
-      if (i + 1 < attempts) {
-        console.warn("[updater] retrying after:", String(e.message || e).slice(0, 120));
-        await new Promise((r) => setTimeout(r, pauseMs));
-      }
+      // A 404 is an answer, not a flake. Same rule the applier's fetch follows.
+      if (!retryable(e) || i + 1 >= attempts) break;
+      console.warn("[updater] retrying after:", String(e.message || e).slice(0, 120));
+      await new Promise((r) => setTimeout(r, pauseMs));
     }
   }
   throw last;
 }
+
+// What is worth another go: everything except an answer the server meant.
+const transient = (e) => !/HTTP 4\d\d/.test(String((e && e.message) || e));
 
 function freeBytes() {
   try {
@@ -551,7 +559,13 @@ async function apply() {
       // 503 often enough to have failed two image builds in one evening, and
       // @electron/get has no retry of its own. Failing here fails the whole
       // update, and the user sees it as "the update failed" with no cause.
-      await withRetries(() => run("node", ["node_modules/electron/install.js"], { cwd: path.join(stage, "shell") }));
+      // The per-attempt timeout is shortened from run()'s 15-minute default so
+      // four attempts cannot turn a stalled download into three quarters of an
+      // hour with the update stuck at "installing" and a shell restart waiting
+      // at the end of it.
+      await withRetries(() =>
+        run("node", ["node_modules/electron/install.js"], { cwd: path.join(stage, "shell"), timeout: 5 * 60 * 1000 }),
+      );
     }
     // move into place + atomic-ish symlink flip, with the rollback marker
     // written FIRST so a crash between the two steps still rolls back cleanly
@@ -717,6 +731,7 @@ function startSchedulers() {
 
 module.exports = {
   unmetRequirements, // exported for the test: a release may demand what OTA cannot bring
+  withRetries, // exported for the test: what survives a flake and what does not
   neededSystemRevision, // same: which revision an unmet set is asking for
   init,
   status,

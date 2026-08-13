@@ -153,3 +153,62 @@ test("a release that needs the compositor is not offered to a box without one", 
   delete require.cache[require.resolve("./compositor")];
   delete require.cache[require.resolve("./updater")];
 });
+
+// GitHub's release CDN drops connections and answers 503 often enough to have
+// failed two SD-image builds in one evening, and to make a box report
+// "feed-unreachable" while curl to the same URL from that box succeeded three
+// times running. So what comes from it is tried more than once - but only the
+// failures worth another go.
+test("a flake is survived, and the work stops once it succeeds", async () => {
+  let calls = 0;
+  const r = await updater.withRetries(
+    async () => {
+      calls++;
+      if (calls < 3) throw new Error("Remote end closed connection without response");
+      return "ok";
+    },
+    4,
+    1,
+  );
+  assert.equal(r, "ok");
+  assert.equal(calls, 3, "kept trying after it had already succeeded");
+});
+
+test("a permanent failure is reported with its own error, not a generic one", async () => {
+  let calls = 0;
+  await assert.rejects(
+    () =>
+      updater.withRetries(
+        async () => {
+          calls++;
+          throw new Error("no space left on device");
+        },
+        3,
+        1,
+      ),
+    /no space left on device/,
+  );
+  assert.equal(calls, 3);
+});
+
+test("an answer the server meant is not retried", async () => {
+  // A 404 says the artefact is not there; asking three more times is three more
+  // ways to be told so, slowly. Same rule the applier's own fetch follows, so
+  // the two halves of an update agree about what a flake is.
+  let calls = 0;
+  const transient = (e) => !/HTTP 4\d\d/.test(String(e.message || e));
+  await assert.rejects(
+    () =>
+      updater.withRetries(
+        async () => {
+          calls++;
+          throw new Error("HTTP 404");
+        },
+        4,
+        1,
+        transient,
+      ),
+    /HTTP 404/,
+  );
+  assert.equal(calls, 1, "a 404 was retried");
+});
