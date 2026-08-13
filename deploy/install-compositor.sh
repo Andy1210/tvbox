@@ -75,7 +75,14 @@ if [ -n "$TAG" ] && [ -n "$SHA256" ]; then
 	fi
 	url="https://github.com/Andy1210/tvbox-wc/releases/download/$TAG/tvbox-wc-aarch64"
 	tmp=$(mktemp) || exit 1
-	if ! curl -fsSL --retry 3 -o "$tmp" "$url"; then
+	# `--retry 3` alone backs off 1s, 2s, 4s, so all four attempts are spent
+	# inside seven seconds. Measured: the v3.0.0 image build died with four 503s
+	# in that window while GitHub's release CDN was unwell, and the same endpoint
+	# was serving normally minutes later. A fixed delay spreads the attempts over
+	# about a minute instead, which is the difference between a failed image build
+	# and a slow one. `--retry-all-errors` also covers the connection being closed
+	# without a response, which is the other shape this takes.
+	if ! curl -fsSL --retry 5 --retry-delay 15 --retry-all-errors -o "$tmp" "$url"; then
 		rm -f "$tmp"
 		echo "  could not download $url" >&2
 		exit 1

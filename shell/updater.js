@@ -409,6 +409,26 @@ function run(cmd, args, opts) {
   });
 }
 
+// Run something that talks to GitHub a few times before believing it.
+// Deliberately small and blunt: the failures worth surviving here are transient
+// (a 503, a connection closed without a response), and anything permanent fails
+// the same way it did before, just later.
+async function withRetries(fn, attempts = 3, pauseMs = 15000) {
+  let last = null;
+  for (let i = 0; i < attempts; i++) {
+    try {
+      return await fn();
+    } catch (e) {
+      last = e;
+      if (i + 1 < attempts) {
+        console.warn("[updater] retrying after:", String(e.message || e).slice(0, 120));
+        await new Promise((r) => setTimeout(r, pauseMs));
+      }
+    }
+  }
+  throw last;
+}
+
 function freeBytes() {
   try {
     const s = fs.statfsSync(TVBOX);
@@ -526,7 +546,12 @@ async function apply() {
       // release's first start instead, i.e. a ~110 MB download inside the 90 s
       // the boot watchdog gives an update to commit itself before it counts as
       // a failed boot. Fetch it here, where failing just fails the update.
-      await run("node", ["node_modules/electron/install.js"], { cwd: path.join(stage, "shell") });
+      // Tried more than once for the same reason the image build is: it pulls
+      // ~110 MB from GitHub's release CDN, which drops connections and answers
+      // 503 often enough to have failed two image builds in one evening, and
+      // @electron/get has no retry of its own. Failing here fails the whole
+      // update, and the user sees it as "the update failed" with no cause.
+      await withRetries(() => run("node", ["node_modules/electron/install.js"], { cwd: path.join(stage, "shell") }));
     }
     // move into place + atomic-ish symlink flip, with the rollback marker
     // written FIRST so a crash between the two steps still rolls back cleanly

@@ -710,7 +710,22 @@ su - ${FIRST_USER_NAME} -c 'cd ~/.tvbox/shell && npm ci --no-audit --no-fund'
 # that download, done where a failure stops the build; it exits 0 when the
 # binary is already in place.
 # (No backticks in this comment - see the heredoc note above.)
-su - ${FIRST_USER_NAME} -c 'cd ~/.tvbox/shell && node node_modules/electron/install.js'
+#
+# Tried more than once, because it pulls ~110 MB from the same GitHub release CDN
+# that failed the v3.0.1 image build outright ("TypeError: fetch failed" out of
+# @electron/get, which has no retry of its own). An hour of build time should not
+# be thrown away by one bad minute at the far end.
+for attempt in 1 2 3 4; do
+  if su - ${FIRST_USER_NAME} -c 'cd ~/.tvbox/shell && node node_modules/electron/install.js'; then
+    break
+  fi
+  if [ "$attempt" = 4 ]; then
+    echo "electron binary download failed after $attempt attempts" >&2
+    exit 1
+  fi
+  echo "electron binary download failed (attempt $attempt) - retrying in 20s" >&2
+  sleep 20
+done
 
 # tvbox CLI on PATH
 su - ${FIRST_USER_NAME} -c 'mkdir -p ~/.local/bin && ln -sf ~/.tvbox/tvbox ~/.local/bin/tvbox'
