@@ -97,8 +97,19 @@ echo "==> Electron (npm install)"
 # exits 0 when the binary is already there.
 # stdout only: the progress bar is noise, but the reason a download failed is
 # the whole point of running it here.
-( cd ~/.tvbox/shell && node node_modules/electron/install.js >/dev/null ) \
-  && ok "electron binary" || bad "electron binary download failed"
+# Tried more than once, like the image build and the updater: it pulls ~110 MB
+# from the GitHub release CDN, which drops connections often enough to have
+# failed two image builds in one evening, and @electron/get has no retry of its
+# own. This heredoc is quoted, so $attempt is the remote shell's.
+electron_ok=0
+for attempt in 1 2 3 4; do
+  if ( cd ~/.tvbox/shell && node node_modules/electron/install.js >/dev/null ); then
+    electron_ok=1
+    break
+  fi
+  [ "$attempt" = 4 ] || sleep 20
+done
+[ "$electron_ok" = 1 ] && ok "electron binary" || bad "electron binary download failed"
 chmod +x ~/.tvbox/run-shell.sh ~/.tvbox/shell/audio-default.sh ~/.tvbox/tvbox 2>/dev/null || true
 
 echo "==> dev deploy wins over OTA (drop the \`current\` symlink + update markers)"
