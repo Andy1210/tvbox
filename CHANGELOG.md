@@ -5,6 +5,24 @@ updates). `scripts/make-release.sh` lifts the current version's `hu`/`en`
 blocks into the OTA feed's `notes` - keep both languages, keep it short, and
 write for the person on the couch (what changes for THEM), not for developers.
 
+## 3.0.2
+
+### hu
+
+- **Egy pillanatnyi hálózati zavar nem hiúsítja meg a frissítést.** A letöltési
+  kiszolgáló időnként másodpercekre elérhetetlen. Eddig ilyenkor a box hibát írt
+  ki a Beállításokban, és az aznap éjjeli automatikus frissítés is elmaradt,
+  pedig másodpercekkel később már minden ment volna. Mostantól újrapróbálkozik, és
+  egy sikertelen keresés után sem kell percekig várni a következő próbára.
+
+### en
+
+- **A moment of network trouble no longer costs you an update.** The download
+  server is unreachable for a few seconds now and then. The box used to show an
+  error in Settings and skip that night's automatic update over it, when trying
+  again seconds later would have worked. It retries now, and a failed check no
+  longer makes you wait minutes before the next attempt.
+
 ## 3.0.1
 
 ### hu
