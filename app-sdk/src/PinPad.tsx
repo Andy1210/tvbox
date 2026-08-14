@@ -11,11 +11,14 @@ export function PinPad({
   onSubmit,
   onCancel,
   error,
+  busy,
 }: {
   title: string;
   onSubmit: (pin: string) => void;
   onCancel: () => void;
   error?: string;
+  /** A check is in flight. Digits are ignored rather than silently dropped. */
+  busy?: boolean;
 }) {
   const [pin, setPin] = useState("");
   const { ref, focusKey } = useFocusable({ focusKey: "pinpad" });
@@ -32,6 +35,14 @@ export function PinPad({
       onSubmit(p);
     }
   }, [pin, onSubmit]);
+
+  // The fourth digit clears the dots before the caller has answered, so without
+  // this the pad shows four empty circles, no error and no sign of progress -
+  // and a second code typed into that gap fills, clears and is thrown away.
+  const press = (fn: (p: string) => string): void => {
+    if (busy) return;
+    setPin(fn);
+  };
 
   useBackspace(onCancel);
 
@@ -52,13 +63,17 @@ export function PinPad({
             />
           ))}
         </div>
-        {error && <div className="text-[2vh] text-red-400">{error}</div>}
+        {busy ? (
+          <div className="text-[2vh] text-white/70">…</div>
+        ) : (
+          error && <div className="text-[2vh] text-red-400">{error}</div>
+        )}
         <div className="grid grid-cols-3 gap-[1.2vw]">
           {digits.map((d) => (
             <FocusButton
               key={d}
               focusKey={"pin-" + d}
-              onEnter={() => setPin((p) => (p.length < 4 ? p + d : p))}
+              onEnter={() => press((p) => (p.length < 4 ? p + d : p))}
               className="w-[9vw] max-w-[120px] aspect-square rounded-full bg-white/5 flex items-center justify-center text-[3.5vh] font-semibold"
             >
               {d}
@@ -67,14 +82,14 @@ export function PinPad({
           <FocusButton
             focusKey="pin-del"
             label="delete"
-            onEnter={() => setPin((p) => p.slice(0, -1))}
+            onEnter={() => press((p) => p.slice(0, -1))}
             className="w-[9vw] max-w-[120px] aspect-square rounded-full bg-white/5 flex items-center justify-center text-[3vh]"
           >
             <KeyGlyph name="backspace" className="w-[3vh] h-[3vh]" />
           </FocusButton>
           <FocusButton
             focusKey="pin-0"
-            onEnter={() => setPin((p) => (p.length < 4 ? p + "0" : p))}
+            onEnter={() => press((p) => (p.length < 4 ? p + "0" : p))}
             className="w-[9vw] max-w-[120px] aspect-square rounded-full bg-white/5 flex items-center justify-center text-[3.5vh] font-semibold"
           >
             0
