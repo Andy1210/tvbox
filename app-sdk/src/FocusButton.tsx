@@ -10,12 +10,22 @@ export function FocusButton({
   children,
   label,
   onFocused,
+  onArrowPress,
 }: {
   focusKey?: string;
   onEnter: () => void;
   className?: string;
   children: ReactNode;
   label?: string; // accessible name - needed when the visible content is an icon
+  /**
+   * Intercept an arrow before spatial navigation resolves it.
+   *
+   * Return false to say the press is handled. For the cases where geometry
+   * gives the right answer and the wrong destination - the edge of a rail that
+   * should reach the header above it rather than whatever happens to lie up and
+   * to the left.
+   */
+  onArrowPress?: (direction: string) => boolean;
   /**
    * Called when this button takes focus.
    *
@@ -25,7 +35,7 @@ export function FocusButton({
    */
   onFocused?: () => void;
 }) {
-  const { ref, focused } = useFocusableItem({ focusKey, onEnterPress: onEnter }, { block: "nearest" });
+  const { ref, focused } = useFocusableItem({ focusKey, onEnterPress: onEnter, onArrowPress }, { block: "nearest" });
 
   useEffect(() => {
     if (focused) onFocused?.();
