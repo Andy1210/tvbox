@@ -42,7 +42,7 @@ fi
 # is not a reason to re-provision a fleet. scripts/provision_revision_check.js
 # is the reminder: it fails when the root payload's content moved and this did
 # not.
-PROVISION_REVISION=2
+PROVISION_REVISION=3
 
 # Set by tvbox-sysupdate: this run has nobody in front of it. Two things are a
 # person's to decide and are skipped in that mode - see where each is used.
