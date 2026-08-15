@@ -15,3 +15,4 @@ export * from "./capability";
 export * from "./display";
 export * from "./gamepad";
 export * from "./spatial-nav";
+export * from "./sounds";
