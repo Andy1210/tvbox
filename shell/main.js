@@ -123,6 +123,11 @@ const CONSOLE_TAG = { debug: "log", info: "info", warning: "warn", error: "error
 
 let win = null;
 let currentAppId = null; // which app is FOREGROUND (null = launcher); drives focus + video-mode targeting
+// The app to return to when the screensaver it asked for is dismissed (see
+// showAmbient, far below). Declared up here because setForegroundApp clears it,
+// and a `let` further down the file would be in its temporal dead zone for any
+// call that happens before this module finishes loading.
+let ambientReturnApp = null;
 
 // The compositor cannot work out which of the launcher and an app owns the screen:
 // both are windows of this process. It needs to know, because the remote's Back
@@ -130,6 +135,9 @@ let currentAppId = null; // which app is FOREGROUND (null = launcher); drives fo
 // for the launcher, which handles the browser key itself.
 function setForegroundApp(id) {
   currentAppId = id;
+  // Whatever moved the screen, the app the screensaver would go back to is no
+  // longer a promise worth keeping: the person went somewhere themselves.
+  ambientReturnApp = null;
   compositor.setFocus(id ? "app" : "launcher", id || null);
 }
 // A native app is MEANT to own the screen. Separate from nativeapp.running(): a
@@ -2860,6 +2868,46 @@ ipcMain.on("nav", (e, dest) => {
   // whatever is foreground - a background app's exit must not close the visible one.
   if (dest === "exit") return exitApp(windowAppId(e.sender));
   navTo(dest);
+});
+
+// ---- the screensaver, asked for by the app on screen ----
+// The ambient screen belongs to the launcher, and the launcher's window is hidden
+// whenever an app is in front (exactly one visible toplevel). So the screensaver
+// cannot arm behind an app - which is right while the app has something to show,
+// and wrong for an app that has nothing: Spotify sitting on "nothing is playing"
+// is a static screen the box will hold all night. Such an app asks, and the shell
+// brings the launcher forward with the ambient screen on, remembering where to go
+// back to. Any key there returns to the app, which was hidden rather than closed,
+// so it comes back as it was.
+//
+// No capability of its own: this is worth what tvbox.home() is worth, and every
+// app already has that. What it must not do is fire for an app that is not the
+// one on screen, or a background app's timer would take the person out of
+// whatever they are actually watching.
+function ambientEnabled() {
+  const c = config.publicConfig();
+  return !!(c && c.ambient && c.ambient.enabled);
+}
+function showAmbient(fromApp) {
+  if (!win || win.isDestroyed() || !ambientEnabled()) return false;
+  if (!fromApp || fromApp !== currentAppId) return false;
+  showLauncher(); // hides the app's window, and clears ambientReturnApp
+  ambientReturnApp = fromApp;
+  try {
+    win.webContents.send("tvbox-nav", { dest: "ambient" });
+  } catch (e) {}
+  return true;
+}
+// Back to the app that asked. A no-op when nothing asked, so the launcher can
+// call it on every ambient exit without knowing which kind it was.
+function ambientDone() {
+  const id = ambientReturnApp;
+  ambientReturnApp = null;
+  if (id) navTo(id);
+}
+ipcMain.on("ambient", (e, action) => {
+  if (action === "request") showAmbient(windowAppId(e.sender));
+  else if (action === "done" && windowAppId(e.sender) === null) ambientDone(); // the launcher only
 });
 
 // Which app a capability call belongs to - the SENDER window's own identity

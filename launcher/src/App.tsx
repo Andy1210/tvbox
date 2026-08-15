@@ -82,6 +82,10 @@ export function App() {
   const ambientEnabled = config?.ambient.enabled ?? false;
   const [typing, setTyping] = useState(false);
   const [mirroring, setMirroring] = useState(false);
+  // An app asked for the screensaver over itself (see the nav handler below).
+  // Kept apart from `idle`, because this one did not come from a timer here and
+  // dismissing it goes somewhere else: back to the app that asked.
+  const [askedAmbient, setAskedAmbient] = useState(false);
   const [idle, wake] = useIdle(
     (config?.ambient.idleMinutes ?? 5) * 60000,
     view !== "home" || !ambientEnabled || typing || mirroring,
@@ -126,6 +130,15 @@ export function App() {
     // whatever is on screen); everything else is a view switch.
     return window.tvbox?.onNav?.((n) => {
       if (n.dest === "typing" || n.dest === "mirroring") return;
+      // An app on screen asked for the screensaver (its own screen had nothing to
+      // show). The shell has already brought this window forward and remembers
+      // where to go back to; the timer cannot be waited for, because it never ran
+      // while this window was hidden.
+      if (n.dest === "ambient") {
+        nav.home();
+        setAskedAmbient(true);
+        return;
+      }
       if (n.dest === "settings") nav.open("settings");
       else nav.home();
     });
@@ -171,7 +184,19 @@ export function App() {
     content = (
       <ScreenTransition key="home">
         <Home />
-        {idle && ambientEnabled && <Ambient onExit={wake} />}
+        {(idle || askedAmbient) && ambientEnabled && (
+          <Ambient
+            onExit={() => {
+              wake();
+              if (!askedAmbient) return;
+              setAskedAmbient(false);
+              // Straight back to the app that asked, rather than leaving the
+              // person on a Home screen they never navigated to. A no-op in the
+              // shell if it has since sent the screen somewhere else.
+              window.tvbox?.ambient?.done?.();
+            }}
+          />
+        )}
       </ScreenTransition>
     );
 

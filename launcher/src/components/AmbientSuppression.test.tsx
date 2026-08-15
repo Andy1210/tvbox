@@ -24,6 +24,8 @@ const CONFIG = {
 type NavCb = (n: { dest: string }) => void;
 let navCbs: NavCb[] = [];
 
+const ambientDone = vi.fn();
+
 function stubShell(session: unknown) {
   vi.stubGlobal("fetch", (url: string) =>
     Promise.resolve(
@@ -46,6 +48,7 @@ function stubShell(session: unknown) {
       submit: vi.fn(),
       phone: vi.fn(),
     },
+    ambient: { request: vi.fn(), done: ambientDone },
   });
 }
 
@@ -62,6 +65,7 @@ beforeEach(() => {
   localStorage.clear();
   useConfigStore.setState({ config: null, error: false });
   navCbs = [];
+  ambientDone.mockClear();
   vi.useFakeTimers();
 });
 afterEach(() => {
@@ -86,6 +90,51 @@ describe("ambient suppression", () => {
     await pushNav("typing");
     await goIdle();
     expect(ambientUp()).toBe(false);
+  });
+
+  // The other direction: an app can ask for the screensaver over itself, because
+  // the launcher's window is hidden while an app is in front and its timer never
+  // runs there. The shell brings this window forward and pushes "ambient".
+  it("comes up when an app asks, without waiting for the timer", async () => {
+    stubShell(null);
+    render(<App />);
+    await settle();
+
+    await pushNav("ambient");
+
+    expect(ambientUp()).toBe(true);
+  });
+
+  it("...and the first key sends the screen back to the app that asked", async () => {
+    stubShell(null);
+    render(<App />);
+    await settle();
+    await pushNav("ambient");
+    expect(ambientUp()).toBe(true);
+
+    await act(async () => {
+      window.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+      await Promise.resolve();
+    });
+
+    expect(ambientUp()).toBe(false);
+    expect(ambientDone).toHaveBeenCalled();
+  });
+
+  it("a screensaver nobody asked for does not send the screen anywhere", async () => {
+    stubShell(null);
+    render(<App />);
+    await settle();
+    await goIdle();
+    expect(ambientUp()).toBe(true);
+
+    await act(async () => {
+      window.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+      await Promise.resolve();
+    });
+
+    expect(ambientUp()).toBe(false);
+    expect(ambientDone).not.toHaveBeenCalled();
   });
 
   it("arms again once the typing session ends", async () => {

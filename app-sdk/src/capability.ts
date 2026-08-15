@@ -105,6 +105,12 @@ export interface TvboxBridge {
   onCommand?(cb: (c: TvCommand) => void): () => void;
   onNotify?(cb: (n: TvNotification) => void): () => void;
   onNav?(cb: (n: NavEvent) => void): () => void;
+  /** The box's screensaver. `request()` asks for it over this app: the ambient
+   * screen belongs to the launcher, whose window is hidden while an app is in
+   * front, so an app whose own screen has nothing to show has to ask rather than
+   * wait. Any key on the screensaver returns here. Ignored unless this app is the
+   * one on screen and the owner has the screensaver on. */
+  ambient?: { request(): void; done(): void };
   fetch?(url: string, opts?: FetchRequest): Promise<FetchResponse>;
   storage?: StorageBridge;
   display?: DisplayBridge;
