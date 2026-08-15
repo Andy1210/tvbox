@@ -171,9 +171,19 @@ describe("ambient suppression", () => {
 
     expect(ambientUp()).toBe(false);
     expect(behind).toEqual([]);
-    // ...and the next release, which belongs to whatever the person does after,
-    // reaches the screen normally.
+
+    // A repeat of the same held key is eaten too - that is the one that opened a
+    // tile on the box - and so is anything else within the second the wake key
+    // is given, because a held key has no reliable last event.
     window.addEventListener("keyup", spy);
+    await act(async () => {
+      window.dispatchEvent(new KeyboardEvent("keyup", { key: "Enter", bubbles: true }));
+      await Promise.resolve();
+    });
+    expect(behind).toEqual([]);
+
+    // ...and a second later the screen is the person's again.
+    await act(async () => void (await vi.advanceTimersByTimeAsync(1200)));
     await act(async () => {
       window.dispatchEvent(new KeyboardEvent("keyup", { key: "Enter", bubbles: true }));
       await Promise.resolve();

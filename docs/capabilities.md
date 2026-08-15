@@ -72,15 +72,22 @@ tvbox().ambient?.request(); // "I have nothing to show, the screensaver may come
 ```
 
 The shell brings the launcher forward with the ambient screen on, remembers which
-app asked, and sends the screen back there on the first key. The app is hidden,
-not closed, so it comes back as it was.
+app asked, and sends the screen back there on the first key. The app is hidden
+rather than closed, so it normally comes back as it was - but hidden means muted,
+with its `<video>`/`<audio>` paused, and on a box with `config.apps.background`
+off it means destroyed and relaunched. Do not ask for this over state a person
+would mind losing.
 
-Three things it will not do, all of them silent (the call is fire-and-forget):
+Four things it will not do, all of them silent (the call is fire-and-forget):
 
 - fire for an app that is **not the one on screen** - a background app's timer
   must not take the person out of what they are watching;
+- fire while a **native program** is running (the shell would end it, not hide
+  it), while the shared **player** is running, or while a phone is **mirroring**;
 - fire when the owner has the screensaver **off** (Settings - Ambient);
-- fire on a shell that predates it, where `tvbox().ambient` is simply absent.
+- fire on a shell that predates it, where `tvbox().ambient` is simply absent -
+  and in the isolated window, on an app that declares no capability beyond `nav`,
+  where `window.tvbox` is not exposed at all.
 
 Deciding **when** is the app's own business, and it needs both halves: no
 playback of its own, and no key for a while. `GET /tvbox/api/config` carries

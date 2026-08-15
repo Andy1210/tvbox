@@ -109,8 +109,10 @@ export interface TvboxBridge {
    * screen belongs to the launcher, whose window is hidden while an app is in
    * front, so an app whose own screen has nothing to show has to ask rather than
    * wait. Any key on the screensaver returns here. Ignored unless this app is the
-   * one on screen and the owner has the screensaver on. */
-  ambient?: { request(): void; done(): void };
+   * one on screen, nothing of ours is playing, and the owner has the screensaver
+   * on. (The launcher's own `done()` is not part of an app's surface - the shell
+   * accepts it from the launcher window only.) */
+  ambient?: { request(): void };
   fetch?(url: string, opts?: FetchRequest): Promise<FetchResponse>;
   storage?: StorageBridge;
   display?: DisplayBridge;

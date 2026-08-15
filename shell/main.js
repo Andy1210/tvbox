@@ -2894,13 +2894,18 @@ function ambientEnabled() {
   return !!(c && c.ambient && c.ambient.enabled);
 }
 function showAmbient(fromApp) {
-  if (!win || win.isDestroyed() || !ambientEnabled()) return false;
+  if (!win || win.isDestroyed()) return false;
   if (!fromApp || fromApp !== currentAppId) return false;
-  // A native program owns the screen, and showLauncher would not hide it - it
-  // would END it. An app that launches one (the RetroArch grid starts a game per
-  // title) keeps its own hidden window and stays `currentAppId` the whole time,
-  // so without this its idle timer would kill somebody's game to put a clock up.
+  // Everything showLauncher would take away on the way to a clock. The screen is
+  // not the only thing an app can have going: it ENDS a native program (an app
+  // that launches one keeps its own hidden window and stays `currentAppId` the
+  // whole game), stops the shared player, and mutes the window it hides along
+  // with any media playing inside it. So an app is only allowed to ask when
+  // nothing of that is running - which is the same rule the app itself is
+  // supposed to apply, enforced where it cannot be forgotten.
   if (nativeForeground || nativeapp.running()) return false;
+  if (player.running() || mirrorOnScreen) return false;
+  if (!ambientEnabled()) return false;
   showLauncher(); // hides the app's window, and clears ambientReturnApp
   ambientReturnApp = fromApp;
   try {

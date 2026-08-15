@@ -85,7 +85,20 @@ export function App() {
   // An app asked for the screensaver over itself (see the nav handler below).
   // Kept apart from `idle`, because this one did not come from a timer here and
   // dismissing it goes somewhere else: back to the app that asked.
+  //
+  // Dropped when this window goes away, which is what an app coming forward does
+  // to it (the shell keeps exactly one visible toplevel and says nothing to us
+  // about it). Left set, the screensaver would keep running its clock, its photo
+  // fetches and its sleep timer behind whatever is on screen. `idle` has the same
+  // edge, inside useIdle.
   const [askedAmbient, setAskedAmbient] = useState(false);
+  useEffect(() => {
+    const onVis = () => {
+      if (document.hidden) setAskedAmbient(false);
+    };
+    document.addEventListener("visibilitychange", onVis);
+    return () => document.removeEventListener("visibilitychange", onVis);
+  }, []);
   const [idle, wake] = useIdle(
     (config?.ambient.idleMinutes ?? 5) * 60000,
     view !== "home" || !ambientEnabled || typing || mirroring,
