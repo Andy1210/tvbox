@@ -2,7 +2,8 @@
   "name": "tvbox-shell",
   "version": "3.1.0",
   "tvboxRequires": [
-    "compositor"
+    "compositor",
+    "system:2"
   ],
   "private": true,
   "description": "tvbox Electron shell - manifest-driven host for the launcher + apps (web-client/mpv).",
