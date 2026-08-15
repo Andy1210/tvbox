@@ -285,9 +285,16 @@ export function Osk({
       >
         <div className="text-[2.4vh] font-semibold text-fg-dim">{title}</div>
         <div className="min-w-[60vw] max-w-[80vw] px-[2vw] py-[1.6vh] rounded-[1vh] bg-white/5 text-[3vh] min-h-[6vh] flex items-center break-all">
-          {text.slice(0, cursor)}
+          {/* whitespace-pre-wrap, because HTML collapses a trailing space: the
+              caret stayed put after pressing space and only moved once the next
+              character arrived, which reads as a dropped keypress. */}
+          <span className="whitespace-pre-wrap">{text.slice(0, cursor)}</span>
           <span className="inline-block w-[0.2vw] h-[3vh] bg-white/70 align-middle animate-pulse" />
-          {text.slice(cursor)}
+          <span className="whitespace-pre-wrap">{text.slice(cursor)}</span>
+          {/* A zero-width character so the field keeps a full line box while it
+              is empty. Without it the box is only as tall as the caret, and it
+              grows the moment the first character is typed. */}
+          <span className="inline-block w-0 overflow-hidden">{"\u200b"}</span>
         </div>
         <div className="flex flex-col gap-[1vh] items-center">
           {rows.map((row, r) => (

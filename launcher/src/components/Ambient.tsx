@@ -3,8 +3,8 @@ import { pause, resume } from "@noriginmedia/norigin-spatial-navigation";
 import { useI18n } from "../lib/i18n";
 import { fetchWeather, fetchPhotos, photoUrl, weatherGroup, type Weather } from "../lib/ambient";
 import { sleepIfIdle } from "../lib/power";
-import { setSoundsSuppressed } from "../lib/sounds";
 import { useConfigStore } from "../stores/config";
+import { setSoundsSuppressed } from "../lib/sounds";
 
 // Idle/ambient screen: a big clock + weather over a photo slideshow (local
 // ~/.tvbox/ambient/ photos, blurred in the Spotify now-playing aesthetic) or an

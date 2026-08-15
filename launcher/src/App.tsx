@@ -1,7 +1,7 @@
+import { installNavSounds, setSoundsEnabled } from "./lib/sounds";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { useI18n, useLocaleStore } from "./lib/i18n";
 import { useConfigStore } from "./stores/config";
-import { installNavSounds, setSoundsEnabled } from "./lib/sounds";
 import { useNavStore } from "./stores/nav";
 import { Backdrop } from "./components/Backdrop";
 import { Home } from "./components/Home";
@@ -64,7 +64,7 @@ export function App() {
   const configError = useConfigStore((s) => s.error);
   const loadConfig = useConfigStore((s) => s.load);
 
-  // Fire TV-style navigation ticks (WebAudio, lib/sounds.ts). The listener is
+  // Fire TV-style navigation ticks (WebAudio, app-sdk/src/sounds.ts). The listener is
   // permanent; the config toggle only flips the enabled flag.
   useEffect(() => installNavSounds(), []);
   useEffect(() => {
