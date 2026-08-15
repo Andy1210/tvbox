@@ -90,6 +90,11 @@ apt_install $HARD && ok "core deps ($HARD)" || bad "core apt deps - install manu
 # (Lite-based) box has NO system sans font, so Chromium renders blank/tofu -
 # one ubiquitous Latin font makes the whole UI legible (kept in sync with the
 # image's 00-packages).
+# fonts-noto-color-emoji: DejaVu has no emoji, so anything carrying one renders
+# as a tofu box. We put no emoji in our own UI - but the names come from other
+# people's services, and a Spotify playlist called "☀️ nyár" is theirs to name.
+# ~10 MB, and it installs its own fontconfig rule, so Chromium picks it up with
+# no font-stack change.
 # iw: turns WiFi power saving off on the RUNNING radio, so the drop-in below
 # doesn't have to wait for a reconnect. Soft on purpose - without it the setting
 # still lands, just at the next boot instead of immediately.
@@ -97,7 +102,7 @@ apt_install $HARD && ok "core deps ($HARD)" || bad "core apt deps - install manu
 # polkit grant is below). Soft as well - without it the box browses its own
 # folders and says that USB is unavailable, which is also what an OTA-only box
 # gets, since OTA can never install an apt package.
-SOFT="jq flatpak curl git unzip ca-certificates gcc libc6-dev fonts-dejavu-core iw udisks2"
+SOFT="jq flatpak curl git unzip ca-certificates gcc libc6-dev fonts-dejavu-core fonts-noto-color-emoji iw udisks2"
 apt_install $SOFT && ok "extra deps ($SOFT)" || warn "some extra deps missing: $SOFT"
 
 # Shared media stack in the core (kept in sync with image/stage-tvbox): mpv is
