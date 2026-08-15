@@ -2891,6 +2891,11 @@ function ambientEnabled() {
 function showAmbient(fromApp) {
   if (!win || win.isDestroyed() || !ambientEnabled()) return false;
   if (!fromApp || fromApp !== currentAppId) return false;
+  // A native program owns the screen, and showLauncher would not hide it - it
+  // would END it. An app that launches one (the RetroArch grid starts a game per
+  // title) keeps its own hidden window and stays `currentAppId` the whole time,
+  // so without this its idle timer would kill somebody's game to put a clock up.
+  if (nativeForeground || nativeapp.running()) return false;
   showLauncher(); // hides the app's window, and clears ambientReturnApp
   ambientReturnApp = fromApp;
   try {
@@ -2900,10 +2905,20 @@ function showAmbient(fromApp) {
 }
 // Back to the app that asked. A no-op when nothing asked, so the launcher can
 // call it on every ambient exit without knowing which kind it was.
+//
+// The app is re-checked rather than trusted: minutes can pass on that screen, and
+// an app can be uninstalled, disabled, or have its window dropped by the RAM
+// guard in the meantime. navTo says nothing at all for an id it cannot open, so
+// without this the key that dismissed the screensaver would appear to do nothing.
+// A dropped window is not that case - navTo reopens the app, from the start
+// rather than where it was.
 function ambientDone() {
   const id = ambientReturnApp;
   ambientReturnApp = null;
-  if (id) navTo(id);
+  if (!id) return;
+  const m = apps.manifestById(id);
+  if (m && m.status === "ready") navTo(id);
+  else console.log("[nav] ambient: nothing to go back to (" + id + ")");
 }
 ipcMain.on("ambient", (e, action) => {
   if (action === "request") showAmbient(windowAppId(e.sender));
