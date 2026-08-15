@@ -121,6 +121,21 @@ describe("ambient suppression", () => {
     expect(ambientDone).toHaveBeenCalled();
   });
 
+  // The remote's Home key never reaches this page as a key: the preload turns it
+  // into a nav event, so the screensaver's own first-key handler cannot see it,
+  // and Home used to leave the clock sitting there.
+  it("Home takes an ordinary screensaver away as well", async () => {
+    stubShell(null);
+    render(<App />);
+    await settle();
+    await goIdle();
+    expect(ambientUp()).toBe(true);
+
+    await pushNav("home");
+
+    expect(ambientUp()).toBe(false);
+  });
+
   it("pressing Home during one takes the screensaver away, not the next key", async () => {
     stubShell(null);
     render(<App />);

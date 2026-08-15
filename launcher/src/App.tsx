@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { useI18n, useLocaleStore } from "./lib/i18n";
 import { useConfigStore } from "./stores/config";
 import { installNavSounds, setSoundsEnabled } from "./lib/sounds";
@@ -103,6 +103,10 @@ export function App() {
     (config?.ambient.idleMinutes ?? 5) * 60000,
     view !== "home" || !ambientEnabled || typing || mirroring,
   );
+  // The nav subscription below is set up once and must not be torn down and
+  // rebuilt on every render just to reach the current `wake`.
+  const wakeNow = useRef(wake);
+  wakeNow.current = wake;
 
   useEffect(() => {
     loadConfig();
@@ -152,10 +156,13 @@ export function App() {
         setAskedAmbient(true);
         return;
       }
-      // Any other destination is somebody asking for a screen, so a screensaver
-      // an app asked for gets out of the way rather than sitting over it (the
-      // shell drops its promise to go back to that app at the same moment).
+      // Any other destination is somebody asking for a screen, so the screensaver
+      // gets out of the way rather than sitting over it - either kind. The remote's
+      // Home key arrives as one of these and nothing else was taking it: the
+      // preload turns it into a nav event before the page sees a key, so the
+      // screensaver's own first-key handler never fired and Home left it up.
       setAskedAmbient(false);
+      wakeNow.current();
       if (n.dest === "settings") nav.open("settings");
       else nav.home();
     });
