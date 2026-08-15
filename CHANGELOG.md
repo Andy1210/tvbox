@@ -5,6 +5,28 @@ updates). `scripts/make-release.sh` lifts the current version's `hu`/`en`
 blocks into the OTA feed's `notes` - keep both languages, keep it short, and
 write for the person on the couch (what changes for THEM), not for developers.
 
+## 3.2.0
+
+### hu
+
+- **Más emberek nevei rendesen látszanak a képernyőn.** Egy Spotify-lista, aminek
+  napocska van a nevében, eddig üres téglalapot mutatott: a doboz betűkészlete
+  nem ismert egyetlen emojit sem. Mostantól igen. Amit mi írunk a képernyőre,
+  abban nincs emoji — ezek mások szolgáltatásaiból jönnek, és az ő szavaik.
+- **Ez a frissítés a szokásosnál hosszabb**, mert a betűkészletet a dobozra
+  telepíti, nem csak a programot cseréli. Egyszeri; a következő frissítések újra
+  a megszokott tempóban mennek.
+
+### en
+
+- **Other people's names render properly on screen.** A Spotify playlist with a
+  sun in its name showed an empty box, because the box's font knew no emoji at
+  all. Now it does. Nothing we write uses emoji - these names come from other
+  people's services and are theirs to write.
+- **This update takes longer than usual**, because it installs the font on the
+  box rather than only replacing the program. One time only; the next updates
+  are back to their normal pace.
+
 ## 3.1.0
 
 ### hu
