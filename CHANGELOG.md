@@ -5,6 +5,45 @@ updates). `scripts/make-release.sh` lifts the current version's `hu`/`en`
 blocks into the OTA feed's `notes` - keep both languages, keep it short, and
 write for the person on the couch (what changes for THEM), not for developers.
 
+## 3.1.0
+
+### hu
+
+- **A képernyőkímélő feljöhet olyan app fölé is, aminek épp nincs mit mutatnia.**
+  A Spotify „Nincs lejátszás" képernyője eddig egész éjjel kint maradt, mert app
+  közben a kímélő nem indulhatott el. Mostantól maga az app szólhat, hogy nála
+  jöhet — ugyanannyi tétlenség után, amennyit a launcherhez beállítottál —, és
+  bármelyik gomb visszavisz oda, ahol voltál. Amíg zene szól, film megy vagy a
+  telefonod képét tükrözöd, marad minden a régiben.
+- **A kímélőt lezáró gomb nem indít el semmit mögötte.** Eddig az OK
+  megnyomása egyben elindította azt a csempét, amin a fókusz állt — nálunk az
+  Élő TV-t. Most csak eltűnik a kímélő. A Home gomb is működik rá, eddig nem
+  tüntette el.
+- **A menühangok minden appban szólnak, nem csak a főképernyőn.** Ugyanazok a
+  hangok, ugyanaz a kapcsoló a Beállításokban.
+- **A képernyő-billentyűzet azt mutatja, amit begépeltél.** A szóköz azonnal
+  látszik, és a beviteli mező nem ugrik meg az első karakternél. A PIN-kód
+  ellenőrzése közben pedig látszik, hogy dolgozik — eddig a négy pötty némán
+  kiürült, és a közben beütött kód elveszett.
+
+### en
+
+- **The screensaver can come up over an app that has nothing to show.** Spotify's
+  "nothing is playing" screen used to stay on the TV all night, because the
+  screensaver could not arm behind an app. Now the app itself can say it is fine
+  — after the same wait you set for the launcher — and any button takes you back
+  where you were. While music, a film or a phone's mirrored screen is on, nothing
+  changes.
+- **The button that dismisses the screensaver no longer presses what is behind
+  it.** Pressing OK used to open whatever tile had focus on Home; now it just
+  clears the screen. Home works on it too, which it did not before.
+- **Navigation sounds play inside apps, not only on the home screen.** Same
+  sounds, same switch in Settings.
+- **The on-screen keyboard shows what you typed.** A space appears straight away,
+  and the field no longer jumps in size at the first character. The PIN pad shows
+  that it is checking, instead of silently emptying its four dots and throwing
+  away the code you typed in the meantime.
+
 ## 3.0.2
 
 ### hu
