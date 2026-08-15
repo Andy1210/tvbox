@@ -28,8 +28,13 @@ export interface TvNotification {
 // pushes "home" when that session ends. "mirroring" works the same way and for
 // the same reason - the shell knows whether frames are still arriving from a
 // phone, and the screen must follow that rather than guess.
+// "ambient" is an app on screen asking for the screensaver over itself: the
+// launcher's window is hidden while an app is in front, so its idle timer never
+// runs there and an app with nothing to show (Spotify with no music) would hold
+// a static screen all night. The shell has already brought this window forward
+// by the time it arrives, and remembers which app to go back to.
 export interface TvNav {
-  dest: "home" | "settings" | "typing" | "mirroring";
+  dest: "home" | "settings" | "typing" | "mirroring" | "ambient";
 }
 
 export interface TvboxBridge {
@@ -47,6 +52,10 @@ export interface TvboxBridge {
   onCommand?(cb: (cmd: { action: string; app?: string }) => void): () => void;
   onWidgets?(cb: (widgets: { id: string; title: string; subtitle: string }[]) => void): () => void;
   onNav?(cb: (n: TvNav) => void): () => void;
+  // The screensaver an app asked for: done() tells the shell a key was pressed on
+  // it, which sends the screen back to that app. request() is the app's half and
+  // is never called from here.
+  ambient?: { request(): void; done(): void };
 }
 
 declare global {

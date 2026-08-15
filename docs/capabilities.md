@@ -36,7 +36,7 @@ capability must never grant it - the boundary fails closed.
 
 | Capability | Grants (`window.tvbox.*`)                                                                                                                                                | Notes                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
 | ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `nav`      | `launch(id)`, `home()` (+ `onNotify`/`onCommand`, main window only)                                                                                                      | Universal; every app has it. `onNotify`/`onCommand` currently fire only for the launcher/main window - the isolated window doesn't receive them yet.                                                                                                                                                                                                                                                                                                                                                                                                          |
+| `nav`      | `launch(id)`, `home()`, `ambient.request()` (+ `onNotify`/`onCommand`, main window only)                                                                                 | Universal; every app has it. `onNotify`/`onCommand` currently fire only for the launcher/main window - the isolated window doesn't receive them yet. `ambient.request()` asks for the screensaver over this app: see below.                                                                                                                                                                                                                                                                                                                                   |
 | `player`   | `play(url, streams?)`, `stop()`, `pip(on, rect)`, `tracks()`, `setTrack(type, id)`, `selectStreams({audio, sub, subFile})`, `setPlayerProp(name, value)`, `onPlayer(cb)` | Drives the shared `mpv`. App-agnostic - the shell plays a URL on the app's behalf; the app never spawns anything. Needs `mpv` on the box (`tvbox deps`). `streams`/`selectStreams` take 0-based ordinals within each track type (`sub: -1` = off, `subFile` = a sidecar subtitle URL) so an app that resolved its streams server-side can say so; `setPlayerProp` reaches an allowlisted set of mpv properties (`sub-delay`, `audio-delay`, `speed`, `volume`, `sub-scale`, `sub-pos`, `sub-visibility`, `sub-color`, `sub-border-color`) in mpv's own units. |
 
 > **`onPlayer` and the end of a film.** The event is `{type, on?, ms?, reason?}`.
@@ -54,6 +54,44 @@ capability must never grant it - the boundary fails closed.
 | `config` | (launcher-internal) | First-party surface; not for third-party apps. |
 | `input` | (bridge-only) | Media/remote keys routed into a bridge app's own handlers (the bridge ships in the app package, e.g. Plex's `bridge.js`). No `window.tvbox` surface. |
 | `system` | (bridge-only) `system.exit` / `quit` / `close` / `closeApp` | Lets a bridge app ask the host to CLOSE it - its window is destroyed and the next launch starts fresh, unlike Home which only backgrounds it. This is what a Plex-style "Exit?" dialog calls. |
+
+### `ambient.request()` - the screensaver, over an app that has nothing to show
+
+The ambient screen belongs to the launcher, and the launcher's window is hidden
+whenever an app is in front (exactly one visible toplevel). Its idle timer is
+suppressed there on purpose: a hidden window sees none of the keys the person is
+pressing, so counting that time would arm the screensaver behind whatever they
+are watching and hand it to them the moment they came back.
+
+That is right for an app with something on screen, and wrong for one without.
+Spotify sitting on "nothing is playing" is a static screen the box will hold all
+night. So the app asks:
+
+```js
+tvbox().ambient?.request(); // "I have nothing to show, the screensaver may come up"
+```
+
+The shell brings the launcher forward with the ambient screen on, remembers which
+app asked, and sends the screen back there on the first key. The app is hidden
+rather than closed, so it normally comes back as it was - but hidden means muted,
+with its `<video>`/`<audio>` paused, and on a box with `config.apps.background`
+off it means destroyed and relaunched. Do not ask for this over state a person
+would mind losing.
+
+Four things it will not do, all of them silent (the call is fire-and-forget):
+
+- fire for an app that is **not the one on screen** - a background app's timer
+  must not take the person out of what they are watching;
+- fire while a **native program** is running (the shell would end it, not hide
+  it), while the shared **player** is running, or while a phone is **mirroring**;
+- fire when the owner has the screensaver **off** (Settings - Ambient);
+- fire on a shell that predates it, where `tvbox().ambient` is simply absent -
+  and in the isolated window, on an app that declares no capability beyond `nav`,
+  where `window.tvbox` is not exposed at all.
+
+Deciding **when** is the app's own business, and it needs both halves: no
+playback of its own, and no key for a while. `GET /tvbox/api/config` carries
+`ambient.idleMinutes`, which is the delay the person chose for the launcher.
 
 ### `display` - the adaptive-mode capability
 
