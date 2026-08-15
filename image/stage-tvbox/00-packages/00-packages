@@ -23,6 +23,7 @@ npm
 jq
 flatpak
 fonts-dejavu-core
+fonts-noto-color-emoji
 rfkill
 iw
 curl
