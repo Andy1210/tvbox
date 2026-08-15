@@ -24,6 +24,8 @@ const CONFIG = {
 type NavCb = (n: { dest: string }) => void;
 let navCbs: NavCb[] = [];
 
+const ambientDone = vi.fn();
+
 function stubShell(session: unknown) {
   vi.stubGlobal("fetch", (url: string) =>
     Promise.resolve(
@@ -46,6 +48,7 @@ function stubShell(session: unknown) {
       submit: vi.fn(),
       phone: vi.fn(),
     },
+    ambient: { request: vi.fn(), done: ambientDone },
   });
 }
 
@@ -62,6 +65,7 @@ beforeEach(() => {
   localStorage.clear();
   useConfigStore.setState({ config: null, error: false });
   navCbs = [];
+  ambientDone.mockClear();
   vi.useFakeTimers();
 });
 afterEach(() => {
@@ -86,6 +90,121 @@ describe("ambient suppression", () => {
     await pushNav("typing");
     await goIdle();
     expect(ambientUp()).toBe(false);
+  });
+
+  // The other direction: an app can ask for the screensaver over itself, because
+  // the launcher's window is hidden while an app is in front and its timer never
+  // runs there. The shell brings this window forward and pushes "ambient".
+  it("comes up when an app asks, without waiting for the timer", async () => {
+    stubShell(null);
+    render(<App />);
+    await settle();
+
+    await pushNav("ambient");
+
+    expect(ambientUp()).toBe(true);
+  });
+
+  it("...and the first key sends the screen back to the app that asked", async () => {
+    stubShell(null);
+    render(<App />);
+    await settle();
+    await pushNav("ambient");
+    expect(ambientUp()).toBe(true);
+
+    await act(async () => {
+      window.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+      await Promise.resolve();
+    });
+
+    expect(ambientUp()).toBe(false);
+    expect(ambientDone).toHaveBeenCalled();
+  });
+
+  // The remote's Home key never reaches this page as a key: the preload turns it
+  // into a nav event, so the screensaver's own first-key handler cannot see it,
+  // and Home used to leave the clock sitting there.
+  it("Home takes an ordinary screensaver away as well", async () => {
+    stubShell(null);
+    render(<App />);
+    await settle();
+    await goIdle();
+    expect(ambientUp()).toBe(true);
+
+    await pushNav("home");
+
+    expect(ambientUp()).toBe(false);
+  });
+
+  it("pressing Home during one takes the screensaver away, not the next key", async () => {
+    stubShell(null);
+    render(<App />);
+    await settle();
+    await pushNav("ambient");
+    expect(ambientUp()).toBe(true);
+
+    await pushNav("home");
+
+    expect(ambientUp()).toBe(false);
+    expect(ambientDone).not.toHaveBeenCalled();
+  });
+
+  it("a screensaver nobody asked for does not send the screen anywhere", async () => {
+    stubShell(null);
+    render(<App />);
+    await settle();
+    await goIdle();
+    expect(ambientUp()).toBe(true);
+
+    await act(async () => {
+      window.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+      await Promise.resolve();
+    });
+
+    expect(ambientUp()).toBe(false);
+    expect(ambientDone).not.toHaveBeenCalled();
+  });
+
+  // Spatial navigation acts on a key's RELEASE, so the screensaver has to eat
+  // both halves: on the box, waking it with Enter opened the tile behind it.
+  it("the key that wakes it does not also press what is behind it", async () => {
+    stubShell(null);
+    render(<App />);
+    await settle();
+    await goIdle();
+    expect(ambientUp()).toBe(true);
+
+    const behind: string[] = [];
+    const spy = () => behind.push("up");
+    window.addEventListener("keyup", spy);
+    await act(async () => {
+      window.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+      window.dispatchEvent(new KeyboardEvent("keyup", { key: "Enter", bubbles: true }));
+      await Promise.resolve();
+    });
+    window.removeEventListener("keyup", spy);
+
+    expect(ambientUp()).toBe(false);
+    expect(behind).toEqual([]);
+
+    // A repeat of the same held key is eaten too - that is the one that opened a
+    // tile on the box - and so is anything else within the second the wake key
+    // is given, because a held key has no reliable last event.
+    window.addEventListener("keyup", spy);
+    await act(async () => {
+      window.dispatchEvent(new KeyboardEvent("keyup", { key: "Enter", bubbles: true }));
+      await Promise.resolve();
+    });
+    expect(behind).toEqual([]);
+
+    // ...and a second later the screen is the person's again.
+    await act(async () => void (await vi.advanceTimersByTimeAsync(1200)));
+    await act(async () => {
+      window.dispatchEvent(new KeyboardEvent("keyup", { key: "Enter", bubbles: true }));
+      await Promise.resolve();
+    });
+    window.removeEventListener("keyup", spy);
+    expect(behind).toEqual(["up"]);
   });
 
   it("arms again once the typing session ends", async () => {

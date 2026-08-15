@@ -31,6 +31,25 @@ const { ipcRenderer } = require("electron");
         ipcRenderer.send("nav", "home");
       } catch (e) {}
     },
+    // The screensaver. An app in the foreground keeps the launcher's window
+    // hidden, so the ambient screen cannot arm behind it - request() asks the
+    // shell to bring it forward, for an app whose own screen has nothing to show
+    // (Spotify with no music). done() is the launcher saying a key was pressed on
+    // it, which sends the screen back to the app that asked. Universal, like
+    // home(): it can only reach the ambient screen, and only for the app the
+    // person is already looking at.
+    ambient: {
+      request: function () {
+        try {
+          ipcRenderer.send("ambient", "request");
+        } catch (e) {}
+      },
+      done: function () {
+        try {
+          ipcRenderer.send("ambient", "done");
+        } catch (e) {}
+      },
+    },
     // On-screen notifications pushed by the shell (from MQTT - HA alerts, doorbell
     // camera, …). Receive-only, so it's safe to expose everywhere.
     onNotify: function (cb) {

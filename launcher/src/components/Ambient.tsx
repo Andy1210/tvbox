@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { pause, resume } from "@noriginmedia/norigin-spatial-navigation";
 import { useI18n } from "../lib/i18n";
 import { fetchWeather, fetchPhotos, photoUrl, weatherGroup, type Weather } from "../lib/ambient";
 import { sleepIfIdle } from "../lib/power";
@@ -78,6 +79,44 @@ function PhotoPair({ src }: { src: string }) {
       <img src={src} alt="" className="absolute inset-0 w-full h-full object-contain" />
     </>
   );
+}
+
+// The key that wakes the screensaver, all of it, and none of it reaching Home.
+//
+// This has to live OUTSIDE the component, and the reason is not obvious: a
+// listener the component owns is gone before it runs. `useIdle`'s own key
+// listener is registered first (App mounts before this screen does), its
+// setState is flushed in the microtask checkpoint between the two callbacks, and
+// that flush unmounts this component - taking its listener out of the dispatch it
+// was in the middle of. Measured on the box, with the swallow in place: the press
+// reached Home and started whatever tile had focus, and the component's own
+// handler never ran at all.
+//
+// So: registered once at import, before anything the app sets up, and it holds
+// the exit callback rather than the other way round. What follows the press - the
+// release, and the repeats of a held key - is eaten for a second afterwards,
+// because a held key has no reliable last event to stop on.
+const KEY_TAIL_MS = 1000;
+let dismiss: (() => void) | null = null; // set while a screensaver is on screen
+let eatKeysUntil = 0;
+if (typeof window !== "undefined") {
+  const eat = (e: KeyboardEvent) => {
+    if (dismiss) {
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      if (e.type !== "keydown") return; // a stray release does not wake anything
+      const exit = dismiss;
+      dismiss = null; // one screensaver, one dismissal
+      eatKeysUntil = Date.now() + KEY_TAIL_MS;
+      exit();
+      return;
+    }
+    if (!eatKeysUntil || Date.now() > eatKeysUntil) return;
+    e.preventDefault();
+    e.stopImmediatePropagation();
+  };
+  window.addEventListener("keydown", eat, true);
+  window.addEventListener("keyup", eat, true);
 }
 
 export function Ambient({ onExit }: { onExit: () => void }) {
@@ -171,15 +210,23 @@ export function Ambient({ onExit }: { onExit: () => void }) {
     return () => setSoundsSuppressed(false);
   }, []);
 
-  // Swallow the first key so waking the screen doesn't also trigger a tile.
+  // Nothing behind this screen is reachable while it is up, on two counts. The
+  // listener above owns the keys, and spatial navigation is paused as well: its
+  // own window listener would otherwise be in the same race, decided by module
+  // import order rather than by anything either side declares.
   useEffect(() => {
-    const swallow = (e: KeyboardEvent) => {
-      e.preventDefault();
-      e.stopImmediatePropagation();
-      onExit();
+    pause();
+    return () => resume();
+  }, []);
+
+  // Hand the module-level listener the way out of this screen, for as long as
+  // this screen is the one on display. A listener of our own would be removed
+  // mid-dispatch by the re-render that dismisses us; see the note above it.
+  useEffect(() => {
+    dismiss = onExit;
+    return () => {
+      dismiss = null;
     };
-    window.addEventListener("keydown", swallow, true);
-    return () => window.removeEventListener("keydown", swallow, true);
   }, [onExit]);
 
   const hf = useConfigStore((s) => s.config?.ui.hourFormat) || "auto";

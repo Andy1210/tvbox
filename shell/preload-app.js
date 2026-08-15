@@ -40,6 +40,17 @@ const api = {
   home: function () {
     ipcRenderer.send("nav", "home");
   },
+  // Ask for the box's screensaver over this app, for an app whose own screen has
+  // nothing to show. Here as well as in the privileged preload, because the
+  // reason is the same in both windows and the shell's own rules (this app must
+  // be the one on screen, nothing of ours playing) are what actually decide it.
+  // No `done` counterpart: that one is the launcher saying a key was pressed on
+  // the screensaver, and the shell accepts it from the launcher only.
+  ambient: {
+    request: function () {
+      ipcRenderer.send("ambient", "request");
+    },
+  },
 };
 
 // ---- fetch capability: scoped server-side data proxy ----
