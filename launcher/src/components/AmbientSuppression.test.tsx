@@ -137,6 +137,38 @@ describe("ambient suppression", () => {
     expect(ambientDone).not.toHaveBeenCalled();
   });
 
+  // Spatial navigation acts on a key's RELEASE, so the screensaver has to eat
+  // both halves: on the box, waking it with Enter opened the tile behind it.
+  it("the key that wakes it does not also press what is behind it", async () => {
+    stubShell(null);
+    render(<App />);
+    await settle();
+    await goIdle();
+    expect(ambientUp()).toBe(true);
+
+    const behind: string[] = [];
+    const spy = () => behind.push("up");
+    window.addEventListener("keyup", spy);
+    await act(async () => {
+      window.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+      window.dispatchEvent(new KeyboardEvent("keyup", { key: "Enter", bubbles: true }));
+      await Promise.resolve();
+    });
+    window.removeEventListener("keyup", spy);
+
+    expect(ambientUp()).toBe(false);
+    expect(behind).toEqual([]);
+    // ...and the next release, which belongs to whatever the person does after,
+    // reaches the screen normally.
+    window.addEventListener("keyup", spy);
+    await act(async () => {
+      window.dispatchEvent(new KeyboardEvent("keyup", { key: "Enter", bubbles: true }));
+      await Promise.resolve();
+    });
+    window.removeEventListener("keyup", spy);
+    expect(behind).toEqual(["up"]);
+  });
+
   it("arms again once the typing session ends", async () => {
     stubShell({ active: true, appName: "Plex", label: "Search", kind: "text" });
     render(<App />);

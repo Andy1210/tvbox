@@ -80,6 +80,29 @@ function PhotoPair({ src }: { src: string }) {
   );
 }
 
+// The other half of swallowing the key that wakes the screensaver: its RELEASE,
+// which is what spatial navigation acts on. It arrives after the screen is gone,
+// so this listener cannot belong to the component - it is registered once, does
+// nothing until the screensaver arms it, and disarms itself either on that
+// release or a second later, for a press whose release never comes (a key held
+// through a window change, a synthetic event).
+let eatReleaseUntil = 0;
+function eatRelease() {
+  eatReleaseUntil = Date.now() + 1000;
+}
+if (typeof window !== "undefined") {
+  window.addEventListener(
+    "keyup",
+    (e: KeyboardEvent) => {
+      if (!eatReleaseUntil || Date.now() > eatReleaseUntil) return;
+      eatReleaseUntil = 0;
+      e.preventDefault();
+      e.stopImmediatePropagation();
+    },
+    true,
+  );
+}
+
 export function Ambient({ onExit }: { onExit: () => void }) {
   const { t, tag } = useI18n();
   const [now, setNow] = useState(() => new Date());
@@ -172,10 +195,18 @@ export function Ambient({ onExit }: { onExit: () => void }) {
   }, []);
 
   // Swallow the first key so waking the screen doesn't also trigger a tile.
+  //
+  // BOTH halves of it. Spatial navigation acts on the key's RELEASE, so eating
+  // the press alone left the release to land on Home and open whatever tile had
+  // focus - measured on the box: waking the screensaver with Enter started Live
+  // TV. The release arrives after this component is gone, which is why the
+  // listener for it lives at module level (see eatRelease above) rather than
+  // here, where the cleanup would have taken it away first.
   useEffect(() => {
     const swallow = (e: KeyboardEvent) => {
       e.preventDefault();
       e.stopImmediatePropagation();
+      eatRelease();
       onExit();
     };
     window.addEventListener("keydown", swallow, true);
