@@ -121,6 +121,19 @@ describe("ambient suppression", () => {
     expect(ambientDone).toHaveBeenCalled();
   });
 
+  it("pressing Home during one takes the screensaver away, not the next key", async () => {
+    stubShell(null);
+    render(<App />);
+    await settle();
+    await pushNav("ambient");
+    expect(ambientUp()).toBe(true);
+
+    await pushNav("home");
+
+    expect(ambientUp()).toBe(false);
+    expect(ambientDone).not.toHaveBeenCalled();
+  });
+
   it("a screensaver nobody asked for does not send the screen anywhere", async () => {
     stubShell(null);
     render(<App />);

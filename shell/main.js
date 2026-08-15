@@ -1000,7 +1000,12 @@ function serve() {
     installRclone: () => installRclone() || rcloneInstalling,
     navTo,
     // The launcher's own navigation, for the destinations navTo does not own.
+    // This path does not go through setForegroundApp (the launcher is already the
+    // window on screen), so the screensaver's promise to go back to an app has to
+    // be dropped here: somebody pressing Home while it is up means Home, not "and
+    // then back into Spotify on the next key".
     navToLauncher: (dest) => {
+      ambientReturnApp = null;
       if (win && !win.isDestroyed()) win.webContents.send("tvbox-nav", { dest });
     },
     publishMediaState,

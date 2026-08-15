@@ -139,6 +139,10 @@ export function App() {
         setAskedAmbient(true);
         return;
       }
+      // Any other destination is somebody asking for a screen, so a screensaver
+      // an app asked for gets out of the way rather than sitting over it (the
+      // shell drops its promise to go back to that app at the same moment).
+      setAskedAmbient(false);
       if (n.dest === "settings") nav.open("settings");
       else nav.home();
     });
