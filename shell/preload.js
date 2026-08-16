@@ -140,7 +140,13 @@ const { ipcRenderer } = require("electron");
     // which is why a small number of entries is enough and the box caps it.
     window.tvbox.enqueue = function (urls) {
       try {
-        return ipcRenderer.invoke("player", "enqueue", { urls: Array.isArray(urls) ? urls : [urls] });
+        // `.catch` as well as the try: the try only sees a synchronous throw,
+        // while a main-process exception comes back as a REJECTED promise - which
+        // this contract promises never to hand out, and which would surface in the
+        // renderer as an unhandled rejection.
+        return ipcRenderer
+          .invoke("player", "enqueue", { urls: Array.isArray(urls) ? urls : [urls] })
+          .catch(() => ({ ok: false }));
       } catch (e) {
         return Promise.resolve({ ok: false });
       }
@@ -149,7 +155,7 @@ const { ipcRenderer } = require("electron");
     // clearing a queue is not stopping, and an app that wanted to stop has stop().
     window.tvbox.clearQueue = function () {
       try {
-        return ipcRenderer.invoke("player", "queueclear");
+        return ipcRenderer.invoke("player", "queueclear").catch(() => ({ ok: false }));
       } catch (e) {
         return Promise.resolve({ ok: false });
       }
