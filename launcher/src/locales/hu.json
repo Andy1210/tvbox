@@ -354,8 +354,8 @@
     "flatpakFailed": "{name} frissítése nem sikerült.",
     "phaseFlatpak": "Program letöltése...",
     "busy": "A box most mással van elfoglalva. Próbáld újra egy kis idő múlva.",
-    "alsoIn": "megtalálható még: {names}",
-    "fromSource": "innen: {name}"
+    "fromSource": "innen: {name}",
+    "takeFrom": "Telepítés innen:"
   },
   "storeSources": {
     "title": "Store források",

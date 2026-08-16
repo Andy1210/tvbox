@@ -225,7 +225,12 @@ function mergeSources(loaded) {
     const c = (pin && list.find((x) => x.source.url === pin)) || list[0];
     chosen.set(id, {
       ...c,
-      alsoIn: list.filter((x) => x !== c).map((x) => x.source.url),
+      // Enough to draw a button, not just to name a source in prose: a person
+      // switching an app to their own registry needs to press something, and a
+      // url alone is neither a label nor a target.
+      alsoIn: list
+        .filter((x) => x !== c)
+        .map((x) => ({ url: x.source.url, name: x.source.name || null, official: !!x.source.official })),
       // The app was installed from a registry that is no longer configured, and
       // what is on offer here comes from a different one. Removing a source does
       // not remove its apps, so this is an ordinary state - but it must not be an
@@ -403,7 +408,25 @@ function listForUi(config) {
   };
 }
 
-async function install(config, id) {
+/**
+ * Install one app, from a registry the caller may name.
+ *
+ * `sourceUrl` is how an app is moved BETWEEN registries: the same id offered by
+ * two of them is the ordinary case while somebody is working on an app that is
+ * also published, and without a way to say which one, the pin decides for ever
+ * and the local copy can never be tried on a box that already has the published
+ * one.
+ *
+ * It is matched against the CONFIGURED sources and never fetched as given: a
+ * url that arrives here is a request to trust a registry, and that decision
+ * belongs to adding a source, not to pressing Install on one app.
+ *
+ * There is no version check anywhere in here, which is what makes the same
+ * version installable again from somewhere else - that is the whole point of
+ * the switch, and it is why the button says where it comes from rather than
+ * what it is called.
+ */
+async function install(config, id, sourceUrl) {
   // REFRESH, not the cached copy. The file list and its sha256s come from the
   // index while the files come from the registry live, so an index even a few
   // minutes old can describe a package that has since been republished - and the
@@ -412,7 +435,15 @@ async function install(config, id) {
   // install did exactly that. An install is deliberate and rare; one fetch to
   // make the two agree is the cheapest correctness there is.
   const loaded = await loadAll(config, true);
-  const hit = mergeSources(loaded).find((c) => c.entry.id === id);
+  const wanted = typeof sourceUrl === "string" && sourceUrl ? sourceUrl : null;
+  if (wanted && !loaded.some((s) => s.url === wanted)) return { ok: false, error: "not a configured registry" };
+  const hit = wanted
+    ? (() => {
+        const src = loaded.find((s) => s.url === wanted);
+        const entry = (src && (src.entries || []).find((m) => m.id === id)) || null;
+        return entry ? { entry, source: src } : null;
+      })()
+    : mergeSources(loaded).find((c) => c.entry.id === id);
   // Say WHY when a refresh failed. Forcing a refresh means the registries have to
   // answer - the files needed the network anyway - and reporting an unreachable
   // one as "not in registry" sends whoever debugs a failed auto-update looking
@@ -421,7 +452,10 @@ async function install(config, id) {
   if (!hit) {
     const failed = loaded.find((s) => s.error);
     if (failed) return { ok: false, error: "registry unreachable: " + (failed.error || "unknown") };
-    return { ok: false, error: "not in registry" };
+    // A named registry that answered and does not have it is a different
+    // sentence from "nobody has it", and it is the one somebody switching
+    // sources needs: the app is still installed, from where it was.
+    return { ok: false, error: wanted ? "that registry does not offer it" : "not in registry" };
   }
   const m = hit.entry;
   const url = hit.source.url;

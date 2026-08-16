@@ -404,8 +404,13 @@ function post(p, data, res, ctx) {
   }
   if (p === "/tvbox/api/store/install") {
     const id = String(data.id || "");
+    // Which registry, when the app is offered by more than one. Passed through
+    // as given and checked against the configured list inside `install` - a url
+    // arriving here is not a source, it is a request to use one that is already
+    // trusted.
+    const sourceUrl = typeof data.sourceUrl === "string" ? data.sourceUrl : undefined;
     store
-      .install(config, id)
+      .install(config, id, sourceUrl)
       .then((r) => {
         httpserver.jsonRes(res, r);
         // The manifest is on disk; now finish the install (no-root binary deps +

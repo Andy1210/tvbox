@@ -86,6 +86,7 @@ export function AppDetail({
   app,
   status,
   onInstall,
+  onSwitchSource,
   onUpdate,
   onFlatpakUpdate,
   onRemove,
@@ -95,6 +96,8 @@ export function AppDetail({
   app: StoreEntry;
   status?: string | null;
   onInstall: () => void;
+  /** Take this app from another configured registry, and stand it with that one. */
+  onSwitchSource?: (sourceUrl: string) => void;
   onUpdate: () => void;
   onFlatpakUpdate: () => void;
   onRemove: () => void;
@@ -176,12 +179,28 @@ export function AppDetail({
         {app.source && !app.source.official && (
           <div className="text-[1.9vh] text-fg-dim mb-[1.6vh]">
             {t("store.fromSource", { name: sourceLabel(app.source) })}
-            {app.alsoIn && app.alsoIn.length > 0 && (
-              <span className="text-[1.7vh] opacity-70">
-                {" "}
-                · {t("store.alsoIn", { names: app.alsoIn.map((u) => sourceLabel({ url: u })).join(", ") })}
-              </span>
-            )}
+          </div>
+        )}
+
+        {/* The same app in more than one registry is the ordinary state while
+            somebody is working on one that is also published - so this is a
+            press, not a sentence. Taking it from the other one re-pins it there,
+            at whatever version that registry carries, the same number included:
+            a debug build usually stands in for the published one under its own
+            version. */}
+        {onSwitchSource && app.alsoIn && app.alsoIn.length > 0 && !app.installing && (
+          <div className="flex flex-wrap items-center gap-[1.2vw] mb-[1.6vh]">
+            <span className="text-[1.9vh] text-fg-dim">{t("store.takeFrom")}</span>
+            {app.alsoIn.map((s2) => (
+              <FocusButton
+                key={s2.url}
+                focusKey={`detail-source-${s2.url}`}
+                onEnter={() => onSwitchSource(s2.url)}
+                className="px-[1.8vw] h-[5vh] rounded-[1.1vh] bg-white/5 flex items-center justify-center text-[1.9vh]"
+              >
+                {sourceLabel(s2)}
+              </FocusButton>
+            ))}
           </div>
         )}
 

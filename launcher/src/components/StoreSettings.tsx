@@ -125,9 +125,9 @@ export function StoreSettings() {
   // view swaps its Install/Update button for the progress indicator, move focus
   // to the still-mounted Back button, then refresh once so the phase appears.
   // The poll + completion effects above take it from there.
-  const kickoff = async (e: StoreEntry, kind: "install" | "update") => {
+  const kickoff = async (e: StoreEntry, kind: "install" | "update", sourceUrl?: string) => {
     pending.current.set(e.id, kind);
-    const ok = await storeInstall(e.id);
+    const ok = await storeInstall(e.id, sourceUrl);
     if (!ok) {
       pending.current.delete(e.id);
       setStatus({ id: e.id, text: t("store.failed", { name: loc(e.name) }) });
@@ -145,6 +145,11 @@ export function StoreSettings() {
   };
   const install = (e: StoreEntry) => kickoff(e, "install");
   const update = (e: StoreEntry) => kickoff(e, "update");
+  // Taking an app from a DIFFERENT registry than the one it stands with. Counted
+  // as an update rather than an install because that is what it is from the
+  // box's side - the app stays, its origin moves - and because the focus goes
+  // back to the right button if the registry refuses it.
+  const switchSource = (e: StoreEntry, sourceUrl: string) => kickoff(e, "update", sourceUrl);
   // Updating the flatpak is not a store install: the app package stays put and the
   // program it runs (or was built from) moves. It reuses the same progress plumbing
   // because it is the same kind of wait - hundreds of MB, out of process.
@@ -197,6 +202,7 @@ export function StoreSettings() {
           app={detailApp}
           status={status && status.id === detailApp.id ? status.text : null}
           onInstall={() => install(detailApp)}
+          onSwitchSource={(url) => switchSource(detailApp, url)}
           onUpdate={() => update(detailApp)}
           onFlatpakUpdate={() => flatpakUpdate(detailApp)}
           onRemove={() => remove(detailApp)}

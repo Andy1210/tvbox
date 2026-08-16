@@ -107,7 +107,10 @@ export interface StoreEntry {
   flatpaks?: { ref: string; name: string; version: string | null }[];
   flatpakStatus?: { ok: boolean; changed: boolean; version: string | null } | null; // last manual flatpak update
   source?: StoreSource; // the registry this entry came from
-  alsoIn?: string[]; // other configured registries offering the same id (not used for this entry)
+  // Other configured registries offering the same id. Enough to draw a button
+  // rather than only to name them: switching an app to a local copy of itself is
+  // how somebody debugs an app that is also published.
+  alsoIn?: { url: string; name: string | null; official: boolean }[];
 }
 // A configured registry. The first one the box returns is the primary (the
 // official index unless it was replaced); the rest were added by the owner.
@@ -155,7 +158,11 @@ async function post(url: string, body: unknown): Promise<boolean> {
   }
 }
 
-export const storeInstall = (id: string) => post("/tvbox/api/store/install", { id });
+// `sourceUrl` names WHICH configured registry to take it from - the box checks
+// it against its own list, so this is a choice between sources already trusted,
+// never a new one. Omitted, the app comes from wherever it stands now.
+export const storeInstall = (id: string, sourceUrl?: string) =>
+  post("/tvbox/api/store/install", sourceUrl ? { id, sourceUrl } : { id });
 export const storeUninstall = (id: string) => post("/tvbox/api/store/uninstall", { id });
 // The added registries, saved as a whole list (an add, a rename and a removal are
 // the same edit to the same array). `autoUpdate` is the PRIMARY registry's flag;

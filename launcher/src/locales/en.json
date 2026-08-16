@@ -354,8 +354,8 @@
     "flatpakFailed": "Could not update {name}.",
     "phaseFlatpak": "Downloading the program...",
     "busy": "The box is busy with something else. Try again in a moment.",
-    "alsoIn": "also in {names}",
-    "fromSource": "from {name}"
+    "fromSource": "from {name}",
+    "takeFrom": "Take it from:"
   },
   "storeSources": {
     "title": "Store sources",

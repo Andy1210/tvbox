@@ -295,7 +295,10 @@ test("an id offered by two registries resolves to the first configured, and name
     assert.equal(list.apps.length, 1, "one id is one row, whatever it is offered by");
     assert.equal(list.apps[0].name, "FromPrimary");
     assert.equal(list.apps[0].version, "1.0.0", "a higher version elsewhere does not win the id");
-    assert.deepEqual(list.apps[0].alsoIn, [urlB]);
+    assert.deepEqual(
+      list.apps[0].alsoIn.map((x) => x.url),
+      [urlB],
+    );
   } finally {
     a.close();
     b.close();
@@ -323,7 +326,10 @@ test("an app stays with the registry it was installed from, even when another cl
     assert.equal(list.apps[0].version, "1.0.0");
     assert.equal(list.apps[0].updateAvailable, false, "another registry's version is not an update");
     assert.deepEqual(list.updates, [], "so the nightly auto-update has nothing to act on");
-    assert.deepEqual(list.apps[0].alsoIn, [urlA]);
+    assert.deepEqual(
+      list.apps[0].alsoIn.map((x) => x.url),
+      [urlA],
+    );
 
     // ...and a real update, from the pinned source, still works.
     b.state.apps = [manifestOnly("brewapp", "Brew", "1.1.0")];
@@ -444,3 +450,104 @@ test("an unreachable registry says so, instead of 'not in registry'", async () =
     delete require.cache[require.resolve("./store")];
   }
 });
+
+// Moving an app from one registry to another, on purpose.
+//
+// The pin exists so a local build cannot be taken over by a published app of the
+// same id - which is right, and which also means an app can never LEAVE the
+// registry it came from without saying so. This is that sentence: install it
+// again, naming where from. Same version included, because a debug build usually
+// carries the same number as the published one it is standing in for.
+test("install(id, sourceUrl) takes the app from the registry it names, and re-pins to it", async () => {
+  const http = require("node:http");
+  const entry = (v) => ({
+    id: "twoapp",
+    name: "Two",
+    type: "webclient",
+    status: "ready",
+    version: v,
+    runtime: { serve: "remote", url: "https://example.com" },
+  });
+
+  const official = http.createServer((req, res) => {
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ registryVersion: 1, apps: [entry("1.0.0")] }));
+  });
+  const local = http.createServer((req, res) => {
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ registryVersion: 1, apps: [entry("1.0.0")] }));
+  });
+  await new Promise((r) => official.listen(0, "127.0.0.1", r));
+  await new Promise((r) => local.listen(0, "127.0.0.1", r));
+  const officialUrl = "http://127.0.0.1:" + official.address().port + "/index.json";
+  const localUrl = "http://127.0.0.1:" + local.address().port + "/index.json";
+  const config = {
+    rawStore: () => ({ registry: officialUrl, sources: [{ url: localUrl, name: "dev" }] }),
+    appConfig: () => ({}),
+  };
+
+  try {
+    // Installed from the primary, as an ordinary install is.
+    const first = await store.install(config, "twoapp");
+    assert.equal(first.ok, true, "install failed: " + JSON.stringify(first));
+    let list = await store.listForUi(config)(true);
+    let e = list.apps.find((a) => a.id === "twoapp");
+    assert.equal(e.source.url, officialUrl, "the primary is where an unpinned app comes from");
+    assert.deepEqual(
+      e.alsoIn.map((x) => x.url),
+      [localUrl],
+      "the other registry is offered, with enough to draw a button",
+    );
+    assert.equal(e.alsoIn[0].name, "dev");
+
+    // The same version, from the other registry. No version comparison stands in
+    // the way, which is what makes a debug build installable over its published
+    // twin.
+    assert.equal((await store.install(config, "twoapp", localUrl)).ok, true);
+    list = await store.listForUi(config)(true);
+    e = list.apps.find((a) => a.id === "twoapp");
+    assert.equal(e.source.url, localUrl, "it stands with the registry it was last taken from");
+    assert.deepEqual(
+      e.alsoIn.map((x) => x.url),
+      [officialUrl],
+    );
+
+    // And back again, which is the half that makes the switch usable rather than
+    // a one-way door.
+    assert.equal((await store.install(config, "twoapp", officialUrl)).ok, true);
+    list = await store.listForUi(config)(true);
+    assert.equal(list.apps.find((a) => a.id === "twoapp").source.url, officialUrl);
+  } finally {
+    store.uninstall("twoapp");
+    official.close();
+    local.close();
+  }
+});
+
+test("install() refuses a registry that is not configured, and one that does not have the app", async () => {
+  const http = require("node:http");
+  const server = http.createServer((req, res) => {
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ registryVersion: 1, apps: [{ id: "oneapp", name: "One", type: "webclient", status: "ready", version: "1.0.0", runtime: { serve: "remote", url: "https://example.com" } }] }));
+  });
+  await new Promise((r) => server.listen(0, "127.0.0.1", r));
+  const url = "http://127.0.0.1:" + server.address().port + "/index.json";
+  const config = { rawStore: () => ({ registry: url }), appConfig: () => ({}) };
+  try {
+    // A url arriving from a caller is not a source. Trusting one because it was
+    // named in an install request would make "add a registry" - the place the
+    // decision is supposed to live - a formality.
+    const outside = await store.install(config, "oneapp", "https://elsewhere.example/index.json");
+    assert.equal(outside.ok, false);
+    assert.match(outside.error, /not a configured registry/);
+
+    // And a configured one that simply does not carry it says so, rather than
+    // reporting the app missing everywhere.
+    const missing = await store.install(config, "nosuch", url);
+    assert.equal(missing.ok, false);
+    assert.match(missing.error, /does not offer it/);
+  } finally {
+    server.close();
+  }
+});
+
