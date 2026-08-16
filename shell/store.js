@@ -192,8 +192,10 @@ function writePin(id, url) {
   try {
     fs.mkdirSync(PIN_DIR, { recursive: true });
     fs.writeFileSync(pinPath(id), JSON.stringify({ v: 1, url, at: Date.now() }));
+    return true;
   } catch (e) {
     console.warn("[store]", id, "could not record which registry it came from:", e.message);
+    return false;
   }
 }
 
@@ -225,7 +227,32 @@ function mergeSources(loaded) {
     const c = (pin && list.find((x) => x.source.url === pin)) || list[0];
     chosen.set(id, {
       ...c,
-      alsoIn: list.filter((x) => x !== c).map((x) => x.source.url),
+      // Enough to draw a button, not just to name a source in prose: a person
+      // switching an app to their own registry needs to press something, and a
+      // url alone is neither a label nor a target.
+      alsoIn: (() => {
+        // One entry per SOURCE, not per listing: a registry that lists the same
+        // id twice would otherwise draw two buttons carrying the same url - and
+        // two React children with one key, of which only one can be reached
+        // with a remote.
+        const seen = new Set();
+        const out = [];
+        for (const x of list) {
+          if (x === c || seen.has(x.source.url)) continue;
+          seen.add(x.source.url);
+          out.push({ url: x.source.url, name: x.source.name || null, official: !!x.source.official });
+        }
+        // The registry it is PINNED to belongs here even when it did not answer
+        // this time: a local registry is off more often than it is on, and
+        // without this the way back disappears exactly when somebody needs it -
+        // while the screen still offers a one-press Update that would re-pin the
+        // app to whichever source did answer.
+        if (pin && pin !== c.source.url && !seen.has(pin)) {
+          const src = (loaded || []).find((s2) => s2.url === pin);
+          if (src) out.push({ url: pin, name: src.name || null, official: !!src.official, silent: true });
+        }
+        return out;
+      })(),
       // The app was installed from a registry that is no longer configured, and
       // what is on offer here comes from a different one. Removing a source does
       // not remove its apps, so this is an ordinary state - but it must not be an
@@ -403,7 +430,25 @@ function listForUi(config) {
   };
 }
 
-async function install(config, id) {
+/**
+ * Install one app, from a registry the caller may name.
+ *
+ * `sourceUrl` is how an app is moved BETWEEN registries: the same id offered by
+ * two of them is the ordinary case while somebody is working on an app that is
+ * also published, and without a way to say which one, the pin decides for ever
+ * and the local copy can never be tried on a box that already has the published
+ * one.
+ *
+ * It is matched against the CONFIGURED sources and never fetched as given: a
+ * url that arrives here is a request to trust a registry, and that decision
+ * belongs to adding a source, not to pressing Install on one app.
+ *
+ * There is no version check anywhere in here, which is what makes the same
+ * version installable again from somewhere else - that is the whole point of
+ * the switch, and it is why the button says where it comes from rather than
+ * what it is called.
+ */
+async function install(config, id, sourceUrl) {
   // REFRESH, not the cached copy. The file list and its sha256s come from the
   // index while the files come from the registry live, so an index even a few
   // minutes old can describe a package that has since been republished - and the
@@ -412,13 +457,33 @@ async function install(config, id) {
   // install did exactly that. An install is deliberate and rare; one fetch to
   // make the two agree is the cheapest correctness there is.
   const loaded = await loadAll(config, true);
-  const hit = mergeSources(loaded).find((c) => c.entry.id === id);
+  const wanted = typeof sourceUrl === "string" && sourceUrl ? sourceUrl : null;
+  if (wanted && !loaded.some((s) => s.url === wanted)) return { ok: false, error: "not a configured registry" };
+  const hit = wanted
+    ? (() => {
+        const src = loaded.find((s) => s.url === wanted);
+        const entry = (src && (src.entries || []).find((m) => m.id === id)) || null;
+        return entry ? { entry, source: src } : null;
+      })()
+    : mergeSources(loaded).find((c) => c.entry.id === id);
   // Say WHY when a refresh failed. Forcing a refresh means the registries have to
   // answer - the files needed the network anyway - and reporting an unreachable
   // one as "not in registry" sends whoever debugs a failed auto-update looking
   // for a missing app. With several sources configured the distinction is the
   // same one: the app is only missing if every source answered and none had it.
   if (!hit) {
+    // With a registry NAMED, only that one's reachability is the answer: another
+    // source being down says nothing about the press somebody just made, and
+    // reporting it as unreachable sends them to look at a registry they did not
+    // choose.
+    if (wanted) {
+      const src = loaded.find((s) => s.url === wanted);
+      if (src && src.error) return { ok: false, error: "registry unreachable: " + (src.error || "unknown") };
+      // It answered and does not have it, which is a different sentence from
+      // "nobody has it" and the one somebody switching sources needs: the app is
+      // still installed, from where it was.
+      return { ok: false, error: "that registry does not offer it" };
+    }
     const failed = loaded.find((s) => s.error);
     if (failed) return { ok: false, error: "registry unreachable: " + (failed.error || "unknown") };
     return { ok: false, error: "not in registry" };
@@ -457,7 +522,7 @@ async function install(config, id) {
   // Written after the files, so a failed install leaves no claim on the id, and
   // on every install rather than the first: an app REinstalled from a different
   // source has moved, and the pin is meant to record where it stands now.
-  writePin(id, url);
+  const pinned = writePin(id, url);
   // The tile appears live (manifests reload per /apps request), but a `service`
   // plugin only loads at boot - the caller restarts (gated) to activate it. Read
   // the flag from the INSTALLED manifest (a package's own manifest.json is
@@ -465,6 +530,11 @@ async function install(config, id) {
   // with what loadPlugins will actually run.
   apps.loadManifests();
   const installed = apps.manifestById(id);
+  // A switch IS the pin: the files are the same ones the other registry would
+  // have given, and what was asked for is where the app stands. Reporting
+  // success on a pin that did not land leaves the app looking switched while
+  // the nightly run takes it back that night.
+  if (sourceUrl && !pinned) return { ok: false, error: "could not record which registry it came from" };
   return { ok: true, service: !!(installed && installed.service) };
 }
 

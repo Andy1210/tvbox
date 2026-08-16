@@ -86,6 +86,7 @@ export function AppDetail({
   app,
   status,
   onInstall,
+  onSwitchSource,
   onUpdate,
   onFlatpakUpdate,
   onRemove,
@@ -95,6 +96,8 @@ export function AppDetail({
   app: StoreEntry;
   status?: string | null;
   onInstall: () => void;
+  /** Take this app from another configured registry, and stand it with that one. */
+  onSwitchSource?: (sourceUrl: string) => void;
   onUpdate: () => void;
   onFlatpakUpdate: () => void;
   onRemove: () => void;
@@ -111,6 +114,26 @@ export function AppDetail({
   // Only refs actually on the box have a version to show or a reason to update; a
   // missing one is already reported as a dependency ("needs RetroArch").
   const flatpaks = (app.flatpaks || []).filter((f) => f.version);
+
+  /**
+   * The primary action button, or Back when there is none.
+   *
+   * Down from a registry button has to be TOLD this. Geometry answers it wrongly
+   * and the wrongness is invisible: the "Take it from:" label pushes the buttons
+   * to the right of the action row, so the corner distance picks whichever
+   * action happens to sit under a button's edge - measured, Down from the second
+   * registry landed on the red Uninstall, jumping over Update, and from a
+   * registry with a long name it passed the whole row and reached a changelog
+   * card.
+   */
+  const actionKey = (): string => {
+    if (!app.builtin && !app.installed) return "detail-install";
+    if (!app.builtin && app.updateAvailable) return "detail-update";
+    if (!app.builtin && app.installed && flatpaks.length) return "detail-flatpak";
+    if (!app.builtin && app.installed) return "detail-remove";
+    if (app.urlConfig) return "detail-url";
+    return "detail-back";
+  };
 
   // The first action that exists for this app - where focus lands on open.
   const firstAction = (): string => {
@@ -173,15 +196,67 @@ export function AppDetail({
             added one is named, and a second registry offering the same id is named
             too - an app that exists in more than one place is exactly the case
             where "which one is this" stops being obvious. */}
-        {app.source && !app.source.official && (
+        {/* Which registry this app stands with. Said for the official catalogue
+            too once another one is on offer: with only the buttons on screen,
+            "where is it from now" was answerable only by the ABSENCE of
+            this line. */}
+        {app.source && (!app.source.official || (app.alsoIn && app.alsoIn.length > 0)) && (
           <div className="text-[1.9vh] text-fg-dim mb-[1.6vh]">
-            {t("store.fromSource", { name: sourceLabel(app.source) })}
-            {app.alsoIn && app.alsoIn.length > 0 && (
-              <span className="text-[1.7vh] opacity-70">
-                {" "}
-                · {t("store.alsoIn", { names: app.alsoIn.map((u) => sourceLabel({ url: u })).join(", ") })}
-              </span>
-            )}
+            {t("store.fromSource", { name: sourceLabel(app.source, t("storeSources.official")) })}
+          </div>
+        )}
+
+        {/* The same app in more than one registry is the ordinary state while
+            somebody is working on one that is also published - so this is a
+            press, not a sentence. Taking it from the other one re-pins it there,
+            at whatever version that registry carries, the same number included:
+            a debug build usually stands in for the published one under its own
+            version. */}
+        {/* Where it came from, when that is not where it is being offered from.
+            Without this the emerald "Update available" badge is the only thing
+            on screen, and pressing it silently takes the app back to the other
+            registry - which is the switch being undone by the button that looks
+            like an ordinary version bump. */}
+        {app.pinnedElsewhere && !app.installing && (
+          <div className="text-[1.9vh] text-warn mb-[1.6vh]">
+            {t("store.pinnedElsewhere", { name: sourceLabel(app.source || { url: "" }, t("storeSources.official")) })}
+          </div>
+        )}
+
+        {onSwitchSource && !app.builtin && app.alsoIn && app.alsoIn.length > 0 && !app.installing && (
+          <div className="flex flex-wrap items-center gap-[1.2vw] mb-[1.6vh]">
+            <span className="text-[1.9vh] text-fg-dim">{t("store.takeFrom")}</span>
+            {app.alsoIn.map((s2) => (
+              <FocusButton
+                key={s2.url}
+                focusKey={`detail-source-${s2.url}`}
+                // Through the same gate as Install: this press can perform a
+                // first install of an app, which is the action the child lock
+                // exists for - and a lock that the button beside it honours is
+                // not a lock.
+                onEnter={() => guard(() => onSwitchSource(s2.url), `detail-source-${s2.url}`)}
+                onArrowPress={(dir) => {
+                  if (dir !== "down") return true;
+                  // Deferred by a macrotask: called straight from inside the
+                  // library's own key handler the move is swallowed - the press
+                  // is still being resolved, and the focus set during it does
+                  // not survive it.
+                  setTimeout(() => setFocus(actionKey()), 0);
+                  return false;
+                }}
+                className={`px-[1.8vw] h-[5vh] rounded-[1.1vh] flex items-center justify-center text-[1.9vh] ${
+                  s2.silent ? "bg-white/5 text-fg-dim" : "bg-white/5"
+                }`}
+              >
+                {/* A registry that did not answer is still offered - it is the
+                    way back to where the app came from - but it is said, because
+                    a button that looks like the others and can only fail is
+                    worse than one that explains itself. */}
+                {s2.silent
+                  ? t("store.sourceOffline", { name: sourceLabel(s2, t("storeSources.official")) })
+                  : sourceLabel(s2, t("storeSources.official"))}
+              </FocusButton>
+            ))}
           </div>
         )}
 
