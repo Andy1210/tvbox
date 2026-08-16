@@ -77,6 +77,29 @@ describe("the detail of an app nobody offers", () => {
   });
 });
 
+describe("an app that is also a flatpak", () => {
+  it("still lands the cursor on Remove", async () => {
+    // The flatpak update is real - the ref is the box's, not the registry's -
+    // but it sits directly under a line saying the app cannot be updated, and
+    // one OK there starts a several-hundred-megabyte download instead of the
+    // removal this screen exists for.
+    const { container } = render(
+      <AppDetail
+        app={gone({ flatpaks: [{ ref: "org.libretro.RetroArch", name: "RetroArch", version: "1.19.1" }] })}
+        onInstall={() => {}}
+        onUpdate={() => {}}
+        onFlatpakUpdate={() => {}}
+        onRemove={() => {}}
+        onSetUrl={() => {}}
+        onExit={() => {}}
+      />,
+    );
+    await settle();
+    expect(container.querySelector('[data-sfocus="detail-flatpak"]'), "the button still exists").not.toBeNull();
+    expect(getCurrentFocusKey()).toBe("detail-remove");
+  });
+});
+
 describe("the store list", () => {
   function stub(apps: () => StoreEntry[], onUninstall?: () => void) {
     vi.stubGlobal("fetch", (_url: string, init?: RequestInit) => {
@@ -102,6 +125,68 @@ describe("the store list", () => {
     await settle();
     expect(container.textContent).toContain("Installed, no longer offered by any source");
     expect(container.querySelector('[data-sfocus="store-app-goneapp"]')).not.toBeNull();
+  });
+
+  it("puts the cursor on something reachable even when nothing is left", async () => {
+    // Removing the last app leaves a store with no rows - and that screen used
+    // to hold nothing focusable at all, so arrows and OK did nothing and only
+    // Back escaped.
+    let list: StoreEntry[] = [gone()];
+    stub(
+      () => list,
+      () => {
+        list = [];
+      },
+    );
+    render(<StoreSettings />);
+    await settle();
+    await setFocus("store-app-goneapp");
+    await act(async () => {
+      await remote.ok();
+    });
+    await settle();
+    await setFocus("detail-remove");
+    await act(async () => {
+      await remote.ok();
+    });
+    await settle();
+    const where = getCurrentFocusKey();
+    expect(document.querySelector(`[data-sfocus="${where}"]`), `cursor parked on ${where}`).not.toBeNull();
+  });
+
+  it("ignores a press that was queued behind the removal", async () => {
+    // The cursor lands on the row that took the removed one's place, and an
+    // installed app's detail opens focused on its own Uninstall - so a press
+    // still travelling when the list came back would arm a removal nobody asked
+    // for, two presses from one.
+    let list: StoreEntry[] = [entry(), gone()];
+    stub(
+      () => list,
+      () => {
+        list = [entry()];
+      },
+    );
+    render(<StoreSettings />);
+    await settle();
+    await setFocus("store-app-goneapp");
+    await act(async () => {
+      await remote.ok();
+    });
+    await settle();
+    await setFocus("detail-remove");
+    await act(async () => {
+      await remote.ok();
+    });
+    await settle();
+    // The queued one, arriving on whatever the cursor now holds.
+    await act(async () => {
+      await remote.ok();
+    });
+    await settle();
+    expect(
+      document.body.textContent,
+      "another app's detail must not open from a press meant for the last one",
+    ).not.toContain("Uninstall");
   });
 
   it("does not strand the remote when the last row of one is removed", async () => {

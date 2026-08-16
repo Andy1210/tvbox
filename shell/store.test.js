@@ -723,7 +723,11 @@ test("an installed app that no source lists still gets a row, marked as unlisted
     assert.equal(e.updateAvailable, false, "there is nothing to update from");
     assert.equal(e.installedVersion, "1.0.0");
     assert.equal(e.version, "1.0.0", "a version of undefined reaches the screen as 'vundefined'");
-    assert.equal(e.unlistedFrom, url, "the pin still says where it came from, which is the way back");
+    assert.equal(
+      e.unlistedFrom,
+      null,
+      "that registry is still configured and simply stopped offering it - naming it would read as advice to add it back",
+    );
     assert.deepEqual(list.updates, [], "not offered as an update");
     assert.deepEqual(list.autoUpdates, []);
 
@@ -754,6 +758,50 @@ test("a source that did not answer never makes an app look retired", async () =>
     const e = list.apps.find((a) => a.id === "liveapp");
     assert.ok(!e || !e.unlisted, "an unreachable registry is not a retirement");
     await store.uninstall("liveapp");
+  } finally {
+    r.close();
+  }
+});
+
+test("the registry it came from is named only when the box no longer has it", async () => {
+  // The half that turns the screen from a dead end into an action - and only
+  // then, because the usual case is a registry that is still configured and has
+  // simply dropped the app.
+  const gone = registry([manifestOnly("movedapp", "MovedApp", "1.0.0")]);
+  const main = registry([]);
+  const [goneUrl, mainUrl] = [await gone.listen(), await main.listen()];
+  let sources = [{ url: goneUrl, name: "Dev" }];
+  const config = { rawStore: () => ({ registry: mainUrl, sources }), appConfig: () => ({}) };
+  try {
+    assert.equal((await store.install(config, "movedapp")).ok, true);
+    // The owner removes that source from the box.
+    sources = [];
+    const list = await store.listForUi(config)(true);
+    const e = list.apps.find((a) => a.id === "movedapp");
+    assert.equal(e.unlisted, true);
+    assert.equal(e.unlistedFrom, goneUrl, "adding that registry back is what would make it updatable again");
+    await store.uninstall("movedapp");
+  } finally {
+    gone.close();
+    main.close();
+  }
+});
+
+test("an app this box refuses to read is not reported as retired", async () => {
+  // A refusal is not an absence. The likeliest reasons are forward-compatible
+  // ones - a manifestVersion or a capability a box does not know yet - so a
+  // registry raising either would otherwise tell every older box in the field
+  // that the app is gone, and point them at a registry they already have.
+  const r = registry([manifestOnly("newapp", "NewApp", "1.0.0")]);
+  const url = await r.listen();
+  const config = { rawStore: () => ({ registry: url, sources: [] }), appConfig: () => ({}) };
+  try {
+    assert.equal((await store.install(config, "newapp")).ok, true);
+    r.state.apps = [{ ...manifestOnly("newapp", "NewApp", "2.0.0"), manifestVersion: 99 }];
+    const list = await store.listForUi(config)(true);
+    const e = list.apps.find((a) => a.id === "newapp");
+    assert.ok(!e || !e.unlisted, "offered but unreadable is not the same as not offered");
+    await store.uninstall("newapp");
   } finally {
     r.close();
   }

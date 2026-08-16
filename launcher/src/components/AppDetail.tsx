@@ -129,7 +129,7 @@ export function AppDetail({
   const actionKey = (): string => {
     if (!app.builtin && !app.installed) return "detail-install";
     if (!app.builtin && app.updateAvailable) return "detail-update";
-    if (!app.builtin && app.installed && flatpaks.length) return "detail-flatpak";
+    if (!app.builtin && app.installed && flatpaks.length && !app.unlisted) return "detail-flatpak";
     if (!app.builtin && app.installed) return "detail-remove";
     if (app.urlConfig) return "detail-url";
     return "detail-back";
@@ -140,7 +140,12 @@ export function AppDetail({
     if (app.installing) return "detail-back"; // progress replaces the action buttons
     if (!app.builtin && !app.installed) return "detail-install";
     if (!app.builtin && app.updateAvailable) return "detail-update";
-    if (!app.builtin && app.installed && flatpaks.length) return "detail-flatpak";
+    // A flatpak update is real even for an app no registry offers - the ref is
+    // the box's, not the registry's - but it must not be what the cursor lands
+    // on, directly under a line saying the app cannot be updated. One OK there
+    // starts a several-hundred-megabyte download instead of the removal this
+    // screen exists for.
+    if (!app.builtin && app.installed && flatpaks.length && !app.unlisted) return "detail-flatpak";
     if (!app.builtin && app.installed) return "detail-remove";
     if (app.urlConfig) return "detail-url";
     return "detail-back";

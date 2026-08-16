@@ -39,6 +39,8 @@ export function StoreSettings() {
   const [status, setStatus] = useState<{ id: string; text: string } | null>(null);
   const [urlEdit, setUrlEdit] = useState<StoreEntry | null>(null); // OSK open for this app
   const [detailId, setDetailId] = useState<string | null>(null); // AppDetail open for this app
+  /** Until when a row press is ignored, so one queued behind a removal cannot open the row that replaced it. */
+  const settling = useRef(0);
 
   // Every row is focusable now (each opens the detail view); focus the first.
   const firstKey = (list: StoreEntry[]): string | null => (list.length ? "store-app-" + list[0].id : null);
@@ -230,23 +232,31 @@ export function StoreSettings() {
     if (d) setEntries(d.apps);
   };
   const remove = async (e: StoreEntry) => {
+    const wasAt = (entries || []).findIndex((x) => x.id === e.id);
     const ok = await storeUninstall(e.id);
     setStatus({ id: e.id, text: t(ok ? "store.removed" : "store.failed", { name: loc(e.name) }) });
-    if (!ok) {
-      setTimeout(() => setFocus("detail-remove"), 0);
-      return;
-    }
     const rest = await load();
-    // An app no source lists has no row left once it is gone, so the detail
-    // unmounts with it and `detail-install` never mounts again - a cursor there
-    // discards every press afterwards, with only Back out. Leave for the list.
-    if (rest && !rest.some((x) => x.id === e.id)) {
-      setDetailId(null);
-      const next = firstKey(rest);
-      if (next) setTimeout(() => setFocus(next), 0);
+    const stillThere = !!rest && rest.some((x) => x.id === e.id);
+    // Whether the detail can still hold the cursor is decided by the LIST, not
+    // by whether this press succeeded. A second OK arriving while the first
+    // removal is in flight is answered "not a store app", and focusing
+    // detail-remove then parks the cursor on a screen that has already
+    // unmounted - every press after it discarded, with only Back out.
+    if (stillThere) {
+      setTimeout(() => setFocus(ok ? "detail-install" : "detail-remove"), 0);
       return;
     }
-    setTimeout(() => setFocus("detail-install"), 0);
+    setDetailId(null);
+    // The neighbour, not the top of the list: being thrown to the first row
+    // costs a screenful of presses to get back in a long store, and the
+    // confirmation line lives at the end of the list, below the fold from there.
+    const next =
+      rest && rest.length ? "store-app-" + rest[Math.min(Math.max(wasAt, 0), rest.length - 1)].id : "store-empty";
+    // A press queued behind the removal would otherwise open whichever row the
+    // cursor just landed on - and an installed app's detail opens focused on
+    // its own Uninstall, so a third press removes an app nobody asked about.
+    settling.current = Date.now() + 600;
+    setTimeout(() => setFocus(next), 0);
   };
   const saveUrl = async (e: StoreEntry, value: string) => {
     setUrlEdit(null);
@@ -344,7 +354,10 @@ export function StoreSettings() {
               )}
               <FocusButton
                 focusKey={"store-app-" + e.id}
-                onEnter={() => setDetailId(e.id)}
+                onEnter={() => {
+                  if (Date.now() < settling.current) return;
+                  setDetailId(e.id);
+                }}
                 className="px-[1.5vw] py-[1.2vh] rounded-[1.1vh] bg-white/5 flex items-center gap-[1.5vw]"
               >
                 <Icon svg={e.icon} className="w-[3.4vh] h-[3.4vh] shrink-0" />
@@ -365,7 +378,16 @@ export function StoreSettings() {
           );
         })}
         {entries !== null && !error && !entries.length && (
-          <div className="text-[1.9vh] text-fg-dim">{t("store.empty")}</div>
+          // Focusable, not a sentence. An empty store used to hold nothing the
+          // D-pad could reach, so arrows and OK did nothing at all and only Back
+          // escaped - and removing the last app is a way to arrive here.
+          <FocusButton
+            focusKey="store-empty"
+            onEnter={() => load(true)}
+            className="px-[1.5vw] py-[1.2vh] rounded-[1.1vh] bg-white/5 text-[1.9vh] text-fg-dim text-left"
+          >
+            {t("store.empty")} · {t("app.retry")}
+          </FocusButton>
         )}
         {status && (
           <div className="text-[1.8vh] text-fg-dim mt-[0.6vh]" role="status" aria-live="polite">
