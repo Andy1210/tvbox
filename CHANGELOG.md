@@ -5,6 +5,32 @@ updates). `scripts/make-release.sh` lifts the current version's `hu`/`en`
 blocks into the OTA feed's `notes` - keep both languages, keep it short, and
 write for the person on the couch (what changes for THEM), not for developers.
 
+## 3.3.0
+
+### hu
+
+- **Egy app áthozható egy másik boltból, egy gombnyomással.** Ha ugyanaz az app
+  több boltban is fent van — mert épp dolgozol rajta, és közben a hivatalosban
+  is benne van —, az app oldalán megjelenik egy gomb boltonként, és azzal
+  átveheted onnan. Ugyanazzal a verziószámmal is: egy fejlesztői változat
+  általában a publikált helyére áll be, ugyanazon a számon. Vissza is ugyanígy
+  megy.
+- **Az app oldala megmondja, melyik boltból való**, és ha máshonnan jött, mint
+  ahonnan most kínálják, azt is, hogy a frissítés áthozná. Egy bolt, ami épp nem
+  válaszol, kint marad a listán — az a visszaút —, de látszik rajta, hogy nem
+  felel.
+
+### en
+
+- **An app can be taken from another store with one press.** When the same app
+  is in more than one store - because you are working on it while it is also
+  published - its page shows a button per store, and that button takes it from
+  there. The same version number included: a development build usually stands in
+  for the published one under its own number. Going back is the same press.
+- **An app's page says which store it came from**, and when that is not the one
+  offering it now, that updating would move it. A store that is not answering
+  stays on the list - it is the way back - and says so.
+
 ## 3.2.0
 
 ### hu
