@@ -217,6 +217,54 @@ describe("the store list", () => {
     expect(container.textContent).not.toContain("failed");
   });
 
+  it("does not claim a removal the box answered 200 to but could not verify", async () => {
+    // The shape the box really produces when a registry is unreachable: HTTP
+    // 200, an empty app list, and an `error` in the body. Reading that as
+    // "everything is gone" is how a failed removal reported success - the 500
+    // case below was covered and this one was not.
+    let broken = false;
+    vi.stubGlobal("fetch", (_url: string, init?: RequestInit) => {
+      if (init?.method === "POST") {
+        broken = true;
+        return Promise.resolve(
+          new Response(JSON.stringify({ ok: false, error: "busy" }), {
+            headers: { "Content-Type": "application/json" },
+          }),
+        );
+      }
+      return Promise.resolve(
+        new Response(
+          JSON.stringify({
+            registry: OFFICIAL,
+            apps: broken ? [] : [entry()],
+            error: broken ? "registry unreachable" : null,
+            updates: [],
+            autoUpdates: [],
+            sources: [],
+          }),
+          { headers: { "Content-Type": "application/json" } },
+        ),
+      );
+    });
+    const { container } = render(<StoreSettings />);
+    await settle();
+    await setFocus("store-app-listedapp");
+    await act(async () => {
+      await remote.ok();
+    });
+    await settle();
+    await setFocus("detail-remove");
+    await act(async () => {
+      await remote.ok();
+    });
+    await settle();
+    expect(container.textContent).toContain("failed");
+    // And the cursor has to be on what that screen actually renders - the retry,
+    // not the empty-store button, which is hidden while there is an error.
+    const where = getCurrentFocusKey();
+    expect(document.querySelector(`[data-sfocus="${where}"]`), `cursor parked on ${where}`).not.toBeNull();
+  });
+
   it("does not claim a removal that could not be checked", async () => {
     // If the list cannot be read afterwards, an empty answer is "I did not see",
     // not "everything is gone" - and the press said no.

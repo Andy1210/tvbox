@@ -40,6 +40,7 @@ export function StoreSettings() {
   const [status, setStatus] = useState<{ id: string; text: string } | null>(null);
   const [urlEdit, setUrlEdit] = useState<StoreEntry | null>(null); // OSK open for this app
   const [detailId, setDetailId] = useState<string | null>(null); // AppDetail open for this app
+  const detailApp = detailId ? ((entries || []).find((e) => e.id === detailId) ?? null) : null;
   /** Until when a row press is ignored, so one queued behind a removal cannot open the row that replaced it. */
   const settling = useRef(0);
   // A held OK repeats on this hardware, and one press in this list is two away
@@ -47,8 +48,10 @@ export function StoreSettings() {
   // the list and uninstalled three.
   // Not while the on-screen keyboard is up: it is a sibling of the detail view,
   // so the same listener was eating held keys there - clearing an address went
-  // from one held press to twenty-four.
-  useSwallowEnterRepeats(!urlEdit);
+  // from one held press to twenty-four. Keyed on what the render actually uses,
+  // because `urlEdit` outlives the keyboard whenever the detail closes under it,
+  // and the list would then run with the swallow off.
+  useSwallowEnterRepeats(!(detailApp && urlEdit));
 
   // Every row is focusable now (each opens the detail view); focus the first.
   const firstKey = (list: StoreEntry[]): string | null => (list.length ? "store-app-" + list[0].id : null);
@@ -75,10 +78,11 @@ export function StoreSettings() {
         if (err) setFocus("store-retry");
         else setFocus(firstKey(apps) ?? "store-empty");
       }, 0);
-    // null, not [], when the box could not be asked: "I did not see" and "there
-    // is nothing" are different answers, and a caller checking whether an app
-    // survived a removal must not read the first as the second.
-    return d ? apps : null;
+    // null, not [], when the list could not be READ - which is not only a
+    // transport failure. An unreachable registry is answered 200 with an empty
+    // list and an `error` in the body, and reading that as "everything is gone"
+    // is how a removal that failed announced success.
+    return d && !d.error ? apps : null;
   }, []);
   useEffect(() => {
     load(false, true);
@@ -285,7 +289,11 @@ export function StoreSettings() {
       .reverse()
       .find((x) => now.some((y) => y.id === x.id));
     const keep = after || back;
-    const next = keep ? "store-app-" + keep.id : now.length ? "store-app-" + now[0].id : "store-empty";
+    // Which of the two the screen actually has: the empty button is rendered
+    // only when there is no error, and the retry only when there is. Naming the
+    // wrong one leaves the cursor on nothing.
+    const bare = rest === null ? "store-retry" : "store-empty";
+    const next = keep ? "store-app-" + keep.id : now.length ? "store-app-" + now[0].id : bare;
     // A press queued behind the removal would otherwise open whichever row the
     // cursor just landed on - and an installed app's detail opens focused on
     // its own Uninstall, so a third press removes an app nobody asked about.
@@ -304,8 +312,6 @@ export function StoreSettings() {
     }
     setTimeout(() => setFocus("detail-url"), 0);
   };
-
-  const detailApp = detailId ? ((entries || []).find((e) => e.id === detailId) ?? null) : null;
 
   // The detail view fills the screen; the OSK (Set address) is a modal on top of
   // it - rendered as a sibling overlay so AppDetail stays mounted (its focus
@@ -395,7 +401,11 @@ export function StoreSettings() {
             <Fragment key={e.id}>
               {opensGroup && (
                 <div className="mt-[1.4vh] px-[1.5vw] text-[1.7vh] text-fg-dim">
-                  {t(reason === "retired" ? "store.unlistedGroup" : "store.unreadableGroup")}
+                  {reason === "retired"
+                    ? t("store.unlistedGroup")
+                    : reason === "blocked"
+                      ? t("store.blockedGroup")
+                      : t("store.unreadableGroup")}
                 </div>
               )}
               <FocusButton
