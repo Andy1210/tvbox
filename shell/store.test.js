@@ -888,6 +888,12 @@ test("the rows nobody offers arrive grouped by reason, not interleaved", async (
       [...new Set(reasons)],
       "each reason appears in one run, so the panel draws each heading once",
     );
+    assert.deepEqual(runs, ["retired", "unreadable", "blocked"], "and in that order, worst-explained last");
+    const firstUnlisted = list.apps.findIndex((a) => a.unlisted);
+    assert.ok(
+      list.apps.slice(0, firstUnlisted).every((a) => !a.unlisted),
+      "the catalogue stays ahead of the tail - the sort must not reach into it",
+    );
     for (const id of ["aaa", "bbb", "ccc", "ddd"]) await store.uninstall(id);
   } finally {
     r.close();

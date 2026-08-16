@@ -41,6 +41,14 @@ export function StoreSettings() {
   const [urlEdit, setUrlEdit] = useState<StoreEntry | null>(null); // OSK open for this app
   const [detailId, setDetailId] = useState<string | null>(null); // AppDetail open for this app
   const detailApp = detailId ? ((entries || []).find((e) => e.id === detailId) ?? null) : null;
+  // The keyboard is rendered inside the detail, but its state is not: a poll
+  // that dropped the app closed the screen and left `urlEdit` set, so the next
+  // press opened another app's detail with the previous app's address editor on
+  // top of it - saving to the right app from the wrong screen, and leaving the
+  // cursor on a button that screen does not have.
+  useEffect(() => {
+    if (!detailApp && urlEdit) setUrlEdit(null);
+  }, [detailApp, urlEdit]);
   /** Until when a row press is ignored, so one queued behind a removal cannot open the row that replaced it. */
   const settling = useRef(0);
   // A held OK repeats on this hardware, and one press in this list is two away
@@ -82,7 +90,12 @@ export function StoreSettings() {
     // transport failure. An unreachable registry is answered 200 with an empty
     // list and an `error` in the body, and reading that as "everything is gone"
     // is how a removal that failed announced success.
-    return d && !d.error ? apps : null;
+    // Any source failing is enough: `error` is only set when they ALL fail, and
+    // a single registry blinking out drops its apps from this list while the
+    // answer still looks healthy - which reads as "removed" for a removal that
+    // did not happen.
+    const partial = !!d && Array.isArray(d.sources) && d.sources.some((x) => x.error);
+    return d && !d.error && !partial ? apps : null;
   }, []);
   useEffect(() => {
     load(false, true);
@@ -272,7 +285,10 @@ export function StoreSettings() {
     // detail-remove then parks the cursor on a screen that has already
     // unmounted - every press after it discarded, with only Back out.
     if (stillThere) {
-      setTimeout(() => setFocus(ok ? "detail-install" : "detail-remove"), 0);
+      // What the screen is about to RENDER, not what the press answered: the two
+      // disagree whenever the box's reply and its own list do, and naming the
+      // button that is not there leaves the cursor on nothing.
+      setTimeout(() => setFocus(row && row.installed ? "detail-remove" : "detail-install"), 0);
       return;
     }
     setDetailId(null);

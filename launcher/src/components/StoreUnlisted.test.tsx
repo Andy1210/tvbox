@@ -336,6 +336,54 @@ describe("the store list", () => {
     expect(container.textContent).not.toContain("failed");
   });
 
+  it("does not keep an address editor open over a screen that closed under it", async () => {
+    // The keyboard is rendered inside the detail view; its state was not. So a
+    // screen that closes on its own - a poll that no longer lists the app -
+    // left the editor armed, and the next press opened ANOTHER app's detail
+    // with the previous app's address editor on top of it.
+    //
+    // Driven through the poll rather than through Back, because Back closes the
+    // editor itself and proves nothing: with that route the test passed against
+    // the bug.
+    let list: StoreEntry[] = [
+      entry({ id: "hosted", name: "Hosted", urlConfig: "hosted", baseUrl: "", installing: true }),
+      entry({ id: "other", name: "Other" }),
+    ];
+    stub(() => list);
+    const { container } = render(<StoreSettings />);
+    await settle();
+    await setFocus("store-app-hosted");
+    await act(async () => {
+      await remote.ok();
+    });
+    await settle();
+    await setFocus("detail-url");
+    await act(async () => {
+      await remote.ok();
+    });
+    await settle();
+    expect(container.querySelector('[data-sfocus^="osk-"]'), "the editor is up").not.toBeNull();
+
+    // It goes away underneath, while the panel is polling because of the install.
+    list = [entry({ id: "other", name: "Other" })];
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 1800));
+    });
+    // The keyboard is inside the detail, so it is off screen either way. What
+    // matters is whether it is still ARMED: opening the next app is where it
+    // came back, over a screen it does not belong to.
+    await setFocus("store-app-other");
+    await act(async () => {
+      await remote.ok();
+    });
+    await settle();
+    expect(container.textContent, "Other's detail is open").toContain("Other");
+    expect(
+      container.querySelector('[data-sfocus^="osk-"]'),
+      "the previous app's address editor must not reopen over another app",
+    ).toBeNull();
+  }, 10000);
+
   it("puts the cursor somewhere on a store that is already empty", async () => {
     // Not the removal path - arriving at a store with no rows at all, which a
     // fresh box and a registry serving nothing both produce. The button was
