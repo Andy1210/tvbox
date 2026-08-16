@@ -31,10 +31,17 @@ export const keyBase = (id: string) => "remote-" + id.replace(/[^a-z0-9]/gi, "")
 // physically held for a moment, and Chromium synthesizes repeats for held keys -
 // without this a slightly long press would immediately "press" the modal's default
 // button. Arrows repeat as usual.
-export function useSwallowEnterRepeats() {
+export function useSwallowEnterRepeats(enabled = true) {
+  const on = useRef(enabled);
+  useEffect(() => {
+    on.current = enabled;
+  });
   useEffect(() => {
     const block = (ev: KeyboardEvent) => {
-      if (ev.repeat && (ev.key === "Enter" || ev.key === " ")) {
+      // Read through a ref rather than re-binding: a listener that comes and
+      // goes changes its position in the capture order, and this one only works
+      // by being ahead of the handlers it protects.
+      if (on.current && ev.repeat && (ev.key === "Enter" || ev.key === " ")) {
         ev.preventDefault();
         ev.stopImmediatePropagation();
       }

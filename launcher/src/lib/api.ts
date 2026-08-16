@@ -116,7 +116,7 @@ export interface StoreEntry {
    */
   unlisted?: boolean;
   /** Why: the registries dropped it, or this box cannot read what they sent. */
-  unlistedReason?: "retired" | "unreadable";
+  unlistedReason?: "retired" | "unreadable" | "blocked";
   /** The registry it was installed from, while the pin still records it. */
   unlistedFrom?: string | null;
   // Other configured registries offering the same id. Enough to draw a button

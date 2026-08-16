@@ -812,3 +812,50 @@ test("an app this box refuses to read keeps a row, and is not called retired", a
     r.close();
   }
 });
+
+test("a trust refusal is not dressed up as a version skew", async () => {
+  // The box refused this one ON PURPOSE, and no amount of updating it will
+  // change that - so it must not be told that updating might bring the app
+  // back. Same row, same Remove, different sentence.
+  const r = registry([manifestOnly("trustapp", "TrustApp", "1.0.0")]);
+  const url = await r.listen();
+  const config = { rawStore: () => ({ registry: url, sources: [] }), appConfig: () => ({}) };
+  try {
+    assert.equal((await store.install(config, "trustapp")).ok, true);
+    r.state.apps = [
+      { ...manifestOnly("trustapp", "TrustApp", "2.0.0"), requires: { aptRepo: { uri: "http://x", key: "k" } } },
+    ];
+    const list = await store.listForUi(config)(true);
+    const e = list.apps.find((a) => a.id === "trustapp");
+    assert.ok(e, "still removable");
+    assert.equal(e.unlistedReason, "blocked");
+    await store.uninstall("trustapp");
+  } finally {
+    r.close();
+  }
+});
+
+test("a refusal keeps its row even while another source is unreachable", async () => {
+  // Whether this box can read an app is answered by the source that DID reply.
+  // Waiting for the ones that did not cost the row - and the row is where
+  // Remove lives, so the app became unremovable from the television.
+  const a = registry([manifestOnly("mixapp", "MixApp", "1.0.0")]);
+  const b = registry([]);
+  const [urlA, urlB] = [await a.listen(), await b.listen()];
+  const config = {
+    rawStore: () => ({ registry: urlA, sources: [{ url: urlB, name: "Other" }] }),
+    appConfig: () => ({}),
+  };
+  try {
+    assert.equal((await store.install(config, "mixapp")).ok, true);
+    a.state.apps = [{ ...manifestOnly("mixapp", "MixApp", "2.0.0"), manifestVersion: 99 }];
+    b.close();
+    const list = await store.listForUi(config)(true);
+    const e = list.apps.find((a2) => a2.id === "mixapp");
+    assert.ok(e, "one silent source must not take the row away");
+    assert.equal(e.unlistedReason, "unreadable");
+    await store.uninstall("mixapp");
+  } finally {
+    a.close();
+  }
+});

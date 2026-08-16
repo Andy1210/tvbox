@@ -116,6 +116,9 @@ async function fetchIndex(url, bust) {
     // box must not go on to announce that nobody offers the app any more. Only
     // ever used for set membership, never shown.
     const dropped = [];
+    // Refused by the TRUST rules rather than unreadable: deliberate, and no
+    // amount of updating the box changes it, so it must not be told to.
+    const blocked = [];
     const noteDropped = (m) => {
       if (m && typeof m.id === "string") dropped.push(m.id);
     };
@@ -128,7 +131,7 @@ async function fetchIndex(url, bust) {
       const errs = trustErrors(valid);
       if (errs.length) {
         console.warn("[store] skip", valid.id, "-", errs.join("; "));
-        noteDropped(valid);
+        blocked.push(valid.id);
         continue;
       }
       const pkg = packages[valid.id];
@@ -138,6 +141,7 @@ async function fetchIndex(url, bust) {
       out.push(valid);
     }
     Object.defineProperty(out, "_dropped", { value: dropped, enumerable: false });
+    Object.defineProperty(out, "_blocked", { value: blocked, enumerable: false });
     return out;
   } finally {
     clearTimeout(t);
@@ -447,9 +451,14 @@ function listForUi(config) {
     // thing this list exists to keep reachable. It gets a row that says what
     // actually happened.
     const refused = new Set(loaded.flatMap((s) => (s.entries && s.entries._dropped) || []));
-    const candidates = answered
-      ? apps.getManifests().filter((m) => !builtinIds.has(m.id) && installedFromStore(m.id))
-      : [];
+    const blocked = new Set(loaded.flatMap((s) => (s.entries && s.entries._blocked) || []));
+    // A refusal is knowable from the source that DID answer, so it does not
+    // wait on the ones that did not - and waiting cost the row, which is the
+    // thing Remove lives in. Only "nobody offers this" needs every source in.
+    const candidates = apps
+      .getManifests()
+      .filter((m) => !builtinIds.has(m.id) && installedFromStore(m.id))
+      .filter((m) => answered || refused.has(m.id) || blocked.has(m.id));
     if (candidates.length) {
       const listed = new Set(out.map((a) => a.id));
       const pins = readPins();
@@ -494,12 +503,12 @@ function listForUi(config) {
           // Which sentence the screen owes the person. "Retired" is a claim
           // about the world; "unreadable" is a claim about this box, and only
           // one of them is true at a time.
-          unlistedReason: refused.has(m.id) ? "unreadable" : "retired",
+          unlistedReason: blocked.has(m.id) ? "blocked" : refused.has(m.id) ? "unreadable" : "retired",
           // Where it came from, while the pin still says. It is the difference
           // between "this is stuck here" and "add that registry back".
           // Only for a retired app: a registry that is still serving this one and
           // merely speaks a newer dialect is not somewhere to be sent.
-          unlistedFrom: refused.has(m.id) ? null : unlistedFrom(pins.get(m.id), configured),
+          unlistedFrom: refused.has(m.id) || blocked.has(m.id) ? null : unlistedFrom(pins.get(m.id), configured),
         });
       }
     }

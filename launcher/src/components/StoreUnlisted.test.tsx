@@ -189,6 +189,77 @@ describe("the store list", () => {
     expect(getCurrentFocusKey(), "the row that FOLLOWED it, whatever moved").toBe("store-app-z9");
   });
 
+  it("says removed for an ordinary app, whose row stays behind", async () => {
+    // The row does NOT disappear when a still-offered app is removed - the
+    // registry keeps listing it, with installed false. Reading "still in the
+    // list" as "the removal failed" put "action failed" on the screen for every
+    // ordinary removal, in the same frame as the button turning into Install.
+    let list: StoreEntry[] = [entry()];
+    stub(
+      () => list,
+      () => {
+        list = [entry({ installed: false, installedVersion: null })];
+      },
+    );
+    const { container } = render(<StoreSettings />);
+    await settle();
+    await setFocus("store-app-listedapp");
+    await act(async () => {
+      await remote.ok();
+    });
+    await settle();
+    await setFocus("detail-remove");
+    await act(async () => {
+      await remote.ok();
+    });
+    await settle();
+    expect(container.textContent).toContain("removed");
+    expect(container.textContent).not.toContain("failed");
+  });
+
+  it("does not claim a removal that could not be checked", async () => {
+    // If the list cannot be read afterwards, an empty answer is "I did not see",
+    // not "everything is gone" - and the press said no.
+    let broken = false;
+    vi.stubGlobal("fetch", (_url: string, init?: RequestInit) => {
+      if (init?.method === "POST") {
+        broken = true;
+        return Promise.resolve(
+          new Response(JSON.stringify({ ok: false, error: "busy" }), {
+            headers: { "Content-Type": "application/json" },
+          }),
+        );
+      }
+      if (broken) return Promise.resolve(new Response("nope", { status: 500 }));
+      return Promise.resolve(
+        new Response(
+          JSON.stringify({
+            registry: OFFICIAL,
+            apps: [entry()],
+            error: null,
+            updates: [],
+            autoUpdates: [],
+            sources: [],
+          }),
+          { headers: { "Content-Type": "application/json" } },
+        ),
+      );
+    });
+    const { container } = render(<StoreSettings />);
+    await settle();
+    await setFocus("store-app-listedapp");
+    await act(async () => {
+      await remote.ok();
+    });
+    await settle();
+    await setFocus("detail-remove");
+    await act(async () => {
+      await remote.ok();
+    });
+    await settle();
+    expect(container.textContent, "nothing was removed, and nothing could confirm it either").toContain("failed");
+  });
+
   it("says it was removed even when a second press raced the first", async () => {
     // The second OK inside one round trip is answered "not a store app", and
     // the sentence used to be written by whichever press replied last - so a

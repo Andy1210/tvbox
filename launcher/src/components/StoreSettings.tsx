@@ -45,7 +45,10 @@ export function StoreSettings() {
   // A held OK repeats on this hardware, and one press in this list is two away
   // from removing an app. Measured with autorepeat: a single held button walked
   // the list and uninstalled three.
-  useSwallowEnterRepeats();
+  // Not while the on-screen keyboard is up: it is a sibling of the detail view,
+  // so the same listener was eating held keys there - clearing an address went
+  // from one held press to twenty-four.
+  useSwallowEnterRepeats(!urlEdit);
 
   // Every row is focusable now (each opens the detail view); focus the first.
   const firstKey = (list: StoreEntry[]): string | null => (list.length ? "store-app-" + list[0].id : null);
@@ -56,7 +59,7 @@ export function StoreSettings() {
   // placed explicitly or the D-pad can never enter the panel.
   // Returns what it loaded: a caller that has just removed something needs to
   // know whether the row it was standing on still exists.
-  const load = useCallback(async (refresh = false, placeFocus = false): Promise<StoreEntry[]> => {
+  const load = useCallback(async (refresh = false, placeFocus = false): Promise<StoreEntry[] | null> => {
     const d = await fetchStore(refresh);
     const apps = d ? d.apps : [];
     const err = !d ? "network" : d.error ? "registry" : null;
@@ -72,7 +75,10 @@ export function StoreSettings() {
         if (err) setFocus("store-retry");
         else setFocus(firstKey(apps) ?? "store-empty");
       }, 0);
-    return apps;
+    // null, not [], when the box could not be asked: "I did not see" and "there
+    // is nothing" are different answers, and a caller checking whether an app
+    // survived a removal must not read the first as the second.
+    return d ? apps : null;
   }, []);
   useEffect(() => {
     load(false, true);
@@ -243,11 +249,19 @@ export function StoreSettings() {
     const wasAt = before.findIndex((x) => x.id === e.id);
     const ok = await storeUninstall(e.id);
     const rest = await load();
-    const stillThere = !!rest && rest.some((x) => x.id === e.id);
-    // The LIST decides what happened, not this press. Two OKs inside one round
-    // trip mean the second is answered "not a store app" - and it used to write
-    // "action failed" over a screen where the app had just been removed.
-    setStatus({ id: e.id, text: t(!stillThere ? "store.removed" : "store.failed", { name: loc(e.name) }) });
+    const row = rest ? rest.find((x) => x.id === e.id) : undefined;
+    // A row does NOT disappear when an ordinary app is removed - the registry
+    // still lists it, with `installed` false - so "is it still in the list" is
+    // no test of anything. Only an app nobody offers loses its row.
+    //
+    // The press's own answer is right except in one case: a second OK inside
+    // one round trip is refused with "not a store app", which means the FIRST
+    // one worked. So a refusal is believed only while the app is still there
+    // and still installed - and never when the list could not be read at all.
+    const gone = rest !== null && (row === undefined || !row.installed);
+    const removed = ok || gone;
+    setStatus({ id: e.id, text: t(removed ? "store.removed" : "store.failed", { name: loc(e.name) }) });
+    const stillThere = !!row;
     // Whether the detail can still hold the cursor is decided by the LIST, not
     // by whether this press succeeded. A second OK arriving while the first
     // removal is in flight is answered "not a store app", and focusing
@@ -264,13 +278,14 @@ export function StoreSettings() {
     // Named, not positional. A list that grew between the press and the reload
     // put the cursor on an unrelated app - and that cursor sits one press from
     // its Uninstall.
-    const after = before.slice(wasAt + 1).find((x) => rest.some((y) => y.id === x.id));
+    const now = rest || [];
+    const after = before.slice(wasAt + 1).find((x) => now.some((y) => y.id === x.id));
     const back = before
       .slice(0, Math.max(wasAt, 0))
       .reverse()
-      .find((x) => rest.some((y) => y.id === x.id));
+      .find((x) => now.some((y) => y.id === x.id));
     const keep = after || back;
-    const next = keep ? "store-app-" + keep.id : rest.length ? "store-app-" + rest[0].id : "store-empty";
+    const next = keep ? "store-app-" + keep.id : now.length ? "store-app-" + now[0].id : "store-empty";
     // A press queued behind the removal would otherwise open whichever row the
     // cursor just landed on - and an installed app's detail opens focused on
     // its own Uninstall, so a third press removes an app nobody asked about.
@@ -352,7 +367,11 @@ export function StoreSettings() {
           // The shell puts them last, so one boundary is all it takes. The
           // heading is a plain div: spatial navigation only registers
           // focusables, so the D-pad travels straight past it.
-          const opensUnlisted = !!e.unlisted && !all[i - 1]?.unlisted;
+          // A heading per REASON, not one over the lot: "no longer offered by any
+          // source" is false above a row that a store is still serving.
+          const reason = e.unlisted ? e.unlistedReason || "retired" : null;
+          const opensGroup =
+            !!reason && reason !== (all[i - 1]?.unlisted ? all[i - 1]?.unlistedReason || "retired" : null);
           const shownVersion = e.installed && e.installedVersion ? e.installedVersion : e.version;
           const subtitle = [
             e.tagline ? loc(e.tagline) : null,
@@ -360,7 +379,13 @@ export function StoreSettings() {
             // Only for an added registry: naming the official one on every row
             // would be noise, while an app from somewhere else is exactly what a
             // person scrolling the catalogue needs to see without opening it.
-            e.unlisted ? t(e.unlistedReason === "unreadable" ? "store.unreadable" : "store.unlisted") : null,
+            e.unlisted
+              ? reason === "retired"
+                ? t("store.unlisted")
+                : reason === "blocked"
+                  ? t("store.blocked")
+                  : t("store.unreadable")
+              : null,
             e.source && !e.source.official ? t("store.fromSource", { name: sourceLabel(e.source) }) : null,
             e.urlConfig && e.installed && !e.baseUrl ? t("store.urlMissing") : null,
           ]
@@ -368,8 +393,10 @@ export function StoreSettings() {
             .join(" · ");
           return (
             <Fragment key={e.id}>
-              {opensUnlisted && (
-                <div className="mt-[1.4vh] px-[1.5vw] text-[1.7vh] text-fg-dim">{t("store.unlistedGroup")}</div>
+              {opensGroup && (
+                <div className="mt-[1.4vh] px-[1.5vw] text-[1.7vh] text-fg-dim">
+                  {t(reason === "retired" ? "store.unlistedGroup" : "store.unreadableGroup")}
+                </div>
               )}
               <FocusButton
                 focusKey={"store-app-" + e.id}
