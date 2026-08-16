@@ -169,7 +169,10 @@ let restoredAt = null; // a backup restore just ran; the launcher polls this to 
 // audio/subtitle stream to play server-side, e.g. Plex): 0-based ordinals within
 // their type, `sub: -1` = subtitles off, `subFile` = a sidecar subtitle URL.
 // null anywhere = "no opinion", which leaves mpv's own selection alone.
-const queued = { url: null, startPos: 0, streams: null };
+// `kind` is the app saying what this is, not the shell guessing: "audio" skips
+// the output-mode handshake and the video reveal, which belong to a film and cost
+// a screen blank and a round trip before the first note.
+const queued = { url: null, startPos: 0, streams: null, kind: null };
 
 // The box counts as idle for a self-initiated restart (nightly auto-update)
 // only when nothing is on screen or audible: no mpv, launcher focused, and the
@@ -3078,11 +3081,25 @@ ipcMain.handle("player", (e, action, payload) => {
     queued.url = payload.url;
     queued.startPos = payload.startPos || 0;
     queued.streams = payload.streams || null;
+    queued.kind = payload.kind === "audio" ? "audio" : null;
+  } else if (action === "enqueue") {
+    // Entries behind the one playing, so the player crosses to the next itself.
+    // Refused unless something is already playing: an empty player has nothing
+    // to append to, and starting one from a queue call would hide which entry
+    // the app actually asked for.
+    return player.enqueue(payload.urls);
+  } else if (action === "queueclear") {
+    return player.clearQueue();
   } else if (action === "play") {
     // remember whose window the video belongs to: the first-frame reveal
     // (setVideoMode(true) in observeMpv) must hit THAT window, not the launcher
     player.setOwner(appIdForSender(e.sender));
-    if (player.running() && player.playing() === queued.url && !player.isPip()) {
+    // The KIND has to match as well as the URL. The same file asked for as
+    // sound after being played as a picture is a different launch - audio skips
+    // the mode handshake and the reveal - and resuming here would silently keep
+    // the mode the caller just said it did not want.
+    const sameKind = player.isAudioOnly() === (queued.kind === "audio");
+    if (player.running() && player.playing() === queued.url && sameKind && !player.isPip()) {
       if (player.startPending()) {
         // Still in the paused-start handshake: the mode switch starts it in a
         // moment. Unpausing here would put the switch INSIDE playback.
@@ -3094,7 +3111,11 @@ ipcMain.handle("player", (e, action, payload) => {
     } else if (queued.url) {
       player.setPlaying(queued.url);
       setVideoMode(false);
-      ensureAudio(() => player.launch(queued.url, queued.startPos, false, null, queued.streams));
+      ensureAudio(() =>
+        player.launch(queued.url, queued.startPos, false, null, queued.streams, {
+          audioOnly: queued.kind === "audio",
+        }),
+      );
     } // fullscreen (also un-PiPs)
   } else if (action === "pause") player.cmd({ command: ["set_property", "pause", true] });
   else if (action === "resume") player.cmd({ command: ["set_property", "pause", false] });
