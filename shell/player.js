@@ -65,6 +65,34 @@ let mpvOwnerId = null; // app id whose player broker call launched mpv (video-mo
 let mpvStartPending = false; // fullscreen mpv launched paused, waiting for the display-mode switch
 let mpvSeq = 0; // launch counter, so a stale start-gate timer can't touch a newer launch
 let mpvStartedSeq = 0; // the launch whose start handshake already ran
+// This launch plays sound only, so none of the screen's machinery applies: no
+// output-mode handshake, no HDR claim, no revealing the video behind the UI.
+let mpvAudioOnly = false;
+let mpvPlaylistPos = -1; // which playlist entry is playing, for the "track" event
+
+/**
+ * How many entries an app may keep queued behind the one playing.
+ *
+ * A bound rather than a policy: a queue entry is a URL that usually carries a
+ * credential, it sits in another process's memory, and an app with a library of
+ * thousands would otherwise hand all of them over at once. Apps top the list up
+ * as it advances, which is what makes a small number enough.
+ */
+const QUEUE_MAX = 32;
+
+/**
+ * What may be handed to the player as a queue entry.
+ *
+ * http(s) only, and the same rule the sidecar-subtitle path already applies: the
+ * URL reaches another process, and `loadfile` will open anything mpv can open -
+ * a local path, or a protocol like `avdevice://`. The first play() is argv, where
+ * `--` already stops a URL being read as an option; a queued one is not, so this
+ * is where it is bounded.
+ */
+function playableUrl(u) {
+  if (typeof u !== "string" || u.length > 4096) return false;
+  return /^https?:\/\//i.test(u);
+}
 
 // What mpv is doing right now. Kept here rather than read on demand: the observer
 // already streams it (observeMpv), and asking mpv over its socket per publish would
@@ -221,7 +249,7 @@ function pipFallbackRect() {
   return { x: output.width - w - margin, y: margin, w, h };
 }
 
-function launchMpv(url, startPos, pip, rect, streams) {
+function launchMpv(url, startPos, pip, rect, streams, opts) {
   // Fullscreen relaunch keeps the claim (the next file re-claims immediately, and
   // releasing in between would blank the TV twice); going to PiP gives it back,
   // because there the browse UI is what's on screen.
@@ -234,6 +262,8 @@ function launchMpv(url, startPos, pip, rect, streams) {
     fs.unlinkSync(ipc);
   } catch (e) {}
   mpvPip = !!pip;
+  mpvAudioOnly = !!(opts && opts.audioOnly);
+  mpvPlaylistPos = -1;
   // mpv is a shared, dep-gated player service - spawned lazily only when a
   // player-capable app actually plays, and only if the binary is present. A box
   // that never opted into an mpv app (fresh install) has no mpv; degrade with a
@@ -261,6 +291,20 @@ function launchMpv(url, startPos, pip, rect, streams) {
     // (the log file is appended below, when there is one we trust)
     "--msg-level=all=error",
   ];
+  // Sound with no picture is a different job, not a film with the screen off.
+  //
+  // `--vid=no` also keeps an embedded cover out of the way: mpv treats album art
+  // as a video track, so without it a tagged mp3 opens a window over the app's
+  // own UI. `--audio-display=no` is the same guard from the other side.
+  //
+  // The two that earn this feature its name: `gapless-audio=yes` rather than the
+  // default `weak`, because a queue mixes formats and `weak` only bridges files
+  // that match; and `prefetch-playlist`, without which the next entry is only
+  // opened once the current one ends - which over the network is most of the
+  // silence this is meant to remove.
+  if (mpvAudioOnly) {
+    args.push("--vid=no", "--audio-display=no", "--gapless-audio=yes", "--prefetch-playlist=yes", "--keep-open=no");
+  }
   // PiP (Live TV "browse while watching"): a small window. A Wayland client cannot
   // place itself, so the COMPOSITOR places it - `rect` (device px, measured by the
   // launcher from the on-screen placeholder) makes it match the placeholder exactly
@@ -281,8 +325,14 @@ function launchMpv(url, startPos, pip, rect, streams) {
     // BEFORE it plays (adaptMpvMode -> startMpvPlayback below): a mode change
     // blanks HDMI for a second or two, which belongs before the first frame, not
     // three seconds into the film. PiP never switches - the UI owns the screen there.
-    args.push("--pause=yes");
-    mpvStartPending = true;
+    //
+    // Sound has no frame to be early for. Pausing it would cost the handshake's
+    // whole round trip before the first note, and the mode change it exists for
+    // would blank a screen that is showing the app rather than a film.
+    if (!mpvAudioOnly) {
+      args.push("--pause=yes");
+      mpvStartPending = true;
+    }
   }
   const logFile = mpvLogPath();
   if (logFile) args.push("--log-file=" + logFile);
@@ -512,7 +562,11 @@ function observeMpv(seq, tries) {
     // stuck loading for as long as the film sat paused. Plex then spun its loader
     // over the frozen frame and killed the session on its own 120 s
     // BufferingTimeout ("Playback error"), measured on the box.
-    ["time-pos", "duration", "pause", "eof-reached", "paused-for-cache"].forEach((p, i) =>
+    // `playlist-pos` is what makes a queue visible to the app: with entries
+    // appended, mpv moves to the next one itself instead of exiting, so the
+    // "finished" that used to mark every track now only marks the end of the
+    // whole list.
+    ["time-pos", "duration", "pause", "eof-reached", "paused-for-cache", "playlist-pos"].forEach((p, i) =>
       s.write(JSON.stringify({ command: ["observe_property", i + 1, p] }) + "\n"),
     );
   });
@@ -535,21 +589,26 @@ function observeMpv(seq, tries) {
         // fullscreen; in PiP the browse UI stays opaque and mpv floats on top.
         if (!firstPos) {
           firstPos = true;
-          if (!mpvPip) {
-            console.log("[player] first frame -> reveal video");
-            deps.setVideoMode(true);
+          // None of this belongs to sound. Revealing the video makes the shell's
+          // window TRANSPARENT, so doing it for a song would clear the screen the
+          // app is drawing on; and there is no mpv window to raise or unpause.
+          if (!mpvAudioOnly) {
+            if (!mpvPip) {
+              console.log("[player] first frame -> reveal video");
+              deps.setVideoMode(true);
+            }
+            // mpv maps its window and grabs keyboard focus exactly when playback
+            // actually starts. For a slow-to-buffer source (a Plex movie can take
+            // well over 5s to start) that happens AFTER the fixed post-launch raise
+            // retries ended, leaving mpv focused so the remote stops reaching the
+            // app UI. Re-raise on the real playback-start event (and a short burst
+            // after, since the focus grab can trail the first frame) - this covers
+            // any buffer delay, unlike the fixed launch-time window.
+            [0, 250, 700, 1500].forEach((ms) => setTimeout(deps.raiseWindow, ms));
+            // The file is loaded now (that's what a time-pos means), so its real
+            // fps/size are readable: pick a mode for it, then let it play.
+            if (!mpvPip) startMpvPlayback(seq);
           }
-          // mpv maps its window and grabs keyboard focus exactly when playback
-          // actually starts. For a slow-to-buffer source (a Plex movie can take
-          // well over 5s to start) that happens AFTER the fixed post-launch raise
-          // retries ended, leaving mpv focused so the remote stops reaching the
-          // app UI. Re-raise on the real playback-start event (and a short burst
-          // after, since the focus grab can trail the first frame) - this covers
-          // any buffer delay, unlike the fixed launch-time window.
-          [0, 250, 700, 1500].forEach((ms) => setTimeout(deps.raiseWindow, ms));
-          // The file is loaded now (that's what a time-pos means), so its real
-          // fps/size are readable: pick a mode for it, then let it play.
-          if (!mpvPip) startMpvPlayback(seq);
         }
         emit({ type: "playing" });
         emit({ type: "position", ms: Math.round(m.data * 1000) });
@@ -565,6 +624,20 @@ function observeMpv(seq, tries) {
         // from its own player calls.
         mpvMedia.paused = !!m.data;
         deps.publishMediaState({ force: true });
+      } else if (m.name === "playlist-pos") {
+        // The queue moved on by itself. Reported as its own event rather than as
+        // a "finished": an app that treats finished as "the item ended, start the
+        // next" would react to this by starting something, which is exactly the
+        // relaunch a queue exists to avoid.
+        const at = typeof m.data === "number" ? m.data : -1;
+        if (at !== mpvPlaylistPos) {
+          const previous = mpvPlaylistPos;
+          mpvPlaylistPos = at;
+          // Only an advance, and never the first entry: the property also fires
+          // when the list is created, and that entry is the one the app just
+          // asked to play - it does not need to be told.
+          if (at >= 0 && previous >= 0 && at !== previous) emit({ type: "track", index: at });
+        }
       } else if (m.name === "paused-for-cache") emit({ type: "buffering", on: !!m.data });
       else if (m.name === "eof-reached" && m.data) {
         // Logged, not emitted: mpv runs without --keep-open, so the end of a file is
@@ -612,6 +685,45 @@ const setOwner = (id) => {
   mpvOwnerId = id;
 };
 
+/**
+ * Append entries behind what is playing, so the player moves on by itself.
+ *
+ * This is the whole of "gapless" from the shell's side. Today the end of a file
+ * is the end of the process - mpv runs without `--keep-open` - so an app hears
+ * "finished" and asks for another launch, and the silence in between is a
+ * process teardown, a start, and a network connection. With a list, mpv crosses
+ * from one entry to the next inside one process.
+ *
+ * Deliberately dumb: nothing here knows what the entries are, which app sent
+ * them, or what they mean. An app hands over URLs and tops the list up as it
+ * advances, which is what keeps the bound below small enough to be honest.
+ */
+function enqueueMpv(urls) {
+  if (!mpv) return { ok: false, error: "nothing is playing" };
+  const wanted = Array.isArray(urls) ? urls : [];
+  const list = wanted.filter(playableUrl).slice(0, QUEUE_MAX);
+  const refused = wanted.length - list.length;
+  for (const u of list) mpvCmd({ command: ["loadfile", u, "append"] });
+  // Counted, not silent: an app whose entries are all being refused would
+  // otherwise see a queue that simply never advances.
+  if (refused > 0) console.warn("[player] queue: refused " + refused + " of " + wanted.length + " entries");
+  return { ok: true, added: list.length, refused };
+}
+
+/**
+ * Drop what is queued BEHIND the current entry; what is playing keeps playing.
+ *
+ * `playlist-pos` is reset here rather than left to the observer: after the clear
+ * the surviving entry IS position 0, and without this that reads as an advance
+ * and the app would be told a track started that has been playing all along.
+ */
+function clearMpvQueue() {
+  if (!mpv) return { ok: false, error: "nothing is playing" };
+  mpvCmd({ command: ["playlist-clear"] });
+  mpvPlaylistPos = -1;
+  return { ok: true };
+}
+
 module.exports = {
   init,
   setHdr,
@@ -619,6 +731,9 @@ module.exports = {
   startPending,
   MPV_CLAIM,
   launch: launchMpv,
+  enqueue: enqueueMpv,
+  clearQueue: clearMpvQueue,
+  playableUrl,
   stop: stopMpv,
   cmd: mpvCmd,
   query: mpvQuery,

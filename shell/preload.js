@@ -118,15 +118,41 @@ const { ipcRenderer } = require("electron");
     // `startPos` (optional, seconds) is where to begin - what a film resumed from
     // last night needs. It reaches mpv as `--start=`, i.e. before the first frame,
     // rather than as a jump three seconds into playback.
-    window.tvbox.play = function (url, streams, startPos) {
+    // `opts.kind` (optional) is what this is, not how to play it: "audio" means
+    // there is no picture, so the box skips the output-mode handshake and the
+    // reveal that a film needs - both of which cost time and one of which blanks
+    // the screen. Anything else, including leaving it out, plays as before.
+    window.tvbox.play = function (url, streams, startPos, opts) {
       try {
         ipcRenderer.invoke("player", "queue", {
           url: url,
           streams: streams || null,
           startPos: seconds(startPos),
+          kind: opts && opts.kind ? String(opts.kind) : null,
         });
         ipcRenderer.invoke("player", "play");
       } catch (e) {}
+    };
+    // Hand the box what comes AFTER the current item, so it crosses over by
+    // itself instead of the app hearing an ending and asking for another start.
+    // The box appends; it does not replace, and it does not start anything. An
+    // app tops this up as the queue advances (see the "track" player event) -
+    // which is why a small number of entries is enough and the box caps it.
+    window.tvbox.enqueue = function (urls) {
+      try {
+        return ipcRenderer.invoke("player", "enqueue", { urls: Array.isArray(urls) ? urls : [urls] });
+      } catch (e) {
+        return Promise.resolve({ ok: false });
+      }
+    };
+    // Drop what is queued behind the current item. What is playing keeps playing:
+    // clearing a queue is not stopping, and an app that wanted to stop has stop().
+    window.tvbox.clearQueue = function () {
+      try {
+        return ipcRenderer.invoke("player", "queueclear");
+      } catch (e) {
+        return Promise.resolve({ ok: false });
+      }
     };
     window.tvbox.stop = function () {
       try {

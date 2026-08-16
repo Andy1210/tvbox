@@ -7,9 +7,19 @@
 // Events the shell pushes to onPlayer(cb) as mpv changes state (emitted by
 // shell/main.js `emit(...)`). `ms` carries position/duration in milliseconds.
 export interface PlayerEvent {
-  type: "playing" | "buffering" | "finished" | "error" | "position" | "duration";
+  /**
+   * "track" means the QUEUE moved on by itself - see `enqueue`.
+   *
+   * It is not a "finished": an app that starts the next item when it hears
+   * finished would react to this by starting something, which is the relaunch a
+   * queue exists to avoid. With entries queued, `finished` marks the end of the
+   * whole list rather than the end of each item.
+   */
+  type: "playing" | "buffering" | "finished" | "error" | "position" | "duration" | "track";
   on?: boolean; // buffering on/off
   ms?: number; // position / duration, in milliseconds
+  /** Which queue entry is now playing, on a "track" event. 0-based. */
+  index?: number;
   /** Why playback ended, when it did not simply run out: "tv-standby", "stopped".
    * An app that auto-advances on `finished` should not do so when this is set. */
   reason?: string;
@@ -89,8 +99,32 @@ export interface TvboxBridge {
   launch(id: string): void;
   home(): void;
   /** `streams` is the app's own track decision in 0-based ordinals per type;
-   * `startPos` (seconds) is where to begin, e.g. a film being resumed. */
-  play?(url: string, streams?: { audio?: number; sub?: number; subFile?: string }, startPos?: number): void;
+   * `startPos` (seconds) is where to begin, e.g. a film being resumed.
+   * `opts.kind` says WHAT this is: "audio" has no picture, so the box skips the
+   * output-mode handshake and the video reveal a film needs - which is a screen
+   * blank and a round trip before the first note. Omitting it plays as before. */
+  play?(
+    url: string,
+    streams?: { audio?: number; sub?: number; subFile?: string },
+    startPos?: number,
+    opts?: { kind?: "audio" | "video" },
+  ): void;
+  /**
+   * Queue what comes after the current item, so the box crosses to it itself.
+   *
+   * This is what removes the silence between tracks: without it the end of a
+   * file is the end of the player process, and the app has to hear that and ask
+   * for another start. The box APPENDS - it never replaces what is playing and
+   * never starts anything - and caps how many entries it will hold, so an app
+   * tops the list up as it advances rather than handing over a whole library.
+   * Watch `PlayerEvent` of type "track" to know when to.
+   *
+   * http(s) URLs only; anything else is refused and counted in `refused`.
+   */
+  enqueue?(urls: string[] | string): Promise<{ ok: boolean; added?: number; refused?: number; error?: string }>;
+  /** Drop what is queued BEHIND the current item. What is playing keeps playing:
+   *  clearing a queue is not stopping, and stopping is what stop() is for. */
+  clearQueue?(): Promise<{ ok: boolean; error?: string }>;
   stop?(): void;
   pause?(): void;
   resume?(): void;
