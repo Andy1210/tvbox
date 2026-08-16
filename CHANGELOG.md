@@ -5,6 +5,35 @@ updates). `scripts/make-release.sh` lifts the current version's `hu`/`en`
 blocks into the OTA feed's `notes` - keep both languages, keep it short, and
 write for the person on the couch (what changes for THEM), not for developers.
 
+## 3.4.0
+
+### hu
+
+- **Az az alkalmazás is eltávolítható, amit már egyik bolt sem kínál.** Eddig az
+  Eltávolítás gomb csak a bolti listában létezett, így egy visszavont app ott
+  maradt a boxon örökre: futott, de nem lehetett leszedni. Most a bolt alján
+  külön csoportban megjelenik, és megmondja, miért van ott — már senki nem
+  kínálja, vagy a box nem tudja értelmezni, amit a bolt küld, vagy nem fogadja
+  el. Ha a bolt, ahonnan telepítetted, már nincs beállítva, azt is kiírja, hogy
+  vissza tudd venni.
+- **Az üres bolt is kezelhető a távirányítóval**, és eltávolítás után a kurzor a
+  szomszéd sorra áll, nem ugrik a lista tetejére.
+- Egy bolt, ami épp nem válaszol, **nem** teszi visszavontnak az onnan telepített
+  appokat, és egy nyomva tartott OK gomb nem töröl le több appot egymás után.
+
+### en
+
+- **An app no store offers any more can be removed.** Remove used to live only
+  in the store list, so an app retired from a registry stayed on the box for
+  good: it ran, but there was no way to take it off. It now appears in a group
+  at the end of the store and says why it is there — nobody offers it, or the
+  box cannot read what the store sent, or it does not accept it. If the store
+  you installed it from is no longer set up, it tells you that too.
+- **An empty store can be used with the remote**, and after a removal the cursor
+  moves to the neighbouring row instead of jumping to the top of the list.
+- A store that is not answering does **not** make its apps look retired, and a
+  held OK button no longer removes one app after another.
+
 ## 3.3.0
 
 ### hu
