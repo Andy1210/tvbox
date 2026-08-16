@@ -59,11 +59,13 @@ export function StoreSettings() {
     setEntries(apps);
     if (placeFocus)
       setTimeout(() => {
+        // Empty is a place the cursor has to be PUT, not skipped. Leaving it
+        // unplaced left the cursor on whatever the previous screen held - a
+        // HOME tile that had already unmounted, or the pane container itself -
+        // and from there every arrow and every OK is discarded, with only Back
+        // out. Measured in both hosts this panel has.
         if (err) setFocus("store-retry");
-        else {
-          const k = firstKey(apps);
-          if (k) setFocus(k);
-        }
+        else setFocus(firstKey(apps) ?? "store-empty");
       }, 0);
     return apps;
   }, []);
