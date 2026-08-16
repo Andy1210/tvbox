@@ -69,6 +69,18 @@ let mpvStartedSeq = 0; // the launch whose start handshake already ran
 // output-mode handshake, no HDR claim, no revealing the video behind the UI.
 let mpvAudioOnly = false;
 let mpvPlaylistPos = -1; // which playlist entry is playing, for the "track" event
+/**
+ * The URLs behind the playlist entries, in order, so `playingUrl` can follow the
+ * queue.
+ *
+ * Without this the shell's idea of what is playing only ever moves on an explicit
+ * play or stop, and a queue advances without either. Measured on the box: once
+ * the player had crossed to the second entry, asking for the FIRST one again
+ * logged "resume (already loaded)" and carried on with the second - the check
+ * compared against a URL that had stopped being true. The same stale value is
+ * what a PiP toggle relaunches, so it would have brought back the wrong item.
+ */
+let mpvQueueUrls = [];
 
 /**
  * How many entries an app may keep queued behind the one playing.
@@ -264,6 +276,7 @@ function launchMpv(url, startPos, pip, rect, streams, opts) {
   mpvPip = !!pip;
   mpvAudioOnly = !!(opts && opts.audioOnly);
   mpvPlaylistPos = -1;
+  mpvQueueUrls = [url];
   // mpv is a shared, dep-gated player service - spawned lazily only when a
   // player-capable app actually plays, and only if the binary is present. A box
   // that never opted into an mpv app (fresh install) has no mpv; degrade with a
@@ -636,7 +649,13 @@ function observeMpv(seq, tries) {
           // Only an advance, and never the first entry: the property also fires
           // when the list is created, and that entry is the one the app just
           // asked to play - it does not need to be told.
-          if (at >= 0 && previous >= 0 && at !== previous) emit({ type: "track", index: at });
+          if (at >= 0 && previous >= 0 && at !== previous) {
+            // What the shell believes is playing has to move with the queue, or
+            // the "already loaded" check and the PiP relaunch both act on the
+            // entry this one replaced.
+            if (mpvQueueUrls[at]) playingUrl = mpvQueueUrls[at];
+            emit({ type: "track", index: at });
+          }
         }
       } else if (m.name === "paused-for-cache") emit({ type: "buffering", on: !!m.data });
       else if (m.name === "eof-reached" && m.data) {
@@ -703,7 +722,10 @@ function enqueueMpv(urls) {
   const wanted = Array.isArray(urls) ? urls : [];
   const list = wanted.filter(playableUrl).slice(0, QUEUE_MAX);
   const refused = wanted.length - list.length;
-  for (const u of list) mpvCmd({ command: ["loadfile", u, "append"] });
+  for (const u of list) {
+    mpvCmd({ command: ["loadfile", u, "append"] });
+    mpvQueueUrls.push(u);
+  }
   // Counted, not silent: an app whose entries are all being refused would
   // otherwise see a queue that simply never advances.
   if (refused > 0) console.warn("[player] queue: refused " + refused + " of " + wanted.length + " entries");
@@ -721,6 +743,8 @@ function clearMpvQueue() {
   if (!mpv) return { ok: false, error: "nothing is playing" };
   mpvCmd({ command: ["playlist-clear"] });
   mpvPlaylistPos = -1;
+  // `playlist-clear` keeps the entry being played, and it becomes index 0.
+  mpvQueueUrls = playingUrl ? [playingUrl] : [];
   return { ok: true };
 }
 
