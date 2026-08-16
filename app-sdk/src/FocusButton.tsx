@@ -46,6 +46,11 @@ export function FocusButton({
       ref={ref}
       onClick={onEnter}
       aria-label={label}
+      // The focus key, in the DOM. The settings rows already carry theirs this
+      // way and their navigation tests depend on it: without a marker a test
+      // cannot place a rectangle on the right element, and a navigation
+      // assertion with no rectangles is decided by nothing at all.
+      data-sfocus={focusKey}
       className={[
         // transform only: background-color/color aren't compositable, so
         // transitioning them repaints on every D-pad move (this is the most-used

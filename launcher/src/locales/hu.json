@@ -356,8 +356,15 @@
     "busy": "A box most mással van elfoglalva. Próbáld újra egy kis idő múlva.",
     "fromSource": "innen: {name}",
     "takeFrom": "Telepítés innen:",
-    "pinnedElsewhere": "Ez az app egy másik boltból származik — a frissítés áthozná ide.",
-    "failedWhy": "{name}: {why}"
+    "pinnedElsewhere": "Ez az app máshonnan való — a frissítés áthozná ide: {name}.",
+    "failedWhy": "{name}: {why}",
+    "sourceOffline": "{name} (nem válaszol)",
+    "switched": "{name} mostantól innen jön: {source}",
+    "whyUnreachable": "a bolt nem válaszol",
+    "whyNotOffered": "ez a bolt nem kínálja",
+    "whyNotConfigured": "ez a bolt nincs beállítva",
+    "whyBuiltin": "ez egy beépített app",
+    "whyPin": "nem sikerült megjegyezni, honnan jött"
   },
   "storeSources": {
     "title": "Store források",

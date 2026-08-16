@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { act, render } from "@testing-library/react";
 import { AppDetail } from "./AppDetail";
-import { setupRemote, setFocus, remote } from "../test/remote";
+import { setupRemote, setFocus, remote, getCurrentFocusKey, place, flushFocus } from "../test/remote";
 import { useConfigStore } from "../stores/config";
 import type { StoreEntry } from "../lib/api";
 
@@ -45,6 +45,20 @@ function entry(over: Partial<StoreEntry> = {}): StoreEntry {
     alsoIn: [{ url: LOCAL, name: "dev", official: false }],
     ...over,
   } as StoreEntry;
+}
+
+/**
+ * Let the screen's own opening focus land before the test moves it.
+ *
+ * `AppDetail` focuses its first action a macrotask after mount, so a `setFocus`
+ * issued straight after render is overwritten - and an assertion that happens to
+ * name the same key then passes without the press doing anything.
+ */
+async function settled(): Promise<void> {
+  await act(async () => {
+    await new Promise((r) => setTimeout(r, 0));
+  });
+  await flushFocus();
 }
 
 function draw(app: StoreEntry, onSwitchSource?: (url: string) => void): HTMLElement {
@@ -122,5 +136,27 @@ describe("an app offered by more than one registry", () => {
     // mid-install would start a second fetch of the same app.
     const container = draw(entry({ installing: true }), vi.fn());
     expect(container.textContent).not.toContain("Take it from");
+  });
+});
+
+// NOT tested here: that Down from a registry button reaches the app's own
+// action. The failure it fixes is geometric - measured in a real browser at
+// 1080p, where the "Take it from:" label pushes the buttons right of the action
+// row and the corner distance then picks Uninstall over Update, or skips the row
+// entirely when a registry has a long name. Three attempts to reproduce that in
+// this harness produced tests that passed against the unfixed code, because the
+// rectangles here are the ones a test places rather than the ones a browser
+// computes. The mechanism the fix uses - a focused button answering an arrow
+// before spatial navigation resolves it - is the SDK's own, shipped and used by
+// the media client's A-Z strip. Left untested rather than tested falsely.
+
+describe("a registry that did not answer", () => {
+  it("is offered, and says so", () => {
+    // It is the way back to where the app came from, so it stays - but a button
+    // that looks like the others and can only fail is worse than one that
+    // explains itself.
+    const container = draw(entry({ alsoIn: [{ url: LOCAL, name: "dev", official: false, silent: true }] }), vi.fn());
+    expect(container.textContent).toContain("dev");
+    expect(container.textContent).toContain("not answering");
   });
 });
