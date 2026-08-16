@@ -1,7 +1,8 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { Fragment, useCallback, useEffect, useRef, useState } from "react";
 import { setFocus } from "@noriginmedia/norigin-spatial-navigation";
 import { fetchStore, storeInstall, storeUninstall, storeFlatpakUpdate, saveAppUrl, type StoreEntry } from "../lib/api";
 import { sourceLabel } from "../lib/storesource";
+import { useSwallowEnterRepeats } from "./RemoteKeymap";
 import { useI18n } from "../lib/i18n";
 import { useInstalls } from "../stores/installs";
 import { FocusButton } from "./FocusButton";
@@ -39,6 +40,26 @@ export function StoreSettings() {
   const [status, setStatus] = useState<{ id: string; text: string } | null>(null);
   const [urlEdit, setUrlEdit] = useState<StoreEntry | null>(null); // OSK open for this app
   const [detailId, setDetailId] = useState<string | null>(null); // AppDetail open for this app
+  const detailApp = detailId ? ((entries || []).find((e) => e.id === detailId) ?? null) : null;
+  // The keyboard is rendered inside the detail, but its state is not: a poll
+  // that dropped the app closed the screen and left `urlEdit` set, so the next
+  // press opened another app's detail with the previous app's address editor on
+  // top of it - saving to the right app from the wrong screen, and leaving the
+  // cursor on a button that screen does not have.
+  useEffect(() => {
+    if (!detailApp && urlEdit) setUrlEdit(null);
+  }, [detailApp, urlEdit]);
+  /** Until when a row press is ignored, so one queued behind a removal cannot open the row that replaced it. */
+  const settling = useRef(0);
+  // A held OK repeats on this hardware, and one press in this list is two away
+  // from removing an app. Measured with autorepeat: a single held button walked
+  // the list and uninstalled three.
+  // Not while the on-screen keyboard is up: it is a sibling of the detail view,
+  // so the same listener was eating held keys there - clearing an address went
+  // from one held press to twenty-four. Keyed on what the render actually uses,
+  // because `urlEdit` outlives the keyboard whenever the detail closes under it,
+  // and the list would then run with the swallow off.
+  useSwallowEnterRepeats(!(detailApp && urlEdit));
 
   // Every row is focusable now (each opens the detail view); focus the first.
   const firstKey = (list: StoreEntry[]): string | null => (list.length ? "store-app-" + list[0].id : null);
@@ -47,7 +68,9 @@ export function StoreSettings() {
   // focuses its first child before the fetch resolves), so after the initial
   // load - and after Retry, whose button unmounts on success - focus must be
   // placed explicitly or the D-pad can never enter the panel.
-  const load = useCallback(async (refresh = false, placeFocus = false) => {
+  // Returns what it loaded: a caller that has just removed something needs to
+  // know whether the row it was standing on still exists.
+  const load = useCallback(async (refresh = false, placeFocus = false): Promise<StoreEntry[] | null> => {
     const d = await fetchStore(refresh);
     const apps = d ? d.apps : [];
     const err = !d ? "network" : d.error ? "registry" : null;
@@ -55,12 +78,24 @@ export function StoreSettings() {
     setEntries(apps);
     if (placeFocus)
       setTimeout(() => {
+        // Empty is a place the cursor has to be PUT, not skipped. Leaving it
+        // unplaced left the cursor on whatever the previous screen held - a
+        // HOME tile that had already unmounted, or the pane container itself -
+        // and from there every arrow and every OK is discarded, with only Back
+        // out. Measured in both hosts this panel has.
         if (err) setFocus("store-retry");
-        else {
-          const k = firstKey(apps);
-          if (k) setFocus(k);
-        }
+        else setFocus(firstKey(apps) ?? "store-empty");
       }, 0);
+    // null, not [], when the list could not be READ - which is not only a
+    // transport failure. An unreachable registry is answered 200 with an empty
+    // list and an `error` in the body, and reading that as "everything is gone"
+    // is how a removal that failed announced success.
+    // Any source failing is enough: `error` is only set when they ALL fail, and
+    // a single registry blinking out drops its apps from this list while the
+    // answer still looks healthy - which reads as "removed" for a removal that
+    // did not happen.
+    const partial = !!d && Array.isArray(d.sources) && d.sources.some((x) => x.error);
+    return d && !d.error && !partial ? apps : null;
   }, []);
   useEffect(() => {
     load(false, true);
@@ -227,10 +262,59 @@ export function StoreSettings() {
     if (d) setEntries(d.apps);
   };
   const remove = async (e: StoreEntry) => {
+    const before = entries || [];
+    const wasAt = before.findIndex((x) => x.id === e.id);
     const ok = await storeUninstall(e.id);
-    setStatus({ id: e.id, text: t(ok ? "store.removed" : "store.failed", { name: loc(e.name) }) });
-    if (ok) await load();
-    setTimeout(() => setFocus(ok ? "detail-install" : "detail-remove"), 0);
+    const rest = await load();
+    const row = rest ? rest.find((x) => x.id === e.id) : undefined;
+    // A row does NOT disappear when an ordinary app is removed - the registry
+    // still lists it, with `installed` false - so "is it still in the list" is
+    // no test of anything. Only an app nobody offers loses its row.
+    //
+    // The press's own answer is right except in one case: a second OK inside
+    // one round trip is refused with "not a store app", which means the FIRST
+    // one worked. So a refusal is believed only while the app is still there
+    // and still installed - and never when the list could not be read at all.
+    const gone = rest !== null && (row === undefined || !row.installed);
+    const removed = ok || gone;
+    setStatus({ id: e.id, text: t(removed ? "store.removed" : "store.failed", { name: loc(e.name) }) });
+    const stillThere = !!row;
+    // Whether the detail can still hold the cursor is decided by the LIST, not
+    // by whether this press succeeded. A second OK arriving while the first
+    // removal is in flight is answered "not a store app", and focusing
+    // detail-remove then parks the cursor on a screen that has already
+    // unmounted - every press after it discarded, with only Back out.
+    if (stillThere) {
+      // What the screen is about to RENDER, not what the press answered: the two
+      // disagree whenever the box's reply and its own list do, and naming the
+      // button that is not there leaves the cursor on nothing.
+      setTimeout(() => setFocus(row && row.installed ? "detail-remove" : "detail-install"), 0);
+      return;
+    }
+    setDetailId(null);
+    // The neighbour, not the top of the list: being thrown to the first row
+    // costs a screenful of presses to get back in a long store, and the
+    // confirmation line lives at the end of the list, below the fold from there.
+    // Named, not positional. A list that grew between the press and the reload
+    // put the cursor on an unrelated app - and that cursor sits one press from
+    // its Uninstall.
+    const now = rest || [];
+    const after = before.slice(wasAt + 1).find((x) => now.some((y) => y.id === x.id));
+    const back = before
+      .slice(0, Math.max(wasAt, 0))
+      .reverse()
+      .find((x) => now.some((y) => y.id === x.id));
+    const keep = after || back;
+    // Which of the two the screen actually has: the empty button is rendered
+    // only when there is no error, and the retry only when there is. Naming the
+    // wrong one leaves the cursor on nothing.
+    const bare = rest === null ? "store-retry" : "store-empty";
+    const next = keep ? "store-app-" + keep.id : now.length ? "store-app-" + now[0].id : bare;
+    // A press queued behind the removal would otherwise open whichever row the
+    // cursor just landed on - and an installed app's detail opens focused on
+    // its own Uninstall, so a third press removes an app nobody asked about.
+    settling.current = Date.now() + 600;
+    setTimeout(() => setFocus(next), 0);
   };
   const saveUrl = async (e: StoreEntry, value: string) => {
     setUrlEdit(null);
@@ -244,8 +328,6 @@ export function StoreSettings() {
     }
     setTimeout(() => setFocus("detail-url"), 0);
   };
-
-  const detailApp = detailId ? ((entries || []).find((e) => e.id === detailId) ?? null) : null;
 
   // The detail view fills the screen; the OSK (Set address) is a modal on top of
   // it - rendered as a sibling overlay so AppDetail stays mounted (its focus
@@ -303,7 +385,15 @@ export function StoreSettings() {
       )}
 
       <div className="flex flex-col gap-[0.8vh] max-w-[70vw]">
-        {(entries || []).map((e) => {
+        {(entries || []).map((e, i, all) => {
+          // The shell puts them last, so one boundary is all it takes. The
+          // heading is a plain div: spatial navigation only registers
+          // focusables, so the D-pad travels straight past it.
+          // A heading per REASON, not one over the lot: "no longer offered by any
+          // source" is false above a row that a store is still serving.
+          const reason = e.unlisted ? e.unlistedReason || "retired" : null;
+          const opensGroup =
+            !!reason && reason !== (all[i - 1]?.unlisted ? all[i - 1]?.unlistedReason || "retired" : null);
           const shownVersion = e.installed && e.installedVersion ? e.installedVersion : e.version;
           const subtitle = [
             e.tagline ? loc(e.tagline) : null,
@@ -311,36 +401,68 @@ export function StoreSettings() {
             // Only for an added registry: naming the official one on every row
             // would be noise, while an app from somewhere else is exactly what a
             // person scrolling the catalogue needs to see without opening it.
+            e.unlisted
+              ? reason === "retired"
+                ? t("store.unlisted")
+                : reason === "blocked"
+                  ? t("store.blocked")
+                  : t("store.unreadable")
+              : null,
             e.source && !e.source.official ? t("store.fromSource", { name: sourceLabel(e.source) }) : null,
             e.urlConfig && e.installed && !e.baseUrl ? t("store.urlMissing") : null,
           ]
             .filter(Boolean)
             .join(" · ");
           return (
-            <FocusButton
-              key={e.id}
-              focusKey={"store-app-" + e.id}
-              onEnter={() => setDetailId(e.id)}
-              className="px-[1.5vw] py-[1.2vh] rounded-[1.1vh] bg-white/5 flex items-center gap-[1.5vw]"
-            >
-              <Icon svg={e.icon} className="w-[3.4vh] h-[3.4vh] shrink-0" />
-              <div className="flex-1 min-w-0 text-left">
-                <div className="text-[2.1vh] truncate">{loc(e.name)}</div>
-                <div className="text-[1.6vh] text-fg-dim truncate">{subtitle}</div>
-              </div>
-              {/* fixed emerald (same as AppDetail's Update button) - the manifest
-                  accent can be arbitrarily dark and unreadable */}
-              {e.updateAvailable && (
-                <span className="text-[1.6vh] font-semibold shrink-0 whitespace-nowrap text-emerald-200">
-                  {t("store.updateAvailableBadge")} · {t("store.vShort", { v: e.version })}
-                </span>
+            <Fragment key={e.id}>
+              {opensGroup && (
+                <div className="mt-[1.4vh] px-[1.5vw] text-[1.7vh] text-fg-dim">
+                  {reason === "retired"
+                    ? t("store.unlistedGroup")
+                    : reason === "blocked"
+                      ? t("store.blockedGroup")
+                      : t("store.unreadableGroup")}
+                </div>
               )}
-              <span className="w-[2.4vh] h-[2.4vh] shrink-0 opacity-40">{chevron}</span>
-            </FocusButton>
+              <FocusButton
+                focusKey={"store-app-" + e.id}
+                onEnter={() => {
+                  if (Date.now() < settling.current) return;
+                  setDetailId(e.id);
+                }}
+                className="px-[1.5vw] py-[1.2vh] rounded-[1.1vh] bg-white/5 flex items-center gap-[1.5vw]"
+              >
+                <Icon svg={e.icon} className="w-[3.4vh] h-[3.4vh] shrink-0" />
+                <div className="flex-1 min-w-0 text-left">
+                  <div className="text-[2.1vh] truncate">{loc(e.name)}</div>
+                  <div className="text-[1.6vh] text-fg-dim truncate">{subtitle}</div>
+                </div>
+                {/* fixed emerald (same as AppDetail's Update button) - the manifest
+                  accent can be arbitrarily dark and unreadable */}
+                {e.updateAvailable && (
+                  <span className="text-[1.6vh] font-semibold shrink-0 whitespace-nowrap text-emerald-200">
+                    {t("store.updateAvailableBadge")} · {t("store.vShort", { v: e.version })}
+                  </span>
+                )}
+                <span className="w-[2.4vh] h-[2.4vh] shrink-0 opacity-40">{chevron}</span>
+              </FocusButton>
+            </Fragment>
           );
         })}
         {entries !== null && !error && !entries.length && (
-          <div className="text-[1.9vh] text-fg-dim">{t("store.empty")}</div>
+          // Focusable, not a sentence. An empty store used to hold nothing the
+          // D-pad could reach, so arrows and OK did nothing at all and only Back
+          // escaped - and removing the last app is a way to arrive here.
+          <FocusButton
+            focusKey="store-empty"
+            onEnter={() => {
+              if (Date.now() < settling.current) return;
+              load(true);
+            }}
+            className="px-[1.6vw] h-[5vh] rounded-[1vh] bg-white/5 flex items-center justify-center text-[1.9vh] font-semibold self-start"
+          >
+            {t("store.empty")} · {t("app.retry")}
+          </FocusButton>
         )}
         {status && (
           <div className="text-[1.8vh] text-fg-dim mt-[0.6vh]" role="status" aria-live="polite">

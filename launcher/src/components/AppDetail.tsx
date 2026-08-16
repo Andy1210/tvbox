@@ -129,7 +129,7 @@ export function AppDetail({
   const actionKey = (): string => {
     if (!app.builtin && !app.installed) return "detail-install";
     if (!app.builtin && app.updateAvailable) return "detail-update";
-    if (!app.builtin && app.installed && flatpaks.length) return "detail-flatpak";
+    if (!app.builtin && app.installed && flatpaks.length && !app.unlisted) return "detail-flatpak";
     if (!app.builtin && app.installed) return "detail-remove";
     if (app.urlConfig) return "detail-url";
     return "detail-back";
@@ -140,7 +140,12 @@ export function AppDetail({
     if (app.installing) return "detail-back"; // progress replaces the action buttons
     if (!app.builtin && !app.installed) return "detail-install";
     if (!app.builtin && app.updateAvailable) return "detail-update";
-    if (!app.builtin && app.installed && flatpaks.length) return "detail-flatpak";
+    // A flatpak update is real even for an app no registry offers - the ref is
+    // the box's, not the registry's - but it must not be what the cursor lands
+    // on, directly under a line saying the app cannot be updated. One OK there
+    // starts a several-hundred-megabyte download instead of the removal this
+    // screen exists for.
+    if (!app.builtin && app.installed && flatpaks.length && !app.unlisted) return "detail-flatpak";
     if (!app.builtin && app.installed) return "detail-remove";
     if (app.urlConfig) return "detail-url";
     return "detail-back";
@@ -178,9 +183,13 @@ export function AppDetail({
         {/* version */}
         <div className="flex flex-wrap items-center gap-[1.2vw] mb-[1.6vh]">
           <span className="text-[2vh] text-fg-dim">
-            {app.installed && app.installedVersion
-              ? t("store.installedLatest", { installed: app.installedVersion, latest: app.version })
-              : t("store.version", { v: "v" + app.version })}
+            {/* "installed X, latest X" is a comparison, and for an app nobody
+                offers there is nothing to compare it against. */}
+            {app.unlisted
+              ? t("store.version", { v: "v" + app.version })
+              : app.installed && app.installedVersion
+                ? t("store.installedLatest", { installed: app.installedVersion, latest: app.version })
+                : t("store.version", { v: "v" + app.version })}
           </span>
           {/* fixed emerald (same as the Update button) - the manifest accent
               can be arbitrarily dark and unreadable */}
@@ -190,6 +199,22 @@ export function AppDetail({
             </span>
           )}
         </div>
+
+        {/* Why it is here with no Install and no Update, and what would bring it
+            back. Without the second half this reads as a dead end, when the
+            answer is usually to add a registry the box no longer has. */}
+        {app.unlisted && (
+          <div className="text-[1.9vh] text-warn mb-[1.6vh]">
+            {t(
+              app.unlistedReason === "unreadable"
+                ? "store.unreadableDetail"
+                : app.unlistedReason === "blocked"
+                  ? "store.blockedDetail"
+                  : "store.unlistedDetail",
+            )}
+            {app.unlistedFrom ? " " + t("store.unlistedWasFrom", { url: app.unlistedFrom }) : ""}
+          </div>
+        )}
 
         {/* Where this app comes from. This is the screen the Install press is on,
             so it is where the registry belongs: the official one goes unsaid, an

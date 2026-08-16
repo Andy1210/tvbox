@@ -106,7 +106,19 @@ export interface StoreEntry {
   // moves through `flatpak update` - the nightly timer or the manual button.
   flatpaks?: { ref: string; name: string; version: string | null }[];
   flatpakStatus?: { ok: boolean; changed: boolean; version: string | null } | null; // last manual flatpak update
-  source?: StoreSource; // the registry this entry came from
+  source?: StoreSource | null; // the registry this entry came from (null when none lists it)
+  /**
+   * Installed, and no configured source offers it any more.
+   *
+   * The app still runs - the grid is built from what is on disk - but there is
+   * nothing to update it from, and this row exists so it can still be removed:
+   * Remove lives only here.
+   */
+  unlisted?: boolean;
+  /** Why: the registries dropped it, or this box cannot read what they sent. */
+  unlistedReason?: "retired" | "unreadable" | "blocked";
+  /** The registry it was installed from, while the pin still records it. */
+  unlistedFrom?: string | null;
   // Other configured registries offering the same id. Enough to draw a button
   // rather than only to name them: switching an app to a local copy of itself is
   // how somebody debugs an app that is also published.
