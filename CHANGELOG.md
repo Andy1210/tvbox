@@ -5,6 +5,28 @@ updates). `scripts/make-release.sh` lifts the current version's `hu`/`en`
 blocks into the OTA feed's `notes` - keep both languages, keep it short, and
 write for the person on the couch (what changes for THEM), not for developers.
 
+## 3.5.0
+
+### hu
+
+- **Előkészítés a szünetmentes zenéhez.** A box mostantól egyetlen lejátszóval,
+  egyben végig tudja játszani az egymás után következő számokat, ahelyett hogy
+  mindegyikhez újraindítaná — az az újraindítás volt eddig a csend a számok
+  között. Zene szólásakor a képernyőhöz sem nyúl hozzá: nem vált képmódot és nem
+  villan feketére, mert nincs mit megjelenítenie.
+- Magától egyelőre semmi nem változik ettől: a Média alkalmazás a következő
+  frissítésétől kezdi használni.
+
+### en
+
+- **Groundwork for gapless music.** The box can now play one track after another
+  in a single player instead of restarting it for each one — that restart is
+  where the silence between songs came from. Playing sound no longer touches the
+  screen either: no display-mode switch and no blank, because there is nothing to
+  show.
+- Nothing changes on its own from this: the Media app starts using it from its
+  next update.
+
 ## 3.4.0
 
 ### hu
