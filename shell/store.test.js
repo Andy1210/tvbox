@@ -718,6 +718,7 @@ test("an installed app that no source lists still gets a row, marked as unlisted
     const e = list.apps.find((a) => a.id === "goneapp");
     assert.ok(e, "an installed app must not vanish from the store just because the registry did");
     assert.equal(e.unlisted, true);
+    assert.equal(e.unlistedReason, "retired");
     assert.equal(e.installed, true);
     assert.equal(e.source, null);
     assert.equal(e.updateAvailable, false, "there is nothing to update from");
@@ -787,11 +788,14 @@ test("the registry it came from is named only when the box no longer has it", as
   }
 });
 
-test("an app this box refuses to read is not reported as retired", async () => {
-  // A refusal is not an absence. The likeliest reasons are forward-compatible
-  // ones - a manifestVersion or a capability a box does not know yet - so a
-  // registry raising either would otherwise tell every older box in the field
-  // that the app is gone, and point them at a registry they already have.
+test("an app this box refuses to read keeps a row, and is not called retired", async () => {
+  // A refusal is not an absence, and it is not silence either. The likeliest
+  // reasons are forward-compatible - a manifestVersion or a capability a box
+  // does not know yet - so calling it retired would tell every older box in the
+  // field that the app is gone. But dropping the row instead takes Remove with
+  // it, which is the one thing this list exists to keep reachable: measured,
+  // that left an installed app that could not be taken off the television at
+  // all, which is the state the feature was written to fix.
   const r = registry([manifestOnly("newapp", "NewApp", "1.0.0")]);
   const url = await r.listen();
   const config = { rawStore: () => ({ registry: url, sources: [] }), appConfig: () => ({}) };
@@ -800,8 +804,10 @@ test("an app this box refuses to read is not reported as retired", async () => {
     r.state.apps = [{ ...manifestOnly("newapp", "NewApp", "2.0.0"), manifestVersion: 99 }];
     const list = await store.listForUi(config)(true);
     const e = list.apps.find((a) => a.id === "newapp");
-    assert.ok(!e || !e.unlisted, "offered but unreadable is not the same as not offered");
-    await store.uninstall("newapp");
+    assert.ok(e, "no row means no Remove, and it is installed");
+    assert.equal(e.unlistedReason, "unreadable", "the sentence is about this box, not about the app being gone");
+    assert.equal(e.unlistedFrom, null, "a registry still serving it is not somewhere to send anyone");
+    assert.equal((await store.uninstall("newapp")).ok, true, "and it can actually be taken off");
   } finally {
     r.close();
   }

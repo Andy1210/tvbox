@@ -368,7 +368,9 @@
     "unlisted": "már nem kínálja senki",
     "unlistedGroup": "Telepítve, de már egyik forrás sem kínálja",
     "unlistedDetail": "Ezt az alkalmazást már egyik forrás sem kínálja, így nem frissíthető. Továbbra is működik, és innen eltávolítható.",
-    "unlistedWasFrom": "Innen lett telepítve: {url}."
+    "unlistedWasFrom": "Innen lett telepítve: {url}.",
+    "unreadable": "ezt a boxot nem tudja elolvasni",
+    "unreadableDetail": "Egy bolt még kínálja ezt az alkalmazást, de a box nem tudja értelmezni a leírását - valószínűleg újabb, mint a box. Egy boxfrissítés visszahozhatja; innen el is távolítható."
   },
   "storeSources": {
     "title": "Store források",

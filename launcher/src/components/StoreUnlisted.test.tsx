@@ -77,6 +77,30 @@ describe("the detail of an app nobody offers", () => {
   });
 });
 
+describe("an app this box cannot read", () => {
+  it("says that, rather than that nobody offers it", async () => {
+    // A registry is still serving it; the box just does not speak its manifest.
+    // Saying "no longer offered" would be a claim about the world when the true
+    // claim is about the box - and it would send somebody looking for a store
+    // that is right there.
+    const { container } = render(
+      <AppDetail
+        app={gone({ unlistedReason: "unreadable", unlistedFrom: null })}
+        onInstall={() => {}}
+        onUpdate={() => {}}
+        onFlatpakUpdate={() => {}}
+        onRemove={() => {}}
+        onSetUrl={() => {}}
+        onExit={() => {}}
+      />,
+    );
+    await settle();
+    expect(container.textContent).toContain("cannot read its entry");
+    expect(container.textContent).not.toContain("No source offers this app any more");
+    expect(container.querySelector('[data-sfocus="detail-remove"]')).not.toBeNull();
+  });
+});
+
 describe("an app that is also a flatpak", () => {
   it("still lands the cursor on Remove", async () => {
     // The flatpak update is real - the ref is the box's, not the registry's -
@@ -104,9 +128,15 @@ describe("the store list", () => {
   function stub(apps: () => StoreEntry[], onUninstall?: () => void) {
     vi.stubGlobal("fetch", (_url: string, init?: RequestInit) => {
       if (init?.method === "POST") {
+        // What the box really answers a second time: the app is already gone,
+        // so `uninstall` refuses it (shell/store.js "not a store app").
+        const id = String(JSON.parse(String(init.body) || "{}").id || "");
+        const known = apps().some((x) => x.id === id);
         onUninstall?.();
         return Promise.resolve(
-          new Response(JSON.stringify({ ok: true }), { headers: { "Content-Type": "application/json" } }),
+          new Response(JSON.stringify(known ? { ok: true } : { ok: false, error: "not a store app" }), {
+            headers: { "Content-Type": "application/json" },
+          }),
         );
       }
       return Promise.resolve(
@@ -125,6 +155,66 @@ describe("the store list", () => {
     await settle();
     expect(container.textContent).toContain("Installed, no longer offered by any source");
     expect(container.querySelector('[data-sfocus="store-app-goneapp"]')).not.toBeNull();
+  });
+
+  it("keeps the cursor by name when the list changed under it", async () => {
+    // The cursor used to go to whatever sat at the removed row's INDEX, and a
+    // list that grew in the meantime hands it to an unrelated app - one press
+    // from that app's own Uninstall.
+    let list: StoreEntry[] = [entry({ id: "a1", name: "A1" }), gone(), entry({ id: "z9", name: "Z9" })];
+    stub(
+      () => list,
+      () => {
+        // The catalogue came back bigger while the removal was in flight.
+        list = [
+          entry({ id: "a1", name: "A1" }),
+          entry({ id: "n1", name: "N1" }),
+          entry({ id: "n2", name: "N2" }),
+          entry({ id: "z9", name: "Z9" }),
+        ];
+      },
+    );
+    render(<StoreSettings />);
+    await settle();
+    await setFocus("store-app-goneapp");
+    await act(async () => {
+      await remote.ok();
+    });
+    await settle();
+    await setFocus("detail-remove");
+    await act(async () => {
+      await remote.ok();
+    });
+    await settle();
+    expect(getCurrentFocusKey(), "the row that FOLLOWED it, whatever moved").toBe("store-app-z9");
+  });
+
+  it("says it was removed even when a second press raced the first", async () => {
+    // The second OK inside one round trip is answered "not a store app", and
+    // the sentence used to be written by whichever press replied last - so a
+    // successful removal announced itself as a failure.
+    let list: StoreEntry[] = [entry(), gone()];
+    stub(
+      () => list,
+      () => {
+        list = [entry()];
+      },
+    );
+    const { container } = render(<StoreSettings />);
+    await settle();
+    await setFocus("store-app-goneapp");
+    await act(async () => {
+      await remote.ok();
+    });
+    await settle();
+    await setFocus("detail-remove");
+    await act(async () => {
+      await remote.ok();
+      await remote.ok();
+    });
+    await settle();
+    expect(container.textContent).toContain("removed");
+    expect(container.textContent).not.toContain("failed");
   });
 
   it("puts the cursor somewhere on a store that is already empty", async () => {

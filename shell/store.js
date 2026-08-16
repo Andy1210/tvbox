@@ -441,12 +441,14 @@ function listForUi(config) {
     // was down - and the way back, re-adding or fixing the source, is exactly
     // what that sentence would talk them out of.
     const answered = loaded.every((s) => !s.error && Array.isArray(s.entries));
-    // Offered somewhere and refused here. Silence is the honest answer for these
-    // - the app is not retired, this box just cannot read its manifest - and it
-    // is what happened before there were rows at all.
+    // Offered somewhere and refused HERE - an unknown manifestVersion, an
+    // unknown capability, or a trust rule. Not the same as retired, and not
+    // silence either: dropping the row takes Remove with it, which is the one
+    // thing this list exists to keep reachable. It gets a row that says what
+    // actually happened.
     const refused = new Set(loaded.flatMap((s) => (s.entries && s.entries._dropped) || []));
     const candidates = answered
-      ? apps.getManifests().filter((m) => !refused.has(m.id) && !builtinIds.has(m.id) && installedFromStore(m.id))
+      ? apps.getManifests().filter((m) => !builtinIds.has(m.id) && installedFromStore(m.id))
       : [];
     if (candidates.length) {
       const listed = new Set(out.map((a) => a.id));
@@ -489,9 +491,15 @@ function listForUi(config) {
           alsoIn: [],
           pinnedElsewhere: false,
           unlisted: true,
+          // Which sentence the screen owes the person. "Retired" is a claim
+          // about the world; "unreadable" is a claim about this box, and only
+          // one of them is true at a time.
+          unlistedReason: refused.has(m.id) ? "unreadable" : "retired",
           // Where it came from, while the pin still says. It is the difference
           // between "this is stuck here" and "add that registry back".
-          unlistedFrom: unlistedFrom(pins.get(m.id), configured),
+          // Only for a retired app: a registry that is still serving this one and
+          // merely speaks a newer dialect is not somewhere to be sent.
+          unlistedFrom: refused.has(m.id) ? null : unlistedFrom(pins.get(m.id), configured),
         });
       }
     }
