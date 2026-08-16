@@ -364,7 +364,11 @@
     "whyNotOffered": "that store does not offer it",
     "whyNotConfigured": "that store is not set up",
     "whyBuiltin": "it is a built-in app",
-    "whyPin": "could not record where it came from"
+    "whyPin": "could not record where it came from",
+    "unlisted": "no longer offered",
+    "unlistedGroup": "Installed, no longer offered by any source",
+    "unlistedDetail": "No source offers this app any more, so it cannot be updated. It still works, and it can be removed here.",
+    "unlistedWasFrom": "It was installed from {url}."
   },
   "storeSources": {
     "title": "Store sources",
