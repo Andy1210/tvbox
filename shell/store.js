@@ -192,8 +192,10 @@ function writePin(id, url) {
   try {
     fs.mkdirSync(PIN_DIR, { recursive: true });
     fs.writeFileSync(pinPath(id), JSON.stringify({ v: 1, url, at: Date.now() }));
+    return true;
   } catch (e) {
     console.warn("[store]", id, "could not record which registry it came from:", e.message);
+    return false;
   }
 }
 
@@ -228,9 +230,29 @@ function mergeSources(loaded) {
       // Enough to draw a button, not just to name a source in prose: a person
       // switching an app to their own registry needs to press something, and a
       // url alone is neither a label nor a target.
-      alsoIn: list
-        .filter((x) => x !== c)
-        .map((x) => ({ url: x.source.url, name: x.source.name || null, official: !!x.source.official })),
+      alsoIn: (() => {
+        // One entry per SOURCE, not per listing: a registry that lists the same
+        // id twice would otherwise draw two buttons carrying the same url - and
+        // two React children with one key, of which only one can be reached
+        // with a remote.
+        const seen = new Set();
+        const out = [];
+        for (const x of list) {
+          if (x === c || seen.has(x.source.url)) continue;
+          seen.add(x.source.url);
+          out.push({ url: x.source.url, name: x.source.name || null, official: !!x.source.official });
+        }
+        // The registry it is PINNED to belongs here even when it did not answer
+        // this time: a local registry is off more often than it is on, and
+        // without this the way back disappears exactly when somebody needs it -
+        // while the screen still offers a one-press Update that would re-pin the
+        // app to whichever source did answer.
+        if (pin && pin !== c.source.url && !seen.has(pin)) {
+          const src = (loaded || []).find((s2) => s2.url === pin);
+          if (src) out.push({ url: pin, name: src.name || null, official: !!src.official, silent: true });
+        }
+        return out;
+      })(),
       // The app was installed from a registry that is no longer configured, and
       // what is on offer here comes from a different one. Removing a source does
       // not remove its apps, so this is an ordinary state - but it must not be an
@@ -500,7 +522,7 @@ async function install(config, id, sourceUrl) {
   // Written after the files, so a failed install leaves no claim on the id, and
   // on every install rather than the first: an app REinstalled from a different
   // source has moved, and the pin is meant to record where it stands now.
-  writePin(id, url);
+  const pinned = writePin(id, url);
   // The tile appears live (manifests reload per /apps request), but a `service`
   // plugin only loads at boot - the caller restarts (gated) to activate it. Read
   // the flag from the INSTALLED manifest (a package's own manifest.json is
@@ -508,6 +530,11 @@ async function install(config, id, sourceUrl) {
   // with what loadPlugins will actually run.
   apps.loadManifests();
   const installed = apps.manifestById(id);
+  // A switch IS the pin: the files are the same ones the other registry would
+  // have given, and what was asked for is where the app stands. Reporting
+  // success on a pin that did not land leaves the app looking switched while
+  // the nightly run takes it back that night.
+  if (sourceUrl && !pinned) return { ok: false, error: "could not record which registry it came from" };
   return { ok: true, service: !!(installed && installed.service) };
 }
 

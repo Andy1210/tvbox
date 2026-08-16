@@ -127,11 +127,25 @@ export function StoreSettings() {
   // The poll + completion effects above take it from there.
   const kickoff = async (e: StoreEntry, kind: "install" | "update", sourceUrl?: string) => {
     pending.current.set(e.id, kind);
-    const ok = await storeInstall(e.id, sourceUrl);
-    if (!ok) {
+    const r = await storeInstall(e.id, sourceUrl);
+    if (!r.ok) {
       pending.current.delete(e.id);
-      setStatus({ id: e.id, text: t("store.failed", { name: loc(e.name) }) });
-      setTimeout(() => setFocus(kind === "update" ? "detail-update" : "detail-install"), 0);
+      // The box's own reason, when it gave one: "that registry does not offer
+      // it" and "registry unreachable" are different problems with different
+      // next steps, and both used to read as "action failed".
+      setStatus({
+        id: e.id,
+        text: r.error
+          ? t("store.failedWhy", { name: loc(e.name), why: r.error })
+          : t("store.failed", { name: loc(e.name) }),
+      });
+      // Back to the button that was actually pressed. Keying this off `kind`
+      // sent focus to `detail-update`, which is NOT mounted when the two
+      // registries carry the same version - the ordinary case for a switch - and
+      // spatial navigation then either sat on a key nothing owns or landed on
+      // the red Uninstall button with somebody's thumb on OK.
+      const back = sourceUrl ? `detail-source-${sourceUrl}` : kind === "update" ? "detail-update" : "detail-install";
+      setTimeout(() => setFocus(back), 0);
       return;
     }
     setStatus(null);

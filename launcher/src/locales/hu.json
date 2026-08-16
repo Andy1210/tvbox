@@ -355,7 +355,9 @@
     "phaseFlatpak": "Program letöltése...",
     "busy": "A box most mással van elfoglalva. Próbáld újra egy kis idő múlva.",
     "fromSource": "innen: {name}",
-    "takeFrom": "Telepítés innen:"
+    "takeFrom": "Telepítés innen:",
+    "pinnedElsewhere": "Ez az app egy másik boltból származik — a frissítés áthozná ide.",
+    "failedWhy": "{name}: {why}"
   },
   "storeSources": {
     "title": "Store források",

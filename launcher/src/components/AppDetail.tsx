@@ -188,14 +188,27 @@ export function AppDetail({
             at whatever version that registry carries, the same number included:
             a debug build usually stands in for the published one under its own
             version. */}
-        {onSwitchSource && app.alsoIn && app.alsoIn.length > 0 && !app.installing && (
+        {/* Where it came from, when that is not where it is being offered from.
+            Without this the emerald "Update available" badge is the only thing
+            on screen, and pressing it silently takes the app back to the other
+            registry - which is the switch being undone by the button that looks
+            like an ordinary version bump. */}
+        {app.pinnedElsewhere && !app.installing && (
+          <div className="text-[1.9vh] text-warn mb-[1.6vh]">{t("store.pinnedElsewhere")}</div>
+        )}
+
+        {onSwitchSource && !app.builtin && app.alsoIn && app.alsoIn.length > 0 && !app.installing && (
           <div className="flex flex-wrap items-center gap-[1.2vw] mb-[1.6vh]">
             <span className="text-[1.9vh] text-fg-dim">{t("store.takeFrom")}</span>
             {app.alsoIn.map((s2) => (
               <FocusButton
                 key={s2.url}
                 focusKey={`detail-source-${s2.url}`}
-                onEnter={() => onSwitchSource(s2.url)}
+                // Through the same gate as Install: this press can perform a
+                // first install of an app, which is the action the child lock
+                // exists for - and a lock that the button beside it honours is
+                // not a lock.
+                onEnter={() => guard(() => onSwitchSource(s2.url), `detail-source-${s2.url}`)}
                 className="px-[1.8vw] h-[5vh] rounded-[1.1vh] bg-white/5 flex items-center justify-center text-[1.9vh]"
               >
                 {sourceLabel(s2)}

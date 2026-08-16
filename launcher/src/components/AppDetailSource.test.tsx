@@ -1,7 +1,8 @@
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect, vi, beforeEach } from "vitest";
 import { act, render } from "@testing-library/react";
 import { AppDetail } from "./AppDetail";
 import { setupRemote, setFocus, remote } from "../test/remote";
+import { useConfigStore } from "../stores/config";
 import type { StoreEntry } from "../lib/api";
 
 // Taking an app from a registry other than the one it stands with.
@@ -17,6 +18,15 @@ import type { StoreEntry } from "../lib/api";
 // this.
 
 setupRemote();
+
+// The child lock is global state and another suite may have left one set, so it
+// is stated here rather than assumed - the lock's presence is the whole subject
+// of one of these tests.
+beforeEach(() => {
+  useConfigStore.setState({
+    config: { parental: { pinSet: false, requirePin: false, lockedGroups: [] } } as never,
+  });
+});
 
 const OFFICIAL = "https://andy1210.github.io/tvbox-apps/index.json";
 const LOCAL = "http://192.168.1.19:8790/index.json";
@@ -74,16 +84,43 @@ describe("an app offered by more than one registry", () => {
   });
 
   it("says nothing when no other registry has it", () => {
-    // With a handler, so the absence is the list being empty rather than the
-    // screen not offering the feature at all.
+    // Asserted on the ROW's own label, not on the registry's name: with an empty
+    // list the buttons render nothing either way, so looking for "dev" passed
+    // even with the length guard removed - a test that could not fail.
     const container = draw(entry({ alsoIn: [] }), vi.fn());
-    expect(container.textContent).not.toContain("dev");
+    expect(container.textContent).not.toContain("Take it from");
+  });
+
+  it("says nothing on a built-in app", () => {
+    // Every press would be refused by the box ("built-in app"), and a refusal is
+    // a screen somebody has to get out of.
+    const container = draw(entry({ builtin: true }), vi.fn());
+    expect(container.textContent).not.toContain("Take it from");
+  });
+
+  it("asks for the PIN first, like the Install button beside it", async () => {
+    // This press can perform a FIRST install, which is the action the child lock
+    // exists for - and a lock the button beside it honours is not a lock. Stated
+    // as the lock STOPPING it, because that is the property: with no lock the
+    // press goes through either way and the assertion would prove nothing.
+    useConfigStore.setState({
+      config: { parental: { pinSet: true, requirePin: true, lockedGroups: [] } } as never,
+    });
+    const switched = vi.fn();
+    draw(entry({ installed: false, installedVersion: null }), switched);
+
+    await setFocus(`detail-source-${LOCAL}`);
+    await act(async () => {
+      await remote.ok();
+    });
+
+    expect(switched, "the lock has to stand in front of this press too").not.toHaveBeenCalled();
   });
 
   it("keeps out of the way while an install is running", () => {
     // The buttons sit where the progress indicator goes, and pressing one
     // mid-install would start a second fetch of the same app.
     const container = draw(entry({ installing: true }), vi.fn());
-    expect(container.textContent).not.toContain("dev");
+    expect(container.textContent).not.toContain("Take it from");
   });
 });

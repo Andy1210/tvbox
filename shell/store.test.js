@@ -605,3 +605,91 @@ test("a named registry that answered reports its own state, not another one's", 
     up.close();
   }
 });
+
+test("the registry an app is pinned to stays on offer even when it did not answer", async () => {
+  // A local registry is off more often than it is on. Without this the way back
+  // disappears exactly when it is needed, while the screen still offers a
+  // one-press Update that would re-pin the app to whichever source did answer.
+  const http = require("node:http");
+  const entry = (name) => ({
+    id: "pinapp",
+    name,
+    type: "webclient",
+    status: "ready",
+    version: "1.0.0",
+    runtime: { serve: "remote", url: "https://example.com" },
+  });
+  const official = http.createServer((req, res) => {
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ registryVersion: 1, apps: [entry("Official")] }));
+  });
+  const local = http.createServer((req, res) => {
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ registryVersion: 1, apps: [entry("Dev")] }));
+  });
+  await new Promise((r) => official.listen(0, "127.0.0.1", r));
+  await new Promise((r) => local.listen(0, "127.0.0.1", r));
+  const officialUrl = "http://127.0.0.1:" + official.address().port + "/index.json";
+  const localUrl = "http://127.0.0.1:" + local.address().port + "/index.json";
+  const config = {
+    rawStore: () => ({ registry: officialUrl, sources: [{ url: localUrl, name: "dev" }] }),
+    appConfig: () => ({}),
+  };
+
+  try {
+    assert.equal((await store.install(config, "pinapp", localUrl)).ok, true);
+    // The registry it came from goes away, as a laptop does.
+    await new Promise((r) => local.close(r));
+
+    const list = await store.listForUi(config)(true);
+    const e = list.apps.find((a) => a.id === "pinapp");
+    assert.equal(e.pinnedElsewhere, true, "the screen has to be able to say where it came from");
+    assert.ok(
+      e.alsoIn.some((x) => x.url === localUrl),
+      "the way back is still on offer",
+    );
+    assert.deepEqual(list.autoUpdates, [], "and the nightly run must not take it back by itself");
+  } finally {
+    store.uninstall("pinapp");
+    official.close();
+  }
+});
+
+test("a registry that lists one id twice draws one button, not two", async () => {
+  // `alsoIn` is registry-controlled UI state: two entries carrying the same url
+  // become two buttons with one focus key, of which only one can be pressed.
+  const http = require("node:http");
+  const one = (name) => ({
+    id: "dupe",
+    name,
+    type: "webclient",
+    status: "ready",
+    version: "1.0.0",
+    runtime: { serve: "remote", url: "https://example.com" },
+  });
+  const primary = http.createServer((req, res) => {
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ registryVersion: 1, apps: [one("Primary")] }));
+  });
+  const twice = http.createServer((req, res) => {
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ registryVersion: 1, apps: [one("A"), one("B"), one("C")] }));
+  });
+  await new Promise((r) => primary.listen(0, "127.0.0.1", r));
+  await new Promise((r) => twice.listen(0, "127.0.0.1", r));
+  const primaryUrl = "http://127.0.0.1:" + primary.address().port + "/index.json";
+  const twiceUrl = "http://127.0.0.1:" + twice.address().port + "/index.json";
+  const config = { rawStore: () => ({ registry: primaryUrl, sources: [{ url: twiceUrl }] }), appConfig: () => ({}) };
+
+  try {
+    const list = await store.listForUi(config)(true);
+    const e = list.apps.find((a) => a.id === "dupe");
+    assert.deepEqual(
+      e.alsoIn.map((x) => x.url),
+      [twiceUrl],
+    );
+  } finally {
+    primary.close();
+    twice.close();
+  }
+});

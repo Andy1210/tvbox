@@ -355,7 +355,9 @@
     "phaseFlatpak": "Downloading the program...",
     "busy": "The box is busy with something else. Try again in a moment.",
     "fromSource": "from {name}",
-    "takeFrom": "Take it from:"
+    "takeFrom": "Take it from:",
+    "pinnedElsewhere": "This app came from another store — updating would move it here.",
+    "failedWhy": "{name}: {why}"
   },
   "storeSources": {
     "title": "Store sources",

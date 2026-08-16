@@ -110,7 +110,9 @@ export interface StoreEntry {
   // Other configured registries offering the same id. Enough to draw a button
   // rather than only to name them: switching an app to a local copy of itself is
   // how somebody debugs an app that is also published.
-  alsoIn?: { url: string; name: string | null; official: boolean }[];
+  alsoIn?: { url: string; name: string | null; official: boolean; silent?: boolean }[];
+  /** The app came from a registry other than the one offering it now. */
+  pinnedElsewhere?: boolean;
 }
 // A configured registry. The first one the box returns is the primary (the
 // official index unless it was replaced); the rest were added by the owner.
@@ -161,8 +163,12 @@ async function post(url: string, body: unknown): Promise<boolean> {
 // `sourceUrl` names WHICH configured registry to take it from - the box checks
 // it against its own list, so this is a choice between sources already trusted,
 // never a new one. Omitted, the app comes from wherever it stands now.
-export const storeInstall = (id: string, sourceUrl?: string) =>
-  post("/tvbox/api/store/install", sourceUrl ? { id, sourceUrl } : { id });
+export const storeInstall = (id: string, sourceUrl?: string): Promise<{ ok: boolean; error?: string }> =>
+  // The BODY, not just the boolean. The box distinguishes "that registry does
+  // not offer it" from "registry unreachable" from "not a configured registry",
+  // and a screen that renders all three as "action failed" throws away the only
+  // sentence that tells somebody what to do next.
+  postJson("/tvbox/api/store/install", sourceUrl ? { id, sourceUrl } : { id }, { ok: false });
 export const storeUninstall = (id: string) => post("/tvbox/api/store/uninstall", { id });
 // The added registries, saved as a whole list (an add, a rename and a removal are
 // the same edit to the same array). `autoUpdate` is the PRIMARY registry's flag;
