@@ -373,7 +373,8 @@
     "unreadableDetail": "A store still offers this app, but this box cannot read its entry - it is probably newer than the box. Updating the box may bring it back; it can also be removed here.",
     "unreadableGroup": "Installed, but this box cannot read what the store sent",
     "blocked": "not accepted by this box",
-    "blockedDetail": "A store still offers this app, but this box does not accept its entry - the registry rules refused it. It can be removed here."
+    "blockedDetail": "A store still offers this app, but this box does not accept its entry - the registry rules refused it. It can be removed here.",
+    "blockedGroup": "Installed, but this box does not accept what the store sent"
   },
   "storeSources": {
     "title": "Store sources",

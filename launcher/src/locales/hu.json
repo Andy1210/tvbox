@@ -373,7 +373,8 @@
     "unreadableDetail": "Egy bolt még kínálja ezt az alkalmazást, de a box nem tudja értelmezni a leírását - valószínűleg újabb, mint a box. Egy boxfrissítés visszahozhatja; innen el is távolítható.",
     "unreadableGroup": "Telepítve, de a box nem tudja értelmezni, amit a bolt küld",
     "blocked": "a box nem fogadja el",
-    "blockedDetail": "Egy bolt még kínálja ezt az alkalmazást, de a box nem fogadja el a leírását - a bolti szabályok visszautasították. Innen eltávolítható."
+    "blockedDetail": "Egy bolt még kínálja ezt az alkalmazást, de a box nem fogadja el a leírását - a bolti szabályok visszautasították. Innen eltávolítható.",
+    "blockedGroup": "Telepítve, de a box nem fogadja el, amit a bolt küld"
   },
   "storeSources": {
     "title": "Store források",

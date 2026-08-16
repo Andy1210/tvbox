@@ -859,3 +859,37 @@ test("a refusal keeps its row even while another source is unreachable", async (
     a.close();
   }
 });
+
+test("the rows nobody offers arrive grouped by reason, not interleaved", async () => {
+  // The panel draws one heading when the reason changes, so an id-sorted mix
+  // put the same heading on screen three times - and a heading is the largest
+  // text there. Grouping belongs here, where the list is built.
+  const r = registry([
+    manifestOnly("aaa", "Aaa", "1.0.0"),
+    manifestOnly("bbb", "Bbb", "1.0.0"),
+    manifestOnly("ccc", "Ccc", "1.0.0"),
+    manifestOnly("ddd", "Ddd", "1.0.0"),
+  ]);
+  const url = await r.listen();
+  const config = { rawStore: () => ({ registry: url, sources: [] }), appConfig: () => ({}) };
+  try {
+    for (const id of ["aaa", "bbb", "ccc", "ddd"]) assert.equal((await store.install(config, id)).ok, true);
+    // aaa retired, bbb unreadable, ccc retired, ddd blocked - alphabetically
+    // interleaved on purpose.
+    r.state.apps = [
+      { ...manifestOnly("bbb", "Bbb", "2.0.0"), manifestVersion: 99 },
+      { ...manifestOnly("ddd", "Ddd", "2.0.0"), requires: { aptRepo: { uri: "http://x", key: "k" } } },
+    ];
+    const list = await store.listForUi(config)(true);
+    const reasons = list.apps.filter((a) => a.unlisted).map((a) => a.unlistedReason);
+    const runs = reasons.filter((x, i) => x !== reasons[i - 1]);
+    assert.deepEqual(
+      runs,
+      [...new Set(reasons)],
+      "each reason appears in one run, so the panel draws each heading once",
+    );
+    for (const id of ["aaa", "bbb", "ccc", "ddd"]) await store.uninstall(id);
+  } finally {
+    r.close();
+  }
+});

@@ -450,6 +450,7 @@ function listForUi(config) {
     // silence either: dropping the row takes Remove with it, which is the one
     // thing this list exists to keep reachable. It gets a row that says what
     // actually happened.
+    const catalogueLength = out.length;
     const refused = new Set(loaded.flatMap((s) => (s.entries && s.entries._dropped) || []));
     const blocked = new Set(loaded.flatMap((s) => (s.entries && s.entries._blocked) || []));
     // A refusal is knowable from the source that DID answer, so it does not
@@ -512,6 +513,14 @@ function listForUi(config) {
         });
       }
     }
+
+    // Grouped by reason before they are handed over: they arrive id-sorted, so
+    // interleaved kinds gave the panel one heading per RUN - the same heading
+    // three times down one screen. Order within a kind is left alone.
+    const RANK = { retired: 0, unreadable: 1, blocked: 2 };
+    const tail = out.splice(catalogueLength);
+    tail.sort((a, b) => RANK[a.unlistedReason] - RANK[b.unlistedReason]);
+    out.push(...tail);
 
     // Two lists, because they answer different questions. `updates` is what the
     // UI offers a person to press, and every pending update belongs in it
