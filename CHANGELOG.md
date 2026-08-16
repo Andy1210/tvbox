@@ -5,28 +5,6 @@ updates). `scripts/make-release.sh` lifts the current version's `hu`/`en`
 blocks into the OTA feed's `notes` - keep both languages, keep it short, and
 write for the person on the couch (what changes for THEM), not for developers.
 
-## 3.4.0
-
-### hu
-
-- **Az az app is eltávolítható, amit már egyik bolt sem kínál.** Eddig az
-  Eltávolítás gomb csak a bolti listában létezett, így egy visszavont app ott
-  maradt a boxon örökre — futott, de nem lehetett leszedni. Most külön csoportban
-  megjelenik a bolt alján, és megmondja, honnan lett annak idején telepítve, hogy
-  vissza tudd hozni a boltot, ha mégis kell.
-- Egy bolt, ami épp nem válaszol, **nem** teszi visszavontnak az onnan telepített
-  appokat — különben minden hálózati hiba azt írná ki, hogy megszűntek.
-
-### en
-
-- **An app no store offers any more can be removed.** Remove used to live only
-  in the store list, so an app that was retired from a registry stayed on the
-  box for good: it ran, but there was no way to take it off. It now appears in a
-  group of its own at the end of the store, and says where it was installed
-  from, so you can add that store back if you want it.
-- A store that is not answering does **not** make its apps look retired -
-  otherwise every network hiccup would announce that they were gone.
-
 ## 3.3.0
 
 ### hu

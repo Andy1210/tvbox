@@ -110,12 +110,25 @@ async function fetchIndex(url, bust) {
     // it threads to install() without ever reaching a written manifest.
     const packages = idx.packages && typeof idx.packages === "object" ? idx.packages : {};
     const out = [];
+    // Ids this registry DID offer and that we refused. A refusal is not an
+    // absence: the commonest reasons are forward-compatibility ones (a
+    // manifestVersion or a capability this box does not know yet), so an older
+    // box must not go on to announce that nobody offers the app any more. Only
+    // ever used for set membership, never shown.
+    const dropped = [];
+    const noteDropped = (m) => {
+      if (m && typeof m.id === "string") dropped.push(m.id);
+    };
     for (const m of idx.apps) {
       const valid = apps.validateManifest(m, "registry:" + (m && m.id));
-      if (!valid) continue;
+      if (!valid) {
+        noteDropped(m);
+        continue;
+      }
       const errs = trustErrors(valid);
       if (errs.length) {
         console.warn("[store] skip", valid.id, "-", errs.join("; "));
+        noteDropped(valid);
         continue;
       }
       const pkg = packages[valid.id];
@@ -124,6 +137,7 @@ async function fetchIndex(url, bust) {
       }
       out.push(valid);
     }
+    Object.defineProperty(out, "_dropped", { value: dropped, enumerable: false });
     return out;
   } finally {
     clearTimeout(t);
@@ -340,6 +354,18 @@ function installedFromStore(id) {
 // What the launcher's Store panel renders. `installed` covers only the
 // store-managed file; `builtin` flags a registry id that ships with the box
 // (not installable, would be shadowed anyway).
+/**
+ * The registry an app came from, when naming it would actually help.
+ *
+ * Only when that registry is no longer configured - then adding it back is the
+ * way to get the app updating again. Capped because a pin is a file on disk and
+ * this is the one string on this path that reaches the screen uncapped.
+ */
+function unlistedFrom(pin, configured) {
+  if (typeof pin !== "string" || !pin || configured.has(pin)) return null;
+  return pin.length > 120 ? pin.slice(0, 120) + "\u2026" : pin;
+}
+
 function listForUi(config) {
   return async (refresh) => {
     const loaded = await loadAll(config, refresh);
@@ -415,11 +441,23 @@ function listForUi(config) {
     // was down - and the way back, re-adding or fixing the source, is exactly
     // what that sentence would talk them out of.
     const answered = loaded.every((s) => !s.error && Array.isArray(s.entries));
-    if (answered) {
+    // Offered somewhere and refused here. Silence is the honest answer for these
+    // - the app is not retired, this box just cannot read its manifest - and it
+    // is what happened before there were rows at all.
+    const refused = new Set(loaded.flatMap((s) => (s.entries && s.entries._dropped) || []));
+    const candidates = answered
+      ? apps.getManifests().filter((m) => !refused.has(m.id) && !builtinIds.has(m.id) && installedFromStore(m.id))
+      : [];
+    if (candidates.length) {
       const listed = new Set(out.map((a) => a.id));
       const pins = readPins();
-      for (const m of apps.getManifests()) {
-        if (listed.has(m.id) || builtinIds.has(m.id) || !installedFromStore(m.id)) continue;
+      // Which registries the box is configured with right now. A pin naming one
+      // of them is not a way back: that registry is present and simply does not
+      // offer the app any more, so "it was installed from X" would read as
+      // advice to add back something nobody removed.
+      const configured = new Set(loaded.map((s) => s.url));
+      for (const m of candidates) {
+        if (listed.has(m.id)) continue;
         const rt = m.runtime || {};
         const { missing } = apps.appDeps(m);
         // The installed manifest is the ONLY description of it left, so the
@@ -453,7 +491,7 @@ function listForUi(config) {
           unlisted: true,
           // Where it came from, while the pin still says. It is the difference
           // between "this is stuck here" and "add that registry back".
-          unlistedFrom: pins.get(m.id) || null,
+          unlistedFrom: unlistedFrom(pins.get(m.id), configured),
         });
       }
     }
