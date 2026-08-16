@@ -368,7 +368,9 @@
     "unlisted": "no longer offered",
     "unlistedGroup": "Installed, no longer offered by any source",
     "unlistedDetail": "No source offers this app any more, so it cannot be updated. It still works, and it can be removed here.",
-    "unlistedWasFrom": "It was installed from {url}."
+    "unlistedWasFrom": "It was installed from {url}.",
+    "unreadable": "this box cannot read it",
+    "unreadableDetail": "A store still offers this app, but this box cannot read its entry - it is probably newer than the box. Updating the box may bring it back; it can also be removed here."
   },
   "storeSources": {
     "title": "Store sources",

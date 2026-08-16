@@ -2,6 +2,7 @@ import { Fragment, useCallback, useEffect, useRef, useState } from "react";
 import { setFocus } from "@noriginmedia/norigin-spatial-navigation";
 import { fetchStore, storeInstall, storeUninstall, storeFlatpakUpdate, saveAppUrl, type StoreEntry } from "../lib/api";
 import { sourceLabel } from "../lib/storesource";
+import { useSwallowEnterRepeats } from "./RemoteKeymap";
 import { useI18n } from "../lib/i18n";
 import { useInstalls } from "../stores/installs";
 import { FocusButton } from "./FocusButton";
@@ -41,6 +42,10 @@ export function StoreSettings() {
   const [detailId, setDetailId] = useState<string | null>(null); // AppDetail open for this app
   /** Until when a row press is ignored, so one queued behind a removal cannot open the row that replaced it. */
   const settling = useRef(0);
+  // A held OK repeats on this hardware, and one press in this list is two away
+  // from removing an app. Measured with autorepeat: a single held button walked
+  // the list and uninstalled three.
+  useSwallowEnterRepeats();
 
   // Every row is focusable now (each opens the detail view); focus the first.
   const firstKey = (list: StoreEntry[]): string | null => (list.length ? "store-app-" + list[0].id : null);
@@ -234,11 +239,15 @@ export function StoreSettings() {
     if (d) setEntries(d.apps);
   };
   const remove = async (e: StoreEntry) => {
-    const wasAt = (entries || []).findIndex((x) => x.id === e.id);
+    const before = entries || [];
+    const wasAt = before.findIndex((x) => x.id === e.id);
     const ok = await storeUninstall(e.id);
-    setStatus({ id: e.id, text: t(ok ? "store.removed" : "store.failed", { name: loc(e.name) }) });
     const rest = await load();
     const stillThere = !!rest && rest.some((x) => x.id === e.id);
+    // The LIST decides what happened, not this press. Two OKs inside one round
+    // trip mean the second is answered "not a store app" - and it used to write
+    // "action failed" over a screen where the app had just been removed.
+    setStatus({ id: e.id, text: t(!stillThere ? "store.removed" : "store.failed", { name: loc(e.name) }) });
     // Whether the detail can still hold the cursor is decided by the LIST, not
     // by whether this press succeeded. A second OK arriving while the first
     // removal is in flight is answered "not a store app", and focusing
@@ -252,8 +261,16 @@ export function StoreSettings() {
     // The neighbour, not the top of the list: being thrown to the first row
     // costs a screenful of presses to get back in a long store, and the
     // confirmation line lives at the end of the list, below the fold from there.
-    const next =
-      rest && rest.length ? "store-app-" + rest[Math.min(Math.max(wasAt, 0), rest.length - 1)].id : "store-empty";
+    // Named, not positional. A list that grew between the press and the reload
+    // put the cursor on an unrelated app - and that cursor sits one press from
+    // its Uninstall.
+    const after = before.slice(wasAt + 1).find((x) => rest.some((y) => y.id === x.id));
+    const back = before
+      .slice(0, Math.max(wasAt, 0))
+      .reverse()
+      .find((x) => rest.some((y) => y.id === x.id));
+    const keep = after || back;
+    const next = keep ? "store-app-" + keep.id : rest.length ? "store-app-" + rest[0].id : "store-empty";
     // A press queued behind the removal would otherwise open whichever row the
     // cursor just landed on - and an installed app's detail opens focused on
     // its own Uninstall, so a third press removes an app nobody asked about.
@@ -343,7 +360,7 @@ export function StoreSettings() {
             // Only for an added registry: naming the official one on every row
             // would be noise, while an app from somewhere else is exactly what a
             // person scrolling the catalogue needs to see without opening it.
-            e.unlisted ? t("store.unlisted") : null,
+            e.unlisted ? t(e.unlistedReason === "unreadable" ? "store.unreadable" : "store.unlisted") : null,
             e.source && !e.source.official ? t("store.fromSource", { name: sourceLabel(e.source) }) : null,
             e.urlConfig && e.installed && !e.baseUrl ? t("store.urlMissing") : null,
           ]
@@ -385,8 +402,11 @@ export function StoreSettings() {
           // escaped - and removing the last app is a way to arrive here.
           <FocusButton
             focusKey="store-empty"
-            onEnter={() => load(true)}
-            className="px-[1.5vw] py-[1.2vh] rounded-[1.1vh] bg-white/5 text-[1.9vh] text-fg-dim text-left"
+            onEnter={() => {
+              if (Date.now() < settling.current) return;
+              load(true);
+            }}
+            className="px-[1.6vw] h-[5vh] rounded-[1vh] bg-white/5 flex items-center justify-center text-[1.9vh] font-semibold self-start"
           >
             {t("store.empty")} · {t("app.retry")}
           </FocusButton>

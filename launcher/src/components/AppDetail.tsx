@@ -205,7 +205,7 @@ export function AppDetail({
             answer is usually to add a registry the box no longer has. */}
         {app.unlisted && (
           <div className="text-[1.9vh] text-warn mb-[1.6vh]">
-            {t("store.unlistedDetail")}
+            {t(app.unlistedReason === "unreadable" ? "store.unreadableDetail" : "store.unlistedDetail")}
             {app.unlistedFrom ? " " + t("store.unlistedWasFrom", { url: app.unlistedFrom }) : ""}
           </div>
         )}
