@@ -127,6 +127,17 @@ describe("the store list", () => {
     expect(container.querySelector('[data-sfocus="store-app-goneapp"]')).not.toBeNull();
   });
 
+  it("puts the cursor somewhere on a store that is already empty", async () => {
+    // Not the removal path - arriving at a store with no rows at all, which a
+    // fresh box and a registry serving nothing both produce. The button was
+    // there and nothing ever put the cursor on it, so the panel was a picture:
+    // every arrow and every OK discarded, only Back out.
+    stub(() => []);
+    render(<StoreSettings />);
+    await settle();
+    expect(getCurrentFocusKey()).toBe("store-empty");
+  });
+
   it("puts the cursor on something reachable even when nothing is left", async () => {
     // Removing the last app leaves a store with no rows - and that screen used
     // to hold nothing focusable at all, so arrows and OK did nothing and only
