@@ -243,14 +243,17 @@ test("two registries merge into one catalogue, each app labelled with its source
   };
   try {
     const list = await store.listForUi(config)(true);
+    // Catalogue only. The list also carries installed apps that no source
+    // lists, and tests above this one leave some installed.
+    const catalogue = list.apps.filter((e) => !e.unlisted);
     assert.deepEqual(
-      list.apps.map((e) => e.id),
+      catalogue.map((e) => e.id),
       ["offapp", "brewapp"],
       "the primary registry's apps come first, in its own order",
     );
-    assert.equal(list.apps[1].source.url, urlB);
-    assert.equal(list.apps[1].source.name, "Homebrew");
-    assert.equal(list.apps[1].source.official, false, "an added registry is never labelled official");
+    assert.equal(catalogue[1].source.url, urlB);
+    assert.equal(catalogue[1].source.name, "Homebrew");
+    assert.equal(catalogue[1].source.official, false, "an added registry is never labelled official");
     assert.equal(list.error, null);
     assert.equal(list.sources.length, 2);
     assert.deepEqual(
@@ -292,9 +295,10 @@ test("an id offered by two registries resolves to the first configured, and name
   const config = { rawStore: () => ({ registry: urlA, sources: [urlB] }), appConfig: () => ({}) };
   try {
     const list = await store.listForUi(config)(true);
-    assert.equal(list.apps.length, 1, "one id is one row, whatever it is offered by");
-    assert.equal(list.apps[0].name, "FromPrimary");
-    assert.equal(list.apps[0].version, "1.0.0", "a higher version elsewhere does not win the id");
+    const catalogue = list.apps.filter((e) => !e.unlisted);
+    assert.equal(catalogue.length, 1, "one id is one row, whatever it is offered by");
+    assert.equal(catalogue[0].name, "FromPrimary");
+    assert.equal(catalogue[0].version, "1.0.0", "a higher version elsewhere does not win the id");
     assert.deepEqual(
       list.apps[0].alsoIn.map((x) => x.url),
       [urlB],
@@ -321,20 +325,22 @@ test("an app stays with the registry it was installed from, even when another cl
     // The primary now offers the same id at a much higher version.
     a.state.apps = [manifestOnly("brewapp", "Hijacked", "9.0.0")];
     let list = await store.listForUi(config)(true);
-    assert.equal(list.apps.length, 1);
-    assert.equal(list.apps[0].name, "Brew", "the pinned source keeps the id");
-    assert.equal(list.apps[0].version, "1.0.0");
-    assert.equal(list.apps[0].updateAvailable, false, "another registry's version is not an update");
+    let catalogue = list.apps.filter((e) => !e.unlisted);
+    assert.equal(catalogue.length, 1);
+    assert.equal(catalogue[0].name, "Brew", "the pinned source keeps the id");
+    assert.equal(catalogue[0].version, "1.0.0");
+    assert.equal(catalogue[0].updateAvailable, false, "another registry's version is not an update");
     assert.deepEqual(list.updates, [], "so the nightly auto-update has nothing to act on");
     assert.deepEqual(
-      list.apps[0].alsoIn.map((x) => x.url),
+      catalogue[0].alsoIn.map((x) => x.url),
       [urlA],
     );
 
     // ...and a real update, from the pinned source, still works.
     b.state.apps = [manifestOnly("brewapp", "Brew", "1.1.0")];
     list = await store.listForUi(config)(true);
-    assert.equal(list.apps[0].updateAvailable, true);
+    catalogue = list.apps.filter((e) => !e.unlisted);
+    assert.equal(catalogue[0].updateAvailable, true);
     assert.deepEqual(list.updates, ["brewapp"]);
     assert.equal((await store.install(config, "brewapp")).ok, true);
     assert.equal(installedManifest().name, "Brew");
@@ -691,5 +697,205 @@ test("a registry that lists one id twice draws one button, not two", async () =>
   } finally {
     primary.close();
     twice.close();
+  }
+});
+
+// An app nobody offers any more.
+//
+// It keeps running - the launcher builds its grid from ~/.tvbox/apps and no
+// catalogue is consulted - but Remove lives only in a store row, so before this
+// a retired app could not be taken off the television at all.
+
+test("an installed app that no source lists still gets a row, marked as unlisted", async () => {
+  const r = registry([manifestOnly("goneapp", "GoneApp", "1.0.0")]);
+  const url = await r.listen();
+  const config = { rawStore: () => ({ registry: url, sources: [] }), appConfig: () => ({}) };
+  try {
+    assert.equal((await store.install(config, "goneapp")).ok, true);
+    // The registry drops it, the box keeps it.
+    r.state.apps = [];
+    const list = await store.listForUi(config)(true);
+    const e = list.apps.find((a) => a.id === "goneapp");
+    assert.ok(e, "an installed app must not vanish from the store just because the registry did");
+    assert.equal(e.unlisted, true);
+    assert.equal(e.unlistedReason, "retired");
+    assert.equal(e.installed, true);
+    assert.equal(e.source, null);
+    assert.equal(e.updateAvailable, false, "there is nothing to update from");
+    assert.equal(e.installedVersion, "1.0.0");
+    assert.equal(e.version, "1.0.0", "a version of undefined reaches the screen as 'vundefined'");
+    assert.equal(
+      e.unlistedFrom,
+      null,
+      "that registry is still configured and simply stopped offering it - naming it would read as advice to add it back",
+    );
+    assert.deepEqual(list.updates, [], "not offered as an update");
+    assert.deepEqual(list.autoUpdates, []);
+
+    // And it can actually be taken off, which is the whole point.
+    assert.equal((await store.uninstall("goneapp")).ok, true);
+    const after = await store.listForUi(config)(true);
+    assert.equal(
+      after.apps.find((a) => a.id === "goneapp"),
+      undefined,
+    );
+  } finally {
+    r.close();
+  }
+});
+
+test("a source that did not answer never makes an app look retired", async () => {
+  // The dangerous direction. A registry that failed to load lists nothing, and
+  // reading that as "no source offers this" would tell somebody their apps were
+  // retired every time the network was down - while the way back is to fix the
+  // source that sentence just talked them out of trusting.
+  const r = registry([manifestOnly("liveapp", "LiveApp", "1.0.0")]);
+  const url = await r.listen();
+  const config = { rawStore: () => ({ registry: url, sources: [] }), appConfig: () => ({}) };
+  try {
+    assert.equal((await store.install(config, "liveapp")).ok, true);
+    r.close();
+    const list = await store.listForUi(config)(true);
+    const e = list.apps.find((a) => a.id === "liveapp");
+    assert.ok(!e || !e.unlisted, "an unreachable registry is not a retirement");
+    await store.uninstall("liveapp");
+  } finally {
+    r.close();
+  }
+});
+
+test("the registry it came from is named only when the box no longer has it", async () => {
+  // The half that turns the screen from a dead end into an action - and only
+  // then, because the usual case is a registry that is still configured and has
+  // simply dropped the app.
+  const gone = registry([manifestOnly("movedapp", "MovedApp", "1.0.0")]);
+  const main = registry([]);
+  const [goneUrl, mainUrl] = [await gone.listen(), await main.listen()];
+  let sources = [{ url: goneUrl, name: "Dev" }];
+  const config = { rawStore: () => ({ registry: mainUrl, sources }), appConfig: () => ({}) };
+  try {
+    assert.equal((await store.install(config, "movedapp")).ok, true);
+    // The owner removes that source from the box.
+    sources = [];
+    const list = await store.listForUi(config)(true);
+    const e = list.apps.find((a) => a.id === "movedapp");
+    assert.equal(e.unlisted, true);
+    assert.equal(e.unlistedFrom, goneUrl, "adding that registry back is what would make it updatable again");
+    await store.uninstall("movedapp");
+  } finally {
+    gone.close();
+    main.close();
+  }
+});
+
+test("an app this box refuses to read keeps a row, and is not called retired", async () => {
+  // A refusal is not an absence, and it is not silence either. The likeliest
+  // reasons are forward-compatible - a manifestVersion or a capability a box
+  // does not know yet - so calling it retired would tell every older box in the
+  // field that the app is gone. But dropping the row instead takes Remove with
+  // it, which is the one thing this list exists to keep reachable: measured,
+  // that left an installed app that could not be taken off the television at
+  // all, which is the state the feature was written to fix.
+  const r = registry([manifestOnly("newapp", "NewApp", "1.0.0")]);
+  const url = await r.listen();
+  const config = { rawStore: () => ({ registry: url, sources: [] }), appConfig: () => ({}) };
+  try {
+    assert.equal((await store.install(config, "newapp")).ok, true);
+    r.state.apps = [{ ...manifestOnly("newapp", "NewApp", "2.0.0"), manifestVersion: 99 }];
+    const list = await store.listForUi(config)(true);
+    const e = list.apps.find((a) => a.id === "newapp");
+    assert.ok(e, "no row means no Remove, and it is installed");
+    assert.equal(e.unlistedReason, "unreadable", "the sentence is about this box, not about the app being gone");
+    assert.equal(e.unlistedFrom, null, "a registry still serving it is not somewhere to send anyone");
+    assert.equal((await store.uninstall("newapp")).ok, true, "and it can actually be taken off");
+  } finally {
+    r.close();
+  }
+});
+
+test("a trust refusal is not dressed up as a version skew", async () => {
+  // The box refused this one ON PURPOSE, and no amount of updating it will
+  // change that - so it must not be told that updating might bring the app
+  // back. Same row, same Remove, different sentence.
+  const r = registry([manifestOnly("trustapp", "TrustApp", "1.0.0")]);
+  const url = await r.listen();
+  const config = { rawStore: () => ({ registry: url, sources: [] }), appConfig: () => ({}) };
+  try {
+    assert.equal((await store.install(config, "trustapp")).ok, true);
+    r.state.apps = [
+      { ...manifestOnly("trustapp", "TrustApp", "2.0.0"), requires: { aptRepo: { uri: "http://x", key: "k" } } },
+    ];
+    const list = await store.listForUi(config)(true);
+    const e = list.apps.find((a) => a.id === "trustapp");
+    assert.ok(e, "still removable");
+    assert.equal(e.unlistedReason, "blocked");
+    await store.uninstall("trustapp");
+  } finally {
+    r.close();
+  }
+});
+
+test("a refusal keeps its row even while another source is unreachable", async () => {
+  // Whether this box can read an app is answered by the source that DID reply.
+  // Waiting for the ones that did not cost the row - and the row is where
+  // Remove lives, so the app became unremovable from the television.
+  const a = registry([manifestOnly("mixapp", "MixApp", "1.0.0")]);
+  const b = registry([]);
+  const [urlA, urlB] = [await a.listen(), await b.listen()];
+  const config = {
+    rawStore: () => ({ registry: urlA, sources: [{ url: urlB, name: "Other" }] }),
+    appConfig: () => ({}),
+  };
+  try {
+    assert.equal((await store.install(config, "mixapp")).ok, true);
+    a.state.apps = [{ ...manifestOnly("mixapp", "MixApp", "2.0.0"), manifestVersion: 99 }];
+    b.close();
+    const list = await store.listForUi(config)(true);
+    const e = list.apps.find((a2) => a2.id === "mixapp");
+    assert.ok(e, "one silent source must not take the row away");
+    assert.equal(e.unlistedReason, "unreadable");
+    await store.uninstall("mixapp");
+  } finally {
+    a.close();
+  }
+});
+
+test("the rows nobody offers arrive grouped by reason, not interleaved", async () => {
+  // The panel draws one heading when the reason changes, so an id-sorted mix
+  // put the same heading on screen three times - and a heading is the largest
+  // text there. Grouping belongs here, where the list is built.
+  const r = registry([
+    manifestOnly("aaa", "Aaa", "1.0.0"),
+    manifestOnly("bbb", "Bbb", "1.0.0"),
+    manifestOnly("ccc", "Ccc", "1.0.0"),
+    manifestOnly("ddd", "Ddd", "1.0.0"),
+  ]);
+  const url = await r.listen();
+  const config = { rawStore: () => ({ registry: url, sources: [] }), appConfig: () => ({}) };
+  try {
+    for (const id of ["aaa", "bbb", "ccc", "ddd"]) assert.equal((await store.install(config, id)).ok, true);
+    // aaa retired, bbb unreadable, ccc retired, ddd blocked - alphabetically
+    // interleaved on purpose.
+    r.state.apps = [
+      { ...manifestOnly("bbb", "Bbb", "2.0.0"), manifestVersion: 99 },
+      { ...manifestOnly("ddd", "Ddd", "2.0.0"), requires: { aptRepo: { uri: "http://x", key: "k" } } },
+    ];
+    const list = await store.listForUi(config)(true);
+    const reasons = list.apps.filter((a) => a.unlisted).map((a) => a.unlistedReason);
+    const runs = reasons.filter((x, i) => x !== reasons[i - 1]);
+    assert.deepEqual(
+      runs,
+      [...new Set(reasons)],
+      "each reason appears in one run, so the panel draws each heading once",
+    );
+    assert.deepEqual(runs, ["retired", "unreadable", "blocked"], "and in that order, worst-explained last");
+    const firstUnlisted = list.apps.findIndex((a) => a.unlisted);
+    assert.ok(
+      list.apps.slice(0, firstUnlisted).every((a) => !a.unlisted),
+      "the catalogue stays ahead of the tail - the sort must not reach into it",
+    );
+    for (const id of ["aaa", "bbb", "ccc", "ddd"]) await store.uninstall(id);
+  } finally {
+    r.close();
   }
 });

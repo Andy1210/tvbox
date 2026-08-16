@@ -110,12 +110,28 @@ async function fetchIndex(url, bust) {
     // it threads to install() without ever reaching a written manifest.
     const packages = idx.packages && typeof idx.packages === "object" ? idx.packages : {};
     const out = [];
+    // Ids this registry DID offer and that we refused. A refusal is not an
+    // absence: the commonest reasons are forward-compatibility ones (a
+    // manifestVersion or a capability this box does not know yet), so an older
+    // box must not go on to announce that nobody offers the app any more. Only
+    // ever used for set membership, never shown.
+    const dropped = [];
+    // Refused by the TRUST rules rather than unreadable: deliberate, and no
+    // amount of updating the box changes it, so it must not be told to.
+    const blocked = [];
+    const noteDropped = (m) => {
+      if (m && typeof m.id === "string") dropped.push(m.id);
+    };
     for (const m of idx.apps) {
       const valid = apps.validateManifest(m, "registry:" + (m && m.id));
-      if (!valid) continue;
+      if (!valid) {
+        noteDropped(m);
+        continue;
+      }
       const errs = trustErrors(valid);
       if (errs.length) {
         console.warn("[store] skip", valid.id, "-", errs.join("; "));
+        blocked.push(valid.id);
         continue;
       }
       const pkg = packages[valid.id];
@@ -124,6 +140,8 @@ async function fetchIndex(url, bust) {
       }
       out.push(valid);
     }
+    Object.defineProperty(out, "_dropped", { value: dropped, enumerable: false });
+    Object.defineProperty(out, "_blocked", { value: blocked, enumerable: false });
     return out;
   } finally {
     clearTimeout(t);
@@ -340,6 +358,18 @@ function installedFromStore(id) {
 // What the launcher's Store panel renders. `installed` covers only the
 // store-managed file; `builtin` flags a registry id that ships with the box
 // (not installable, would be shadowed anyway).
+/**
+ * The registry an app came from, when naming it would actually help.
+ *
+ * Only when that registry is no longer configured - then adding it back is the
+ * way to get the app updating again. Capped because a pin is a file on disk and
+ * this is the one string on this path that reaches the screen uncapped.
+ */
+function unlistedFrom(pin, configured) {
+  if (typeof pin !== "string" || !pin || configured.has(pin)) return null;
+  return pin.length > 120 ? pin.slice(0, 120) + "\u2026" : pin;
+}
+
 function listForUi(config) {
   return async (refresh) => {
     const loaded = await loadAll(config, refresh);
@@ -403,13 +433,102 @@ function listForUi(config) {
         pinnedElsewhere: !!pinnedElsewhere,
       };
     });
+    // An app that is installed and that NO source lists. It still runs - the
+    // launcher builds its grid from ~/.tvbox/apps, not from any catalogue, and
+    // nothing prunes it - but it had no row here, and Remove lives only in a
+    // row. So an app retired from a registry could not be taken off the
+    // television at all, only over the API or the CLI.
+    //
+    // Only claimed when every configured source actually ANSWERED. A source
+    // that failed to load lists nothing, so reading that as "no source offers
+    // this" would tell somebody their apps were retired every time the network
+    // was down - and the way back, re-adding or fixing the source, is exactly
+    // what that sentence would talk them out of.
+    const answered = loaded.every((s) => !s.error && Array.isArray(s.entries));
+    // Offered somewhere and refused HERE - an unknown manifestVersion, an
+    // unknown capability, or a trust rule. Not the same as retired, and not
+    // silence either: dropping the row takes Remove with it, which is the one
+    // thing this list exists to keep reachable. It gets a row that says what
+    // actually happened.
+    const catalogueLength = out.length;
+    const refused = new Set(loaded.flatMap((s) => (s.entries && s.entries._dropped) || []));
+    const blocked = new Set(loaded.flatMap((s) => (s.entries && s.entries._blocked) || []));
+    // A refusal is knowable from the source that DID answer, so it does not
+    // wait on the ones that did not - and waiting cost the row, which is the
+    // thing Remove lives in. Only "nobody offers this" needs every source in.
+    const candidates = apps
+      .getManifests()
+      .filter((m) => !builtinIds.has(m.id) && installedFromStore(m.id))
+      .filter((m) => answered || refused.has(m.id) || blocked.has(m.id));
+    if (candidates.length) {
+      const listed = new Set(out.map((a) => a.id));
+      const pins = readPins();
+      // Which registries the box is configured with right now. A pin naming one
+      // of them is not a way back: that registry is present and simply does not
+      // offer the app any more, so "it was installed from X" would read as
+      // advice to add back something nobody removed.
+      const configured = new Set(loaded.map((s) => s.url));
+      for (const m of candidates) {
+        if (listed.has(m.id)) continue;
+        const rt = m.runtime || {};
+        const { missing } = apps.appDeps(m);
+        // The installed manifest is the ONLY description of it left, so the
+        // version it carries is both what is on disk and the newest there is.
+        const version = m.version || "0.0.0";
+        out.push({
+          id: m.id,
+          name: m.name,
+          tagline: m.tagline,
+          description: m.description || null,
+          screenshots: Array.isArray(m.screenshots) ? m.screenshots.filter((x) => /^https:\/\//.test(x)) : [],
+          icon: m.icon,
+          accent: m.accent,
+          installed: true,
+          builtin: false,
+          version,
+          installedVersion: version,
+          updateAvailable: false,
+          changelog: Array.isArray(m.changelog) ? m.changelog : [],
+          flatpaks: flatpak.refsFor(m).map((f) => ({
+            ref: f.ref,
+            name: flatpak.shortName(f.ref),
+            version: (fps.get(f.ref) || {}).version || null,
+          })),
+          urlConfig: rt.urlConfig || null,
+          baseUrl: rt.urlConfig ? (config.appConfig(rt.urlConfig) || {}).baseUrl || "" : "",
+          missing,
+          source: null,
+          alsoIn: [],
+          pinnedElsewhere: false,
+          unlisted: true,
+          // Which sentence the screen owes the person. "Retired" is a claim
+          // about the world; "unreadable" is a claim about this box, and only
+          // one of them is true at a time.
+          unlistedReason: blocked.has(m.id) ? "blocked" : refused.has(m.id) ? "unreadable" : "retired",
+          // Where it came from, while the pin still says. It is the difference
+          // between "this is stuck here" and "add that registry back".
+          // Only for a retired app: a registry that is still serving this one and
+          // merely speaks a newer dialect is not somewhere to be sent.
+          unlistedFrom: refused.has(m.id) || blocked.has(m.id) ? null : unlistedFrom(pins.get(m.id), configured),
+        });
+      }
+    }
+
+    // Grouped by reason before they are handed over: they arrive id-sorted, so
+    // interleaved kinds gave the panel one heading per RUN - the same heading
+    // three times down one screen. Order within a kind is left alone.
+    const RANK = { retired: 0, unreadable: 1, blocked: 2 };
+    const tail = out.splice(catalogueLength);
+    tail.sort((a, b) => RANK[a.unlistedReason] - RANK[b.unlistedReason]);
+    out.push(...tail);
+
     // Two lists, because they answer different questions. `updates` is what the
     // UI offers a person to press, and every pending update belongs in it
     // whatever it came from. `autoUpdates` is what the box may install while
     // nobody is watching, which is the source's own setting.
     const updates = out.filter((a) => a.updateAvailable).map((a) => a.id);
     const autoUpdates = out
-      .filter((a) => a.updateAvailable && a.source.autoUpdate && !a.pinnedElsewhere)
+      .filter((a) => a.updateAvailable && a.source && a.source.autoUpdate && !a.pinnedElsewhere)
       .map((a) => a.id);
     return {
       registry: loaded[0].url,
