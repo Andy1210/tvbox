@@ -354,8 +354,17 @@
     "flatpakFailed": "Could not update {name}.",
     "phaseFlatpak": "Downloading the program...",
     "busy": "The box is busy with something else. Try again in a moment.",
-    "alsoIn": "also in {names}",
-    "fromSource": "from {name}"
+    "fromSource": "from {name}",
+    "takeFrom": "Take it from:",
+    "pinnedElsewhere": "This app came from somewhere else — updating would move it to {name}.",
+    "failedWhy": "{name}: {why}",
+    "sourceOffline": "{name} (not answering)",
+    "switched": "{name} now comes from {source}",
+    "whyUnreachable": "that store is not answering",
+    "whyNotOffered": "that store does not offer it",
+    "whyNotConfigured": "that store is not set up",
+    "whyBuiltin": "it is a built-in app",
+    "whyPin": "could not record where it came from"
   },
   "storeSources": {
     "title": "Store sources",

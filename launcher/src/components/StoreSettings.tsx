@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { setFocus } from "@noriginmedia/norigin-spatial-navigation";
 import { fetchStore, storeInstall, storeUninstall, storeFlatpakUpdate, saveAppUrl, type StoreEntry } from "../lib/api";
-import { useI18n } from "../lib/i18n";
 import { sourceLabel } from "../lib/storesource";
+import { useI18n } from "../lib/i18n";
 import { useInstalls } from "../stores/installs";
 import { FocusButton } from "./FocusButton";
 import { Icon } from "./Icon";
@@ -88,6 +88,8 @@ export function StoreSettings() {
   // detail view is open on that app, refocus its now-current action button
   // (the progress indicator that held focus is about to unmount).
   const pending = useRef<Map<string, "install" | "update" | "flatpak">>(new Map());
+  /** Which registry a switch was aimed at, so its completion can name it. */
+  const switchedTo = useRef<Map<string, string>>(new Map());
   const prevInstalling = useRef<Set<string>>(new Set());
   useEffect(() => {
     const now = new Set((entries || []).filter((e) => e.installing).map((e) => e.id));
@@ -95,7 +97,9 @@ export function StoreSettings() {
       if (!now.has(id)) {
         const e = (entries || []).find((x) => x.id === id);
         const kind = pending.current.get(id) ?? "install";
+        const movedTo = switchedTo.current.get(id);
         pending.current.delete(id);
+        switchedTo.current.delete(id);
         if (e && kind === "flatpak") {
           // The box reports what the update did: a flatpak can be rebuilt without
           // its version moving, so "already current" is a real outcome, not a
@@ -111,8 +115,18 @@ export function StoreSettings() {
           }
           if (detailId === id) setTimeout(() => setFocus("detail-flatpak"), 0);
         } else if (e) {
-          const key = e.installed ? (kind === "update" ? "store.updated" : "store.installed") : "store.failed";
-          setStatus({ id: e.id, text: t(key, { name: loc(e.name) }) });
+          if (e.installed && movedTo) {
+            setStatus({
+              id: e.id,
+              text: t("store.switched", {
+                name: loc(e.name),
+                source: movedTo,
+              }),
+            });
+          } else {
+            const key = e.installed ? (kind === "update" ? "store.updated" : "store.installed") : "store.failed";
+            setStatus({ id: e.id, text: t(key, { name: loc(e.name) }) });
+          }
           if (detailId === id) setTimeout(() => setFocus(e.installed ? "detail-remove" : "detail-install"), 0);
         }
       }
@@ -125,13 +139,54 @@ export function StoreSettings() {
   // view swaps its Install/Update button for the progress indicator, move focus
   // to the still-mounted Back button, then refresh once so the phase appears.
   // The poll + completion effects above take it from there.
-  const kickoff = async (e: StoreEntry, kind: "install" | "update") => {
+  const kickoff = async (e: StoreEntry, kind: "install" | "update", sourceUrl?: string) => {
     pending.current.set(e.id, kind);
-    const ok = await storeInstall(e.id);
-    if (!ok) {
+    // Remembered for the completion message: "updated" is the wrong sentence for
+    // a switch - the version often does not move at all, and on a first install
+    // from another registry it never said where the app went.
+    if (sourceUrl) {
+      // The LABEL, resolved here: the entry in hand knows what its registries
+      // are called, and looking it up later would tie the completion effect to
+      // the whole list.
+      const src = e.source?.url === sourceUrl ? e.source : (e.alsoIn || []).find((x) => x.url === sourceUrl);
+      switchedTo.current.set(
+        e.id,
+        sourceLabel({ url: sourceUrl, name: src?.name ?? null, official: !!src?.official }, t("storeSources.official")),
+      );
+    }
+    const r = await storeInstall(e.id, sourceUrl);
+    if (!r.ok) {
       pending.current.delete(e.id);
-      setStatus({ id: e.id, text: t("store.failed", { name: loc(e.name) }) });
-      setTimeout(() => setFocus(kind === "update" ? "detail-update" : "detail-install"), 0);
+      // The box's own reason, when it gave one: "that registry does not offer
+      // it" and "registry unreachable" are different problems with different
+      // next steps, and both used to read as "action failed".
+      // Said in the language the box is set to. The shell's strings are
+      // diagnostics - "registry unreachable: connect ECONNREFUSED
+      // 192.168.1.19:8790" is a log line, not a sentence for a sofa - so the
+      // ones a press can reach are mapped and anything else falls back to the
+      // plain failure, with the raw text left to the log.
+      const reason = ((raw?: string): string | null => {
+        if (!raw) return null;
+        if (raw.startsWith("registry unreachable")) return t("store.whyUnreachable");
+        if (raw.includes("does not offer it")) return t("store.whyNotOffered");
+        if (raw.includes("not a configured registry")) return t("store.whyNotConfigured");
+        if (raw.includes("built-in app")) return t("store.whyBuiltin");
+        if (raw.includes("could not record")) return t("store.whyPin");
+        return null;
+      })(r.error);
+      setStatus({
+        id: e.id,
+        text: reason
+          ? t("store.failedWhy", { name: loc(e.name), why: reason })
+          : t("store.failed", { name: loc(e.name) }),
+      });
+      // Back to the button that was actually pressed. Keying this off `kind`
+      // sent focus to `detail-update`, which is NOT mounted when the two
+      // registries carry the same version - the ordinary case for a switch - and
+      // spatial navigation then either sat on a key nothing owns or landed on
+      // the red Uninstall button with somebody's thumb on OK.
+      const back = sourceUrl ? `detail-source-${sourceUrl}` : kind === "update" ? "detail-update" : "detail-install";
+      setTimeout(() => setFocus(back), 0);
       return;
     }
     setStatus(null);
@@ -145,6 +200,11 @@ export function StoreSettings() {
   };
   const install = (e: StoreEntry) => kickoff(e, "install");
   const update = (e: StoreEntry) => kickoff(e, "update");
+  // Taking an app from a DIFFERENT registry than the one it stands with. Counted
+  // as an update rather than an install because that is what it is from the
+  // box's side - the app stays, its origin moves - and because the focus goes
+  // back to the right button if the registry refuses it.
+  const switchSource = (e: StoreEntry, sourceUrl: string) => kickoff(e, "update", sourceUrl);
   // Updating the flatpak is not a store install: the app package stays put and the
   // program it runs (or was built from) moves. It reuses the same progress plumbing
   // because it is the same kind of wait - hundreds of MB, out of process.
@@ -197,6 +257,7 @@ export function StoreSettings() {
           app={detailApp}
           status={status && status.id === detailApp.id ? status.text : null}
           onInstall={() => install(detailApp)}
+          onSwitchSource={(url) => switchSource(detailApp, url)}
           onUpdate={() => update(detailApp)}
           onFlatpakUpdate={() => flatpakUpdate(detailApp)}
           onRemove={() => remove(detailApp)}
