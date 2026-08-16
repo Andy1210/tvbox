@@ -728,7 +728,10 @@ function enqueueMpv(urls) {
   // success. Video wants a queue that carries all of that per entry; this one
   // does not pretend to be it.
   if (!mpvAudioOnly) return { ok: false, error: "the queue is for audio playback" };
-  const wanted = Array.isArray(urls) ? urls : [];
+  // A bare string is what the published type allows, and it used to fall
+  // through as an empty list - answering ok with nothing queued, which is the
+  // one shape a caller cannot tell from success.
+  const wanted = Array.isArray(urls) ? urls : typeof urls === "string" ? [urls] : [];
   // The cap counts what is ALREADY waiting, not what one call asks for: capping
   // per call bounds nothing, since ten calls of thirty-two are three hundred
   // entries held in another process, each a URL that usually carries a credential.
