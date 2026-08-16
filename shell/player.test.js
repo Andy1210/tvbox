@@ -117,6 +117,47 @@ test("the fallback rectangle is a quarter of whatever the output is at", () => {
   assert.strictEqual(player.pipFallbackRect(), null);
 });
 
+// What a queue entry is allowed to be.
+//
+// This is the security half of the queue, and it is unit-testable precisely
+// because it decides nothing else: the first play() reaches mpv as argv, where a
+// leading `--` stops a URL being read as an option, but an appended entry is a
+// `loadfile` argument and mpv will open whatever it is handed - a local path, or
+// a protocol like `avdevice://`.
+test("a queue entry has to be an http(s) URL", () => {
+  assert.ok(player.playableUrl("http://server:32400/library/parts/1/2/file.mp3"));
+  assert.ok(player.playableUrl("https://server/x.flac?token=abc"));
+  assert.ok(player.playableUrl("HTTPS://SERVER/x.mp3"), "the scheme is not case sensitive");
+
+  for (const bad of [
+    "/etc/shadow",
+    "file:///etc/shadow",
+    "avdevice://lavfi",
+    "ytdl://anything",
+    "data:audio/mp3;base64,AAA",
+    "  http://server/x.mp3",
+    "",
+    null,
+    undefined,
+    42,
+    {},
+    ["http://server/x.mp3"],
+    "http://server/" + "a".repeat(5000),
+  ]) {
+    assert.strictEqual(player.playableUrl(bad), false, JSON.stringify(bad) + " must not be queueable");
+  }
+});
+
+// Both refuse rather than start something. An empty player has nothing to append
+// behind, and a queue call that launched playback would hide which entry the app
+// actually asked for - the two calls mean different things and must stay that way.
+test("queueing needs something to queue behind", () => {
+  const added = player.enqueue(["http://server/x.mp3"]);
+  assert.strictEqual(added.ok, false);
+  const cleared = player.clearQueue();
+  assert.strictEqual(cleared.ok, false);
+});
+
 test.after(() => {
   fs.rmSync(dir, { recursive: true, force: true });
   if (REAL_SOCKET === undefined) delete process.env.TVBOX_WC_SOCKET;
