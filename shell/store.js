@@ -450,12 +450,21 @@ async function install(config, id, sourceUrl) {
   // for a missing app. With several sources configured the distinction is the
   // same one: the app is only missing if every source answered and none had it.
   if (!hit) {
+    // With a registry NAMED, only that one's reachability is the answer: another
+    // source being down says nothing about the press somebody just made, and
+    // reporting it as unreachable sends them to look at a registry they did not
+    // choose.
+    if (wanted) {
+      const src = loaded.find((s) => s.url === wanted);
+      if (src && src.error) return { ok: false, error: "registry unreachable: " + (src.error || "unknown") };
+      // It answered and does not have it, which is a different sentence from
+      // "nobody has it" and the one somebody switching sources needs: the app is
+      // still installed, from where it was.
+      return { ok: false, error: "that registry does not offer it" };
+    }
     const failed = loaded.find((s) => s.error);
     if (failed) return { ok: false, error: "registry unreachable: " + (failed.error || "unknown") };
-    // A named registry that answered and does not have it is a different
-    // sentence from "nobody has it", and it is the one somebody switching
-    // sources needs: the app is still installed, from where it was.
-    return { ok: false, error: wanted ? "that registry does not offer it" : "not in registry" };
+    return { ok: false, error: "not in registry" };
   }
   const m = hit.entry;
   const url = hit.source.url;

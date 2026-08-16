@@ -528,7 +528,21 @@ test("install() refuses a registry that is not configured, and one that does not
   const http = require("node:http");
   const server = http.createServer((req, res) => {
     res.writeHead(200, { "Content-Type": "application/json" });
-    res.end(JSON.stringify({ registryVersion: 1, apps: [{ id: "oneapp", name: "One", type: "webclient", status: "ready", version: "1.0.0", runtime: { serve: "remote", url: "https://example.com" } }] }));
+    res.end(
+      JSON.stringify({
+        registryVersion: 1,
+        apps: [
+          {
+            id: "oneapp",
+            name: "One",
+            type: "webclient",
+            status: "ready",
+            version: "1.0.0",
+            runtime: { serve: "remote", url: "https://example.com" },
+          },
+        ],
+      }),
+    );
   });
   await new Promise((r) => server.listen(0, "127.0.0.1", r));
   const url = "http://127.0.0.1:" + server.address().port + "/index.json";
@@ -551,3 +565,43 @@ test("install() refuses a registry that is not configured, and one that does not
   }
 });
 
+test("a named registry that answered reports its own state, not another one's", async () => {
+  // The press was for ONE registry. Another source being down says nothing about
+  // it, and answering "unreachable" sends whoever pressed it to look at a
+  // registry they did not choose.
+  const http = require("node:http");
+  const up = http.createServer((req, res) => {
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(
+      JSON.stringify({
+        registryVersion: 1,
+        apps: [
+          {
+            id: "here",
+            name: "Here",
+            type: "webclient",
+            status: "ready",
+            version: "1.0.0",
+            runtime: { serve: "remote", url: "https://example.com" },
+          },
+        ],
+      }),
+    );
+  });
+  await new Promise((r) => up.listen(0, "127.0.0.1", r));
+  const upUrl = "http://127.0.0.1:" + up.address().port + "/index.json";
+  // A source that is configured and answers nothing at all.
+  const deadUrl = "http://127.0.0.1:1/index.json";
+  const config = {
+    rawStore: () => ({ registry: upUrl, sources: [{ url: deadUrl, name: "down" }] }),
+    appConfig: () => ({}),
+  };
+
+  try {
+    const r = await store.install(config, "nothere", upUrl);
+    assert.equal(r.ok, false);
+    assert.match(r.error, /does not offer it/, "the registry that was named is the one being reported on");
+  } finally {
+    up.close();
+  }
+});

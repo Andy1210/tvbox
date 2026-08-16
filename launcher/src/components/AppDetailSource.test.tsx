@@ -41,12 +41,13 @@ function draw(app: StoreEntry, onSwitchSource?: (url: string) => void): HTMLElem
   const { container } = render(
     <AppDetail
       app={app}
-      onBack={() => {}}
       onInstall={() => {}}
-      onUpdate={() => {}}
-      onRemove={() => {}}
-      onFlatpakUpdate={() => {}}
       onSwitchSource={onSwitchSource}
+      onUpdate={() => {}}
+      onFlatpakUpdate={() => {}}
+      onRemove={() => {}}
+      onSetUrl={() => {}}
+      onExit={() => {}}
     />,
   );
   return container;
