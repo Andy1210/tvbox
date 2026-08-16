@@ -694,6 +694,8 @@ const running = () => !!mpv;
 // Mid paused-start handshake: a "play" arriving now must let the switch finish
 // rather than unpause INSIDE it.
 const startPending = () => mpvStartPending;
+/** Whether what is loaded was started as sound rather than as a picture. */
+const isAudioOnly = () => mpvAudioOnly;
 const isPip = () => mpvPip;
 const playing = () => playingUrl;
 const setPlaying = (url) => {
@@ -719,8 +721,20 @@ const setOwner = (id) => {
  */
 function enqueueMpv(urls) {
   if (!mpv) return { ok: false, error: "nothing is playing" };
+  // Sound only, and that is a correctness bound rather than a policy. An advance
+  // does not re-run the per-item startup: no output-mode choice, no HDR claim, no
+  // stream selection. A queued FILM would therefore play under the mode and the
+  // track choices of the entry before it, which is a wrong picture reported as
+  // success. Video wants a queue that carries all of that per entry; this one
+  // does not pretend to be it.
+  if (!mpvAudioOnly) return { ok: false, error: "the queue is for audio playback" };
   const wanted = Array.isArray(urls) ? urls : [];
-  const list = wanted.filter(playableUrl).slice(0, QUEUE_MAX);
+  // The cap counts what is ALREADY waiting, not what one call asks for: capping
+  // per call bounds nothing, since ten calls of thirty-two are three hundred
+  // entries held in another process, each a URL that usually carries a credential.
+  const behind = Math.max(0, mpvQueueUrls.length - (mpvPlaylistPos < 0 ? 1 : mpvPlaylistPos + 1));
+  const room = Math.max(0, QUEUE_MAX - behind);
+  const list = wanted.filter(playableUrl).slice(0, room);
   const refused = wanted.length - list.length;
   for (const u of list) {
     mpvCmd({ command: ["loadfile", u, "append"] });
@@ -753,6 +767,7 @@ module.exports = {
   setHdr,
   pipFallbackRect,
   startPending,
+  isAudioOnly,
   MPV_CLAIM,
   launch: launchMpv,
   enqueue: enqueueMpv,
