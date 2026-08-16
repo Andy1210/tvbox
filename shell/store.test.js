@@ -243,14 +243,17 @@ test("two registries merge into one catalogue, each app labelled with its source
   };
   try {
     const list = await store.listForUi(config)(true);
+    // Catalogue only. The list also carries installed apps that no source
+    // lists, and tests above this one leave some installed.
+    const catalogue = list.apps.filter((e) => !e.unlisted);
     assert.deepEqual(
-      list.apps.map((e) => e.id),
+      catalogue.map((e) => e.id),
       ["offapp", "brewapp"],
       "the primary registry's apps come first, in its own order",
     );
-    assert.equal(list.apps[1].source.url, urlB);
-    assert.equal(list.apps[1].source.name, "Homebrew");
-    assert.equal(list.apps[1].source.official, false, "an added registry is never labelled official");
+    assert.equal(catalogue[1].source.url, urlB);
+    assert.equal(catalogue[1].source.name, "Homebrew");
+    assert.equal(catalogue[1].source.official, false, "an added registry is never labelled official");
     assert.equal(list.error, null);
     assert.equal(list.sources.length, 2);
     assert.deepEqual(
@@ -292,9 +295,10 @@ test("an id offered by two registries resolves to the first configured, and name
   const config = { rawStore: () => ({ registry: urlA, sources: [urlB] }), appConfig: () => ({}) };
   try {
     const list = await store.listForUi(config)(true);
-    assert.equal(list.apps.length, 1, "one id is one row, whatever it is offered by");
-    assert.equal(list.apps[0].name, "FromPrimary");
-    assert.equal(list.apps[0].version, "1.0.0", "a higher version elsewhere does not win the id");
+    const catalogue = list.apps.filter((e) => !e.unlisted);
+    assert.equal(catalogue.length, 1, "one id is one row, whatever it is offered by");
+    assert.equal(catalogue[0].name, "FromPrimary");
+    assert.equal(catalogue[0].version, "1.0.0", "a higher version elsewhere does not win the id");
     assert.deepEqual(
       list.apps[0].alsoIn.map((x) => x.url),
       [urlB],
@@ -321,20 +325,22 @@ test("an app stays with the registry it was installed from, even when another cl
     // The primary now offers the same id at a much higher version.
     a.state.apps = [manifestOnly("brewapp", "Hijacked", "9.0.0")];
     let list = await store.listForUi(config)(true);
-    assert.equal(list.apps.length, 1);
-    assert.equal(list.apps[0].name, "Brew", "the pinned source keeps the id");
-    assert.equal(list.apps[0].version, "1.0.0");
-    assert.equal(list.apps[0].updateAvailable, false, "another registry's version is not an update");
+    let catalogue = list.apps.filter((e) => !e.unlisted);
+    assert.equal(catalogue.length, 1);
+    assert.equal(catalogue[0].name, "Brew", "the pinned source keeps the id");
+    assert.equal(catalogue[0].version, "1.0.0");
+    assert.equal(catalogue[0].updateAvailable, false, "another registry's version is not an update");
     assert.deepEqual(list.updates, [], "so the nightly auto-update has nothing to act on");
     assert.deepEqual(
-      list.apps[0].alsoIn.map((x) => x.url),
+      catalogue[0].alsoIn.map((x) => x.url),
       [urlA],
     );
 
     // ...and a real update, from the pinned source, still works.
     b.state.apps = [manifestOnly("brewapp", "Brew", "1.1.0")];
     list = await store.listForUi(config)(true);
-    assert.equal(list.apps[0].updateAvailable, true);
+    catalogue = list.apps.filter((e) => !e.unlisted);
+    assert.equal(catalogue[0].updateAvailable, true);
     assert.deepEqual(list.updates, ["brewapp"]);
     assert.equal((await store.install(config, "brewapp")).ok, true);
     assert.equal(installedManifest().name, "Brew");
@@ -691,5 +697,64 @@ test("a registry that lists one id twice draws one button, not two", async () =>
   } finally {
     primary.close();
     twice.close();
+  }
+});
+
+// An app nobody offers any more.
+//
+// It keeps running - the launcher builds its grid from ~/.tvbox/apps and no
+// catalogue is consulted - but Remove lives only in a store row, so before this
+// a retired app could not be taken off the television at all.
+
+test("an installed app that no source lists still gets a row, marked as unlisted", async () => {
+  const r = registry([manifestOnly("goneapp", "GoneApp", "1.0.0")]);
+  const url = await r.listen();
+  const config = { rawStore: () => ({ registry: url, sources: [] }), appConfig: () => ({}) };
+  try {
+    assert.equal((await store.install(config, "goneapp")).ok, true);
+    // The registry drops it, the box keeps it.
+    r.state.apps = [];
+    const list = await store.listForUi(config)(true);
+    const e = list.apps.find((a) => a.id === "goneapp");
+    assert.ok(e, "an installed app must not vanish from the store just because the registry did");
+    assert.equal(e.unlisted, true);
+    assert.equal(e.installed, true);
+    assert.equal(e.source, null);
+    assert.equal(e.updateAvailable, false, "there is nothing to update from");
+    assert.equal(e.installedVersion, "1.0.0");
+    assert.equal(e.version, "1.0.0", "a version of undefined reaches the screen as 'vundefined'");
+    assert.equal(e.unlistedFrom, url, "the pin still says where it came from, which is the way back");
+    assert.deepEqual(list.updates, [], "not offered as an update");
+    assert.deepEqual(list.autoUpdates, []);
+
+    // And it can actually be taken off, which is the whole point.
+    assert.equal((await store.uninstall("goneapp")).ok, true);
+    const after = await store.listForUi(config)(true);
+    assert.equal(
+      after.apps.find((a) => a.id === "goneapp"),
+      undefined,
+    );
+  } finally {
+    r.close();
+  }
+});
+
+test("a source that did not answer never makes an app look retired", async () => {
+  // The dangerous direction. A registry that failed to load lists nothing, and
+  // reading that as "no source offers this" would tell somebody their apps were
+  // retired every time the network was down - while the way back is to fix the
+  // source that sentence just talked them out of trusting.
+  const r = registry([manifestOnly("liveapp", "LiveApp", "1.0.0")]);
+  const url = await r.listen();
+  const config = { rawStore: () => ({ registry: url, sources: [] }), appConfig: () => ({}) };
+  try {
+    assert.equal((await store.install(config, "liveapp")).ok, true);
+    r.close();
+    const list = await store.listForUi(config)(true);
+    const e = list.apps.find((a) => a.id === "liveapp");
+    assert.ok(!e || !e.unlisted, "an unreachable registry is not a retirement");
+    await store.uninstall("liveapp");
+  } finally {
+    r.close();
   }
 });

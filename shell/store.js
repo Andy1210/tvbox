@@ -403,13 +403,68 @@ function listForUi(config) {
         pinnedElsewhere: !!pinnedElsewhere,
       };
     });
+    // An app that is installed and that NO source lists. It still runs - the
+    // launcher builds its grid from ~/.tvbox/apps, not from any catalogue, and
+    // nothing prunes it - but it had no row here, and Remove lives only in a
+    // row. So an app retired from a registry could not be taken off the
+    // television at all, only over the API or the CLI.
+    //
+    // Only claimed when every configured source actually ANSWERED. A source
+    // that failed to load lists nothing, so reading that as "no source offers
+    // this" would tell somebody their apps were retired every time the network
+    // was down - and the way back, re-adding or fixing the source, is exactly
+    // what that sentence would talk them out of.
+    const answered = loaded.every((s) => !s.error && Array.isArray(s.entries));
+    if (answered) {
+      const listed = new Set(out.map((a) => a.id));
+      const pins = readPins();
+      for (const m of apps.getManifests()) {
+        if (listed.has(m.id) || builtinIds.has(m.id) || !installedFromStore(m.id)) continue;
+        const rt = m.runtime || {};
+        const { missing } = apps.appDeps(m);
+        // The installed manifest is the ONLY description of it left, so the
+        // version it carries is both what is on disk and the newest there is.
+        const version = m.version || "0.0.0";
+        out.push({
+          id: m.id,
+          name: m.name,
+          tagline: m.tagline,
+          description: m.description || null,
+          screenshots: Array.isArray(m.screenshots) ? m.screenshots.filter((x) => /^https:\/\//.test(x)) : [],
+          icon: m.icon,
+          accent: m.accent,
+          installed: true,
+          builtin: false,
+          version,
+          installedVersion: version,
+          updateAvailable: false,
+          changelog: Array.isArray(m.changelog) ? m.changelog : [],
+          flatpaks: flatpak.refsFor(m).map((f) => ({
+            ref: f.ref,
+            name: flatpak.shortName(f.ref),
+            version: (fps.get(f.ref) || {}).version || null,
+          })),
+          urlConfig: rt.urlConfig || null,
+          baseUrl: rt.urlConfig ? (config.appConfig(rt.urlConfig) || {}).baseUrl || "" : "",
+          missing,
+          source: null,
+          alsoIn: [],
+          pinnedElsewhere: false,
+          unlisted: true,
+          // Where it came from, while the pin still says. It is the difference
+          // between "this is stuck here" and "add that registry back".
+          unlistedFrom: pins.get(m.id) || null,
+        });
+      }
+    }
+
     // Two lists, because they answer different questions. `updates` is what the
     // UI offers a person to press, and every pending update belongs in it
     // whatever it came from. `autoUpdates` is what the box may install while
     // nobody is watching, which is the source's own setting.
     const updates = out.filter((a) => a.updateAvailable).map((a) => a.id);
     const autoUpdates = out
-      .filter((a) => a.updateAvailable && a.source.autoUpdate && !a.pinnedElsewhere)
+      .filter((a) => a.updateAvailable && a.source && a.source.autoUpdate && !a.pinnedElsewhere)
       .map((a) => a.id);
     return {
       registry: loaded[0].url,

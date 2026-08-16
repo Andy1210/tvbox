@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { Fragment, useCallback, useEffect, useRef, useState } from "react";
 import { setFocus } from "@noriginmedia/norigin-spatial-navigation";
 import { fetchStore, storeInstall, storeUninstall, storeFlatpakUpdate, saveAppUrl, type StoreEntry } from "../lib/api";
 import { sourceLabel } from "../lib/storesource";
@@ -47,7 +47,9 @@ export function StoreSettings() {
   // focuses its first child before the fetch resolves), so after the initial
   // load - and after Retry, whose button unmounts on success - focus must be
   // placed explicitly or the D-pad can never enter the panel.
-  const load = useCallback(async (refresh = false, placeFocus = false) => {
+  // Returns what it loaded: a caller that has just removed something needs to
+  // know whether the row it was standing on still exists.
+  const load = useCallback(async (refresh = false, placeFocus = false): Promise<StoreEntry[]> => {
     const d = await fetchStore(refresh);
     const apps = d ? d.apps : [];
     const err = !d ? "network" : d.error ? "registry" : null;
@@ -61,6 +63,7 @@ export function StoreSettings() {
           if (k) setFocus(k);
         }
       }, 0);
+    return apps;
   }, []);
   useEffect(() => {
     load(false, true);
@@ -229,8 +232,21 @@ export function StoreSettings() {
   const remove = async (e: StoreEntry) => {
     const ok = await storeUninstall(e.id);
     setStatus({ id: e.id, text: t(ok ? "store.removed" : "store.failed", { name: loc(e.name) }) });
-    if (ok) await load();
-    setTimeout(() => setFocus(ok ? "detail-install" : "detail-remove"), 0);
+    if (!ok) {
+      setTimeout(() => setFocus("detail-remove"), 0);
+      return;
+    }
+    const rest = await load();
+    // An app no source lists has no row left once it is gone, so the detail
+    // unmounts with it and `detail-install` never mounts again - a cursor there
+    // discards every press afterwards, with only Back out. Leave for the list.
+    if (rest && !rest.some((x) => x.id === e.id)) {
+      setDetailId(null);
+      const next = firstKey(rest);
+      if (next) setTimeout(() => setFocus(next), 0);
+      return;
+    }
+    setTimeout(() => setFocus("detail-install"), 0);
   };
   const saveUrl = async (e: StoreEntry, value: string) => {
     setUrlEdit(null);
@@ -303,7 +319,11 @@ export function StoreSettings() {
       )}
 
       <div className="flex flex-col gap-[0.8vh] max-w-[70vw]">
-        {(entries || []).map((e) => {
+        {(entries || []).map((e, i, all) => {
+          // The shell puts them last, so one boundary is all it takes. The
+          // heading is a plain div: spatial navigation only registers
+          // focusables, so the D-pad travels straight past it.
+          const opensUnlisted = !!e.unlisted && !all[i - 1]?.unlisted;
           const shownVersion = e.installed && e.installedVersion ? e.installedVersion : e.version;
           const subtitle = [
             e.tagline ? loc(e.tagline) : null,
@@ -311,32 +331,37 @@ export function StoreSettings() {
             // Only for an added registry: naming the official one on every row
             // would be noise, while an app from somewhere else is exactly what a
             // person scrolling the catalogue needs to see without opening it.
+            e.unlisted ? t("store.unlisted") : null,
             e.source && !e.source.official ? t("store.fromSource", { name: sourceLabel(e.source) }) : null,
             e.urlConfig && e.installed && !e.baseUrl ? t("store.urlMissing") : null,
           ]
             .filter(Boolean)
             .join(" · ");
           return (
-            <FocusButton
-              key={e.id}
-              focusKey={"store-app-" + e.id}
-              onEnter={() => setDetailId(e.id)}
-              className="px-[1.5vw] py-[1.2vh] rounded-[1.1vh] bg-white/5 flex items-center gap-[1.5vw]"
-            >
-              <Icon svg={e.icon} className="w-[3.4vh] h-[3.4vh] shrink-0" />
-              <div className="flex-1 min-w-0 text-left">
-                <div className="text-[2.1vh] truncate">{loc(e.name)}</div>
-                <div className="text-[1.6vh] text-fg-dim truncate">{subtitle}</div>
-              </div>
-              {/* fixed emerald (same as AppDetail's Update button) - the manifest
-                  accent can be arbitrarily dark and unreadable */}
-              {e.updateAvailable && (
-                <span className="text-[1.6vh] font-semibold shrink-0 whitespace-nowrap text-emerald-200">
-                  {t("store.updateAvailableBadge")} · {t("store.vShort", { v: e.version })}
-                </span>
+            <Fragment key={e.id}>
+              {opensUnlisted && (
+                <div className="mt-[1.4vh] px-[1.5vw] text-[1.7vh] text-fg-dim">{t("store.unlistedGroup")}</div>
               )}
-              <span className="w-[2.4vh] h-[2.4vh] shrink-0 opacity-40">{chevron}</span>
-            </FocusButton>
+              <FocusButton
+                focusKey={"store-app-" + e.id}
+                onEnter={() => setDetailId(e.id)}
+                className="px-[1.5vw] py-[1.2vh] rounded-[1.1vh] bg-white/5 flex items-center gap-[1.5vw]"
+              >
+                <Icon svg={e.icon} className="w-[3.4vh] h-[3.4vh] shrink-0" />
+                <div className="flex-1 min-w-0 text-left">
+                  <div className="text-[2.1vh] truncate">{loc(e.name)}</div>
+                  <div className="text-[1.6vh] text-fg-dim truncate">{subtitle}</div>
+                </div>
+                {/* fixed emerald (same as AppDetail's Update button) - the manifest
+                  accent can be arbitrarily dark and unreadable */}
+                {e.updateAvailable && (
+                  <span className="text-[1.6vh] font-semibold shrink-0 whitespace-nowrap text-emerald-200">
+                    {t("store.updateAvailableBadge")} · {t("store.vShort", { v: e.version })}
+                  </span>
+                )}
+                <span className="w-[2.4vh] h-[2.4vh] shrink-0 opacity-40">{chevron}</span>
+              </FocusButton>
+            </Fragment>
           );
         })}
         {entries !== null && !error && !entries.length && (

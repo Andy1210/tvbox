@@ -364,7 +364,11 @@
     "whyNotOffered": "ez a bolt nem kínálja",
     "whyNotConfigured": "ez a bolt nincs beállítva",
     "whyBuiltin": "ez egy beépített app",
-    "whyPin": "nem sikerült megjegyezni, honnan jött"
+    "whyPin": "nem sikerült megjegyezni, honnan jött",
+    "unlisted": "már nem kínálja senki",
+    "unlistedGroup": "Telepítve, de már egyik forrás sem kínálja",
+    "unlistedDetail": "Ezt az alkalmazást már egyik forrás sem kínálja, így nem frissíthető. Továbbra is működik, és innen eltávolítható.",
+    "unlistedWasFrom": "Innen lett telepítve: {url}."
   },
   "storeSources": {
     "title": "Store források",
