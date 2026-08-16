@@ -124,13 +124,18 @@ const { ipcRenderer } = require("electron");
     // the screen. Anything else, including leaving it out, plays as before.
     window.tvbox.play = function (url, streams, startPos, opts) {
       try {
-        ipcRenderer.invoke("player", "queue", {
-          url: url,
-          streams: streams || null,
-          startPos: seconds(startPos),
-          kind: opts && opts.kind ? String(opts.kind) : null,
-        });
-        ipcRenderer.invoke("player", "play");
+        // Both invokes swallow a rejection as well as a throw. This bridge hands
+        // out no promise at all, so a main-process exception has nowhere to go
+        // but the renderer's unhandled-rejection handler.
+        ipcRenderer
+          .invoke("player", "queue", {
+            url: url,
+            streams: streams || null,
+            startPos: seconds(startPos),
+            kind: opts && opts.kind ? String(opts.kind) : null,
+          })
+          .catch(() => {});
+        ipcRenderer.invoke("player", "play").catch(() => {});
       } catch (e) {}
     };
     // Hand the box what comes AFTER the current item, so it crosses over by
