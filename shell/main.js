@@ -3094,7 +3094,12 @@ ipcMain.handle("player", (e, action, payload) => {
     // remember whose window the video belongs to: the first-frame reveal
     // (setVideoMode(true) in observeMpv) must hit THAT window, not the launcher
     player.setOwner(appIdForSender(e.sender));
-    if (player.running() && player.playing() === queued.url && !player.isPip()) {
+    // The KIND has to match as well as the URL. The same file asked for as
+    // sound after being played as a picture is a different launch - audio skips
+    // the mode handshake and the reveal - and resuming here would silently keep
+    // the mode the caller just said it did not want.
+    const sameKind = player.isAudioOnly() === (queued.kind === "audio");
+    if (player.running() && player.playing() === queued.url && sameKind && !player.isPip()) {
       if (player.startPending()) {
         // Still in the paused-start handshake: the mode switch starts it in a
         // moment. Unpausing here would put the switch INSIDE playback.
