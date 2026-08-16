@@ -120,7 +120,7 @@ export function StoreSettings() {
               id: e.id,
               text: t("store.switched", {
                 name: loc(e.name),
-                source: sourceLabel({ url: movedTo, name: sourceNameFor(movedTo) }, t("storeSources.official")),
+                source: movedTo,
               }),
             });
           } else {
@@ -144,7 +144,16 @@ export function StoreSettings() {
     // Remembered for the completion message: "updated" is the wrong sentence for
     // a switch - the version often does not move at all, and on a first install
     // from another registry it never said where the app went.
-    if (sourceUrl) switchedTo.current.set(e.id, sourceUrl);
+    if (sourceUrl) {
+      // The LABEL, resolved here: the entry in hand knows what its registries
+      // are called, and looking it up later would tie the completion effect to
+      // the whole list.
+      const src = e.source?.url === sourceUrl ? e.source : (e.alsoIn || []).find((x) => x.url === sourceUrl);
+      switchedTo.current.set(
+        e.id,
+        sourceLabel({ url: sourceUrl, name: src?.name ?? null, official: !!src?.official }, t("storeSources.official")),
+      );
+    }
     const r = await storeInstall(e.id, sourceUrl);
     if (!r.ok) {
       pending.current.delete(e.id);
@@ -189,13 +198,6 @@ export function StoreSettings() {
     const d = await fetchStore();
     if (d) setEntries(d.apps);
   };
-  /** The label a registry carries in this app's own listing, when it has one. */
-  const sourceNameFor = (url: string): string | null => {
-    const app = (entries || []).find((x) => (x.alsoIn || []).some((y) => y.url === url) || x.source?.url === url);
-    const hit = app?.source?.url === url ? app.source : (app?.alsoIn || []).find((y) => y.url === url);
-    return hit?.name ?? null;
-  };
-
   const install = (e: StoreEntry) => kickoff(e, "install");
   const update = (e: StoreEntry) => kickoff(e, "update");
   // Taking an app from a DIFFERENT registry than the one it stands with. Counted

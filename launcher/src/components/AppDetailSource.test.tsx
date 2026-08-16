@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { act, render } from "@testing-library/react";
 import { AppDetail } from "./AppDetail";
-import { setupRemote, setFocus, remote, getCurrentFocusKey, place, flushFocus } from "../test/remote";
+import { setupRemote, setFocus, remote } from "../test/remote";
 import { useConfigStore } from "../stores/config";
 import type { StoreEntry } from "../lib/api";
 
@@ -45,20 +45,6 @@ function entry(over: Partial<StoreEntry> = {}): StoreEntry {
     alsoIn: [{ url: LOCAL, name: "dev", official: false }],
     ...over,
   } as StoreEntry;
-}
-
-/**
- * Let the screen's own opening focus land before the test moves it.
- *
- * `AppDetail` focuses its first action a macrotask after mount, so a `setFocus`
- * issued straight after render is overwritten - and an assertion that happens to
- * name the same key then passes without the press doing anything.
- */
-async function settled(): Promise<void> {
-  await act(async () => {
-    await new Promise((r) => setTimeout(r, 0));
-  });
-  await flushFocus();
 }
 
 function draw(app: StoreEntry, onSwitchSource?: (url: string) => void): HTMLElement {
