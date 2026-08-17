@@ -168,7 +168,28 @@ function validateManifest(m, src) {
   // Wayland client (RetroArch); the shell spawns it and hides its own windows.
   if (m.type !== "webclient" && m.type !== "native") return bad("type must be webclient|native");
   if (m.status !== "ready" && m.status !== "coming_soon") return bad("status must be ready|coming_soon");
-  if (!m.name) return bad("missing name");
+  // A user-facing string from a manifest: one string, or a per-locale map whose LEAVES
+  // are strings, non-empty and bounded. The leaf type is not pedantry - the launcher
+  // renders every one of these as a React child, and a nested object there throws
+  // "Objects are not valid as a React child", which only the root error boundary
+  // catches: one manifest replaces the whole 10-foot UI with a crash screen, and a
+  // manifest dropped into ~/.tvbox/apps or served by an added registry never meets the
+  // JSON Schema that would have caught it. A name is also on the HOME grid, so that
+  // one takes the box's first screen with it.
+  const MAX_LABEL = 80; // one line on a row or a tile
+  const MAX_HINT = 240; // the grey line under it, which may wrap
+  const MAX_PROSE = 1200; // the store's detail copy
+  const localeTextOk = (v, max) => {
+    if (typeof v === "string") return v.length > 0 && v.length <= max;
+    if (!v || typeof v !== "object" || Array.isArray(v)) return false;
+    const vals = Object.values(v);
+    return vals.length > 0 && vals.every((x) => typeof x === "string" && x.length > 0 && x.length <= max);
+  };
+  if (!localeTextOk(m.name, MAX_LABEL)) return bad("name must be a string or a locale map of strings (<=80)");
+  if (m.tagline !== undefined && !localeTextOk(m.tagline, MAX_HINT))
+    return bad("tagline must be a string or a locale map of strings (<=240)");
+  if (m.description !== undefined && !localeTextOk(m.description, MAX_PROSE))
+    return bad("description must be a string or a locale map of strings (<=1200)");
   // A native app's command line reaches argv, so validate it with the very parser
   // the launch path uses rather than a second copy of the rules.
   //
@@ -241,14 +262,6 @@ function validateManifest(m, src) {
   // React child", which the only error boundary catches at the root: the whole
   // 10-foot UI is replaced by a crash screen. Bounded too, because a row on a
   // television has one line for the label and two for the hint.
-  const MAX_LABEL = 80; // one line on a row, next to its on/off pill
-  const MAX_HINT = 240; // the grey line under it, which may wrap
-  const localeTextOk = (v, max) => {
-    if (typeof v === "string") return v.length <= max;
-    if (!v || typeof v !== "object" || Array.isArray(v)) return false;
-    const vals = Object.values(v);
-    return vals.length > 0 && vals.every((s) => typeof s === "string" && s.length <= max);
-  };
   // Phone-pairing kinds the app offers (its plugin registers the matching
   // provider). This is how an app that has no screen of its own on the box, e.g. a
   // native app, still gets a "do this from your phone" affordance: the launcher
@@ -262,6 +275,10 @@ function validateManifest(m, src) {
       if (!localeTextOk(p.label, MAX_LABEL))
         return bad("pairing[].label must be a string or a locale map of strings, at most " + MAX_LABEL + " chars");
     }
+    // A pairing kind is registered by a plugin, so without one the launcher shows a
+    // phone action that starts a session nothing answers. The registry's CI refuses
+    // this; a manifest dropped into ~/.tvbox/apps never sees CI.
+    if (!m.service) return bad("pairing needs a `service` plugin to register the provider");
   }
   // On/off switches the app declares, for the same kind of app `pairing` exists
   // for: one whose own screen cannot hold a setting. The key reaches a config

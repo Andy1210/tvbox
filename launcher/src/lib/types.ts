@@ -35,5 +35,9 @@ export interface AppManifest {
   // On/off settings the app declares, with the value in force. Same reason as
   // `pairing`: an app whose screen is not ours (a native app, or a remote site like
   // YouTube's TV page) has nowhere else to put one. `on` comes from the box.
-  switches?: { key: string; label: LocaleString; hint?: LocaleString; on: boolean }[];
+  // `available` is false when the app's plugin is not loaded (a missing dependency, a
+  // factory that threw): the switch is still listed - hiding it leaves somebody
+  // following release notes with no trace of a setting that should exist - but a press
+  // would write config and change nothing.
+  switches?: { key: string; label: LocaleString; hint?: LocaleString; on: boolean; available?: boolean }[];
 }

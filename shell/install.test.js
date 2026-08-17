@@ -244,7 +244,18 @@ test("a bridge is a file the package ships, never a name or a path", () => {
 });
 
 test("pairing entries are bounded and need a kind plus a label", () => {
-  const withPairing = (pairing) => ({ id: "x", name: "X", type: "webclient", status: "ready", pairing });
+  // ...and a `service`: the plugin is what registers the provider for a kind, so
+  // without one the launcher offers a phone action that starts a session nothing
+  // answers. The registry's CI already refused this; the box now agrees.
+  const withPairing = (pairing) => ({ id: "x", name: "X", type: "webclient", status: "ready", service: "x", pairing });
+  assert.equal(
+    apps.validateManifest(
+      { id: "x", name: "X", type: "webclient", status: "ready", pairing: [{ kind: "roms", label: "Upload" }] },
+      "x.json",
+    ),
+    null,
+    "a pairing kind with no plugin behind it",
+  );
   assert.ok(apps.validateManifest(withPairing([{ kind: "roms", label: "Upload" }]), "x.json"));
   assert.ok(apps.validateManifest(withPairing([{ kind: "roms", label: { en: "Upload" } }]), "x.json"));
   assert.equal(apps.validateManifest(withPairing([{ kind: "BAD KIND", label: "x" }]), "x.json"), null);
@@ -611,6 +622,26 @@ test("a switch needs a plugin to act on it", () => {
   // manifest dropped into ~/.tvbox/apps never sees CI.
   const noService = { id: "youtube", name: "YouTube", type: "webclient", status: "ready" };
   assert.equal(apps.validateManifest({ ...noService, switches: [{ key: "cast", label: "Cast" }] }, "y.json"), null);
+});
+
+test("every user-facing string is text all the way down, name included", () => {
+  // The name is on the HOME grid, so a nested object there takes the box's FIRST
+  // screen to the crash boundary - the switch label was only one of four fields on the
+  // same render path. Empty is refused too: a tile or a row with no name at all.
+  const base = { id: "x", name: "X", type: "webclient", status: "ready" };
+  for (const over of [
+    { name: { en: { deep: 1 } } },
+    { name: {} },
+    { name: "" },
+    { name: "N".repeat(81) },
+    { tagline: { hu: 7 } },
+    { tagline: "" },
+    { description: { en: ["no"] } },
+    { description: "d".repeat(1201) },
+  ]) {
+    assert.equal(apps.validateManifest({ ...base, ...over }, "x.json"), null, JSON.stringify(over).slice(0, 50));
+  }
+  assert.ok(apps.validateManifest({ ...base, name: { hu: "Y", en: "Y" }, tagline: "t", description: "d" }, "x.json"));
 });
 
 test("a label or hint must be text all the way down, and bounded", () => {

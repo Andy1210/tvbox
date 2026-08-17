@@ -679,6 +679,13 @@ function observeMpv(seq, tries) {
 // With the screen off that is a box working its way through a season. An app that
 // does not read the reason behaves as it did.
 let lastTvStandbyAt = 0; // launchMpv suppresses its CEC wake right after this
+// How long ago the USER put the TV on standby. Anything that wakes the panel by
+// itself - the one-touch wake here, a cast arriving from a phone - has to respect
+// the person who just turned the television off, and the timestamp is here because
+// this is the module the CEC bridge reports standby to.
+function msSinceTvStandby() {
+  return Date.now() - lastTvStandbyAt;
+}
 function onTvStandby() {
   lastTvStandbyAt = Date.now();
   if (!mpv) return;
@@ -783,6 +790,7 @@ module.exports = {
   media: mpvMedia,
   clearMedia: clearMpvMedia,
   onTvStandby,
+  msSinceTvStandby,
   running,
   isPip,
   playing,

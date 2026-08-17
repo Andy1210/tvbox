@@ -543,6 +543,19 @@ function appSwitches(id) {
 // would answer for a switch nobody declared. Both the app id and the key are object
 // keys here, so both are held to this.
 const NOT_A_KEY = new Set(["__proto__", "constructor", "prototype"]);
+// Forget what an app's switches were set to. Called when the app is uninstalled:
+// otherwise a re-install brings a remembered "on" back with nobody pressing
+// anything, which for a switch that opens a socket on the LAN is the same surprise
+// as a default:true would be.
+function clearAppSwitches(id) {
+  const c = load();
+  if (!c.appSwitches || !Object.prototype.hasOwnProperty.call(c.appSwitches, id)) return false;
+  const all = { ...c.appSwitches };
+  delete all[id];
+  c.appSwitches = all;
+  save(c);
+  return true;
+}
 function setAppSwitch(id, key, on) {
   if (!/^[a-z0-9_-]{1,64}$/.test(String(id || "")) || NOT_A_KEY.has(id)) return false;
   if (!/^[a-z0-9_-]{1,32}$/.test(String(key || "")) || NOT_A_KEY.has(key)) return false;
@@ -892,6 +905,7 @@ module.exports = {
   setAppConfig,
   appSwitches,
   setAppSwitch,
+  clearAppSwitches,
   setStore,
   rawStore,
   setUi,

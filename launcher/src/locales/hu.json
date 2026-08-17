@@ -261,9 +261,11 @@
   },
   "appswitches": {
     "title": "Alkalmazások extra beállításai",
-    "rowHint": "Ezeknek az appoknak van itt kapcsolója",
-    "hint": "Apponként be- vagy kikapcsolható dolgok. Azért itt vannak, mert az alkalmazás saját felületén nem férnek el.",
-    "none": "Egyetlen telepített alkalmazásnak sincs ilyen beállítása."
+    "rowHint": "Egyes alkalmazások extra funkciói",
+    "hint": "Egyes alkalmazások itt kapcsolható extra funkciói.",
+    "none": "Egyik telepített alkalmazás sem kínál ilyet. Az áruházból telepített appok hozhatnak ilyen funkciót.",
+    "saveFailed": "A box nem mentette el ezt a beállítást. Nem változott semmi.",
+    "unavailable": "Az alkalmazás most nem tudja használni – lehet, hogy hiányzik hozzá valami a boxon."
   },
   "catalog": {
     "title": "Továbbiak beszerzése"

@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { useI18n } from "../../lib/i18n";
 import { useConfigStore } from "../../stores/config";
-import { fetchApps } from "../../lib/api";
+import { fetchAppsOrNull } from "../../lib/api";
 import { StoreSettings } from "../../components/StoreSettings";
 import { AppOrderSettings } from "../../components/AppOrderSettings";
 import { StoreSourcesPage } from "./storesources";
@@ -59,13 +59,17 @@ export function AppsPane() {
   const nav = useSettingsNav();
   const appsAuto = useConfigStore((s) => s.config?.update.appsAuto ?? true);
   const setUpdate = useConfigStore((s) => s.setUpdate);
-  // Which installed apps declare a switch of their own. Only their names, and only
-  // to decide whether the row below is worth showing at all.
-  const [switchApps, setSwitchApps] = useState<string[]>([]);
+  // What is behind the row below - the SWITCH labels, not the app names: somebody
+  // scanning Settings is looking for the feature ("cast from phone"), and the app it
+  // belongs to tells them nothing. Empty = no row at all.
+  // null = the box did not answer, which must not read as "no app has one": the row
+  // stays, so the page behind it can say what actually happened.
+  const [switchLabels, setSwitchLabels] = useState<string[] | null>(null);
   useEffect(() => {
     let alive = true;
-    void fetchApps().then((list) => {
-      if (alive) setSwitchApps(list.filter((a) => (a.switches || []).length > 0).map((a) => loc(a.name)));
+    void fetchAppsOrNull().then((list) => {
+      if (!alive) return;
+      setSwitchLabels(list === null ? null : list.flatMap((a) => (a.switches || []).map((s) => loc(s.label))));
     });
     return () => {
       alive = false;
@@ -95,21 +99,6 @@ export function AppsPane() {
             nav.push({ id: "store-sources", title: t("storeSources.title"), render: () => <StoreSourcesPage /> })
           }
         />
-        {/* Only when an installed app actually declares one: without this the row is a
-            press that leads to an empty page, which is exactly what it looks like on
-            a fresh box (nothing declares a switch until an app that has one lands).
-            The value names what is behind it, the way the Network rows do. */}
-        {switchApps.length > 0 && (
-          <Row
-            id="app-switches"
-            label={t("appswitches.title")}
-            hint={t("appswitches.rowHint")}
-            value={switchApps.join(", ")}
-            onEnter={() =>
-              nav.push({ id: "appswitches", title: t("appswitches.title"), render: () => <AppSwitchesPage /> })
-            }
-          />
-        )}
         <Row
           id="order"
           label={t("apps.orderTitle")}
@@ -118,6 +107,28 @@ export function AppsPane() {
             nav.push({ id: "apporder", title: t("apps.orderTitle"), wide: true, render: () => <AppOrderPage /> })
           }
         />
+        {/* Only when an installed app actually declares one: without this the row is a
+            press that leads to an empty page, which is exactly what a fresh box has
+            (nothing declares a switch until an app that has one lands). The value
+            names the FEATURES behind it, the way the Network rows show their state.
+            Last in the group, because it arrives with a fetch: inserted higher up it
+            would shift the row under somebody's focus when it lands. */}
+        {(switchLabels === null || switchLabels.length > 0) && (
+          <Row
+            id="app-switches"
+            label={t("appswitches.title")}
+            hint={t("appswitches.rowHint")}
+            value={
+              switchLabels === null
+                ? ""
+                : switchLabels.slice(0, 2).join(", ") +
+                  (switchLabels.length > 2 ? " +" + (switchLabels.length - 2) : "")
+            }
+            onEnter={() =>
+              nav.push({ id: "appswitches", title: t("appswitches.title"), render: () => <AppSwitchesPage /> })
+            }
+          />
+        )}
       </Group>
       <Group>
         <ToggleRow

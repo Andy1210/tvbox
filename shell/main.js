@@ -210,18 +210,27 @@ const supervisor = new Supervisor(); // shared supervised-child manager for plug
 // STOP its plugin (a daemon or a LAN listener would otherwise outlive the app that
 // owns it, with its switch gone from Settings), and an update has to replace one.
 const loadedPlugins = new Map();
-const pluginRoutes = []; // [{ prefix, table }] - HTTP routes a plugin registered
-const configListeners = []; // plugins that react to a config write (e.g. Live TV drops its cache)
+// [{ id, prefix, table }] - HTTP routes a plugin registered. Tagged with the app id
+// so they can go WITH it: a table left behind after an unload keeps answering out of
+// closures over an instance that has been stopped, and a route table is matched
+// first-wins, so a replacement plugin's routes would sit behind the dead one's.
+const pluginRoutes = [];
+// [{ id, cb }] - plugins that react to a config write (e.g. Live TV drops its cache).
+// Tagged with the app id for the same reason as the routes: a listener that outlives
+// its plugin is a way back in. Measured before it was tagged - an uninstalled app's
+// receiver came back on the LAN the next time anything wrote config, with the shell no
+// longer knowing the plugin existed and its switch gone from Settings.
+const configListeners = [];
 // Notify plugins that config sections changed (host.onConfigChange). A package
 // plugin can't reach the shell config write directly, so this is how e.g. the
 // Live TV plugin invalidates its channel/EPG cache when the IPTV source changes.
 function emitConfigChange(sections) {
   if (!sections || !sections.length) return;
-  for (const cb of configListeners) {
+  for (const { id, cb } of configListeners) {
     try {
       cb(sections);
     } catch (e) {
-      console.warn("[config] listener:", e.message);
+      console.warn("[config] listener", id || "(shell)", ":", e.message);
     }
   }
 }
@@ -757,13 +766,20 @@ function appTiles() {
       // like YouTube's own TV page) has nowhere else to put a setting, and the
       // launcher renders these knowing nothing about what they do.
       //
-      // Only while its PLUGIN is loaded, because the plugin is the thing that acts
-      // on a switch: with a missing dependency, no plugin.js, or a factory that
-      // threw, the row would offer a setting that writes config and changes nothing.
-      switches:
-        Array.isArray(m.switches) && loadedPlugins.has(m.id)
-          ? m.switches.map((s) => ({ key: s.key, label: s.label, hint: s.hint, on: switchValue(m, s.key) }))
-          : undefined,
+      // `available` is whether its PLUGIN is loaded, because the plugin is the thing
+      // that acts on a switch: with a missing dependency, no plugin.js, or a factory
+      // that threw, a press would write config and change nothing. Still LISTED
+      // though - hiding it leaves somebody following release notes with no trace of a
+      // setting that is supposed to exist; the launcher shows it as unavailable.
+      switches: Array.isArray(m.switches)
+        ? m.switches.map((s) => ({
+            key: s.key,
+            label: s.label,
+            hint: s.hint,
+            on: switchValue(m, s.key),
+            available: loadedPlugins.has(m.id),
+          }))
+        : undefined,
       depsOk,
       missing,
       depsInstallable, // every missing binary is a no-root download dep -> UI-installable (no CLI)
@@ -2031,6 +2047,10 @@ function openRemoteApp(m, url) {
   w.on("closed", () => {
     dmode.releaseIfHolder(appClaimId(thisAppId)); // a gone window can't hold the mode
     closePopups(thisAppId); // else a live untrusted renderer outlives its app forever
+    // The page a cast paired with went with the window, so the mark is stale: kept, it
+    // would spend itself on a clean reload of a page nobody cast to, losing where the
+    // person had got to for no reason.
+    castLaunched.delete(thisAppId);
     leftForeground(thisAppId);
     if (appwins.get(thisAppId) === w) appwins.destroy(thisAppId);
     if (currentAppId === thisAppId) showLauncher();
@@ -2065,7 +2085,18 @@ const castLaunched = new Set();
 // reports a connected television while the room stays dark. Sent only for a cast:
 // an ordinary launch happens because somebody is already looking at the screen, and
 // "on" also moves some TVs to this input.
+//
+// The exception is the person who just turned the television OFF - the same guard the
+// player's one-touch wake keeps, because an automatic action must not fight them.
+// (What this cannot do is change the input: the CEC bridge only re-asserts active
+// source while the TV is already routed to us, deliberately, so a cast to a set
+// showing a console opens YouTube on an input nobody is looking at.)
+const CAST_WAKE_AFTER_STANDBY_MS = 30 * 1000;
 function wakePanelForCast() {
+  if (player.msSinceTvStandby() <= CAST_WAKE_AFTER_STANDBY_MS) {
+    console.log("[cec] not waking for a cast: the TV was just put on standby");
+    return;
+  }
   cecPower(true);
 }
 
@@ -2163,6 +2194,10 @@ function openLocalApp(m) {
   w.on("closed", () => {
     dmode.releaseIfHolder(appClaimId(thisAppId)); // a gone window can't hold the mode
     closePopups(thisAppId); // else a live untrusted renderer outlives its app forever
+    // The page a cast paired with went with the window, so the mark is stale: kept, it
+    // would spend itself on a clean reload of a page nobody cast to, losing where the
+    // person had got to for no reason.
+    castLaunched.delete(thisAppId);
     leftForeground(thisAppId);
     if (appwins.get(thisAppId) === w) appwins.destroy(thisAppId);
     if (currentAppId === thisAppId) showLauncher();
@@ -2843,8 +2878,12 @@ function navTo(dest, opts) {
     // app from HOME would land in a stranger's session, and that session would go
     // on seeing and steering what the television plays.
     if (launchQuery) {
+      // The reload IS the cast here: without it the page stays on the previous
+      // session, so a caller told "opened" would have a phone connected to somebody
+      // else's queue. It can refuse (launch data this app cannot be given), and then
+      // nothing about this launch happened.
+      if (!reloadRemoteApp(m, launchQuery)) return false;
       castLaunched.add(m.id);
-      reloadRemoteApp(m, launchQuery);
       wakePanelForCast();
     } else if (castLaunched.delete(m.id)) {
       reloadRemoteApp(m, "");
@@ -3343,14 +3382,17 @@ const host = {
       duration: Math.max(0, Math.min(60000, Number(n && n.duration) || 0)),
       raise: !!(n && n.raise),
     }),
+  // Both of these are re-bound per app in loadOnePlugin, which is what lets an
+  // unload take the plugin's listeners and routes with it. Called on the bare host
+  // (no app), a registration belongs to nothing and is never removed.
   onConfigChange: (cb) => {
-    if (typeof cb === "function") configListeners.push(cb);
+    if (typeof cb === "function") configListeners.push({ id: null, cb });
   },
   // Register a plugin's HTTP routes under a path prefix. `table` is keyed
   // "METHOD /subpath" (e.g. "GET /state"); the generic server tries these before
   // its own built-in routes. Called from a plugin factory (before serve()).
   registerRoutes: (prefix, table) => {
-    pluginRoutes.push({ prefix, table });
+    pluginRoutes.push({ id: null, prefix, table });
   },
   spawnService: (name, spec) => supervisor.spawn(name, spec),
   stopService: (name) => supervisor.stop(name),
@@ -3403,6 +3445,15 @@ function loadOnePlugin(m) {
         // ...and its OWN manifest switches, by key. Scoped for the same reason: a
         // plugin reading another app's settings is not a thing this API allows.
         switchOn: (key) => switchValue(m, key),
+        // Tagged with this app, so unloading it really removes them. An untagged
+        // listener survives its plugin and is a way back in: it fires on the next
+        // config write and starts a daemon nothing is left to stop.
+        onConfigChange: (cb) => {
+          if (typeof cb === "function") configListeners.push({ id: m.id, cb });
+        },
+        registerRoutes: (prefix, table) => {
+          pluginRoutes.push({ id: m.id, prefix, table });
+        },
       }) || {};
     loadedPlugins.set(m.id, plugin);
     console.log("[plugin] loaded", m.id, "(" + name + ")");
@@ -3445,28 +3496,34 @@ function hotLoadPlugin(id) {
 // replaced (update). Its `stop` is what releases a daemon, a supervised child or a
 // listening socket - none of which the shell can see, let alone close for it.
 //
-// What this canNOT undo is the routes the plugin registered (`pluginRoutes` is
-// append-only, and a closure cannot be un-required), so a re-load registers its
-// table a second time and the first match wins. Harmless for a route table that is
-// identical, which an update's is; a rename would need a shell restart. The require
-// cache is dropped too, so the replacement really is the code now on disk.
+// Three things go with it, and each one was a way for the plugin to come back or to
+// keep answering after it was gone:
+//
+//   • its config listeners - an untagged one fires on the next config write and
+//     starts the daemon again, with nothing left that could stop it (measured);
+//   • its HTTP routes - a route table is matched first-wins, so a dead instance's
+//     closures would keep serving and would shadow a replacement's;
+//   • the require cache for its WHOLE package dir, not just plugin.js - a package
+//     installs to the same path every time, so an update's new plugin.js would
+//     otherwise `require("./lib/…")` and get the previous version's module.
 function unloadPlugin(id) {
   const plugin = loadedPlugins.get(id);
   if (!plugin) return false;
-  loadedPlugins.delete(id);
+  // Its own `stop` FIRST, while the shell still holds the handle: dropping the entry
+  // before the call means a `stop` that throws leaves the plugin's socket open with
+  // nothing left that can reach it.
   try {
     if (plugin.stop) plugin.stop();
   } catch (e) {
-    console.warn("[plugin] stop", id, "failed:", e.message);
+    console.warn("[plugin] stop", id, "failed:", e.message, "- whatever it held stays until a restart");
   }
+  loadedPlugins.delete(id);
+  for (let i = configListeners.length - 1; i >= 0; i--) if (configListeners[i].id === id) configListeners.splice(i, 1);
+  for (let i = pluginRoutes.length - 1; i >= 0; i--) if (pluginRoutes[i].id === id) pluginRoutes.splice(i, 1);
   const m = apps.manifestById(id);
-  const file = m && m._dir ? path.join(m._dir, "plugin.js") : null;
-  if (file) {
-    try {
-      delete require.cache[require.resolve(file)];
-    } catch (e) {
-      /* never required, or already gone with the package */
-    }
+  const dir = m && m._dir ? path.resolve(m._dir) + path.sep : null;
+  if (dir) {
+    for (const key of Object.keys(require.cache)) if (key.startsWith(dir)) delete require.cache[key];
   }
   console.log("[plugin] unloaded", id);
   return true;

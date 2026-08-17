@@ -143,7 +143,8 @@
           "key": {
             "type": "string",
             "pattern": "^[a-z0-9_-]{1,32}$",
-            "description": "Switch key, unique within the manifest. What the plugin asks for."
+            "not": { "enum": ["__proto__", "constructor", "prototype"] },
+            "description": "Switch key, unique within the manifest. What the plugin asks for. The three excluded names pass the charset but are not properties when assigned to a plain object, and the box refuses them - a manifest that passed only the schema would be dropped on arrival, taking the whole app off the box."
           },
           "label": {
             "$ref": "#/$defs/switchLabel"

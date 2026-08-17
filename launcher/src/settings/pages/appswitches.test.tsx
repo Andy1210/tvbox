@@ -74,7 +74,7 @@ describe("Settings -> Apps -> extra app settings", () => {
 
   it("says so when nothing declares one, rather than showing an empty box", async () => {
     const c = await draw([app({ switches: undefined })]);
-    expect(c.textContent).toContain("None of the installed apps has one of these.");
+    expect(c.textContent).toContain("None of the installed apps offers one.");
   });
 
   it("does not turn a dead box into a claim about the apps", async () => {
@@ -131,7 +131,24 @@ describe("Settings -> Apps -> extra app settings", () => {
       await remote.ok();
     });
     await act(async () => {});
-    expect(c.textContent).toContain("Couldn't save that.");
+    expect(c.textContent).toContain("The box didn't save that setting.");
+  });
+
+  it("keeps the rows when the reload after a write fails, instead of erasing the screen", async () => {
+    // The person just changed a setting successfully. Replacing the page with "can't
+    // reach the box" would tell them the opposite of what happened, and hide which of
+    // the two it was.
+    fetchAppsOrNull.mockResolvedValueOnce([app()]).mockResolvedValueOnce(null);
+    const { container } = render(<AppSwitchesPage />);
+    await act(async () => {});
+    await setFocus("appswitches:youtube-cast");
+    await act(async () => {
+      await remote.ok();
+    });
+    await act(async () => {});
+    expect(container.textContent).toContain("Cast from phone");
+    expect(container.textContent).toContain("Can't reach the box");
+    expect(container.textContent).not.toContain("None of the installed apps");
   });
 
   it("sends one write per press on the same row while the box has not answered", async () => {

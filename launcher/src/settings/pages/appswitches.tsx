@@ -23,15 +23,20 @@ export function AppSwitchesPage() {
   const { t, loc, tag } = useI18n();
   const nav = useSettingsNav();
   const [apps, setApps] = useState<AppManifest[] | null>(null);
-  // null = still loading; true = the box did not answer. A page that claims what the
-  // apps declare must not make that claim out of a failed fetch.
+  // The box did not answer. A page that claims what the apps declare must not make
+  // that claim out of a failed fetch - but it only takes over the SCREEN while there
+  // is nothing to show: a reload that fails after a successful write would otherwise
+  // replace the setting the person just changed with an error about the box.
   const [unreachable, setUnreachable] = useState(false);
   const [failed, setFailed] = useState(false);
+  const [busy, setBusy] = useState(false);
 
   const load = useCallback(async () => {
+    setBusy(true);
     const list = await fetchAppsOrNull();
     setUnreachable(list === null);
     if (list) setApps(list);
+    setBusy(false);
   }, []);
   useEffect(() => {
     void load();
@@ -71,12 +76,24 @@ export function AppSwitchesPage() {
     saving.current.delete(rowKey);
   };
 
-  if (unreachable) {
+  // Nothing to show AND no answer: the page is about the box's apps, and it does not
+  // know any. "Unreachable" alone reads oddly on a screen the box is drawing, so it
+  // carries the sentence that explains it, the same pair the launcher shows elsewhere.
+  if (unreachable && apps === null) {
     return (
       <SettingsPage id="appswitches" title={t("appswitches.title")} onBack={nav.pop} animate="push">
+        <Note tone="warn">{t("app.shellUnreachable")}</Note>
+        <Note>{t("app.shellUnreachableHint")}</Note>
         <Group>
-          <Note tone="warn">{t("app.shellUnreachable")}</Note>
-          <Row id="retry" label={t("app.retry")} trailing="none" autoFocus onEnter={() => void load()} />
+          <Row
+            id="retry"
+            label={busy ? t("common.working") : t("app.retry")}
+            hint={undefined}
+            trailing="none"
+            autoFocus
+            disabled={busy}
+            onEnter={() => void load()}
+          />
         </Group>
       </SettingsPage>
     );
@@ -84,23 +101,33 @@ export function AppSwitchesPage() {
 
   return (
     <SettingsPage id="appswitches" title={t("appswitches.title")} onBack={nav.pop} animate="push">
-      {failed && <Note tone="warn">{t("common.saveFailed")}</Note>}
-      <Group hint={t("appswitches.hint")}>
-        {apps !== null && rows.length === 0 && <Note>{t("appswitches.none")}</Note>}
-        {rows.map(({ app, sw }, i) => (
-          <ToggleRow
-            key={app.id + "/" + sw.key}
-            id={app.id + "-" + sw.key}
-            label={loc(app.name) + " - " + loc(sw.label)}
-            hint={sw.hint ? loc(sw.hint) : undefined}
-            on={sw.on}
-            onToggle={() => void onToggle(app.id, sw.key, !sw.on)}
-            onWord={t("common.on")}
-            offWord={t("common.off")}
-            autoFocus={i === 0}
-          />
-        ))}
-      </Group>
+      {failed && <Note tone="warn">{t("appswitches.saveFailed")}</Note>}
+      {/* A reload that failed while rows are on screen: say so, keep the rows. They
+          are the last thing the box confirmed, which is more use than an error. */}
+      {unreachable && <Note tone="warn">{t("app.shellUnreachable")}</Note>}
+      {apps !== null && rows.length === 0 && <Note>{t("appswitches.none")}</Note>}
+      {/* No empty card: a Group with no rows is a rounded box with a sentence in it. */}
+      {rows.length > 0 && (
+        <Group hint={t("appswitches.hint")}>
+          {rows.map(({ app, sw }, i) => (
+            <ToggleRow
+              key={app.id + "/" + sw.key}
+              id={app.id + "-" + sw.key}
+              label={loc(app.name) + " - " + loc(sw.label)}
+              // A switch whose app cannot act on it right now is shown, greyed, and
+              // says so: hiding it would leave somebody following the app's release
+              // notes with no trace of a setting that is supposed to be here.
+              hint={sw.available === false ? t("appswitches.unavailable") : sw.hint ? loc(sw.hint) : undefined}
+              on={sw.on}
+              disabled={sw.available === false}
+              onToggle={() => void onToggle(app.id, sw.key, !sw.on)}
+              onWord={t("common.on")}
+              offWord={t("common.off")}
+              autoFocus={i === 0}
+            />
+          ))}
+        </Group>
+      )}
     </SettingsPage>
   );
 }

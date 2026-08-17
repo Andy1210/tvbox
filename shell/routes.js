@@ -464,6 +464,10 @@ function post(p, data, res, ctx) {
     // socket on the LAN is the plugin's, and its own `stop` is the only thing that
     // releases it. Before the files go, so `stop` still has its module.
     ctx.unloadPlugin(id);
+    // ...and forget what its switches were set to: a re-install would otherwise come
+    // back with a remembered "on", which for one that opens a socket on the LAN is
+    // the same surprise as arriving switched on.
+    config.clearAppSwitches(id);
     return httpserver.jsonRes(res, store.uninstall(id));
   }
   if (p === "/tvbox/api/setup/done") {
