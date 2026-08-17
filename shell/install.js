@@ -235,6 +235,20 @@ function validateManifest(m, src) {
   const br = m.runtime && m.runtime.bridge;
   if (br !== undefined && (typeof br !== "string" || !/^\.\/[a-z0-9_-]+\.js$/.test(br)))
     return bad("runtime.bridge must be ./<file>.js shipped by the package");
+  // A user-facing string from a manifest: one string, or a per-locale map whose
+  // LEAVES are strings. The leaf type is not pedantry - the launcher renders these
+  // as React children, and a nested object there throws "Objects are not valid as a
+  // React child", which the only error boundary catches at the root: the whole
+  // 10-foot UI is replaced by a crash screen. Bounded too, because a row on a
+  // television has one line for the label and two for the hint.
+  const MAX_LABEL = 80; // one line on a row, next to its on/off pill
+  const MAX_HINT = 240; // the grey line under it, which may wrap
+  const localeTextOk = (v, max) => {
+    if (typeof v === "string") return v.length <= max;
+    if (!v || typeof v !== "object" || Array.isArray(v)) return false;
+    const vals = Object.values(v);
+    return vals.length > 0 && vals.every((s) => typeof s === "string" && s.length <= max);
+  };
   // Phone-pairing kinds the app offers (its plugin registers the matching
   // provider). This is how an app that has no screen of its own on the box, e.g. a
   // native app, still gets a "do this from your phone" affordance: the launcher
@@ -245,8 +259,8 @@ function validateManifest(m, src) {
     for (const p of pairs) {
       if (!p || typeof p !== "object") return bad("pairing entries must be objects");
       if (!/^[a-z0-9_-]{1,32}$/.test(String(p.kind || ""))) return bad("bad pairing[].kind " + JSON.stringify(p.kind));
-      if (!p.label || (typeof p.label !== "string" && typeof p.label !== "object"))
-        return bad("pairing[].label must be a string or a locale map");
+      if (!localeTextOk(p.label, MAX_LABEL))
+        return bad("pairing[].label must be a string or a locale map of strings, at most " + MAX_LABEL + " chars");
     }
   }
   // On/off switches the app declares, for the same kind of app `pairing` exists
@@ -270,12 +284,16 @@ function validateManifest(m, src) {
       // position depends on which row was drawn last.
       if (seen.has(key)) return bad("duplicate switches[].key " + JSON.stringify(key));
       seen.add(key);
-      if (!s.label || (typeof s.label !== "string" && typeof s.label !== "object"))
-        return bad("switches[].label must be a string or a locale map");
-      if (s.hint !== undefined && typeof s.hint !== "string" && typeof s.hint !== "object")
-        return bad("switches[].hint must be a string or a locale map");
+      if (!localeTextOk(s.label, MAX_LABEL))
+        return bad("switches[].label must be a string or a locale map of strings, at most " + MAX_LABEL + " chars");
+      if (s.hint !== undefined && !localeTextOk(s.hint, MAX_HINT))
+        return bad("switches[].hint must be a string or a locale map of strings, at most " + MAX_HINT + " chars");
       if (s.default !== undefined && typeof s.default !== "boolean") return bad("switches[].default must be a boolean");
     }
+    // Nothing in the shell acts on a switch - the app's own plugin reads it - so a
+    // switch without a service is a row that does nothing. The registry's CI refuses
+    // this too; a manifest dropped into ~/.tvbox/apps never sees CI.
+    if (!m.service) return bad("switches need a `service` plugin to act on them");
   }
   // Files of its own the app wants carried across a re-flash or onto a second box
   // (RetroArch's playlists and save files; the `storage` capability covers only

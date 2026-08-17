@@ -211,7 +211,7 @@ function post(p, data, res, ctx) {
     return httpserver.jsonRes(res, { ok: true, dest });
   }
   if (p === "/tvbox/api/apps/switch") {
-    // One of an app's manifest-declared switches (Settings → the app's screen). The
+    // One of an app's manifest-declared switches (Settings → Apps → App settings). The
     // key must be one the INSTALLED manifest declares: the value lands in a config
     // section and its own plugin acts on it, so an arbitrary key posted here would
     // be a write into the box's config with no app behind it.
@@ -460,6 +460,10 @@ function post(p, data, res, ctx) {
     if (ctx.foregroundApp() === id) ctx.showLauncher();
     ctx.destroyAppWindow(id); // a background window must not outlive its app
     ctx.setWidget(id, null);
+    // ...and neither must its plugin. A window is ours to destroy; a daemon or a
+    // socket on the LAN is the plugin's, and its own `stop` is the only thing that
+    // releases it. Before the files go, so `stop` still has its module.
+    ctx.unloadPlugin(id);
     return httpserver.jsonRes(res, store.uninstall(id));
   }
   if (p === "/tvbox/api/setup/done") {

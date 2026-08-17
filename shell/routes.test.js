@@ -57,6 +57,7 @@ function fakeCtx(over = {}) {
     audioSink: () => null,
     childEnv: () => process.env,
     destroyAppWindow: () => {},
+    unloadPlugin: () => {},
     dmode: { rearm: () => {}, refresh: (cb) => cb && cb(true, "") },
     emitConfigChange: () => {},
     ensureAudio: (done) => done && done(),
@@ -364,6 +365,10 @@ test("an app switch is written only for a key its installed manifest declares", 
       name: "YouTube",
       type: "webclient",
       status: "ready",
+      // A switch is only offered with a plugin to act on it, so the manifest that
+      // declares one has to carry the service too - the validator refuses it
+      // otherwise, and a refused manifest takes the whole app off the box.
+      service: "youtube",
       switches: [{ key: "cast", label: "Cast", default: true }],
     }),
   );
@@ -397,6 +402,23 @@ test("an app switch is written only for a key its installed manifest declares", 
   }
   assert.strictEqual(config.appSwitches("youtube").cast, false, "the stored value is untouched");
   assert.strictEqual(Object.keys(config.appSwitches("youtube")).length, 1, "and nothing else was written");
+});
+
+test("uninstalling an app stops its plugin, not only its window", async () => {
+  // A window is ours to destroy; a daemon or a socket on the LAN belongs to the
+  // plugin, and only its own `stop` releases it. Without this the receiver keeps
+  // listening after the app is gone - and its switch has left Settings with it, so
+  // there is nothing left to turn off.
+  const called = [];
+  const ctx = fakeCtx({
+    unloadPlugin: (id) => called.push(id),
+    destroyAppWindow: (id) => called.push("window:" + id),
+  });
+  const res = fakeRes();
+  await new Promise((r) => {
+    routes.post("/tvbox/api/store/uninstall", { id: "youtube" }, wrapRes(res, r), ctx);
+  });
+  assert.deepStrictEqual(called, ["window:youtube", "youtube"], "window first, then the plugin");
 });
 
 test.after(() => {

@@ -19,8 +19,11 @@ test("a DIAL launch body becomes query parameters of the app's own url", () => {
 });
 
 test("a body a caller wrote with a leading ? still parses", () => {
+  // URLSearchParams drops the leading "?" itself - asserted so nobody adds a strip
+  // for it and believes the strip is what makes this pass.
   const u = new URL(withLaunchQuery(YT, "?pairingCode=abc"));
   assert.equal(u.searchParams.get("pairingCode"), "abc");
+  assert.equal(u.searchParams.get("?pairingCode"), null);
 });
 
 test("no launch data leaves the url exactly as it was", () => {
@@ -61,18 +64,35 @@ test("a key that is not a plain parameter name is dropped, not escaped", () => {
   assert.equal(u.searchParams.get("<script>"), null);
 });
 
-test("count and size are capped, and the cap keeps the parameters it took whole", () => {
-  const many = Array.from({ length: MAX_LAUNCH_PARAMS + 5 }, (_, i) => "k" + i + "=" + i).join("&");
-  const u = new URL(withLaunchQuery(YT, many));
-  assert.equal([...u.searchParams.keys()].length, MAX_LAUNCH_PARAMS);
-  assert.equal(u.searchParams.get("k0"), "0");
+test("a body with more parameters than the cap is refused whole, not truncated", () => {
+  // Truncation is the worst of the three outcomes: it can drop the pairing code -
+  // the one parameter the launch is FOR - and keep the padding, so the app opens,
+  // joins nothing, and the sender is told the cast worked.
+  const many = Array.from({ length: MAX_LAUNCH_PARAMS }, (_, i) => "k" + i + "=" + i).join("&");
+  assert.equal(withLaunchQuery(YT, many + "&pairingCode=LOST"), "", "over the cap -> nothing to open");
+  const atCap = new URL(withLaunchQuery(YT, many));
+  assert.equal([...atCap.searchParams.keys()].length, MAX_LAUNCH_PARAMS, "exactly at the cap still applies");
+});
 
+test("a value too long is dropped as decoration, and the rest of the body still applies", () => {
   const long = new URL(withLaunchQuery(YT, "pairingCode=" + "x".repeat(300) + "&theme=cl"));
-  assert.equal(long.searchParams.get("pairingCode"), null, "an oversized value is dropped");
-  assert.equal(long.searchParams.get("theme"), "cl", "and the rest of the body still applies");
+  assert.equal(long.searchParams.get("pairingCode"), null);
+  assert.equal(long.searchParams.get("theme"), "cl");
 });
 
 test("an unusable url answers empty, so a caller opens no window", () => {
   assert.equal(withLaunchQuery("", "pairingCode=x"), "");
   assert.equal(withLaunchQuery("not a url", "pairingCode=x"), "");
+});
+
+test("a base that is not a page is refused rather than decorated", () => {
+  // Both call sites check the protocol again on the result; this is the module
+  // keeping the promise its own comment makes.
+  for (const base of ["javascript:alert(1)", "file:///etc/passwd", "data:text/html,<b>x", "chrome://settings"]) {
+    assert.equal(withLaunchQuery(base, "pairingCode=x"), "", base);
+  }
+  assert.ok(
+    withLaunchQuery("http://192.168.1.5:8096/web/", "pairingCode=x").startsWith("http://"),
+    "plain http is a page",
+  );
 });

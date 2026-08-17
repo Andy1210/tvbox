@@ -1,6 +1,7 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useI18n } from "../../lib/i18n";
 import { useConfigStore } from "../../stores/config";
+import { fetchApps } from "../../lib/api";
 import { StoreSettings } from "../../components/StoreSettings";
 import { AppOrderSettings } from "../../components/AppOrderSettings";
 import { StoreSourcesPage } from "./storesources";
@@ -54,10 +55,24 @@ function AppOrderPage() {
 }
 
 export function AppsPane() {
-  const { t } = useI18n();
+  const { t, loc } = useI18n();
   const nav = useSettingsNav();
   const appsAuto = useConfigStore((s) => s.config?.update.appsAuto ?? true);
   const setUpdate = useConfigStore((s) => s.setUpdate);
+  // Which installed apps declare a switch of their own. Only their names, and only
+  // to decide whether the row below is worth showing at all.
+  const [switchApps, setSwitchApps] = useState<string[]>([]);
+  useEffect(() => {
+    let alive = true;
+    void fetchApps().then((list) => {
+      if (alive) setSwitchApps(list.filter((a) => (a.switches || []).length > 0).map((a) => loc(a.name)));
+    });
+    return () => {
+      alive = false;
+    };
+    // loc changes with the UI language, and a language change reloads the launcher.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   // The store's value only changes once the save comes back, so two quick presses
   // would both compute the same `!appsAuto` and the box would end up on whichever
   // reply landed last - not on what the user pressed last.
@@ -80,14 +95,21 @@ export function AppsPane() {
             nav.push({ id: "store-sources", title: t("storeSources.title"), render: () => <StoreSourcesPage /> })
           }
         />
-        <Row
-          id="app-switches"
-          label={t("appswitches.title")}
-          hint={t("appswitches.rowHint")}
-          onEnter={() =>
-            nav.push({ id: "appswitches", title: t("appswitches.title"), render: () => <AppSwitchesPage /> })
-          }
-        />
+        {/* Only when an installed app actually declares one: without this the row is a
+            press that leads to an empty page, which is exactly what it looks like on
+            a fresh box (nothing declares a switch until an app that has one lands).
+            The value names what is behind it, the way the Network rows do. */}
+        {switchApps.length > 0 && (
+          <Row
+            id="app-switches"
+            label={t("appswitches.title")}
+            hint={t("appswitches.rowHint")}
+            value={switchApps.join(", ")}
+            onEnter={() =>
+              nav.push({ id: "appswitches", title: t("appswitches.title"), render: () => <AppSwitchesPage /> })
+            }
+          />
+        )}
         <Row
           id="order"
           label={t("apps.orderTitle")}

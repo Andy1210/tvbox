@@ -240,15 +240,35 @@ whether the box answers a phone casting to it has nowhere else to live.
 ],
 ```
 
-They appear in **Settings, Apps, App settings** - a page of their own rather than a
-row on the app's management screen, which sits behind "Home screen order" and is
-about ordering. A switch nobody can find is a switch nobody has.
+They appear in **Settings, Apps, Extra app settings** - a page of their own rather
+than a row on the app's management screen, which sits behind "Home screen order" and
+is about ordering. A switch nobody can find is a switch nobody has. The row into that
+page only exists while some installed app declares one, so it is never a press that
+leads to an empty screen.
 
 The shell knows nothing about what one does. It stores the value per app id (config
 `appSwitches`, so an app id can never name a config section of the shell's) and the
 app's own `plugin.js` reads it with `host.switchOn(key)` - scoped to its own app,
 like `widget`. A write also fires `onConfigChange`, so a plugin can follow the switch
-without a restart. Needs a `service`: nothing in the shell acts on a switch.
+without a restart.
+
+Three rules worth knowing before you declare one:
+
+- **Needs a `service`, and the plugin has to be LOADED.** Nothing in the shell acts on
+  a switch, so a switch offered while its plugin is missing (an unresolved
+  dependency, a factory that threw) would write config and change nothing - the box
+  hides it instead.
+- **`default: true` is a decision, not a default.** It turns the thing on for every
+  box the moment the app updates, with nobody pressing anything - the app update can
+  land unattended overnight. For anything that opens a port, holds a radio or takes
+  input from the network, declare it off and let the owner turn it on.
+- **Label and hint are user-facing text, and bounded** (80 / 240 characters, string
+  leaves only, locale maps welcome). They render as-is on a television.
+
+It is a convenience control, not a boundary: a _local_ app's own page shares the
+shell's origin, so it can flip another app's switch, and a plugin is in-process Node
+that could bind a port with no switch at all. The registry review is what stands
+between those and a box.
 
 ## Folders another box may read (`shares`)
 

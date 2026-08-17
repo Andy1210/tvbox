@@ -26,18 +26,24 @@ function withLaunchQuery(url, query) {
   } catch (e) {
     return "";
   }
+  // Only a page. Both call sites check this again on the result, but a module that
+  // promises "parameters on the app's own url" must not quietly decorate a
+  // `javascript:` or `file:` base and hand it back looking merged.
+  if (u.protocol !== "https:" && u.protocol !== "http:") return "";
   if (!query) return base;
-  let n = 0;
-  // A leading "?" is what a DIAL launch body does NOT have, but a caller building
-  // the string by hand easily writes one; URLSearchParams would then read the
-  // first key with the "?" glued on.
-  for (const [k, v] of new URLSearchParams(String(query).replace(/^\?/, ""))) {
-    if (k.length > MAX_LAUNCH_KEY || !LAUNCH_KEY_RE.test(k)) continue;
+  // Collected first, applied after: a body with more parameters than the cap is
+  // refused WHOLE. Truncating it looks tidier and is the worst outcome available -
+  // it can drop the one parameter the launch is about (the pairing code) while
+  // keeping the decoration, so the app opens and joins nothing while the sender is
+  // told it worked.
+  const keep = [];
+  for (const [k, v] of new URLSearchParams(String(query))) {
+    if (k.length > MAX_LAUNCH_KEY || !LAUNCH_KEY_RE.test(k)) continue; // decoration, not a launch
     if (v.length > MAX_LAUNCH_VALUE) continue;
-    if (n >= MAX_LAUNCH_PARAMS) break;
-    n++;
-    u.searchParams.set(k, v);
+    keep.push([k, v]);
   }
+  if (keep.length > MAX_LAUNCH_PARAMS) return "";
+  for (const [k, v] of keep) u.searchParams.set(k, v);
   return u.toString();
 }
 

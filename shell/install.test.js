@@ -565,7 +565,7 @@ test("the legacy Spotify token is reserved under the name that exists", () => {
 // hold one (a native app, or a remote site that is not our UI). The key reaches a
 // config write, so its shape is pinned here as well as in CI - a manifest dropped
 // into ~/.tvbox/apps never sees CI.
-const SWITCH_BASE = { id: "youtube", name: "YouTube", type: "webclient", status: "ready" };
+const SWITCH_BASE = { id: "youtube", name: "YouTube", type: "webclient", status: "ready", service: "youtube" };
 const withSwitches = (switches) => ({ ...SWITCH_BASE, switches });
 
 test("a switch needs a usable key and a label, and may default to on", () => {
@@ -603,4 +603,33 @@ test("two switches cannot share one key", () => {
 
 test("an app that declares no switches is unaffected", () => {
   assert.ok(apps.validateManifest({ ...SWITCH_BASE }, "youtube.json"));
+});
+
+test("a switch needs a plugin to act on it", () => {
+  // The shell acts on none of them, so a switch on an app with no service is a row
+  // that writes config and changes nothing. The registry's CI refuses this too; a
+  // manifest dropped into ~/.tvbox/apps never sees CI.
+  const noService = { id: "youtube", name: "YouTube", type: "webclient", status: "ready" };
+  assert.equal(apps.validateManifest({ ...noService, switches: [{ key: "cast", label: "Cast" }] }, "y.json"), null);
+});
+
+test("a label or hint must be text all the way down, and bounded", () => {
+  // The launcher renders these as React children. A nested object there throws
+  // "Objects are not valid as a React child", and the only error boundary is at the
+  // root - so one manifest would replace the whole 10-foot UI with a crash screen.
+  const bad = [
+    [{ key: "cast", label: { en: { x: 1 } } }],
+    [{ key: "cast", label: { en: 7 } }],
+    [{ key: "cast", label: {} }],
+    [{ key: "cast", label: ["Cast"] }],
+    [{ key: "cast", label: "Cast", hint: { hu: { deep: "no" } } }],
+    [{ key: "cast", label: "C".repeat(81) }],
+    [{ key: "cast", label: "Cast", hint: "h".repeat(241) }],
+  ];
+  for (const sw of bad) assert.equal(apps.validateManifest(withSwitches(sw), "youtube.json"), null, JSON.stringify(sw));
+  assert.ok(apps.validateManifest(withSwitches([{ key: "cast", label: "C".repeat(80) }]), "youtube.json"));
+  // The same rule reaches pairing labels, which render through the same component.
+  const withPairing = (label) => ({ ...SWITCH_BASE, pairing: [{ kind: "roms", label }] });
+  assert.equal(apps.validateManifest(withPairing({ en: { x: 1 } }), "y.json"), null);
+  assert.ok(apps.validateManifest(withPairing({ en: "Upload games" }), "y.json"));
 });

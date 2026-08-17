@@ -7,6 +7,20 @@
   "required": ["id", "name", "type", "status"],
   "additionalProperties": false,
   "$defs": {
+    "switchLabel": {
+      "description": "A switch's label: one line on a television, next to its on/off pill. Bounded because a long one pushes the pill off the row - the shell and the registry's CI hold every locale leaf to the same length.",
+      "oneOf": [
+        { "type": "string", "maxLength": 80 },
+        { "type": "object", "additionalProperties": { "type": "string", "maxLength": 80 }, "minProperties": 1 }
+      ]
+    },
+    "switchHint": {
+      "description": "The grey line under a switch's label; it may wrap to two lines.",
+      "oneOf": [
+        { "type": "string", "maxLength": 240 },
+        { "type": "object", "additionalProperties": { "type": "string", "maxLength": 240 }, "minProperties": 1 }
+      ]
+    },
     "localeString": {
       "description": "A plain string (brand names) or a per-locale map, e.g. { \"en\": \"Live TV\", \"hu\": \"\u00c9l\u0151 TV\" }.",
       "oneOf": [
@@ -120,7 +134,7 @@
     "switches": {
       "type": "array",
       "maxItems": 8,
-      "description": "On/off settings the app declares, shown on the app's own screen in Settings > Apps. Same purpose as `pairing`: an app whose screen is not ours - a native app, or a remote site like YouTube's TV page - has nowhere else to put a setting. The value is stored per app id (config `appSwitches`) and read by the app's own plugin via `host.switchOn(key)`; the launcher renders the row knowing nothing about what it does.",
+      "description": "On/off settings the app declares, shown in Settings > Apps > Extra app settings - a page of its own, NOT the app's management screen. Same purpose as `pairing`: an app whose screen is not ours - a native app, or a remote site like YouTube's TV page - has nowhere else to put a setting. Needs a `service`, and the box offers a switch only while that plugin is loaded: the value is stored per app id (config `appSwitches`) and read by the app's own plugin via `host.switchOn(key)`, so nothing acts on it otherwise. `default: true` turns something on for every box with no press, on an update that can land unattended - for anything that opens a port or takes input from the network, leave it off.",
       "items": {
         "type": "object",
         "additionalProperties": false,
@@ -132,10 +146,10 @@
             "description": "Switch key, unique within the manifest. What the plugin asks for."
           },
           "label": {
-            "$ref": "#/$defs/localeString"
+            "$ref": "#/$defs/switchLabel"
           },
           "hint": {
-            "$ref": "#/$defs/localeString"
+            "$ref": "#/$defs/switchHint"
           },
           "default": {
             "type": "boolean",

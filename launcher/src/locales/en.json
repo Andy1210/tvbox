@@ -260,10 +260,10 @@
     "back": "Back"
   },
   "appswitches": {
-    "title": "App settings",
-    "rowHint": "What apps ask the box for",
-    "hint": "The app cannot offer these on its own screen, because it has none - or the screen is not ours.",
-    "none": "No installed app asks for one of these."
+    "title": "Extra app settings",
+    "rowHint": "These apps have a switch here",
+    "hint": "Things you can turn on or off, one app at a time. They are here because the app's own screen has no room for them.",
+    "none": "None of the installed apps has one of these."
   },
   "catalog": {
     "title": "Get more apps"
