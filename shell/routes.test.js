@@ -57,6 +57,7 @@ function fakeCtx(over = {}) {
     audioSink: () => null,
     childEnv: () => process.env,
     destroyAppWindow: () => {},
+    unloadPlugin: () => {},
     dmode: { rearm: () => {}, refresh: (cb) => cb && cb(true, "") },
     emitConfigChange: () => {},
     ensureAudio: (done) => done && done(),
@@ -347,6 +348,77 @@ test("turning a radio back ON is never gated", async () => {
   assert.deepStrictEqual(started, [{ radio: "wifi", on: true }]);
   radio.apply = real.apply;
   radio.readState = real.readState;
+});
+
+// A switch an app declared in its manifest, flipped from Settings. The value lands
+// in the box's config and the app's own plugin acts on it, so the manifest is the
+// only thing that may decide a key exists.
+test("an app switch is written only for a key its installed manifest declares", async () => {
+  const config = require("./config");
+  const apps = require("./install");
+  const dir = path.join(home, ".tvbox", "apps");
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(
+    path.join(dir, "youtube.json"),
+    JSON.stringify({
+      id: "youtube",
+      name: "YouTube",
+      type: "webclient",
+      status: "ready",
+      // A switch is only offered with a plugin to act on it, so the manifest that
+      // declares one has to carry the service too - the validator refuses it
+      // otherwise, and a refused manifest takes the whole app off the box.
+      service: "youtube",
+      switches: [{ key: "cast", label: "Cast", default: true }],
+    }),
+  );
+  apps.loadManifests();
+
+  let told = null;
+  const ctx = fakeCtx({ emitConfigChange: (s) => (told = s) });
+  const off = fakeRes();
+  await new Promise((r) => {
+    routes.post("/tvbox/api/apps/switch", { id: "youtube", key: "cast", on: false }, wrapRes(off, r), ctx);
+  });
+  assert.strictEqual(jsonOf(off).ok, true);
+  assert.strictEqual(config.appSwitches("youtube").cast, false);
+  // The plugin is what turns the thing off, and it learns about it from a config
+  // change - without this the box would need a restart to catch up.
+  assert.ok(told && told.length, "plugins were not told");
+
+  // Undeclared key, unknown app, and a value that is not a boolean: none of them
+  // may reach the config file.
+  for (const body of [
+    { id: "youtube", key: "somethingelse", on: true },
+    { id: "nosuchapp", key: "cast", on: true },
+    { id: "youtube", key: "cast", on: "true" },
+    { id: "youtube", key: "__proto__", on: true },
+  ]) {
+    const res = fakeRes();
+    await new Promise((r) => {
+      routes.post("/tvbox/api/apps/switch", body, wrapRes(res, r), fakeCtx());
+    });
+    assert.strictEqual(jsonOf(res).ok, false, JSON.stringify(body));
+  }
+  assert.strictEqual(config.appSwitches("youtube").cast, false, "the stored value is untouched");
+  assert.strictEqual(Object.keys(config.appSwitches("youtube")).length, 1, "and nothing else was written");
+});
+
+test("uninstalling an app stops its plugin, not only its window", async () => {
+  // A window is ours to destroy; a daemon or a socket on the LAN belongs to the
+  // plugin, and only its own `stop` releases it. Without this the receiver keeps
+  // listening after the app is gone - and its switch has left Settings with it, so
+  // there is nothing left to turn off.
+  const called = [];
+  const ctx = fakeCtx({
+    unloadPlugin: (id) => called.push(id),
+    destroyAppWindow: (id) => called.push("window:" + id),
+  });
+  const res = fakeRes();
+  await new Promise((r) => {
+    routes.post("/tvbox/api/store/uninstall", { id: "youtube" }, wrapRes(res, r), ctx);
+  });
+  assert.deepStrictEqual(called, ["window:youtube", "youtube"], "window first, then the plugin");
 });
 
 test.after(() => {

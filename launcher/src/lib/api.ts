@@ -47,6 +47,21 @@ export const FALLBACK_APPS: AppManifest[] = [
   },
 ];
 
+// The same list, with the failure kept: null means the box did not answer. A screen
+// that makes a CLAIM about what the apps declare needs that difference - the
+// fallback below is a demo list, and reporting it as the box's truth would say
+// "no app asks for this" when the answer is "nobody asked the box".
+export async function fetchAppsOrNull(): Promise<AppManifest[] | null> {
+  try {
+    const res = await fetch("/tvbox/api/apps", { cache: "no-store" });
+    if (!res.ok) throw new Error("HTTP " + res.status);
+    const data = (await res.json()) as AppManifest[];
+    return Array.isArray(data) ? data : null;
+  } catch {
+    return null;
+  }
+}
+
 export async function fetchApps(): Promise<AppManifest[]> {
   try {
     const res = await fetch("/tvbox/api/apps", { cache: "no-store" });
@@ -442,6 +457,11 @@ export const testShare = (input: ShareInput) =>
 
 // Set a urlConfig app's server address (empty clears it).
 export const saveAppUrl = (key: string, baseUrl: string) => post("/tvbox/api/config/app", { key, baseUrl });
+
+// Flip one of an app's manifest-declared switches (its own screen in Settings →
+// Apps). The box refuses a key the installed manifest does not declare, so a false
+// here means the switch is gone, not that the value is unknown.
+export const setAppSwitch = (id: string, key: string, on: boolean) => post("/tvbox/api/apps/switch", { id, key, on });
 
 // Remove an installed web-client bundle (Settings → Apps). The manifest stays;
 // the tile reverts to installable.

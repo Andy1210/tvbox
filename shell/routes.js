@@ -210,6 +210,24 @@ function post(p, data, res, ctx) {
     else ctx.navToLauncher(dest);
     return httpserver.jsonRes(res, { ok: true, dest });
   }
+  if (p === "/tvbox/api/apps/switch") {
+    // One of an app's manifest-declared switches (Settings → Apps → App settings). The
+    // key must be one the INSTALLED manifest declares: the value lands in a config
+    // section and its own plugin acts on it, so an arbitrary key posted here would
+    // be a write into the box's config with no app behind it.
+    const id = String(data.id || "");
+    const key = String(data.key || "");
+    const m = apps.manifestById(id);
+    const declared = m && Array.isArray(m.switches) && m.switches.some((s) => s && s.key === key);
+    if (!declared) return httpserver.jsonRes(res, { ok: false, error: "no such switch" });
+    if (typeof data.on !== "boolean") return httpserver.jsonRes(res, { ok: false, error: "on must be a boolean" });
+    if (!config.setAppSwitch(id, key, data.on)) return httpserver.jsonRes(res, { ok: false, error: "not saved" });
+    // The app's plugin is what turns the thing on or off, and it is already
+    // listening for a config write (host.onConfigChange) - so the flip takes effect
+    // without a restart, the same way an IPTV source change does.
+    ctx.emitConfigChange(["appSwitches"]);
+    return httpserver.jsonRes(res, { ok: true, id, key, on: data.on });
+  }
   if (p === "/tvbox/api/apps/quit") {
     // HOME's running-apps row: really exit an app (its window and page state are
     // dropped; next launch is a fresh start). Same teardown an app's own "Exit?"
@@ -442,6 +460,14 @@ function post(p, data, res, ctx) {
     if (ctx.foregroundApp() === id) ctx.showLauncher();
     ctx.destroyAppWindow(id); // a background window must not outlive its app
     ctx.setWidget(id, null);
+    // ...and neither must its plugin. A window is ours to destroy; a daemon or a
+    // socket on the LAN is the plugin's, and its own `stop` is the only thing that
+    // releases it. Before the files go, so `stop` still has its module.
+    ctx.unloadPlugin(id);
+    // ...and forget what its switches were set to: a re-install would otherwise come
+    // back with a remembered "on", which for one that opens a socket on the LAN is
+    // the same surprise as arriving switched on.
+    config.clearAppSwitches(id);
     return httpserver.jsonRes(res, store.uninstall(id));
   }
   if (p === "/tvbox/api/setup/done") {

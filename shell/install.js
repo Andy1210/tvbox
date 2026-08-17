@@ -168,7 +168,28 @@ function validateManifest(m, src) {
   // Wayland client (RetroArch); the shell spawns it and hides its own windows.
   if (m.type !== "webclient" && m.type !== "native") return bad("type must be webclient|native");
   if (m.status !== "ready" && m.status !== "coming_soon") return bad("status must be ready|coming_soon");
-  if (!m.name) return bad("missing name");
+  // A user-facing string from a manifest: one string, or a per-locale map whose LEAVES
+  // are strings, non-empty and bounded. The leaf type is not pedantry - the launcher
+  // renders every one of these as a React child, and a nested object there throws
+  // "Objects are not valid as a React child", which only the root error boundary
+  // catches: one manifest replaces the whole 10-foot UI with a crash screen, and a
+  // manifest dropped into ~/.tvbox/apps or served by an added registry never meets the
+  // JSON Schema that would have caught it. A name is also on the HOME grid, so that
+  // one takes the box's first screen with it.
+  const MAX_LABEL = 80; // one line on a row or a tile
+  const MAX_HINT = 240; // the grey line under it, which may wrap
+  const MAX_PROSE = 1200; // the store's detail copy
+  const localeTextOk = (v, max) => {
+    if (typeof v === "string") return v.length > 0 && v.length <= max;
+    if (!v || typeof v !== "object" || Array.isArray(v)) return false;
+    const vals = Object.values(v);
+    return vals.length > 0 && vals.every((x) => typeof x === "string" && x.length > 0 && x.length <= max);
+  };
+  if (!localeTextOk(m.name, MAX_LABEL)) return bad("name must be a string or a locale map of strings (<=80)");
+  if (m.tagline !== undefined && !localeTextOk(m.tagline, MAX_HINT))
+    return bad("tagline must be a string or a locale map of strings (<=240)");
+  if (m.description !== undefined && !localeTextOk(m.description, MAX_PROSE))
+    return bad("description must be a string or a locale map of strings (<=1200)");
   // A native app's command line reaches argv, so validate it with the very parser
   // the launch path uses rather than a second copy of the rules.
   //
@@ -235,6 +256,12 @@ function validateManifest(m, src) {
   const br = m.runtime && m.runtime.bridge;
   if (br !== undefined && (typeof br !== "string" || !/^\.\/[a-z0-9_-]+\.js$/.test(br)))
     return bad("runtime.bridge must be ./<file>.js shipped by the package");
+  // A user-facing string from a manifest: one string, or a per-locale map whose
+  // LEAVES are strings. The leaf type is not pedantry - the launcher renders these
+  // as React children, and a nested object there throws "Objects are not valid as a
+  // React child", which the only error boundary catches at the root: the whole
+  // 10-foot UI is replaced by a crash screen. Bounded too, because a row on a
+  // television has one line for the label and two for the hint.
   // Phone-pairing kinds the app offers (its plugin registers the matching
   // provider). This is how an app that has no screen of its own on the box, e.g. a
   // native app, still gets a "do this from your phone" affordance: the launcher
@@ -245,9 +272,45 @@ function validateManifest(m, src) {
     for (const p of pairs) {
       if (!p || typeof p !== "object") return bad("pairing entries must be objects");
       if (!/^[a-z0-9_-]{1,32}$/.test(String(p.kind || ""))) return bad("bad pairing[].kind " + JSON.stringify(p.kind));
-      if (!p.label || (typeof p.label !== "string" && typeof p.label !== "object"))
-        return bad("pairing[].label must be a string or a locale map");
+      if (!localeTextOk(p.label, MAX_LABEL))
+        return bad("pairing[].label must be a string or a locale map of strings, at most " + MAX_LABEL + " chars");
     }
+    // A pairing kind is registered by a plugin, so without one the launcher shows a
+    // phone action that starts a session nothing answers. The registry's CI refuses
+    // this; a manifest dropped into ~/.tvbox/apps never sees CI.
+    if (!m.service) return bad("pairing needs a `service` plugin to register the provider");
+  }
+  // On/off switches the app declares, for the same kind of app `pairing` exists
+  // for: one whose own screen cannot hold a setting. The key reaches a config
+  // section keyed by app id (config.setAppSwitch) and the app's own plugin reads
+  // it, so the charset is pinned here as well as in CI - a manifest dropped into
+  // ~/.tvbox/apps never sees CI.
+  const sw = m.switches;
+  if (sw !== undefined) {
+    if (!Array.isArray(sw) || sw.length > 8) return bad("switches must be an array of at most 8");
+    const seen = new Set();
+    for (const s of sw) {
+      if (!s || typeof s !== "object") return bad("switches entries must be objects");
+      const key = String(s.key || "");
+      // `__proto__` and friends pass the charset but are not properties when
+      // assigned to a plain object, and this key becomes one on both sides (the
+      // config write and the plugin's own lookup).
+      if (!/^[a-z0-9_-]{1,32}$/.test(key) || key === "__proto__" || key === "constructor" || key === "prototype")
+        return bad("bad switches[].key " + JSON.stringify(s.key));
+      // Two rows writing one value would make the screen show a switch whose
+      // position depends on which row was drawn last.
+      if (seen.has(key)) return bad("duplicate switches[].key " + JSON.stringify(key));
+      seen.add(key);
+      if (!localeTextOk(s.label, MAX_LABEL))
+        return bad("switches[].label must be a string or a locale map of strings, at most " + MAX_LABEL + " chars");
+      if (s.hint !== undefined && !localeTextOk(s.hint, MAX_HINT))
+        return bad("switches[].hint must be a string or a locale map of strings, at most " + MAX_HINT + " chars");
+      if (s.default !== undefined && typeof s.default !== "boolean") return bad("switches[].default must be a boolean");
+    }
+    // Nothing in the shell acts on a switch - the app's own plugin reads it - so a
+    // switch without a service is a row that does nothing. The registry's CI refuses
+    // this too; a manifest dropped into ~/.tvbox/apps never sees CI.
+    if (!m.service) return bad("switches need a `service` plugin to act on them");
   }
   // Files of its own the app wants carried across a re-flash or onto a second box
   // (RetroArch's playlists and save files; the `storage` capability covers only
