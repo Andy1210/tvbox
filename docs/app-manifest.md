@@ -124,6 +124,7 @@ Top level:
 | `changelog`       |     | What the detail view's "What's new" shows: `[{ version, notes }]`, `notes` one English string, newest version first. |
 | `screenshots`     |     | Up to 8 https URLs for the detail view (host them in the registry repo).                                             |
 | `pairing`         |     | Phone actions the app offers (below).                                                                                |
+| `switches`        |     | On/off settings the box shows for the app (below).                                                                   |
 | `backup`          |     | Files of its own a settings backup should carry (below).                                                             |
 | `shares`          |     | Folders of its own another tvbox may read over the LAN (below).                                                      |
 
@@ -220,6 +221,54 @@ The pairing server is up only while that screen is open, and every route under i
 is code-gated by the shell (`c` in the query for reads, `code` in the body for
 writes). Requests are capped in size; a route that needs a bigger body says so
 (`{ maxBody, handler }`).
+
+## Settings the box shows for the app (`switches`)
+
+The same problem as `pairing`, one step smaller: an app that cannot put a setting on
+its own screen. A `native` app has no screen of ours at all, and a **remote** app's
+screen is not ours either - YouTube's TV page is Google's, so the switch that decides
+whether the box answers a phone casting to it has nowhere else to live.
+
+```jsonc
+"switches": [
+  {
+    "key": "cast",                                    // becomes a config key: [a-z0-9_-]
+    "label": { "en": "Cast from phone", "hu": "Castolás telefonról" },
+    "hint":  { "en": "The box shows up in your phone's YouTube app." },
+    "default": true,                                  // omitted = off
+  },
+],
+```
+
+They appear in **Settings, Apps, Extra app settings** - a page of their own rather
+than a row on the app's management screen, which sits behind "Home screen order" and
+is about ordering. A switch nobody can find is a switch nobody has. The row into that
+page only exists while some installed app declares one, so it is never a press that
+leads to an empty screen.
+
+The shell knows nothing about what one does. It stores the value per app id (config
+`appSwitches`, so an app id can never name a config section of the shell's) and the
+app's own `plugin.js` reads it with `host.switchOn(key)` - scoped to its own app,
+like `widget`. A write also fires `onConfigChange`, so a plugin can follow the switch
+without a restart.
+
+Three rules worth knowing before you declare one:
+
+- **Needs a `service`, and the plugin has to be LOADED.** Nothing in the shell acts on
+  a switch, so a switch offered while its plugin is missing (an unresolved
+  dependency, a factory that threw) would write config and change nothing - the box
+  hides it instead.
+- **`default: true` is a decision, not a default.** It turns the thing on for every
+  box the moment the app updates, with nobody pressing anything - the app update can
+  land unattended overnight. For anything that opens a port, holds a radio or takes
+  input from the network, declare it off and let the owner turn it on.
+- **Label and hint are user-facing text, and bounded** (80 / 240 characters, string
+  leaves only, locale maps welcome). They render as-is on a television.
+
+It is a convenience control, not a boundary: a _local_ app's own page shares the
+shell's origin, so it can flip another app's switch, and a plugin is in-process Node
+that could bind a port with no switch at all. The registry review is what stands
+between those and a box.
 
 ## Folders another box may read (`shares`)
 

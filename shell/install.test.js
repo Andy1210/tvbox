@@ -244,7 +244,18 @@ test("a bridge is a file the package ships, never a name or a path", () => {
 });
 
 test("pairing entries are bounded and need a kind plus a label", () => {
-  const withPairing = (pairing) => ({ id: "x", name: "X", type: "webclient", status: "ready", pairing });
+  // ...and a `service`: the plugin is what registers the provider for a kind, so
+  // without one the launcher offers a phone action that starts a session nothing
+  // answers. The registry's CI already refused this; the box now agrees.
+  const withPairing = (pairing) => ({ id: "x", name: "X", type: "webclient", status: "ready", service: "x", pairing });
+  assert.equal(
+    apps.validateManifest(
+      { id: "x", name: "X", type: "webclient", status: "ready", pairing: [{ kind: "roms", label: "Upload" }] },
+      "x.json",
+    ),
+    null,
+    "a pairing kind with no plugin behind it",
+  );
   assert.ok(apps.validateManifest(withPairing([{ kind: "roms", label: "Upload" }]), "x.json"));
   assert.ok(apps.validateManifest(withPairing([{ kind: "roms", label: { en: "Upload" } }]), "x.json"));
   assert.equal(apps.validateManifest(withPairing([{ kind: "BAD KIND", label: "x" }]), "x.json"), null);
@@ -559,4 +570,97 @@ test("a stale cached copy is refetched past the cache, not called corrupt", asyn
 test("the legacy Spotify token is reserved under the name that exists", () => {
   assert.ok(apps.RESERVED_STATE_FILES.has("spotify-token"));
   assert.equal(apps.stateFileOk("spotify", "spotify-token"), false);
+});
+
+// A manifest-declared switch: an on/off setting for an app whose own screen cannot
+// hold one (a native app, or a remote site that is not our UI). The key reaches a
+// config write, so its shape is pinned here as well as in CI - a manifest dropped
+// into ~/.tvbox/apps never sees CI.
+const SWITCH_BASE = { id: "youtube", name: "YouTube", type: "webclient", status: "ready", service: "youtube" };
+const withSwitches = (switches) => ({ ...SWITCH_BASE, switches });
+
+test("a switch needs a usable key and a label, and may default to on", () => {
+  assert.ok(apps.validateManifest(withSwitches([{ key: "cast", label: "Cast", default: true }]), "youtube.json"));
+  assert.ok(
+    apps.validateManifest(withSwitches([{ key: "cast", label: { hu: "Cast", en: "Cast" }, hint: "..." }]), "y.json"),
+    "a locale map and a hint are both allowed",
+  );
+  for (const bad of [
+    [{ label: "no key" }],
+    [{ key: "Cast", label: "capitals are not a config key" }],
+    [{ key: "with space", label: "x" }],
+    [{ key: "cast" }],
+    [{ key: "cast", label: 7 }],
+    [{ key: "cast", label: "x", default: "yes" }],
+    // Passes the charset, but is not a property when assigned to a plain object.
+    [{ key: "__proto__", label: "x" }],
+    [{ key: "constructor", label: "x" }],
+    "not an array",
+    Array.from({ length: 9 }, (_, i) => ({ key: "k" + i, label: "x" })),
+  ]) {
+    assert.equal(apps.validateManifest(withSwitches(bad), "youtube.json"), null, JSON.stringify(bad).slice(0, 60));
+  }
+});
+
+test("two switches cannot share one key", () => {
+  // Both rows would write the same value, so the screen would show whichever row
+  // happened to be drawn last.
+  const dup = [
+    { key: "cast", label: "A" },
+    { key: "cast", label: "B" },
+  ];
+  assert.equal(apps.validateManifest(withSwitches(dup), "youtube.json"), null);
+});
+
+test("an app that declares no switches is unaffected", () => {
+  assert.ok(apps.validateManifest({ ...SWITCH_BASE }, "youtube.json"));
+});
+
+test("a switch needs a plugin to act on it", () => {
+  // The shell acts on none of them, so a switch on an app with no service is a row
+  // that writes config and changes nothing. The registry's CI refuses this too; a
+  // manifest dropped into ~/.tvbox/apps never sees CI.
+  const noService = { id: "youtube", name: "YouTube", type: "webclient", status: "ready" };
+  assert.equal(apps.validateManifest({ ...noService, switches: [{ key: "cast", label: "Cast" }] }, "y.json"), null);
+});
+
+test("every user-facing string is text all the way down, name included", () => {
+  // The name is on the HOME grid, so a nested object there takes the box's FIRST
+  // screen to the crash boundary - the switch label was only one of four fields on the
+  // same render path. Empty is refused too: a tile or a row with no name at all.
+  const base = { id: "x", name: "X", type: "webclient", status: "ready" };
+  for (const over of [
+    { name: { en: { deep: 1 } } },
+    { name: {} },
+    { name: "" },
+    { name: "N".repeat(81) },
+    { tagline: { hu: 7 } },
+    { tagline: "" },
+    { description: { en: ["no"] } },
+    { description: "d".repeat(1201) },
+  ]) {
+    assert.equal(apps.validateManifest({ ...base, ...over }, "x.json"), null, JSON.stringify(over).slice(0, 50));
+  }
+  assert.ok(apps.validateManifest({ ...base, name: { hu: "Y", en: "Y" }, tagline: "t", description: "d" }, "x.json"));
+});
+
+test("a label or hint must be text all the way down, and bounded", () => {
+  // The launcher renders these as React children. A nested object there throws
+  // "Objects are not valid as a React child", and the only error boundary is at the
+  // root - so one manifest would replace the whole 10-foot UI with a crash screen.
+  const bad = [
+    [{ key: "cast", label: { en: { x: 1 } } }],
+    [{ key: "cast", label: { en: 7 } }],
+    [{ key: "cast", label: {} }],
+    [{ key: "cast", label: ["Cast"] }],
+    [{ key: "cast", label: "Cast", hint: { hu: { deep: "no" } } }],
+    [{ key: "cast", label: "C".repeat(81) }],
+    [{ key: "cast", label: "Cast", hint: "h".repeat(241) }],
+  ];
+  for (const sw of bad) assert.equal(apps.validateManifest(withSwitches(sw), "youtube.json"), null, JSON.stringify(sw));
+  assert.ok(apps.validateManifest(withSwitches([{ key: "cast", label: "C".repeat(80) }]), "youtube.json"));
+  // The same rule reaches pairing labels, which render through the same component.
+  const withPairing = (label) => ({ ...SWITCH_BASE, pairing: [{ kind: "roms", label }] });
+  assert.equal(apps.validateManifest(withPairing({ en: { x: 1 } }), "y.json"), null);
+  assert.ok(apps.validateManifest(withPairing({ en: "Upload games" }), "y.json"));
 });

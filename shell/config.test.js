@@ -81,6 +81,55 @@ test("the ERTM toggle stores a real boolean and ignores anything else", () => {
   assert.strictEqual(config.publicConfig().bluetooth.disableErtm, false);
 });
 
+// An app's manifest-declared switches. The app id and the key are both object keys
+// here and both come from a manifest, so the guards are the subject.
+test("an app switch is stored under its app id, and reads back", () => {
+  assert.strictEqual(config.setAppSwitch("youtube", "cast", false), true);
+  assert.strictEqual(config.appSwitches("youtube").cast, false);
+  assert.strictEqual(config.setAppSwitch("youtube", "cast", true), true);
+  assert.strictEqual(config.appSwitches("youtube").cast, true);
+  // Sections keyed by app id, never a section NAMED after the app: an app id is not
+  // a namespace we control, so `update` must not be able to reach the shell's own.
+  assert.strictEqual(config.setAppSwitch("update", "auto", false), true);
+  assert.strictEqual(config.appSwitches("update").auto, false);
+  assert.notStrictEqual(config.publicConfig().update.auto, false, "the shell's own update setting is untouched");
+});
+
+test("a switch key or app id that is not a property is refused", () => {
+  for (const id of ["__proto__", "constructor", "prototype", "With Caps", "a".repeat(65), ""]) {
+    assert.strictEqual(config.setAppSwitch(id, "cast", true), false, "id " + JSON.stringify(id));
+  }
+  for (const key of ["__proto__", "constructor", "prototype", "Cast", "with space", "k".repeat(33), ""]) {
+    assert.strictEqual(config.setAppSwitch("youtube", key, true), false, "key " + JSON.stringify(key));
+  }
+  assert.deepStrictEqual(Object.keys(config.appSwitches("youtube")), ["cast"], "and nothing else was written");
+  assert.strictEqual({}.cast, undefined, "Object.prototype is unpolluted");
+});
+
+test("the value is a boolean whatever was passed, and an unknown app reads empty", () => {
+  config.setAppSwitch("someapp", "flag", "yes");
+  assert.strictEqual(config.appSwitches("someapp").flag, true);
+  assert.deepStrictEqual(config.appSwitches("nosuchapp"), {});
+  // A lookup for a name every object has must not answer with a function.
+  assert.deepStrictEqual(config.appSwitches("constructor"), {});
+});
+
+test("both caps hold, and a switch already stored stays flippable at the cap", () => {
+  for (let i = 0; i < 8; i++) assert.strictEqual(config.setAppSwitch("capped", "k" + i, true), true);
+  assert.strictEqual(config.setAppSwitch("capped", "k8", true), false, "the 9th switch of one app");
+  assert.strictEqual(config.setAppSwitch("capped", "k0", false), true, "an existing one still moves");
+  assert.strictEqual(config.appSwitches("capped").k0, false);
+});
+
+test("a corrupted appSwitches section degrades to empty rather than throwing", () => {
+  const raw = JSON.parse(fs.readFileSync(FILE, "utf8"));
+  raw.appSwitches = "not an object";
+  fs.writeFileSync(FILE, JSON.stringify(raw));
+  assert.deepStrictEqual(config.appSwitches("youtube"), {});
+  assert.strictEqual(config.setAppSwitch("youtube", "cast", true), true, "and a write repairs it");
+  assert.strictEqual(config.appSwitches("youtube").cast, true);
+});
+
 test.after(() => {
   fs.rmSync(HOME, { recursive: true, force: true });
   if (REAL_HOME === undefined) delete process.env.HOME;

@@ -259,6 +259,14 @@
     "stateRunning": "running",
     "back": "Back"
   },
+  "appswitches": {
+    "title": "Extra app settings",
+    "rowHint": "Extra features some apps offer",
+    "hint": "Extra features some apps offer. Turn them on or off here.",
+    "none": "None of the installed apps offers one. Apps from the store may bring one.",
+    "saveFailed": "The box didn't save that setting. Nothing changed.",
+    "unavailable": "The app cannot use this right now - something it needs may be missing on the box."
+  },
   "catalog": {
     "title": "Get more apps"
   },
