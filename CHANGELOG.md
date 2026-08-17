@@ -5,6 +5,34 @@ updates). `scripts/make-release.sh` lifts the current version's `hu`/`en`
 blocks into the OTA feed's `notes` - keep both languages, keep it short, and
 write for the person on the couch (what changes for THEM), not for developers.
 
+## 3.6.0
+
+### hu
+
+- **Átküldés telefonról.** A telefonod YouTube-alkalmazásából elindíthatsz egy videót
+  ezen a TV-n: a box megjelenik a telefon listájában a saját nevén, és a videó akkor is
+  itt indul el, ha a YouTube épp nincs nyitva. Ha a box maga kapcsolta le a TV-t, a
+  küldés fel is ébreszti.
+- **Előbb be kell kapcsolni** — és a YouTube alkalmazásnak is meg kell kapnia a saját
+  frissítését: Beállítások → Alkalmazások → Alkalmazások extra beállításai → „Átküldés
+  telefonról". Azért marad addig kikapcsolva, mert amíg be van kapcsolva, **bárki
+  ugyanezen a wifin** átküldhet erre a TV-re, és az félbeszakítja, amit épp néztek.
+- **Új hely a Beállításokban: „Alkalmazások extra beállításai".** Ide kerülnek azok a
+  kapcsolók, amiket egy alkalmazás a boxtól kér, mert a saját felületén nincs hova
+  tennie őket — az átküldés az első ilyen.
+
+### en
+
+- **Cast from your phone.** Start a video on this TV from the YouTube app on your phone:
+  the box appears in the phone's list under its own name, and the video starts here even
+  when YouTube is not open. If the box turned the TV off itself, a cast wakes it.
+- **You have to turn it on first** — and the YouTube app needs its own update too:
+  Settings → Apps → Extra app settings → "Cast from phone". It stays off until then
+  because while it is on, **anyone on the same wifi** can send to this TV, interrupting
+  whatever is playing.
+- **A new place in Settings: "Extra app settings".** It holds the switches an app asks
+  the box for when its own screen has nowhere to put them - casting is the first one.
+
 ## 3.5.0
 
 ### hu
