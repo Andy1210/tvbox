@@ -259,6 +259,12 @@
     "stateRunning": "fut",
     "back": "Vissza"
   },
+  "appswitches": {
+    "title": "Alkalmazás-beállítások",
+    "rowHint": "Amit az alkalmazások a boxtól kérnek",
+    "hint": "Ezeket az alkalmazás nem tudja a saját felületén kínálni, mert nincs neki – vagy nem a miénk.",
+    "none": "Egyik telepített alkalmazás sem kér ilyen beállítást."
+  },
   "catalog": {
     "title": "Továbbiak beszerzése"
   },

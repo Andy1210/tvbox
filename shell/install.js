@@ -249,6 +249,34 @@ function validateManifest(m, src) {
         return bad("pairing[].label must be a string or a locale map");
     }
   }
+  // On/off switches the app declares, for the same kind of app `pairing` exists
+  // for: one whose own screen cannot hold a setting. The key reaches a config
+  // section keyed by app id (config.setAppSwitch) and the app's own plugin reads
+  // it, so the charset is pinned here as well as in CI - a manifest dropped into
+  // ~/.tvbox/apps never sees CI.
+  const sw = m.switches;
+  if (sw !== undefined) {
+    if (!Array.isArray(sw) || sw.length > 8) return bad("switches must be an array of at most 8");
+    const seen = new Set();
+    for (const s of sw) {
+      if (!s || typeof s !== "object") return bad("switches entries must be objects");
+      const key = String(s.key || "");
+      // `__proto__` and friends pass the charset but are not properties when
+      // assigned to a plain object, and this key becomes one on both sides (the
+      // config write and the plugin's own lookup).
+      if (!/^[a-z0-9_-]{1,32}$/.test(key) || key === "__proto__" || key === "constructor" || key === "prototype")
+        return bad("bad switches[].key " + JSON.stringify(s.key));
+      // Two rows writing one value would make the screen show a switch whose
+      // position depends on which row was drawn last.
+      if (seen.has(key)) return bad("duplicate switches[].key " + JSON.stringify(key));
+      seen.add(key);
+      if (!s.label || (typeof s.label !== "string" && typeof s.label !== "object"))
+        return bad("switches[].label must be a string or a locale map");
+      if (s.hint !== undefined && typeof s.hint !== "string" && typeof s.hint !== "object")
+        return bad("switches[].hint must be a string or a locale map");
+      if (s.default !== undefined && typeof s.default !== "boolean") return bad("switches[].default must be a boolean");
+    }
+  }
   // Files of its own the app wants carried across a re-flash or onto a second box
   // (RetroArch's playlists and save files; the `storage` capability covers only
   // small key/value settings). Validated here as well as in CI because a manifest

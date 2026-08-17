@@ -210,6 +210,24 @@ function post(p, data, res, ctx) {
     else ctx.navToLauncher(dest);
     return httpserver.jsonRes(res, { ok: true, dest });
   }
+  if (p === "/tvbox/api/apps/switch") {
+    // One of an app's manifest-declared switches (Settings → the app's screen). The
+    // key must be one the INSTALLED manifest declares: the value lands in a config
+    // section and its own plugin acts on it, so an arbitrary key posted here would
+    // be a write into the box's config with no app behind it.
+    const id = String(data.id || "");
+    const key = String(data.key || "");
+    const m = apps.manifestById(id);
+    const declared = m && Array.isArray(m.switches) && m.switches.some((s) => s && s.key === key);
+    if (!declared) return httpserver.jsonRes(res, { ok: false, error: "no such switch" });
+    if (typeof data.on !== "boolean") return httpserver.jsonRes(res, { ok: false, error: "on must be a boolean" });
+    if (!config.setAppSwitch(id, key, data.on)) return httpserver.jsonRes(res, { ok: false, error: "not saved" });
+    // The app's plugin is what turns the thing on or off, and it is already
+    // listening for a config write (host.onConfigChange) - so the flip takes effect
+    // without a restart, the same way an IPTV source change does.
+    ctx.emitConfigChange(["appSwitches"]);
+    return httpserver.jsonRes(res, { ok: true, id, key, on: data.on });
+  }
   if (p === "/tvbox/api/apps/quit") {
     // HOME's running-apps row: really exit an app (its window and page state are
     // dropped; next launch is a fresh start). Same teardown an app's own "Exit?"

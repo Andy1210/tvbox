@@ -4,6 +4,7 @@ import { useConfigStore } from "../../stores/config";
 import { StoreSettings } from "../../components/StoreSettings";
 import { AppOrderSettings } from "../../components/AppOrderSettings";
 import { StoreSourcesPage } from "./storesources";
+import { AppSwitchesPage } from "./appswitches";
 import { SettingsPage } from "../SettingsPage";
 import { Group, Row, ToggleRow } from "../Rows";
 import { useSettingsNav } from "../nav";
@@ -77,6 +78,14 @@ export function AppsPane() {
           hint={t("storeSources.hint")}
           onEnter={() =>
             nav.push({ id: "store-sources", title: t("storeSources.title"), render: () => <StoreSourcesPage /> })
+          }
+        />
+        <Row
+          id="app-switches"
+          label={t("appswitches.title")}
+          hint={t("appswitches.rowHint")}
+          onEnter={() =>
+            nav.push({ id: "appswitches", title: t("appswitches.title"), render: () => <AppSwitchesPage /> })
           }
         />
         <Row

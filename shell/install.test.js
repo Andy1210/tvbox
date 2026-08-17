@@ -560,3 +560,47 @@ test("the legacy Spotify token is reserved under the name that exists", () => {
   assert.ok(apps.RESERVED_STATE_FILES.has("spotify-token"));
   assert.equal(apps.stateFileOk("spotify", "spotify-token"), false);
 });
+
+// A manifest-declared switch: an on/off setting for an app whose own screen cannot
+// hold one (a native app, or a remote site that is not our UI). The key reaches a
+// config write, so its shape is pinned here as well as in CI - a manifest dropped
+// into ~/.tvbox/apps never sees CI.
+const SWITCH_BASE = { id: "youtube", name: "YouTube", type: "webclient", status: "ready" };
+const withSwitches = (switches) => ({ ...SWITCH_BASE, switches });
+
+test("a switch needs a usable key and a label, and may default to on", () => {
+  assert.ok(apps.validateManifest(withSwitches([{ key: "cast", label: "Cast", default: true }]), "youtube.json"));
+  assert.ok(
+    apps.validateManifest(withSwitches([{ key: "cast", label: { hu: "Cast", en: "Cast" }, hint: "..." }]), "y.json"),
+    "a locale map and a hint are both allowed",
+  );
+  for (const bad of [
+    [{ label: "no key" }],
+    [{ key: "Cast", label: "capitals are not a config key" }],
+    [{ key: "with space", label: "x" }],
+    [{ key: "cast" }],
+    [{ key: "cast", label: 7 }],
+    [{ key: "cast", label: "x", default: "yes" }],
+    // Passes the charset, but is not a property when assigned to a plain object.
+    [{ key: "__proto__", label: "x" }],
+    [{ key: "constructor", label: "x" }],
+    "not an array",
+    Array.from({ length: 9 }, (_, i) => ({ key: "k" + i, label: "x" })),
+  ]) {
+    assert.equal(apps.validateManifest(withSwitches(bad), "youtube.json"), null, JSON.stringify(bad).slice(0, 60));
+  }
+});
+
+test("two switches cannot share one key", () => {
+  // Both rows would write the same value, so the screen would show whichever row
+  // happened to be drawn last.
+  const dup = [
+    { key: "cast", label: "A" },
+    { key: "cast", label: "B" },
+  ];
+  assert.equal(apps.validateManifest(withSwitches(dup), "youtube.json"), null);
+});
+
+test("an app that declares no switches is unaffected", () => {
+  assert.ok(apps.validateManifest({ ...SWITCH_BASE }, "youtube.json"));
+});

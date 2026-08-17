@@ -259,6 +259,12 @@
     "stateRunning": "running",
     "back": "Back"
   },
+  "appswitches": {
+    "title": "App settings",
+    "rowHint": "What apps ask the box for",
+    "hint": "The app cannot offer these on its own screen, because it has none - or the screen is not ours.",
+    "none": "No installed app asks for one of these."
+  },
   "catalog": {
     "title": "Get more apps"
   },

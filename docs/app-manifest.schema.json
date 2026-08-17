@@ -117,6 +117,33 @@
         }
       }
     },
+    "switches": {
+      "type": "array",
+      "maxItems": 8,
+      "description": "On/off settings the app declares, shown on the app's own screen in Settings > Apps. Same purpose as `pairing`: an app whose screen is not ours - a native app, or a remote site like YouTube's TV page - has nowhere else to put a setting. The value is stored per app id (config `appSwitches`) and read by the app's own plugin via `host.switchOn(key)`; the launcher renders the row knowing nothing about what it does.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["key", "label"],
+        "properties": {
+          "key": {
+            "type": "string",
+            "pattern": "^[a-z0-9_-]{1,32}$",
+            "description": "Switch key, unique within the manifest. What the plugin asks for."
+          },
+          "label": {
+            "$ref": "#/$defs/localeString"
+          },
+          "hint": {
+            "$ref": "#/$defs/localeString"
+          },
+          "default": {
+            "type": "boolean",
+            "description": "Value in force until someone flips it. Omitted = off, so a switch added by a release never turns something on by appearing."
+          }
+        }
+      }
+    },
     "backup": {
       "type": "object",
       "additionalProperties": false,

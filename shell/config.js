@@ -518,6 +518,46 @@ function setAppConfig(key, val) {
   return true;
 }
 
+// On/off switches an app DECLARES in its manifest (`switches`), for an app whose
+// own screen cannot hold them - a native app, or a remote site that is not our UI
+// (YouTube's own TV page, where the cast receiver has to be turned on somewhere).
+//
+// They live in one section keyed by app id rather than in a section named after
+// the app, because an app id is not a namespace we control: a registry manifest
+// with id `update` or `player` would otherwise write the shell's own config
+// section. Only booleans, and bounded on both axes, since the writer is a
+// manifest.
+const MAX_SWITCH_APPS = 64;
+const MAX_SWITCHES_PER_APP = 8;
+function appSwitches(id) {
+  const all = load().appSwitches;
+  if (!all || typeof all !== "object") return {};
+  if (id === undefined) return all;
+  // Own properties only: a lookup for an id that happens to name something every
+  // object has would otherwise answer with a function.
+  const v = Object.prototype.hasOwnProperty.call(all, id) ? all[id] : null;
+  return v && typeof v === "object" ? v : {};
+}
+// Names that are not properties when assigned to a plain object: `__proto__` sets
+// the prototype instead of a key, and the other two are inherited members a lookup
+// would answer for a switch nobody declared. Both the app id and the key are object
+// keys here, so both are held to this.
+const NOT_A_KEY = new Set(["__proto__", "constructor", "prototype"]);
+function setAppSwitch(id, key, on) {
+  if (!/^[a-z0-9_-]{1,64}$/.test(String(id || "")) || NOT_A_KEY.has(id)) return false;
+  if (!/^[a-z0-9_-]{1,32}$/.test(String(key || "")) || NOT_A_KEY.has(key)) return false;
+  const c = load();
+  const all = c.appSwitches && typeof c.appSwitches === "object" ? { ...c.appSwitches } : {};
+  const mine = all[id] && typeof all[id] === "object" ? { ...all[id] } : {};
+  if (!(id in all) && Object.keys(all).length >= MAX_SWITCH_APPS) return false;
+  if (!(key in mine) && Object.keys(mine).length >= MAX_SWITCHES_PER_APP) return false;
+  mine[key] = !!on;
+  all[id] = mine;
+  c.appSwitches = all;
+  save(c);
+  return true;
+}
+
 // App-store registries: { registry?: "<index.json url>", sources?: [{url, name?}] }.
 // `registry` replaces the official tvbox-apps index (store.js) for a self-hoster;
 // `sources` are extra registries merged into the same catalogue after it. The cap
@@ -850,6 +890,8 @@ module.exports = {
   rawSpotify,
   appConfig,
   setAppConfig,
+  appSwitches,
+  setAppSwitch,
   setStore,
   rawStore,
   setUi,

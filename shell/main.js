@@ -38,6 +38,7 @@ const TYPING_REPLACES_MIN_COMPOSITOR = "0.1.10";
 // delivery will not replace.
 const deliveryReplaces = () => compositor.atLeast(TYPING_REPLACES_MIN_COMPOSITOR);
 const lang = require("./lang"); // what language a remote web app is told it runs in
+const { withLaunchQuery } = require("./launchurl"); // per-launch query for a remote app (a cast's pairing code)
 const audio = require("./audio"); // wpctl sink list + volume (device audio settings)
 const bluetooth = require("./bluetooth"); // bluetoothctl pair/connect (audio + input devices)
 const ambient = require("./ambient"); // weather + local photos for the idle/ambient screen
@@ -702,6 +703,17 @@ function appLaunchable(m) {
   );
 }
 
+// The value of one manifest-declared switch (`switches`): what the box has stored,
+// else the manifest's own default. An undeclared key is off, and so is a declared
+// one whose manifest does not ask for `default: true` - a switch that appears with
+// a release must never turn something on by appearing.
+function switchValue(m, key) {
+  const decl = (Array.isArray(m.switches) ? m.switches : []).find((s) => s && s.key === key);
+  if (!decl) return false;
+  const stored = config.appSwitches(m.id);
+  return key in stored ? !!stored[key] : decl.default === true;
+}
+
 function appTiles() {
   // the subset the launcher needs to draw a tile (+ dependency status so it can
   // grey out an app whose required binary isn't installed)
@@ -734,6 +746,13 @@ function appTiles() {
       // Only kind + label: the launcher starts the session and draws the QR, the
       // app's own plugin owns everything that happens on the phone.
       pairing: Array.isArray(m.pairing) ? m.pairing.map((p) => ({ kind: p.kind, label: p.label })) : undefined,
+      // On/off switches the app declares, with the value in force. Same reason as
+      // `pairing`: an app whose screen is not ours (a native app, or a remote site
+      // like YouTube's own TV page) has nowhere else to put a setting, and the
+      // launcher renders these knowing nothing about what they do.
+      switches: Array.isArray(m.switches)
+        ? m.switches.map((s) => ({ key: s.key, label: s.label, hint: s.hint, on: switchValue(m, s.key) }))
+        : undefined,
       depsOk,
       missing,
       depsInstallable, // every missing binary is a no-root download dep -> UI-installable (no CLI)
@@ -2020,6 +2039,37 @@ function openRemoteApp(m, url) {
   if (win && !win.isDestroyed()) win.hide();
 }
 
+// Point an ALREADY OPEN remote app at its launch url. Only a cast needs this: the
+// window is kept across leaving an app (background apps), so the page a phone
+// connects to would otherwise be the one from the previous session.
+//
+// The url is rebuilt from the manifest and re-checked against the same protocol
+// and host rules openRemoteApp applies, rather than trusted because it was built
+// here - `withLaunchQuery` is what keeps a sender's parameters parameters, and this
+// is the assertion that nothing else moved.
+function reloadRemoteApp(m, query) {
+  const rt = m.runtime || {};
+  if (m.type !== "webclient" || rt.serve !== "remote") return false;
+  const w = appWindow(m.id);
+  if (!w || w.isDestroyed()) return false;
+  const url = withLaunchQuery(resolveRemoteUrl(m), query);
+  let x;
+  try {
+    x = new URL(url);
+  } catch (e) {
+    return false;
+  }
+  const n = x.hostname.toLowerCase();
+  const hosts = allowedRemoteHosts(rt, url);
+  if (!remoteProtoOk(x) || !hosts.some((h) => n === h || n.endsWith("." + h))) {
+    console.warn("[nav] relaunch url not allowed:", url);
+    return false;
+  }
+  console.log("[nav] relaunch", m.id, "with launch data");
+  w.loadURL(url, rt.userAgent ? { userAgent: rt.userAgent } : undefined);
+  return true;
+}
+
 // ---- own window for LOCAL webclient apps (Plex, Live TV, Spotify UI, ...) ----
 // Same trust level as the old model (curated local apps ran in the privileged
 // main window; review is the trust boundary): Node-capable preload,
@@ -2713,7 +2763,10 @@ ipcMain.on("tvbox:app", (e) => {
 // or is caught main-side (remote apps) -> back to the launcher, stopping video.
 // Every app runs in its own window: a RUNNING app is simply re-shown (instant
 // resume, background apps); a fresh one gets its window created.
-function navTo(dest) {
+// `opts.query` is a per-launch query string for a REMOTE webclient - a plugin
+// handing the app the launch data that came with a cast (see withLaunchQuery). It
+// is ignored for every other kind of app, because there is nothing to put it on.
+function navTo(dest, opts) {
   console.log("[nav]", dest);
   if (dest === "home") {
     showLauncher();
@@ -2721,6 +2774,7 @@ function navTo(dest) {
   }
   const m = apps.manifestById(dest);
   if (!m || m.status !== "ready") return;
+  const launchQuery = (opts && opts.query) || "";
   // Switching apps silences the one being replaced: its UI is going to the
   // background, and a plugin foregrounding its app on a cast (Spotify Connect)
   // must stop e.g. the IPTV stream it takes over from. Called only on paths
@@ -2750,6 +2804,10 @@ function navTo(dest) {
     // already running in the background -> instant resume of its live window
     stopPrevPlayback();
     foregroundApp(m.id);
+    // A cast carries a session of its own (a fresh pairing code), so resuming the
+    // live page is not enough here: the page has to be pointed at the launch url,
+    // or the phone stays connected to nothing. Every other launch keeps the page.
+    if (launchQuery) reloadRemoteApp(m, launchQuery);
     return;
   }
   if (m.type === "native") {
@@ -2767,7 +2825,7 @@ function navTo(dest) {
       // a Node-capable window. An unset config-driven URL means the app isn't
       // configured yet; the launcher gates that (tile.configured) so here we
       // just no-op rather than open a blank window.
-      const url = resolveRemoteUrl(m);
+      const url = withLaunchQuery(resolveRemoteUrl(m), launchQuery);
       if (url) {
         stopPrevPlayback();
         openRemoteApp(m, url);
@@ -3213,7 +3271,11 @@ const host = {
   idle: boxFree,
   audioSink: () => audioSink, // detected HDMI sink node.name (set by ensureAudio)
   showLauncher, // (hash) -> stop other playback + bring launcher forward
-  navTo, // (id) -> open an app by id (e.g. a plugin foregrounds its app on a cast)
+  navTo, // (id, {query}) -> open an app by id (a plugin foregrounds its app on a cast)
+  // Is that app alive, and is it the one on screen? A plugin that answers a
+  // protocol on the LAN has to report its app's state - DIAL asks a receiver
+  // whether the app is running before it launches it - and only the shell knows.
+  appState: (id) => ({ running: !!appwins.get(id), foreground: id === currentAppId }),
   // One note on screen, for anyone on the box: the same toast MQTT pushes and the
   // voice satellite uses for a spoken answer's text. A plugin gets it here; a
   // local app's page can POST /tvbox/api/notify, which is the same door.
@@ -3281,6 +3343,9 @@ function loadOnePlugin(m) {
         ...host,
         // per-app widget slot - a plugin can only ever write its OWN card
         widget: { set: (w) => setWidget(m.id, w), clear: () => setWidget(m.id, null) },
+        // ...and its OWN manifest switches, by key. Scoped for the same reason: a
+        // plugin reading another app's settings is not a thing this API allows.
+        switchOn: (key) => switchValue(m, key),
       }) || {};
     loadedPlugins.push(plugin);
     loadedPluginIds.add(m.id);

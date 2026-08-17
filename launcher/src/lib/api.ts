@@ -443,6 +443,11 @@ export const testShare = (input: ShareInput) =>
 // Set a urlConfig app's server address (empty clears it).
 export const saveAppUrl = (key: string, baseUrl: string) => post("/tvbox/api/config/app", { key, baseUrl });
 
+// Flip one of an app's manifest-declared switches (its own screen in Settings →
+// Apps). The box refuses a key the installed manifest does not declare, so a false
+// here means the switch is gone, not that the value is unknown.
+export const setAppSwitch = (id: string, key: string, on: boolean) => post("/tvbox/api/apps/switch", { id, key, on });
+
 // Remove an installed web-client bundle (Settings → Apps). The manifest stays;
 // the tile reverts to installable.
 export async function removeApp(id: string): Promise<boolean> {
