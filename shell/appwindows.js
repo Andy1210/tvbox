@@ -17,6 +17,12 @@ let deps = {
   enabled: () => true, // config.apps.background !== false (the rollback lever)
   memInfo: () => null, // () => { totalKb, availableKb } from main.js
   foregroundId: () => null, // () => currentAppId, so eviction spares the active app
+  // () => player.owner() while something is loaded. Eviction spares it for the
+  // same reason it spares the foreground app: that window is not idle. Music
+  // outlives leaving the app now, and the page is what moves the queue on and
+  // what a phone's pause reaches - dropped, the album plays on out of a box with
+  // nothing left to stop it.
+  playingId: () => null,
 };
 let limits = null; // computed once from total RAM on first use
 
@@ -102,11 +108,13 @@ function destroy(id) {
   }
 }
 
-// Hidden windows, least-recently-shown first (never the foreground app).
+// Hidden windows, least-recently-shown first (never the foreground app, and
+// never the one whose sound is playing).
 function hiddenLru() {
   const fg = deps.foregroundId();
+  const playing = deps.playingId();
   return all()
-    .filter(([id, w]) => !w.isVisible() && id !== fg)
+    .filter(([id, w]) => !w.isVisible() && id !== fg && id !== playing)
     .sort((a, b) => (a[1].tvboxLastShown || 0) - (b[1].tvboxLastShown || 0));
 }
 function enforceCap() {
