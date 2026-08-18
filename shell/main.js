@@ -2579,6 +2579,12 @@ let mediaPublishForced = false;
 // bursts, so publishes are batched to the next tick and then filtered by
 // worthPublishing (a position that moved less than a few seconds is not news).
 function publishMediaState(opts) {
+  // Re-decide the HOME card on the way past. This is called on every player
+  // event, which is what the card needs and the app's own reports do not
+  // provide: an app reports itself playing the instant it asks for a track, i.e.
+  // BEFORE mpv exists, so that first report cannot raise a card and the next one
+  // is ten seconds later - a card that takes ten seconds to appear after a cast.
+  soundWidget(nowPlaying);
   if (!mqttCtl) return;
   // A forced call that lands inside an already-queued window must not lose its
   // force: re-seeding a fresh broker (applyMqttConfig) is exactly a forced publish,
