@@ -2209,17 +2209,11 @@ function reloadRemoteApp(m, query) {
 // contextIsolation off (the Plex QWebChannel bridge needs it). Transparent +
 // always-on-top like the main window, because mpv plays BEHIND it and the
 // tvbox-video class reveals it (ensureStyle/setVideoMode target this window).
-function openLocalApp(m, opts) {
+function openLocalApp(m) {
   const rt = m.runtime || {};
-  // Started for its own sake rather than to be looked at - see `startAppHidden`.
-  // Everything below still happens; what does not is taking the screen.
-  const hidden = !!(opts && opts.hidden);
-  if (!hidden) {
-    textinput.dropFor(null);
-    setForegroundApp(m.id);
-  }
+  textinput.dropFor(null);
+  setForegroundApp(m.id);
   const w = new BrowserWindow({
-    show: !hidden,
     fullscreen: true,
     frame: false,
     transparent: true,
@@ -2282,55 +2276,10 @@ function openLocalApp(m, opts) {
   });
   const atRoot = rt.mount === "root";
   w.loadURL(BASE + (atRoot ? "/" : "/" + m.id + "/"));
-  if (hidden) {
-    // `show: false` is not enough on its own here, measured: the window mapped
-    // anyway and the media client covered the launcher a few seconds after boot.
-    // A fullscreen Electron window on this session ends up mapped whatever the
-    // constructor was told, so it is hidden through the same call the box uses
-    // when somebody leaves an app - which also mutes it, and a loading page must
-    // not make a sound over whatever is on screen. `foregroundApp` unmutes and
-    // shows it when it is opened for real.
-    //
-    // Re-asserted on load as well: the window maps when its page first paints,
-    // which is after this returns.
-    appwins.background(m.id);
-    w.webContents.once("did-finish-load", () => {
-      if (currentAppId !== m.id) appwins.background(m.id);
-    });
-    return;
-  }
   w.focus();
   w.moveTop();
   for (const [oid, ow] of appwins.all()) if (oid !== m.id && ow.isVisible()) backgroundApp(oid);
   if (win && !win.isDestroyed()) win.hide();
-}
-
-/**
- * Start an app without showing it.
- *
- * For an app that is useful before anybody opens it. The media client is the
- * case this exists for: it is what makes the box a Plex player a phone can cast
- * to, and it can only be that while its page is running - so until now the box
- * was castable only after somebody had walked to the television and opened the
- * app, which is the one thing casting exists to avoid.
- *
- * Deliberately not a general "run at boot": it goes through the SAME window
- * path as a normal launch, so the app gets no capability it would not have had,
- * and it is an ordinary background window afterwards - the LRU cap and the
- * memory guard may drop it, Home brings it forward, and quitting it works. What
- * it skips is the screen.
- *
- * A no-op if the app is already running, or is not a local app: a remote site is
- * somebody else's page, and starting one unseen is a request nobody asked for.
- */
-function startAppHidden(id) {
-  const m = apps.manifestById(id);
-  if (!m || appWindow(id)) return false;
-  if (m.type !== "webclient" || (m.runtime || {}).serve === "remote") return false;
-  console.log("[apps] starting hidden:", id);
-  openLocalApp(m, { hidden: true });
-  appsChanged();
-  return true;
 }
 
 // ---- the note that appears over everything ----
@@ -3539,12 +3488,11 @@ function setWidget(appId, w) {
 /**
  * Tell HOME the set of running apps changed.
  *
- * It refetches on `visibilitychange`, which covers every way an app used to
- * start or stop - somebody was always looking at an app when it happened. An app
- * the BOX starts by itself (`startAppHidden`) breaks that: the launcher is
- * continuously visible while it happens, so nothing refetches, and an app was
- * running, holding memory and answering casts, with no row on HOME and therefore
- * no way to quit it.
+ * It refetches on `visibilitychange`, which covers every way somebody STARTS an
+ * app - they were looking at one when it happened. It does not cover an app that
+ * goes on its own: the LRU cap and the memory guard drop a hidden window with
+ * the launcher on screen the whole time, so HOME went on offering a Running row
+ * for an app that had gone, and its ✕ did nothing.
  */
 function appsChanged() {
   if (win && !win.isDestroyed()) {
@@ -3642,16 +3590,6 @@ const host = {
     const running = m && m.type === "native" ? nativeapp.id() === id : !!appwins.get(id);
     return { running: !!running, foreground: id === currentAppId };
   },
-  // Start THIS PLUGIN'S app without showing it, for one that is useful before
-  // anybody opens it - the media client is a Plex player a phone can cast to only
-  // while its page is running, so before this the box was castable only after
-  // somebody had walked to the television and opened it. An ordinary background
-  // window afterwards: evictable, foregrounded by Home, quittable.
-  //
-  // Re-bound per app in loadOnePlugin, which is what scopes it. On the bare host
-  // (no app) there is nothing to start, so it answers false rather than taking an
-  // id from a caller that has no app of its own.
-  startHidden: () => false,
   // One note on screen, for anyone on the box: the same toast MQTT pushes and the
   // voice satellite uses for a spoken answer's text. A plugin gets it here; a
   // local app's page can POST /tvbox/api/notify, which is the same door.
@@ -3722,11 +3660,6 @@ function loadOnePlugin(m) {
         ...host,
         // per-app widget slot - a plugin can only ever write its OWN card
         widget: { set: (w) => setWidget(m.id, w), clear: () => setWidget(m.id, null) },
-        // ...and it may only start ITS OWN app hidden. Nothing needs the general
-        // form, and starting somebody else's page unseen is not a thing this API
-        // should allow - the argument is ignored rather than validated, so a
-        // plugin cannot be wrong about it.
-        startHidden: () => startAppHidden(m.id),
         // ...and its OWN manifest switches, by key. Scoped for the same reason: a
         // plugin reading another app's settings is not a thing this API allows.
         switchOn: (key) => switchValue(m, key),

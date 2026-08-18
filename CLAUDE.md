@@ -216,14 +216,6 @@ shares one origin and that field is a claim any of them can make about another.
 Spotify's plugin-driven card is unchanged; this gives every player app the same
 thing for free.
 
-**`host.startHidden()`** starts the calling plugin's own app hidden, for an app
-that is useful before anybody opens it - the media client IS the Plex player a
-phone casts to, and only while its page runs. Same window path as a normal
-launch (no extra capability), ordinary background window afterwards. `show:
-false` is NOT enough on its own: measured, a fullscreen Electron window on this
-session maps anyway, so it is hidden through `appwins.background()` and again on
-`did-finish-load`, because the window maps when its page first paints.
-
 **The orphan-mpv reaper was dead code twice over.** It matched
 `tvbox-mpv.sock`, and the socket has carried a per-launch sequence number for
 some time (`/tmp/tvbox-mpv-15.sock`); the first fix then matched
