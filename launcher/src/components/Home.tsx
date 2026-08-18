@@ -48,9 +48,14 @@ export function Home() {
       if (!document.hidden) load();
     };
     document.addEventListener("visibilitychange", onVis);
+    // ...and when the box changes the set itself, which visibility cannot catch:
+    // an app started hidden at boot happens with this window on screen the whole
+    // time, so without this it ran with no row here and no way to quit it.
+    const offApps = window.tvbox?.onAppsChanged?.(() => void load()) ?? (() => {});
     return () => {
       alive = false;
       document.removeEventListener("visibilitychange", onVis);
+      offApps();
     };
   }, []);
 

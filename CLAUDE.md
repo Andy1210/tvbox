@@ -179,6 +179,57 @@ A failed registry costs its own apps and nothing else: `error` at the top level
 means NO source answered, and per-source failures travel in `sources[]`. Full
 design plus the local-registry dev loop: [docs/app-store-sources.md](docs/app-store-sources.md).
 
+### Sound outlives the screen, a picture does not (2026-08-18)
+
+Leaving an app calls the shared player's stop, which is right for a film - one
+playing behind the launcher is the box lying about what it is showing - and
+wrong for everything else. It made the media client the one music player on this
+box you could not walk away from, and it refused a cast from a phone with "the
+media app is not on screen" while that app was alive and polling behind the
+launcher.
+
+`soundOutlivesTheScreen()` in [shell/main.js](shell/main.js) is the whole rule:
+audio-only mpv survives `showLauncher()` and `stopPrevPlayback()`. It asks
+nothing about WHICH app is leaving, deliberately - an owner test kept the music
+through Home and then killed it the moment any other app was opened, and killed
+it again when Home was pressed from an app that was not the one playing. What
+ends music is something else claiming the player, or the owning app being quit.
+
+Three consequences, each a hole the first cut left open:
+
+- **A backgrounded app may drive the player it OWNS** (`player.owner() ===
+senderId` in the `player` IPC handler). A queue has to cross to its next track
+  with nobody looking at the app, and pause/stop have to keep working from a
+  phone. Starting a PICTURE from the background stays refused, checked at `play`
+  where `queued.kind` is known.
+- **The app whose sound is playing is not evicted** (`playingId` in
+  [shell/appwindows.js](shell/appwindows.js)). It was an ordinary hidden window
+  to the LRU cap and the RAM guard. Note the shape: the spared app is not part of
+  the evictable set, so a box playing music holds one window MORE than the cap.
+- **Quitting the app stops its sound** (`destroyAppWindow`), because the page
+  that owns the queue is gone.
+
+**The HOME card is derived, not pushed.** `soundWidget()` builds it from the
+now-playing an app already reports for MQTT, and addresses it by
+`player.owner()` - never the payload's own `app` field, because every local app
+shares one origin and that field is a claim any of them can make about another.
+Spotify's plugin-driven card is unchanged; this gives every player app the same
+thing for free.
+
+**The orphan-mpv reaper was dead code twice over.** It matched
+`tvbox-mpv.sock`, and the socket has carried a per-launch sequence number for
+some time (`/tmp/tvbox-mpv-15.sock`); the first fix then matched
+`--input-ipc-server=…`, which pkill's own option parser eats, so it exited 2 with
+a usage message and still killed nothing. It needs `-f --` before the pattern.
+Invisible while leaving an app stopped playback anyway - two orphans playing two
+different tracks the moment it did not.
+
+**Every way a window dies goes through `appwins.destroy`**, so the sound and the
+HOME card come down in its `onDestroyed` hook rather than in the one caller that
+asked. The LRU cap, the memory guard and a crashed renderer all reach it without
+passing through main.js's own teardown, and each would otherwise leave mpv
+playing with no page able to stop it.
+
 ## Dev / deploy / verify
 
 ```sh
