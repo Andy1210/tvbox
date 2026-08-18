@@ -354,6 +354,23 @@ const { ipcRenderer } = require("electron");
     };
   };
 
+  // The set of running apps changed under HOME's feet - an app the box started
+  // by itself, or one that was dropped. HOME refetches on this; without it its
+  // list is only as fresh as the last time the window became visible.
+  window.tvbox.onAppsChanged = function (cb) {
+    var h = function () {
+      try {
+        cb();
+      } catch (e) {}
+    };
+    ipcRenderer.on("apps-changed", h);
+    return function () {
+      try {
+        ipcRenderer.removeListener("apps-changed", h);
+      } catch (e) {}
+    };
+  };
+
   // Remote Home button (CEC double-tap Back -> KEY_HOMEPAGE -> DOM "BrowserHome"):
   // always return to the HOME launcher, from any app.
   window.addEventListener(

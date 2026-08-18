@@ -51,6 +51,8 @@ export interface TvboxBridge {
   // media commands forwarded from the shell (MQTT tv_control) for the active app
   onCommand?(cb: (cmd: { action: string; app?: string }) => void): () => void;
   onWidgets?(cb: (widgets: { id: string; title: string; subtitle: string }[]) => void): () => void;
+  /** The set of running apps changed - refetch. The box can start one itself. */
+  onAppsChanged?(cb: () => void): () => void;
   onNav?(cb: (n: TvNav) => void): () => void;
   // The screensaver an app asked for: done() tells the shell a key was pressed on
   // it, which sends the screen back to that app. request() is the app's half and

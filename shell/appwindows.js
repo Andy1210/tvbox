@@ -17,12 +17,20 @@ let deps = {
   enabled: () => true, // config.apps.background !== false (the rollback lever)
   memInfo: () => null, // () => { totalKb, availableKb } from main.js
   foregroundId: () => null, // () => currentAppId, so eviction spares the active app
-  // () => player.owner() while something is loaded. Eviction spares it for the
-  // same reason it spares the foreground app: that window is not idle. Music
-  // outlives leaving the app now, and the page is what moves the queue on and
-  // what a phone's pause reaches - dropped, the album plays on out of a box with
-  // nothing left to stop it.
+  // () => player.owner() while something is actually PLAYING. Eviction spares it
+  // for the same reason it spares the foreground app: that window is not idle,
+  // and the page is what moves the queue on and what a phone's pause reaches.
+  // Not while PAUSED, or an app pins itself in memory for ever by pausing a
+  // track - and a paused one is safe to drop because `onDestroyed` stops the
+  // sound and takes the card down with it.
   playingId: () => null,
+  // Called for every window that goes, whichever way it went. The cap, the
+  // memory guard and a crashed renderer all reach `destroy` without passing
+  // through main.js's own teardown, so this is the only place that covers all
+  // of them - and since music outlives leaving an app, a window dropped here
+  // would otherwise leave mpv playing with no page to stop it and a card on
+  // HOME naming it.
+  onDestroyed: () => {},
 };
 let limits = null; // computed once from total RAM on first use
 
@@ -101,6 +109,11 @@ function background(id) {
 function destroy(id) {
   const w = get(id);
   wins.delete(id);
+  try {
+    deps.onDestroyed(id);
+  } catch (e) {
+    /* a teardown hook must not stop the window from going */
+  }
   if (w) {
     try {
       w.destroy(); // not close(): skip beforeunload games from app pages

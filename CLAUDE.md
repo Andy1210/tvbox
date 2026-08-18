@@ -216,7 +216,7 @@ shares one origin and that field is a claim any of them can make about another.
 Spotify's plugin-driven card is unchanged; this gives every player app the same
 thing for free.
 
-**`host.startHidden(id)`** starts an app's window without showing it, for an app
+**`host.startHidden()`** starts the calling plugin's own app hidden, for an app
 that is useful before anybody opens it - the media client IS the Plex player a
 phone casts to, and only while its page runs. Same window path as a normal
 launch (no extra capability), ordinary background window afterwards. `show:
@@ -224,10 +224,19 @@ false` is NOT enough on its own: measured, a fullscreen Electron window on this
 session maps anyway, so it is hidden through `appwins.background()` and again on
 `did-finish-load`, because the window maps when its page first paints.
 
-**The orphan-mpv reaper was dead code for a while.** It matched
-`tvbox-mpv.sock`; the socket has carried a per-launch sequence number for some
-time (`/tmp/tvbox-mpv-15.sock`). Invisible while leaving an app stopped playback
-anyway - two orphans playing two different tracks the moment it did not.
+**The orphan-mpv reaper was dead code twice over.** It matched
+`tvbox-mpv.sock`, and the socket has carried a per-launch sequence number for
+some time (`/tmp/tvbox-mpv-15.sock`); the first fix then matched
+`--input-ipc-server=…`, which pkill's own option parser eats, so it exited 2 with
+a usage message and still killed nothing. It needs `-f --` before the pattern.
+Invisible while leaving an app stopped playback anyway - two orphans playing two
+different tracks the moment it did not.
+
+**Every way a window dies goes through `appwins.destroy`**, so the sound and the
+HOME card come down in its `onDestroyed` hook rather than in the one caller that
+asked. The LRU cap, the memory guard and a crashed renderer all reach it without
+passing through main.js's own teardown, and each would otherwise leave mpv
+playing with no page able to stop it.
 
 ## Dev / deploy / verify
 
