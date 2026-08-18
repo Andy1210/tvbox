@@ -5,6 +5,31 @@ updates). `scripts/make-release.sh` lifts the current version's `hu`/`en`
 blocks into the OTA feed's `notes` - keep both languages, keep it short, and
 write for the person on the couch (what changes for THEM), not for developers.
 
+## 3.7.0
+
+### hu
+
+- **A zene nem áll le, ha kilépsz az appból.** Nyomhatsz Home-ot vagy nyithatsz másik
+  alkalmazást, a szám tovább szól, és a kezdőképernyőn megjelenik egy kártya azzal, ami
+  éppen megy — arra lépve visszajutsz hozzá. Akkor áll le, ha bezárod az alkalmazást a
+  „Futó appok" sorban, ha valami más kezd szólni, vagy ha a Beállítások → Kikapcsolás →
+  Alvás gombot használod. Filmre ez nem vonatkozik: az továbbra is véget ér, amikor
+  kilépsz belőle.
+- **Egy alkalmazás már azelőtt is dolgozhat, hogy megnyitnád.** Ezt maga az alkalmazás
+  kéri a boxtól; a médiaalkalmazás az első, amelyik él vele, hogy a telefonod akkor is
+  ide tudjon küldeni zenét, ha a TV-n épp a kezdőképernyő van.
+
+### en
+
+- **Music does not stop when you leave the app.** Press Home or open something else and
+  the track keeps playing, with a card on the home screen showing what it is - press it
+  to get back. It stops when you close the app from the "Running" row, when something
+  else starts playing, or when you use Settings → Power → Sleep. Films are unchanged:
+  leaving one still ends it.
+- **An app can be working before you open it.** The app asks the box for this; the media
+  app is the first to use it, so your phone can send music here while the TV is sitting
+  on the home screen.
+
 ## 3.6.0
 
 ### hu

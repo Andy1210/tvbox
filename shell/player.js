@@ -124,11 +124,19 @@ function clearMpvMedia() {
 }
 
 // ---- mpv control ----
-// Player events go to the launcher (now-playing state) and the FOREGROUND app
-// only - never a backgrounded app; which windows those are is the shell's answer.
-// A hidden app receiving "finished" and auto-advancing would start mpv behind an
-// opaque foreground (invisible video + phantom audio) and keep the box from ever
-// reporting idle.
+// Player events go to the launcher (now-playing state), the FOREGROUND app, and
+// the app that OWNS what is loaded - which windows those are is the shell's
+// answer.
+//
+// That third one used to be forbidden, and the reason it was is worth keeping:
+// a hidden app auto-advancing would start mpv behind an opaque foreground, i.e.
+// invisible video and phantom audio, and hold the box out of idle for ever.
+// What changed is that sound now outlives leaving an app on purpose, so the
+// hazard is answered where it can be answered precisely - a background sender
+// may only start SOUND (the player broker refuses anything else at `queue` and
+// `play`, and refuses `pip` outright), and a paused audio player does not count
+// as the box being busy. Without the event a queue simply stopped at its first
+// track boundary with nobody looking, which is the whole feature.
 function emit(ev) {
   deps.sendEvent(ev);
 }

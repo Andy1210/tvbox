@@ -38,9 +38,15 @@ function fakeWin() {
 let mem = { totalKb: 8 * 1024 * 1024, availableKb: 4 * 1024 * 1024 };
 let enabled = true;
 let fg = null;
+let playing = null;
 
 test("setup", () => {
-  appwins.init({ enabled: () => enabled, memInfo: () => mem, foregroundId: () => fg });
+  appwins.init({
+    enabled: () => enabled,
+    memInfo: () => mem,
+    foregroundId: () => fg,
+    playingId: () => playing,
+  });
 });
 
 test("background hides and mutes; destroy removes from the registry", () => {
@@ -95,4 +101,49 @@ test("RAM guard never evicts the foreground app", () => {
   fg = null;
   mem = { totalKb: 8 * 1024 * 1024, availableKb: 4 * 1024 * 1024 };
   appwins.destroy("livetv");
+});
+
+test("the app whose sound is playing is spared, hidden or not", () => {
+  // Music outlives leaving the app, so a hidden media client is not an idle
+  // window: it is what moves the queue to the next track and what a phone's
+  // pause reaches. Dropped, the album plays on out of a box with nothing left
+  // to stop it - which is worse than the memory it costs.
+  //
+  // The cap here is the 8GB box's six, not a number this test picks: limitsFor()
+  // caches on first use, so an earlier test in this file has already fixed it.
+  for (const id of appwins.runningIds()) appwins.destroy(id);
+  playing = "music";
+  fg = null;
+  const wins = {};
+  for (const id of ["music", "a", "b", "c", "d", "e", "f", "g"]) {
+    wins[id] = fakeWin();
+    appwins.register(id, wins[id]);
+    appwins.background(id); // all hidden, "music" the least recently shown
+  }
+
+  // The spared app is not part of the evictable set at all, so the cap of six
+  // applies to the OTHERS: eight windows leave seven, one dropped. That is the
+  // deliberate shape - a box playing music holds one window more than a silent
+  // one - and it is why the count is asserted rather than left to a comment.
+  // WHICH one goes is not asserted: every window here is registered in the same
+  // millisecond, so the least-recently-shown order among them is a tie the sort
+  // is free to break either way.
+  assert.equal(wins.music.destroyed, false, "the playing app survives the cap");
+  const gone = () => Object.values(wins).filter((w) => w.destroyed).length;
+  assert.equal(gone(), 1, "the cap applied to the rest");
+
+  // And under memory pressure, which is the other way a hidden app is dropped.
+  const was = mem;
+  mem = { totalKb: 8 * 1024 * 1024, availableKb: 1 };
+  appwins.ramGuardTick();
+  assert.equal(wins.music.destroyed, false, "the playing app survives low memory");
+  assert.equal(gone(), 2, "something else went instead");
+
+  // Nothing playing: it is an ordinary hidden app again.
+  // Nothing playing: it is the least recently shown hidden app again, and the
+  // guard reaches it.
+  playing = null;
+  for (let i = 0; i < 8 && !wins.music.destroyed; i++) appwins.ramGuardTick();
+  assert.equal(wins.music.destroyed, true);
+  mem = was;
 });
