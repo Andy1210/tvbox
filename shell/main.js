@@ -181,7 +181,13 @@ const queued = { url: null, startPos: 0, streams: null, kind: null };
 // to look at). HIDDEN app windows don't block idleness - they're muted/paused,
 // and the restart simply drops them (they reload on next launch).
 function boxIdle() {
-  return !player.running() && !currentAppId && !(nowPlaying && nowPlaying.state === "playing");
+  // A PAUSED audio-only player does not count. Sound outlives leaving an app now
+  // (`soundOutlivesTheScreen`), so pausing an album and pressing Home used to
+  // leave mpv loaded for ever - and with it the box permanently "in use", which
+  // gates the sleep timer and the nightly update. Nothing is coming out of the
+  // speakers and nobody is watching anything; that is idle.
+  const playerBusy = player.running() && !(player.isAudioOnly() && player.media.paused);
+  return !playerBusy && !currentAppId && !(nowPlaying && nowPlaying.state === "playing");
 }
 // Is the box free to start something substantial? Idle as above, no install in
 // flight, and none of the shell's OWN background maintenance running. The last
@@ -1677,10 +1683,10 @@ const destroyAppWindow = (id) => {
   if (id != null && player.owner() === id && player.running()) {
     player.setPlaying(null);
     player.stop();
-    // And the card goes with it: the app cannot report itself idle from a page
-    // that no longer exists.
-    setWidget(id, null);
   }
+  // The card goes with the app either way: a page that no longer exists cannot
+  // report itself idle, and this is also the ✕ in HOME's Running row.
+  clearSoundWidget(id);
   return appwins.destroy(id);
 };
 
@@ -3311,7 +3317,10 @@ ipcMain.handle("player", (e, action, payload) => {
   const background = senderId !== currentAppId;
   // `!= null` on purpose: the launcher's id is null, and the launcher is never a
   // background owner - it is the thing in front when it plays anything.
-  const ownsPlayer = senderId != null && player.owner() === senderId;
+  // `running()` is part of it: `owner` is not cleared when playback ends, so
+  // asking it alone leaves "the last app to have used the player" holding the
+  // background exemption for the life of the box.
+  const ownsPlayer = senderId != null && player.running() && player.owner() === senderId;
   if (senderId === undefined || (background && !ownsPlayer) || !capsFor(senderId).includes("player")) {
     return { ok: false, error: "player not permitted (not the foreground app)" };
   }
@@ -3323,6 +3332,13 @@ ipcMain.handle("player", (e, action, payload) => {
   // laptop can read. The origin is what a diagnosis actually needs.
   console.log("[player] action", action, payload && payload.url ? httpserver.originOf(payload.url) : "");
   if (action === "queue") {
+    // `queued` is one object shared by every app, so what a background sender
+    // writes here is what the FOREGROUND app's next play launches - including a
+    // plain resume, which does not re-queue. Sound is all a background sender
+    // may stage, for the same reason it is all one may start.
+    if (background && payload.kind !== "audio") {
+      return { ok: false, error: "player not permitted (a background app may only queue sound)" };
+    }
     queued.url = payload.url;
     queued.startPos = payload.startPos || 0;
     queued.streams = payload.streams || null;
@@ -3345,7 +3361,29 @@ ipcMain.handle("player", (e, action, payload) => {
     }
     // remember whose window the video belongs to: the first-frame reveal
     // (setVideoMode(true) in observeMpv) must hit THAT window, not the launcher
+    const previousOwner = player.running() ? player.owner() : null;
     player.setOwner(appIdForSender(e.sender));
+    // Tell the app that just lost the player. Nothing used to: leaving an app
+    // sends `finished{reason}` because the shell stops the player, but one app
+    // TAKING it from another was silent - so a media client whose music had been
+    // replaced by Live TV went on reporting itself as playing, to the house and
+    // to a phone, with a position that never moved. Its own card on HOME went
+    // with it, since the app can no longer be the one to clear it.
+    if (previousOwner != null && previousOwner !== player.owner()) {
+      // Sent to THAT window rather than through the player's own emit, which
+      // reaches the launcher and the foreground app - and the app being told is
+      // by definition neither. It answers a `finished` WITH a reason by
+      // stopping rather than advancing, and its own stop is refused by the
+      // guard above (it is a background non-owner now), so it cannot take the
+      // player back from the app that just claimed it.
+      const prevWin = appWindow(previousOwner);
+      if (prevWin && !prevWin.isDestroyed()) {
+        try {
+          prevWin.webContents.send("player-event", { type: "finished", reason: "replaced" });
+        } catch (e) {}
+      }
+      clearSoundWidget(previousOwner);
+    }
     // The KIND has to match as well as the URL. The same file asked for as
     // sound after being played as a picture is a different launch - audio skips
     // the mode handshake and the reveal - and resuming here would silently keep
@@ -3415,6 +3453,11 @@ ipcMain.handle("player", (e, action, payload) => {
     // Toggle the current channel between a PiP (at the launcher-measured rect) and
     // fullscreen. PiP needs the window transparent (so mpv behind shows through the
     // hole); fullscreen starts opaque and observeMpv reveals on the first frame.
+    //
+    // Never from the background: this relaunches the stream WITH video and claims
+    // the video mode, which is the one thing the background exemption exists to
+    // withhold - the exemption is for sound.
+    if (background) return { ok: false, error: "player not permitted (not the foreground app)" };
     if (player.playing()) {
       setVideoMode(!!payload.on);
       ensureAudio(() => player.launch(player.playing(), 0, !!payload.on, payload.rect, queued.streams));
@@ -3462,16 +3505,42 @@ function widgetList() {
  *
  * The launcher is deliberately excluded (its id is null): its own now-playing is
  * Live TV, and HOME is already where its card would point.
+ *
+ * Two things are load-bearing and were both wrong in the first cut:
+ *
+ * - **Who the card is about is remembered.** Every report that CLEARS a card
+ *   arrives AFTER mpv has gone - stopping is what makes an app report itself
+ *   idle - so asking the player at that moment answers nobody, and the card
+ *   stayed on HOME for ever, naming something that had finished. A card is
+ *   therefore addressed to the app it is already up for when the player has
+ *   nothing to say.
+ * - **Only sound gets one.** A film owns the screen; a card for it on the HOME
+ *   behind it says nothing, and it was the commonest way to get a stale one.
  */
+let soundCardFor = null;
+
 function soundWidget(data) {
-  const owner = player.running() ? player.owner() : null;
-  if (owner == null) return;
   const state = data && data.state;
-  if (state !== "playing" && state !== "paused") return setWidget(owner, null);
+  const sounding = (state === "playing" || state === "paused") && player.running() && player.isAudioOnly();
+  const owner = player.running() ? player.owner() : soundCardFor;
+  if (owner == null) return;
+  if (!sounding) {
+    setWidget(owner, null);
+    if (soundCardFor === owner) soundCardFor = null;
+    return;
+  }
+  soundCardFor = owner;
   setWidget(owner, {
     title: String((data && data.title) || ""),
     subtitle: String((data && data.artist) || ""),
   });
+}
+
+/** Take an app's card down, wherever the app went. */
+function clearSoundWidget(id) {
+  if (id == null) return;
+  setWidget(id, null);
+  if (soundCardFor === id) soundCardFor = null;
 }
 
 // ---- plugin host API + loader ----
@@ -3504,12 +3573,16 @@ const host = {
     const running = m && m.type === "native" ? nativeapp.id() === id : !!appwins.get(id);
     return { running: !!running, foreground: id === currentAppId };
   },
-  // Start an app without showing it, for one that is useful before anybody opens
-  // it - the media client is a Plex player a phone can cast to only while its
-  // page is running, so before this the box was castable only after somebody had
-  // walked to the television and opened it. An ordinary background window
-  // afterwards: evictable, foregrounded by Home, quittable. See startAppHidden.
-  startHidden: (id) => startAppHidden(String(id || "")),
+  // Start THIS PLUGIN'S app without showing it, for one that is useful before
+  // anybody opens it - the media client is a Plex player a phone can cast to only
+  // while its page is running, so before this the box was castable only after
+  // somebody had walked to the television and opened it. An ordinary background
+  // window afterwards: evictable, foregrounded by Home, quittable.
+  //
+  // Re-bound per app in loadOnePlugin, which is what scopes it. On the bare host
+  // (no app) there is nothing to start, so it answers false rather than taking an
+  // id from a caller that has no app of its own.
+  startHidden: () => false,
   // One note on screen, for anyone on the box: the same toast MQTT pushes and the
   // voice satellite uses for a spoken answer's text. A plugin gets it here; a
   // local app's page can POST /tvbox/api/notify, which is the same door.
@@ -3580,6 +3653,11 @@ function loadOnePlugin(m) {
         ...host,
         // per-app widget slot - a plugin can only ever write its OWN card
         widget: { set: (w) => setWidget(m.id, w), clear: () => setWidget(m.id, null) },
+        // ...and it may only start ITS OWN app hidden. Nothing needs the general
+        // form, and starting somebody else's page unseen is not a thing this API
+        // should allow - the argument is ignored rather than validated, so a
+        // plugin cannot be wrong about it.
+        startHidden: () => startAppHidden(m.id),
         // ...and its OWN manifest switches, by key. Scoped for the same reason: a
         // plugin reading another app's settings is not a thing this API allows.
         switchOn: (key) => switchValue(m, key),
@@ -3942,7 +4020,9 @@ app.whenReady().then(async () => {
     // Only while something is actually loaded: `owner` is not cleared when the
     // player stops, so asking it alone would spare an app for the rest of the
     // box's life because it once played a song.
-    playingId: () => (player.running() ? player.owner() : null),
+    // PLAYING, not merely loaded: an app that pauses a track would otherwise be
+    // immune to the cap and to the memory guard for as long as it liked.
+    playingId: () => (player.running() && !player.media.paused ? player.owner() : null),
   });
   setInterval(() => appwins.ramGuardTick(), 60 * 1000); // evict hidden apps under memory pressure
   nativeapp.init({
