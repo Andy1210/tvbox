@@ -5,6 +5,25 @@ updates). `scripts/make-release.sh` lifts the current version's `hu`/`en`
 blocks into the OTA feed's `notes` - keep both languages, keep it short, and
 write for the person on the couch (what changes for THEM), not for developers.
 
+## 3.7.1
+
+### hu
+
+- **Egy alkalmazás hangja nem tud többé „elveszni".** Ha valaki a telefonjáról
+  lehalkította azt, amit épp átküldött, a box eddig megjegyezte ezt a halkítást annak
+  az alkalmazásnak, és az utána néma maradt — miközben a Beállításokban a hangerő
+  végig 100%-ot mutatott, mert az a TV felé menő hangerő, nem az alkalmazásé. Mostantól
+  minden alkalmazás a saját teljes hangerején indul, a box hangerejét pedig ott állítod,
+  ahol eddig is.
+
+### en
+
+- **An app's sound can no longer go missing.** If someone turned down what they were
+  casting from their phone, the box used to remember that for the app, and it stayed
+  silent afterwards - while Settings kept showing 100%, because that is the volume going
+  to the TV, not the app's. Every app now starts at its own full volume, and you set the
+  box's volume where you always did.
+
 ## 3.7.0
 
 ### hu
