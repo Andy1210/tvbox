@@ -135,7 +135,12 @@ apt_install libasound2t64 || apt_install libasound2 && ok "libasound2" || warn "
 echo "==> audio: no per-stream volume memory (the box's volume is the sink's)"
 WP_DROPIN=/etc/wireplumber/wireplumber.conf.d/51-tvbox-stream-volume.conf
 mkdir -p /etc/wireplumber/wireplumber.conf.d
-cat > "$WP_DROPIN" <<'WPCONF'
+# Written aside and renamed into place, rather than straight over the target:
+# wireplumber parses this file at every session start and provision can run while
+# a session is live, so a half-written config must never be visible to it. The
+# rename is inside one directory, so it is atomic; the grep is what proves the
+# payload actually landed before that rename happens.
+cat > "$WP_DROPIN.new" <<'WPCONF'
 # tvbox: the box's volume is the SINK's. A per-stream volume is invisible to the
 # Settings panel, to Home Assistant and to MQTT, so one lowered from a casting
 # phone would silence an app with nothing on any screen to say why.
@@ -143,8 +148,13 @@ wireplumber.settings = {
   node.stream.restore-props = false
 }
 WPCONF
-[ -s "$WP_DROPIN" ] && ok "wireplumber: per-stream volume not restored" \
-  || warn "wireplumber drop-in not written (a stream volume can still get stuck)"
+if grep -q '^  node.stream.restore-props = false$' "$WP_DROPIN.new" 2>/dev/null &&
+  mv "$WP_DROPIN.new" "$WP_DROPIN"; then
+  ok "wireplumber: per-stream volume not restored"
+else
+  rm -f "$WP_DROPIN.new"
+  warn "wireplumber drop-in not written (a stream volume can still get stuck)"
+fi
 
 # libcec >= 8 (built from source - no distro ships it yet). Gives cec-client
 # --vendor-id, so the LG SIMPLINK identity no longer needs the LD_PRELOAD shim.
