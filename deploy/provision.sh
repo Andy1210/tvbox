@@ -42,7 +42,7 @@ fi
 # is not a reason to re-provision a fleet. scripts/provision_revision_check.js
 # is the reminder: it fails when the root payload's content moved and this did
 # not.
-PROVISION_REVISION=3
+PROVISION_REVISION=4
 
 # Set by tvbox-sysupdate: this run has nobody in front of it. Two things are a
 # person's to decide and are skipped in that mode - see where each is used.
@@ -117,6 +117,44 @@ apt_install mpv libpulse0 && ok "mpv + libpulse0" || warn "mpv/libpulse0 missing
 # libasound2t64 (64-bit time_t transition); fall back to the old name for a
 # bookworm box. Installed separately so a name miss can't drop mpv/libpulse0.
 apt_install libasound2t64 || apt_install libasound2 && ok "libasound2" || warn "libasound2 missing"
+
+# WirePlumber remembers a per-STREAM volume, and on a TV box that is a trap: the
+# only volume any surface here can see is the SINK's - the Settings audio panel,
+# Home Assistant's media_player and the MQTT volume commands all read and write
+# that one (shell/audio.js lists sinks; nothing lists streams). So a stream volume
+# lowered from a phone that is casting is invisible everywhere, survives reboots,
+# and silences that app for good: measured on the living-room box, the shell's own
+# stream sat at 1% while every surface reported 100%, so no webclient could be
+# heard at all.
+#
+# With the restore off a stream starts at the volume its app asks for, and the
+# box's volume stays the sink's - which is what the rest of the system already
+# means by it. The same setting gates the SAVE, so this also retires whatever a
+# box has stored already. Read at wireplumber start, so it applies from the next
+# session.
+echo "==> audio: no per-stream volume memory (the box's volume is the sink's)"
+WP_DROPIN=/etc/wireplumber/wireplumber.conf.d/51-tvbox-stream-volume.conf
+mkdir -p /etc/wireplumber/wireplumber.conf.d
+# Written aside and renamed into place, rather than straight over the target:
+# wireplumber parses this file at every session start and provision can run while
+# a session is live, so a half-written config must never be visible to it. The
+# rename is inside one directory, so it is atomic; the grep is what proves the
+# payload actually landed before that rename happens.
+cat > "$WP_DROPIN.new" <<'WPCONF'
+# tvbox: the box's volume is the SINK's. A per-stream volume is invisible to the
+# Settings panel, to Home Assistant and to MQTT, so one lowered from a casting
+# phone would silence an app with nothing on any screen to say why.
+wireplumber.settings = {
+  node.stream.restore-props = false
+}
+WPCONF
+if grep -q '^  node.stream.restore-props = false$' "$WP_DROPIN.new" 2>/dev/null &&
+  mv "$WP_DROPIN.new" "$WP_DROPIN"; then
+  ok "wireplumber: per-stream volume not restored"
+else
+  rm -f "$WP_DROPIN.new"
+  warn "wireplumber drop-in not written (a stream volume can still get stuck)"
+fi
 
 # libcec >= 8 (built from source - no distro ships it yet). Gives cec-client
 # --vendor-id, so the LG SIMPLINK identity no longer needs the LD_PRELOAD shim.
