@@ -38,7 +38,8 @@ const TYPING_REPLACES_MIN_COMPOSITOR = "0.1.10";
 // delivery will not replace.
 const deliveryReplaces = () => compositor.atLeast(TYPING_REPLACES_MIN_COMPOSITOR);
 const lang = require("./lang"); // what language a remote web app is told it runs in
-const { withLaunchQuery, playQuery } = require("./launchurl"); // what a launch may carry: a remote app's url query, a local app's search words
+// what a launch may carry: a remote app's url query, a local app's search words
+const { withLaunchQuery, playQuery, hasUsableLaunch } = require("./launchurl");
 const audio = require("./audio"); // wpctl sink list + volume (device audio settings)
 const bluetooth = require("./bluetooth"); // bluetoothctl pair/connect (audio + input devices)
 const ambient = require("./ambient"); // weather + local photos for the idle/ambient screen
@@ -2563,8 +2564,12 @@ function playMediaIn(cmd) {
     // command - is asking a site we cannot script to search for something.
     // Opening its front page after stopping the music is the worst answer
     // available, so it is refused before anything is taken away.
+    // `hasUsableLaunch` rather than a non-empty test: withLaunchQuery drops what
+    // it cannot use and hands the base url back, so "   " or "a b" would open
+    // the app's front page and silence the room to do it.
     const launch = String((cmd && cmd.launch) || "");
-    if (!launch) return console.warn("[mqtt] play_media: " + id + " is a remote app and needs `launch`");
+    if (!hasUsableLaunch(launch))
+      return console.warn("[mqtt] play_media: " + id + " is a remote app and needs `launch`");
     // Silenced AFTER, not before: navTo can refuse - an unconfigured remote app,
     // or launch data past withLaunchQuery's caps - and the rule this shell
     // already keeps is that a refusal must not cost the current stream.

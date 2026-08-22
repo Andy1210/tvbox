@@ -31,8 +31,13 @@ const { ipcRenderer } = require("electron");
   var earlyCommands = [];
   var EARLY_WINDOW_MS = 10000;
   var earlySince = Date.now();
+  var collecting = true;
   ipcRenderer.on("tv-command", function (_e, c) {
-    if (earlyCommands && earlyCommands.length < 4) earlyCommands.push(c);
+    // Collecting STOPS at the first listener. What comes after that is delivered
+    // live, and holding it as well would replay it to a listener that registers
+    // later - a screen remounting and re-subscribing would then act on a command
+    // it has already acted on.
+    if (collecting && earlyCommands.length < 4) earlyCommands.push(c);
   });
 
   // ---- universal: shell navigation (works in every app) ----
@@ -100,6 +105,7 @@ const { ipcRenderer } = require("electron");
       // Anything held is replayed to this listener too, until the window closes -
       // after that the backlog is dropped, because a listener registered a minute
       // into a session is not part of the hand-over this exists for.
+      collecting = false;
       var held = earlyCommands;
       if (held && Date.now() - earlySince > EARLY_WINDOW_MS) {
         earlyCommands = null;

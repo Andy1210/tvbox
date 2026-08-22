@@ -58,16 +58,47 @@ function withLaunchQuery(url, query) {
  * capped. Empty means there was nothing to look for.
  */
 const MAX_PLAY_QUERY = 200;
+// The same set textinput.js strips from what a phone types, and for the same
+// reason: C0 and DEL are the obvious ones, but the C1 block, the Arabic letter
+// mark and the bidi and zero-width controls are the ones that survive a glance
+// at a television two metres away - and this text reaches a log line and an
+// app's search box. Replaced with a space rather than removed, so two words
+// separated by one do not become a word nobody asked for.
+// eslint-disable-next-line no-control-regex
+const PLAY_QUERY_STRIP = /[\u0000-\u001f\u007f-\u009f\u061c\u200b-\u200f\u202a-\u202e\u2066-\u2069\ufeff]/g;
 function playQuery(raw) {
-  return (
-    String(raw == null ? "" : raw)
-      // eslint-disable-next-line no-control-regex
-      .replace(/[\u0000-\u001f\u007f]/g, " ")
-      .replace(/\s+/g, " ")
-      .trim()
-      .slice(0, MAX_PLAY_QUERY)
-      .trim()
-  );
+  return String(raw == null ? "" : raw)
+    .replace(PLAY_QUERY_STRIP, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, MAX_PLAY_QUERY)
+    .trim();
 }
 
-module.exports = { withLaunchQuery, playQuery, MAX_LAUNCH_PARAMS, MAX_LAUNCH_KEY, MAX_LAUNCH_VALUE, MAX_PLAY_QUERY };
+/**
+ * Would this launch data put ANY parameter on the url?
+ *
+ * `withLaunchQuery` drops what it cannot use and hands the base url back
+ * unchanged, so a caller checking only "is the string non-empty" opens the app's
+ * front page for `"   "` or `"a b"` - and, for `play_media`, silences the room
+ * to do it. This is the same rule, asked before anything is taken away.
+ */
+function hasUsableLaunch(query) {
+  if (!query) return false;
+  for (const [k, v] of new URLSearchParams(String(query))) {
+    if (k.length > MAX_LAUNCH_KEY || !LAUNCH_KEY_RE.test(k)) continue;
+    if (v.length > MAX_LAUNCH_VALUE) continue;
+    return true;
+  }
+  return false;
+}
+
+module.exports = {
+  withLaunchQuery,
+  playQuery,
+  hasUsableLaunch,
+  MAX_LAUNCH_PARAMS,
+  MAX_LAUNCH_KEY,
+  MAX_LAUNCH_VALUE,
+  MAX_PLAY_QUERY,
+};
