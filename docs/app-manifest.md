@@ -186,8 +186,11 @@ exists for state the shell cannot see: the shell ends its own shared player when
 an app closes, but a plugin's daemon is invisible to it, and Spotify's music
 went on playing out of a box with nothing left to reach it. Any of the three may
 be async; a rejection is logged, never rethrown.
-Plugins load **at shell boot only** (unlike manifests, which reload live) and
-only when the app's `requires.bin` all resolve.
+Plugins load at shell boot, and only when the app's `requires.bin` all resolve.
+An install or an update hot-loads one straight away (replacing the old code if it
+is still loaded), so a package fix takes effect without a reboot - but only for
+an app the store handled: a `plugin.js` dropped into `~/.tvbox/apps` by hand
+needs a shell restart, unlike a manifest, which reloads live.
 
 > **Trust note:** a plugin is Node code running in the shell's host process -
 > installing one is code execution on the box. The registry is curated (every app

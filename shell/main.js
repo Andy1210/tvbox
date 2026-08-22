@@ -3857,12 +3857,8 @@ function hotLoadPlugin(id) {
   }
   const plugin = loadOnePlugin(m);
   if (!plugin) return false;
-  try {
-    if (plugin.start) plugin.start();
-    console.log("[plugin] hot-started", id);
-  } catch (e) {
-    console.warn("[plugin] hot-start", id, "failed:", e.message);
-  }
+  if (typeof plugin.start === "function") callPlugin(id, "start", () => plugin.start());
+  console.log("[plugin] hot-started", id);
   return true;
 }
 // Stop ONE app's plugin and forget it: the app is going away (uninstall) or being
@@ -3899,19 +3895,16 @@ function unloadPlugin(id) {
   return true;
 }
 function startPlugins() {
-  for (const p of loadedPlugins.values()) {
-    try {
-      if (p.start) p.start();
-    } catch (e) {
-      console.warn("[plugin] start:", e.message);
-    }
+  for (const [id, p] of loadedPlugins) {
+    if (typeof p.start === "function") callPlugin(id, "start", () => p.start());
   }
 }
 function stopPlugins() {
-  for (const p of loadedPlugins.values()) {
-    try {
-      if (p.stop) p.stop();
-    } catch (e) {}
+  for (const [id, p] of loadedPlugins) {
+    // Logged rather than swallowed: this runs on the way out, and a plugin that
+    // could not put its daemon down is the reason the next start finds the port
+    // taken.
+    if (typeof p.stop === "function") callPlugin(id, "stop", () => p.stop());
   }
   supervisor.stopAll();
   fileserver.stop(null); // the symlinked view of the box's folders is not left behind
