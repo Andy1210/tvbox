@@ -1691,11 +1691,18 @@ const leftForeground = (id) => textinput.dropFor(id);
  */
 function appWindowGone(id) {
   if (id == null) return;
-  if (player.owner() === id && player.running()) {
+  // Was the shared player OURS for this app? Then stopping it below really does
+  // end the sound, and the claim has to go with it - which is not true of a
+  // plugin's own daemon (librespot), the case `clearNowPlayingFor` is kept off
+  // this path for: `boxIdle` reads the claim to know Spotify is playing, and
+  // clearing it here would let the box sleep the television mid-song.
+  const oursWasPlaying = player.owner() === id && player.running();
+  if (oursWasPlaying) {
     player.setPlaying(null);
     player.stop();
   }
   clearSoundWidget(id);
+  if (oursWasPlaying) clearNowPlayingFor(id);
   appsChanged();
 }
 
@@ -2534,7 +2541,12 @@ function forwardCommand(cmd) {
   // (`playing`/`paused` - a payload with no state at all used to qualify), and a
   // LIVE window, so the target is an app that is running here and now. A wrong
   // claim can then at most send a pause to a local app that is not playing.
-  const sounding = soundingApp();
+  // Liveness-checked, and the VALUE is checked too, not just the target: an app
+  // whose window is gone can still be named by the claim (nothing else clears
+  // it), and broadcasting that id makes every live app stand down while the
+  // assistant reports the publish.
+  const claimed = soundingApp();
+  const sounding = claimed && (claimed === currentAppId || appWindow(claimed)) ? claimed : "";
   const owner = sounding && sounding !== currentAppId ? appWindow(sounding) : null;
   if (owner) targets.add(owner.webContents);
   // Every target is told WHICH app the shell believes is sounding, because the
