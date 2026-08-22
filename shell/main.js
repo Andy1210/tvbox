@@ -2490,19 +2490,49 @@ function bridgesCmd(cmd) {
   fifoCmd(REMOTE_CMD_FIFO, cmd, "remote");
 }
 function forwardCommand(cmd) {
-  if (win && !win.isDestroyed()) {
-    try {
-      win.webContents.send("tv-command", cmd);
-    } catch (e) {}
-  }
+  const targets = new Set();
+  if (win && !win.isDestroyed()) targets.add(win.webContents);
   // The active app runs in its own window now - it gets the transport too
   // (remote/sandboxed windows deliberately have no tv-command listener).
   const fg = currentAppId && appWindow(currentAppId);
-  if (fg) {
+  if (fg) targets.add(fg.webContents);
+  // The app making the SOUND, which is often not the one on screen: music
+  // deliberately survives a return to the launcher (`soundOutlivesTheScreen`, and
+  // for an app whose plugin plays its own audio the plugin outlives the window's
+  // visibility), and showLauncher nulls currentAppId. So the commonest "pause the
+  // music" there is - asked minutes after the screen moved on - reached the
+  // launcher and nothing else, and the app that was playing never heard it.
+  //
+  // `nowPlaying.app` is the app's own claim, which is what the sound widget and
+  // the HA media_player already run on; a wrong claim can at most send a pause to
+  // a local app that is not playing.
+  const sounding = nowPlaying && nowPlaying.state !== "idle" ? String(nowPlaying.app || "") : "";
+  const owner = sounding && sounding !== currentAppId ? appWindow(sounding) : null;
+  if (owner) targets.add(owner.webContents);
+  for (const wc of targets) {
     try {
-      fg.webContents.send("tv-command", cmd);
+      wc.send("tv-command", cmd);
     } catch (e) {}
   }
+}
+
+// The lyrics are the one forwarded command that needs a SCREEN, so the app
+// holding the words may have to be brought forward first - it is usually playing
+// in the background, where it can show nothing at all.
+//
+// The screen is only taken when it is FREE: the launcher, or the app itself.
+// Something else on screen is something somebody is watching, and navTo ends a
+// running native app outright (it takes the box's one video plane), so the lyrics
+// are never worth that. The command is forwarded either way: the app sets its own
+// state and has them up when its screen does come back.
+function showLyrics(cmd) {
+  const state = String((cmd && cmd.state) || "").toLowerCase();
+  const sounding = nowPlaying && nowPlaying.state !== "idle" ? String(nowPlaying.app || "") : "";
+  const target = sounding || currentAppId || "";
+  const screenFree = !nativeapp.running() && (!currentAppId || currentAppId === target);
+  // Hiding them needs no screen, so "off" never navigates.
+  if (target && state !== "off" && screenFree && currentAppId !== target) navTo(target);
+  forwardCommand(cmd);
 }
 
 /**
@@ -2635,6 +2665,9 @@ const TV_COMMANDS = [
   "stop",
   "next",
   "previous",
+  "shuffle",
+  "repeat",
+  "lyrics",
   "seek",
   "volume_set",
   "volume_mute",
@@ -2839,7 +2872,23 @@ function handleTvCommand(cmd) {
     case "next":
     case "previous":
       forwardCommand(cmd);
-      break; // no mpv analogue; the launcher routes to Spotify
+      break; // no mpv analogue; the app that owns the sound routes it
+    // Three the shell has no analogue of at all: what shuffle, repeat and the
+    // lyrics mean belongs to the app holding the queue, so they are only
+    // forwarded. `state` travels in the house's own vocabulary (on/off/toggle,
+    // and off/one/all for repeat) and each app translates it into its own -
+    // Spotify's API wants "context"/"track", the mediaclient's queue "all"/"one".
+    case "shuffle":
+    case "repeat":
+      forwardCommand(cmd);
+      break;
+    case "lyrics":
+      // The one of the three that needs a SCREEN. An app playing in the
+      // background has no way to show anything, so the command has to bring it
+      // forward first - and the forward must happen before the command, or the
+      // app answers it while still hidden and the screen never changes.
+      showLyrics(cmd);
+      break;
     // Music asked for by voice. The assistant knows what to play but cannot
     // reach what plays it: the Spotify account lives in that app's own plugin,
     // behind an HTTP server bound to loopback, and YouTube's TV page is

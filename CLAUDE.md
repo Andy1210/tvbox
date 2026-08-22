@@ -228,6 +228,19 @@ a usage message and still killed nothing. It needs `-f --` before the pattern.
 Invisible while leaving an app stopped playback anyway - two orphans playing two
 different tracks the moment it did not.
 
+**A transport command has to reach the app that owns the SOUND** (2026-08-22).
+`forwardCommand` sent to the launcher and to the foreground app, and this rule is
+exactly what leaves neither of them holding the music: `showLauncher` nulls
+`currentAppId` while the audio plays on. So the commonest spoken "pause the
+music" there is - asked minutes after the screen moved on - reached the launcher
+and nothing else, and the assistant confirmed it. It now also goes to
+`nowPlaying.app`, which is the app's own claim (what the sound widget and the HA
+media_player already run on); the worst a false claim can do is send a pause to a
+local app that is not playing. `lyrics` is the one forwarded command that needs a
+SCREEN, so it brings that app forward - but only when the screen is free (the
+launcher, or the app itself), because `navTo` ends a running native app outright
+and nobody asked for the lyrics badly enough to take a game off the television.
+
 **Every way a window dies goes through `appwins.destroy`**, so the sound and the
 HOME card come down in its `onDestroyed` hook rather than in the one caller that
 asked. The LRU cap, the memory guard and a crashed renderer all reach it without

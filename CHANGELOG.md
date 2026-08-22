@@ -5,6 +5,29 @@ updates). `scripts/make-release.sh` lifts the current version's `hu`/`en`
 blocks into the OTA feed's `notes` - keep both languages, keep it short, and
 write for the person on the couch (what changes for THEM), not for developers.
 
+## 3.9.0
+
+### hu
+
+- **A szóban kért szüneteltetés akkor is odaér, ha a zene a háttérben szól.** Eddig
+  csak akkor működött, ha a zenélő alkalmazás épp a képernyőn volt: ha közben
+  visszamentél a főoldalra, a "szüneteltesd a zenét" nem jutott el hozzá. Most
+  ahhoz az alkalmazáshoz megy, amelyik a hangot adja.
+- **Keverés, ismétlés és dalszöveg hangparancsra.** Megkérheted Lucy-t, hogy keverje
+  össze a számokat, ismételje ezt az egyet vagy az egész listát, és hogy hozza fel a
+  dalszöveget - a Spotifyban és a ház saját zenetárában egyaránt. A dalszöveghez a
+  box előre is hozza a lejátszót, de csak ha épp nem nézel valamit.
+
+### en
+
+- **A spoken pause now reaches music playing in the background.** It used to work
+  only while the app making the sound was on screen: going back to Home meant
+  "pause the music" never reached it. It now goes to whichever app is playing.
+- **Shuffle, repeat and lyrics by voice.** Ask Lucy to shuffle the songs, to repeat
+  this one or the whole list, and to bring the lyrics up - in Spotify and in the
+  house's own music library alike. For lyrics the box also brings the player
+  forward, but only when you are not watching something else.
+
 ## 3.8.1
 
 ### hu
