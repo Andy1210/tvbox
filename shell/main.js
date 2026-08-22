@@ -2559,11 +2559,16 @@ function playMediaIn(cmd) {
     // not control has no other way in. withLaunchQuery is what keeps it to a few
     // short, ordinary parameters on the app's OWN url.
     //
+    // A caller that sent only `query` - the field the SDK type documents for this
+    // command - is asking a site we cannot script to search for something.
+    // Opening its front page after stopping the music is the worst answer
+    // available, so it is refused before anything is taken away.
+    const launch = String((cmd && cmd.launch) || "");
+    if (!launch) return console.warn("[mqtt] play_media: " + id + " is a remote app and needs `launch`");
     // Silenced AFTER, not before: navTo can refuse - an unconfigured remote app,
     // or launch data past withLaunchQuery's caps - and the rule this shell
     // already keeps is that a refusal must not cost the current stream.
-    if (!navTo(id, { query: String((cmd && cmd.launch) || "") }))
-      return console.warn("[mqtt] play_media: not opened:", id);
+    if (!navTo(id, { query: launch })) return console.warn("[mqtt] play_media: not opened:", id);
     silenceForPlayMedia(id);
     return;
   }
@@ -2574,6 +2579,12 @@ function playMediaIn(cmd) {
   silenceForPlayMedia(id);
   const w = appWindow(id);
   if (!w || w.isDestroyed()) return console.warn("[mqtt] play_media: no window for", id);
+  // Only an app that LISTENS for `play_media` can answer it; one that does not
+  // simply comes forward on whatever screen it was left on. Nothing here can tell
+  // the two apart - `onCommand` is ungated and unannounced - so the sender is the
+  // one that has to know which apps implement it. Logged so a box where nothing
+  // happened says why.
+  console.log("[mqtt] play_media ->", id, JSON.stringify(query).slice(0, 80));
   const send = () => {
     try {
       w.webContents.send("tv-command", { action: "play_media", app: id, query });
