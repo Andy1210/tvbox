@@ -234,12 +234,16 @@ exactly what leaves neither of them holding the music: `showLauncher` nulls
 `currentAppId` while the audio plays on. So the commonest spoken "pause the
 music" there is - asked minutes after the screen moved on - reached the launcher
 and nothing else, and the assistant confirmed it. It now also goes to
-`nowPlaying.app`, which is the app's own claim (what the sound widget and the HA
-media_player already run on); the worst a false claim can do is send a pause to a
-local app that is not playing. `lyrics` is the one forwarded command that needs a
-SCREEN, so it brings that app forward - but only when the screen is free (the
-launcher, or the app itself), because `navTo` ends a running native app outright
-and nobody asked for the lyrics badly enough to take a game off the television.
+`nowPlaying.app` - but that is the app's own CLAIM, so three bounds on it: it is
+read only while it says `playing`/`paused` (a payload with no state at all used to
+qualify), the target must have a live window, and the claim is cleared when the
+app that made it dies. That last one was not theoretical: both boxes were holding
+a now-playing from a session ten days old, because nothing had ever cleared it.
+`lyrics` is the one forwarded command that needs a SCREEN, so it brings that app
+forward - only when the screen is free (the launcher, or the app itself), because
+`navTo` ends a running native app outright, and only when the app is already
+RUNNING, because `navTo` would otherwise launch one on the strength of a stale
+claim.
 
 **Every way a window dies goes through `appwins.destroy`**, so the sound and the
 HOME card come down in its `onDestroyed` hook rather than in the one caller that

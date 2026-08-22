@@ -1696,6 +1696,15 @@ function appWindowGone(id) {
     player.stop();
   }
   clearSoundWidget(id);
+  // ...and the now-playing claim itself, which nothing else clears: it is only
+  // ever assigned from an app's POST, so a box that has not played anything since
+  // it booted still reports the last song of the previous session - which is what
+  // decides where a forwarded transport command goes.
+  if (nowPlaying && String(nowPlaying.app || "") === String(id)) {
+    nowPlaying = null;
+    if (mqttCtl) mqttCtl.publish("nowplaying", { app: String(id), state: "idle" }, { retain: true });
+    publishMediaState({ force: true });
+  }
   appsChanged();
 }
 
@@ -2489,6 +2498,16 @@ function bridgesCmd(cmd) {
   fifoCmd(CEC_CMD_FIFO, cmd, "cec");
   fifoCmd(REMOTE_CMD_FIFO, cmd, "remote");
 }
+// Which app is making the sound, or "" when nothing is. The claim comes from the
+// app's own now-playing POST, so it is only read while it says something IS
+// playing - and it is cleared when the app that made it dies (`appWindowGone`),
+// because a retained claim outlives its app by days and used to point at one that
+// had not run since the last boot.
+function soundingApp() {
+  if (!nowPlaying || (nowPlaying.state !== "playing" && nowPlaying.state !== "paused")) return "";
+  return String(nowPlaying.app || "");
+}
+
 function forwardCommand(cmd) {
   const targets = new Set();
   if (win && !win.isDestroyed()) targets.add(win.webContents);
@@ -2503,10 +2522,12 @@ function forwardCommand(cmd) {
   // music" there is - asked minutes after the screen moved on - reached the
   // launcher and nothing else, and the app that was playing never heard it.
   //
-  // `nowPlaying.app` is the app's own claim, which is what the sound widget and
-  // the HA media_player already run on; a wrong claim can at most send a pause to
-  // a local app that is not playing.
-  const sounding = nowPlaying && nowPlaying.state !== "idle" ? String(nowPlaying.app || "") : "";
+  // `nowPlaying.app` is the app's own claim. Two bounds on trusting it, both
+  // because it is a claim: the same two states the sound card requires
+  // (`playing`/`paused` - a payload with no state at all used to qualify), and a
+  // LIVE window, so the target is an app that is running here and now. A wrong
+  // claim can then at most send a pause to a local app that is not playing.
+  const sounding = soundingApp();
   const owner = sounding && sounding !== currentAppId ? appWindow(sounding) : null;
   if (owner) targets.add(owner.webContents);
   for (const wc of targets) {
@@ -2527,11 +2548,16 @@ function forwardCommand(cmd) {
 // state and has them up when its screen does come back.
 function showLyrics(cmd) {
   const state = String((cmd && cmd.state) || "").toLowerCase();
-  const sounding = nowPlaying && nowPlaying.state !== "idle" ? String(nowPlaying.app || "") : "";
+  const sounding = soundingApp();
   const target = sounding || currentAppId || "";
+  // A RUNNING app only: navTo would otherwise launch one, and an app that is not
+  // running is not the one playing the song whose words were asked for. It is
+  // also what keeps a stale claim from opening an app nobody has used since the
+  // last boot.
+  const running = target ? appWindow(target) : null;
   const screenFree = !nativeapp.running() && (!currentAppId || currentAppId === target);
   // Hiding them needs no screen, so "off" never navigates.
-  if (target && state !== "off" && screenFree && currentAppId !== target) navTo(target);
+  if (running && state !== "off" && screenFree && currentAppId !== target) navTo(target);
   forwardCommand(cmd);
 }
 
@@ -2841,7 +2867,9 @@ function applyMqttConfig() {
 // can drive its own player.
 function handleTvCommand(cmd) {
   const action = String((cmd && cmd.action) || "").toLowerCase();
-  console.log("[mqtt] command", action, (cmd && cmd.app) || "");
+  // The state is logged as well as the app: a state the box does not recognise is
+  // dropped in silence, and this log is where that is diagnosed.
+  console.log("[mqtt] command", action, (cmd && (cmd.app || cmd.state)) || "");
   switch (action) {
     case "launch":
     case "open":
