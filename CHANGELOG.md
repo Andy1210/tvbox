@@ -5,6 +5,28 @@ updates). `scripts/make-release.sh` lifts the current version's `hu`/`en`
 blocks into the OTA feed's `notes` - keep both languages, keep it short, and
 write for the person on the couch (what changes for THEM), not for developers.
 
+## 3.8.0
+
+### hu
+
+- **Hangosan kért zene a szoba tévéjén szól.** Ha megkéred Lucy-t, hogy tegyen fel
+  egy számot, egy albumot vagy egy előadót, az abban a szobában szólal meg, ahol
+  mondtad. Először a ház saját zenetárában keres, és ha ott nincs meg, a Spotifyt
+  kéri meg; a YouTube-ot pedig akkor, ha kimondod. Eddig ehhez a boxnak nem volt
+  mit csinálnia, és a kérés a Discordra ment.
+- **Az alkalmazás akkor is elindul, ha épp nincs nyitva.** A box megnyitja, amelyik
+  a kért zenét le tudja játszani, és utána indítja el a számot.
+
+### en
+
+- **Music you ask for out loud plays on the TV in that room.** Ask Lucy for a song,
+  an album or an artist and it starts in the room you said it in. It looks in the
+  house's own library first, asks Spotify when the song is not there, and uses
+  YouTube when you say so. Until now the box had nothing to do with this and the
+  request went to Discord instead.
+- **The app opens itself if it is not already up.** The box brings forward whichever
+  app can play what was asked for, then starts it.
+
 ## 3.7.1
 
 ### hu
