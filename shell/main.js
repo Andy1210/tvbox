@@ -2547,7 +2547,10 @@ function silenceForPlayMedia(id) {
 }
 
 function playMediaIn(cmd) {
-  const id = String((cmd && cmd.app) || "").trim();
+  // Through the same cleaner as the words: an app id that is not one still
+  // reaches the log, and a newline in it forges a line in a file people read
+  // and `tvbox-diag.sh` quotes.
+  const id = playQuery(cmd && cmd.app).slice(0, 64);
   const m = id && apps.manifestById(id);
   if (!m || m.status !== "ready") return console.warn("[mqtt] play_media: no such app:", id);
   const rt = m.runtime || {};
