@@ -5,6 +5,41 @@ updates). `scripts/make-release.sh` lifts the current version's `hu`/`en`
 blocks into the OTA feed's `notes` - keep both languages, keep it short, and
 write for the person on the couch (what changes for THEM), not for developers.
 
+## 3.9.0
+
+### hu
+
+- **A szóban kért szüneteltetés akkor is odaér, ha a zene a háttérben szól.** Eddig
+  csak akkor működött, ha a zenélő alkalmazás épp a képernyőn volt: ha közben
+  visszamentél a főoldalra, a "szüneteltesd a zenét" nem jutott el hozzá. Most
+  ahhoz az alkalmazáshoz megy, amelyik a hangot adja.
+- **A hangparancs ahhoz az alkalmazáshoz megy, amelyik tényleg szól.** Ha a
+  nappaliban a Spotify játszik, de a képernyőn a Média app van, a "következő szám"
+  a Spotifyt lépteti - nem indít el mellé egy másik számot.
+- **A dalszöveg csak akkor veszi el a képernyőt, ha van kinek.** A box nem indít el
+  egy appot a dalszövegért, és nem vesz el egy futó játékot vagy filmet - és a
+  háttérben szóló zenét onnantól ahhoz az apphoz küldi, amelyik tényleg szól.
+- **Keverés, ismétlés és dalszöveg hangparancsra.** Megkérheted a hangasszisztenst, hogy keverje
+  össze a számokat, ismételje ezt az egyet vagy az egész listát, és hogy hozza fel a
+  dalszöveget - a Spotifyban és a ház saját zenetárában egyaránt. A dalszöveghez a
+  box előre is hozza a lejátszót, de csak ha épp nem nézel valamit.
+
+### en
+
+- **A spoken pause now reaches music playing in the background.** It used to work
+  only while the app making the sound was on screen: going back to Home meant
+  "pause the music" never reached it. It now goes to whichever app is playing.
+- **A voice command goes to the app that is really making the sound.** With Spotify
+  playing in the living room while the Media app is on screen, "next song" steps
+  Spotify - instead of starting a second track alongside it.
+- **The lyrics only take the screen when there is someone to show them to.** The box
+  does not open an app for them, and does not take the television from a running
+  game or film.
+- **Shuffle, repeat and lyrics by voice.** Ask the voice assistant to shuffle the songs, to repeat
+  this one or the whole list, and to bring the lyrics up - in Spotify and in the
+  house's own music library alike. For lyrics the box also brings the player
+  forward, but only when you are not watching something else.
+
 ## 3.8.1
 
 ### hu
@@ -27,7 +62,7 @@ write for the person on the couch (what changes for THEM), not for developers.
 
 ### hu
 
-- **Hangosan kért zene a szoba tévéjén szól.** Ha megkéred Lucy-t, hogy tegyen fel
+- **Hangosan kért zene a szoba tévéjén szól.** Ha megkéred a hangasszisztenst, hogy tegyen fel
   egy számot, egy albumot vagy egy előadót, az abban a szobában szólal meg, ahol
   mondtad. Először a ház saját zenetárában keres, és ha ott nincs meg, a Spotifyt
   kéri meg; a YouTube-ot pedig akkor, ha kimondod. Eddig ehhez a boxnak nem volt
@@ -37,7 +72,7 @@ write for the person on the couch (what changes for THEM), not for developers.
 
 ### en
 
-- **Music you ask for out loud plays on the TV in that room.** Ask Lucy for a song,
+- **Music you ask for out loud plays on the TV in that room.** Ask the voice assistant for a song,
   an album or an artist and it starts in the room you said it in. It looks in the
   house's own library first, asks Spotify when the song is not there, and uses
   YouTube when you say so. Until now the box had nothing to do with this and the

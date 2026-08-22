@@ -97,8 +97,24 @@ availability-gated on the status topic. No HA YAML needed for that.
 
 - `launch` / `open` (+ `app`: an installed app id, e.g. `spotify`, `youtube`, `livetv`, `plex`)
 - `home` - back to the launcher
-- `play` / `resume`, `pause`, `stop` - shared player + forwarded to the active app
-- `next`, `previous` - forwarded to the active app (e.g. Spotify)
+- `play` / `resume`, `pause`, `stop` - shared player + forwarded to the app that
+  owns the sound. "Owns the sound" rather than "is on screen": audio-only
+  playback deliberately survives a return to the launcher
+  (`soundOutlivesTheScreen`), and a pause asked for minutes later used to reach
+  the launcher only.
+- `next`, `previous` - forwarded to the app that owns the sound (e.g. Spotify)
+- `shuffle` (+ `state`: `on` | `off` | `toggle`), `repeat` (+ `state`: `off` |
+  `one` | `all`) - forwarded only, because what they mean belongs to the app
+  holding the queue. The state travels in the house's own vocabulary and each app
+  translates it: Spotify's own API wants `context`/`track` for repeat, the media
+  client's queue wants `all`/`one`. An app that does not recognise a state does
+  nothing rather than falling back to a default - a request to stop shuffling
+  must never switch shuffling on.
+- `lyrics` (+ `state`: `on` | `off` | `toggle`, default `on`) - the words to the
+  song, on screen. The only forwarded command that needs a SCREEN, so the box
+  also brings the app that owns the sound forward - but only when the screen is
+  free (the launcher, or that app already): something else on screen is something
+  somebody is watching, and opening an app ends a running native one outright.
 - `tv_on`, `tv_off` / `standby` - TV power over HDMI-CEC
 - `volume_up`, `volume_down` (+ optional `steps`: 1-10 repeats), `mute` - the
   **TV's** volume over the configured IR blaster (Settings → Remotes & accessories →

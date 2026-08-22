@@ -110,3 +110,21 @@ test("going from playing to idle is worth publishing", () => {
   assert.equal(b.state, "idle");
   assert.equal(b.position, null);
 });
+
+// Which app a forwarded transport command is addressed to. The whole reason this
+// is a decision rather than a field read: the value is an app's own claim about
+// itself, and a payload that says nothing is not evidence that anything plays.
+test("soundingApp trusts only a claim that says something is playing", () => {
+  const { soundingApp } = require("./mediastate");
+  assert.equal(soundingApp({ app: "spotify", state: "playing" }), "spotify");
+  assert.equal(soundingApp({ app: "mediaclient", state: "paused" }), "mediaclient");
+  assert.equal(soundingApp({ app: "spotify", state: "idle" }), "");
+  // A payload with no state at all used to qualify, which is how a POST of
+  // `{app:"retroarch"}` could have made itself the target of every command.
+  assert.equal(soundingApp({ app: "retroarch" }), "");
+  assert.equal(soundingApp({ state: "playing" }), "");
+  assert.equal(soundingApp({ app: 7, state: "playing" }), "");
+  assert.equal(soundingApp(null), "");
+  assert.equal(soundingApp(undefined), "");
+  assert.equal(soundingApp("spotify"), "");
+});

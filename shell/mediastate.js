@@ -19,6 +19,19 @@ const POSITION_EPS_S = 5;
 // Merge order per field is the one that OWNS it: the player for the clock, the app
 // for the metadata, the sink for the volume. An app may override position/duration
 // when it plays its own audio (librespot has no mpv to observe).
+// Which app is making the sound, from the now-playing an app reports for itself.
+//
+// The same two states `compose` trusts, and for the same reason: a payload that
+// says nothing (or says `idle`) is not evidence that anything is playing. It is a
+// CLAIM either way - every local app shares one origin, so the field is a thing
+// any of them can say about another - which is why the shell uses it only to
+// address a forwarded transport command, never to decide what is playing.
+function soundingApp(nowPlaying) {
+  const np = nowPlaying && typeof nowPlaying === "object" ? nowPlaying : null;
+  if (!np || (np.state !== "playing" && np.state !== "paused")) return "";
+  return typeof np.app === "string" ? np.app : "";
+}
+
 function compose(input) {
   const i = input || {};
   const np = i.nowPlaying && typeof i.nowPlaying === "object" ? i.nowPlaying : null;
@@ -83,4 +96,4 @@ function worthPublishing(prev, next) {
   return Math.abs(a - b) >= POSITION_EPS_S;
 }
 
-module.exports = { compose, worthPublishing, POSITION_EPS_S };
+module.exports = { compose, soundingApp, worthPublishing, POSITION_EPS_S };
