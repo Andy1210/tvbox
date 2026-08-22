@@ -38,7 +38,8 @@ const TYPING_REPLACES_MIN_COMPOSITOR = "0.1.10";
 // delivery will not replace.
 const deliveryReplaces = () => compositor.atLeast(TYPING_REPLACES_MIN_COMPOSITOR);
 const lang = require("./lang"); // what language a remote web app is told it runs in
-const { withLaunchQuery } = require("./launchurl"); // per-launch query for a remote app (a cast's pairing code)
+// what a launch may carry: a remote app's url query, a local app's search words
+const { withLaunchQuery, playQuery, hasUsableLaunch } = require("./launchurl");
 const audio = require("./audio"); // wpctl sink list + volume (device audio settings)
 const bluetooth = require("./bluetooth"); // bluetoothctl pair/connect (audio + input devices)
 const ambient = require("./ambient"); // weather + local photos for the idle/ambient screen
@@ -2504,6 +2505,100 @@ function forwardCommand(cmd) {
   }
 }
 
+/**
+ * Open an app and hand it something to play.
+ *
+ * Two shapes, because the two kinds of app can be reached in two different ways:
+ *
+ * - A LOCAL app is ours and has the SDK, so it gets the request as an ordinary
+ *   `tv-command` and answers it with its own code. It is delivered after the
+ *   page has loaded, and the preload holds it until the page registers a
+ *   listener - a window that was opened BY this command is still booting, and a
+ *   send into a page that is not there yet is a command that never happened.
+ * - A REMOTE app is a site we cannot script, so all there is to give it is its
+ *   own url with the launch data on it - the same path, and the same bounds, a
+ *   cast from a phone goes through (`withLaunchQuery`, at most a few short
+ *   parameters).
+ *
+ * Nothing here decides WHAT to play. The caller names an app that is installed
+ * and ready, or nothing happens: an id that is not one must not silently take
+ * the television somewhere else.
+ */
+/**
+ * A play_media is a CLAIM on the room's audio, so whatever else is playing stops.
+ *
+ * `soundOutlivesTheScreen` deliberately keeps audio-only playback through a
+ * screen change, which is right for pressing Home and wrong for this: measured
+ * on the box, a song asked for by voice that fell through to Spotify started
+ * over the media client's album and both played at once. This is the other half
+ * of that rule as it is already written - what ends music is something else
+ * claiming the player - said out loud for the one caller that means it.
+ *
+ * Not when the app being asked is the one already playing: it is about to be
+ * handed a new song and stopping first would only add a gap.
+ */
+function silenceForPlayMedia(id) {
+  if (!player.running() || player.owner() === id) return;
+  player.setPlaying(null);
+  player.stop();
+  setVideoMode(false);
+  // With a reason, so the app that owned it does not read the end of its file as
+  // "the track finished" and start the next one over what is about to play.
+  player.emit({ type: "finished", reason: "stopped" });
+}
+
+function playMediaIn(cmd) {
+  // Through the same cleaner as the words: an app id that is not one still
+  // reaches the log, and a newline in it forges a line in a file people read
+  // and `tvbox-diag.sh` quotes.
+  const id = playQuery(cmd && cmd.app).slice(0, 64);
+  const m = id && apps.manifestById(id);
+  if (!m || m.status !== "ready") return console.warn("[mqtt] play_media: no such app:", id);
+  const rt = m.runtime || {};
+  if (rt.serve === "remote") {
+    // `launch` is a url query string (e.g. "v=<id>"), not a phrase: a site we do
+    // not control has no other way in. withLaunchQuery is what keeps it to a few
+    // short, ordinary parameters on the app's OWN url.
+    //
+    // A caller that sent only `query` - the field the SDK type documents for this
+    // command - is asking a site we cannot script to search for something.
+    // Opening its front page after stopping the music is the worst answer
+    // available, so it is refused before anything is taken away.
+    // `hasUsableLaunch` rather than a non-empty test: withLaunchQuery drops what
+    // it cannot use and hands the base url back, so "   " or "a b" would open
+    // the app's front page and silence the room to do it.
+    const launch = String((cmd && cmd.launch) || "");
+    if (!hasUsableLaunch(launch))
+      return console.warn("[mqtt] play_media: " + id + " is a remote app and needs `launch`");
+    // Silenced AFTER, not before: navTo can refuse - an unconfigured remote app,
+    // or launch data past withLaunchQuery's caps - and the rule this shell
+    // already keeps is that a refusal must not cost the current stream.
+    if (!navTo(id, { query: launch })) return console.warn("[mqtt] play_media: not opened:", id);
+    silenceForPlayMedia(id);
+    return;
+  }
+  const query = playQuery(cmd && cmd.query);
+  if (!query) return console.warn("[mqtt] play_media: nothing to look for");
+  // Same order as the remote branch above, and for the same reason.
+  if (!navTo(id)) return console.warn("[mqtt] play_media: not opened:", id);
+  silenceForPlayMedia(id);
+  const w = appWindow(id);
+  if (!w || w.isDestroyed()) return console.warn("[mqtt] play_media: no window for", id);
+  // Only an app that LISTENS for `play_media` can answer it; one that does not
+  // simply comes forward on whatever screen it was left on. Nothing here can tell
+  // the two apart - `onCommand` is ungated and unannounced - so the sender is the
+  // one that has to know which apps implement it. Logged so a box where nothing
+  // happened says why.
+  console.log("[mqtt] play_media ->", id, JSON.stringify(query).slice(0, 80));
+  const send = () => {
+    try {
+      w.webContents.send("tv-command", { action: "play_media", app: id, query });
+    } catch (e) {}
+  };
+  if (w.webContents.isLoading()) w.webContents.once("did-finish-load", send);
+  else send();
+}
+
 // Remote input bridge (tvbox-remote user service) control FIFO: "reload" (re-read
 // the remap config) or drive learn mode ("learn <id>" / "learn-off"). O_NONBLOCK
 // so we never hang if the bridge isn't running.
@@ -2745,6 +2840,21 @@ function handleTvCommand(cmd) {
     case "previous":
       forwardCommand(cmd);
       break; // no mpv analogue; the launcher routes to Spotify
+    // Music asked for by voice. The assistant knows what to play but cannot
+    // reach what plays it: the Spotify account lives in that app's own plugin,
+    // behind an HTTP server bound to loopback, and YouTube's TV page is
+    // somebody else's site. So the box is told which APP and what to look for,
+    // and the app does the searching with the credentials it already has.
+    //
+    // THE RELEASE THIS SHIPS IN MUST BE 3.8.0 OR HIGHER. A publish to an action
+    // an older shell does not know succeeds - the broker accepts the topic and
+    // this switch logs "unknown command" - so the assistant refuses to send one
+    // to a box below `PLAY_MEDIA_SINCE` (assistant-stack tools/music.py), read
+    // from the box's own version sensor. Cutting a 3.7.x release with this in it
+    // would leave that gate refusing a box that can in fact hear it.
+    case "play_media":
+      playMediaIn(cmd);
+      break;
     case "tv_on":
       cecPower(true);
       break;
@@ -3133,7 +3243,14 @@ function showAmbient(fromApp) {
   // nothing of that is running - which is the same rule the app itself is
   // supposed to apply, enforced where it cannot be forgotten.
   if (nativeForeground || nativeapp.running()) return false;
-  if (player.running() || mirrorOnScreen) return false;
+  // A PICTURE is what the launcher would take away; sound is not. Audio-only
+  // playback already survives showLauncher (`soundOutlivesTheScreen`), so a
+  // paused song on a media player's screen is exactly the still picture this
+  // exists for - refusing it left the one screen that can sit there for an hour
+  // as the only one the screensaver could not reach. Whether it is worth asking
+  // over PLAYING music is the app's decision, not ours: it knows if its own
+  // screen is the thing to look at.
+  if ((player.running() && !soundOutlivesTheScreen()) || mirrorOnScreen) return false;
   if (!ambientEnabled()) return false;
   showLauncher(); // hides the app's window, and clears ambientReturnApp
   ambientReturnApp = fromApp;

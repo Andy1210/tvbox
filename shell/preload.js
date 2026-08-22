@@ -19,6 +19,27 @@ const { ipcRenderer } = require("electron");
   })();
   const caps = info.capabilities || [];
 
+  // Commands that arrived before the page had a listener - see `onCommand`. The
+  // subscription is here rather than inside it so the gap starts at preload
+  // time, which is the only moment early enough to cover a page that is still
+  // loading its bundle. Capped, and replayed to EVERY listener that registers
+  // inside the window below rather than to the first one: a live command goes to
+  // all of them, and a page can have more than one for good reasons (an app's
+  // module-level transport handler plus a screen's own), so handing the backlog
+  // to whichever registered first delivers it to a handler that may not be the
+  // one that cares.
+  var earlyCommands = [];
+  var EARLY_WINDOW_MS = 10000;
+  var earlySince = Date.now();
+  var collecting = true;
+  ipcRenderer.on("tv-command", function (_e, c) {
+    // Collecting STOPS at the first listener. What comes after that is delivered
+    // live, and holding it as well would replay it to a listener that registers
+    // later - a screen remounting and re-subscribing would then act on a command
+    // it has already acted on.
+    if (collecting && earlyCommands.length < 4) earlyCommands.push(c);
+  });
+
   // ---- universal: shell navigation (works in every app) ----
   window.tvbox = {
     launch: function (appId) {
@@ -67,6 +88,13 @@ const { ipcRenderer } = require("electron");
     },
     // Media commands forwarded from the shell (MQTT tv_control) so the active app
     // can drive its own player (e.g. Spotify transport).
+    //
+    // A command that arrives before the page has a listener is HELD rather than
+    // dropped: a window opened BY a command (music asked for by voice) is still
+    // executing its bundle when the shell delivers it, and its listener goes on
+    // in an effect after that. Only what arrived before the first listener, and
+    // only a few of them - this is a hand-over gap of milliseconds, not a
+    // mailbox, and a page that never listens must not accumulate one.
     onCommand: function (cb) {
       var h = function (_e, c) {
         try {
@@ -74,6 +102,24 @@ const { ipcRenderer } = require("electron");
         } catch (e) {}
       };
       ipcRenderer.on("tv-command", h);
+      // Anything held is replayed to this listener too, until the window closes -
+      // after that the backlog is dropped, because a listener registered a minute
+      // into a session is not part of the hand-over this exists for.
+      collecting = false;
+      var held = earlyCommands;
+      if (held && Date.now() - earlySince > EARLY_WINDOW_MS) {
+        earlyCommands = null;
+        held = null;
+      }
+      if (held && held.length) {
+        setTimeout(function () {
+          for (var i = 0; i < held.length; i++) {
+            try {
+              cb(held[i]);
+            } catch (e) {}
+          }
+        }, 0);
+      }
       return function () {
         try {
           ipcRenderer.removeListener("tv-command", h);

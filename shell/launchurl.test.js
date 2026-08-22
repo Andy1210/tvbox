@@ -7,7 +7,7 @@
 // Run: node --test shell/launchurl.test.js
 const test = require("node:test");
 const assert = require("node:assert");
-const { withLaunchQuery, MAX_LAUNCH_PARAMS } = require("./launchurl");
+const { withLaunchQuery, playQuery, hasUsableLaunch, MAX_LAUNCH_PARAMS, MAX_PLAY_QUERY } = require("./launchurl");
 
 const YT = "https://www.youtube.com/tv";
 
@@ -95,4 +95,60 @@ test("a base that is not a page is refused rather than decorated", () => {
     withLaunchQuery("http://192.168.1.5:8096/web/", "pairingCode=x").startsWith("http://"),
     "plain http is a page",
   );
+});
+
+// ---- what a LOCAL app is asked to look for (play_media) ----
+// Same boundary, different shape: this arrives over MQTT, reaches an app's search
+// box, and is written to the shell log.
+
+test("ordinary words come through as they were said", () => {
+  assert.equal(playQuery("Bohemian Rhapsody"), "Bohemian Rhapsody");
+  assert.equal(playQuery("  Éjjel-nappal Budapest  "), "Éjjel-nappal Budapest");
+});
+
+test("nothing to look for is empty, whatever shape the nothing arrived in", () => {
+  for (const nothing of [undefined, null, "", "   ", "\n\t"]) assert.equal(playQuery(nothing), "");
+});
+
+test("a control character becomes a space rather than disappearing", () => {
+  // Removing it would join two words into one nobody asked for, and a newline in
+  // a log line is what lets a search phrase forge a second line.
+  assert.equal(playQuery("one\ntwo"), "one two");
+  assert.equal(playQuery("a\u0000b"), "a b");
+  assert.match(playQuery("x\r\ny"), /^x y$/);
+});
+
+test("a very long phrase is cut, and does not end in a stray space", () => {
+  const long = playQuery("a".repeat(50) + " " + "b".repeat(400));
+  assert.ok(long.length <= MAX_PLAY_QUERY);
+  assert.equal(long, long.trim());
+});
+
+test("a number is a phrase like any other", () => {
+  // The caller may hand a title that is only digits; it must not be dropped.
+  assert.equal(playQuery(1984), "1984");
+});
+
+test("an invisible character is a space, not a character that survives a glance", () => {
+  // The set textinput.js already strips: C1, the Arabic letter mark, the bidi and
+  // zero-width controls. They reach a log line and an app's search box.
+  assert.equal(playQuery("a\u200bb"), "a b");
+  assert.equal(playQuery("a\u202eb"), "a b");
+  assert.equal(playQuery("a\u0085b"), "a b");
+  assert.equal(playQuery("\ufeffQueen"), "Queen");
+});
+
+test("launch data that survives NOTHING is not launch data", () => {
+  // withLaunchQuery drops what it cannot use and hands the base url back, so a
+  // caller that only checks "non-empty" opens the app's front page.
+  assert.equal(hasUsableLaunch("v=abc"), true);
+  assert.equal(hasUsableLaunch("pairingCode=x&theme=cl"), true);
+  assert.equal(hasUsableLaunch(""), false);
+  assert.equal(hasUsableLaunch("   "), false);
+  assert.equal(hasUsableLaunch("a b"), false);
+  assert.equal(hasUsableLaunch("=novalue"), false);
+  assert.equal(hasUsableLaunch("bad key=1"), false);
+  assert.equal(hasUsableLaunch("k=" + "x".repeat(300)), false);
+  // ...and one usable pair among rubbish is still launch data.
+  assert.equal(hasUsableLaunch("bad key=1&v=abc"), true);
 });

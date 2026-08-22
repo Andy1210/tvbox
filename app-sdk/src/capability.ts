@@ -49,6 +49,14 @@ export interface TvNotification {
 export interface TvCommand {
   action: string;
   app?: string;
+  /**
+   * What to look for, on a `play_media` command.
+   *
+   * Music asked for out loud reaches the box as words rather than as an id: the
+   * account that can turn a name into something playable is the one this app
+   * holds, so the search happens here. Absent on every other command.
+   */
+  query?: string;
 }
 
 // Launcher navigation pushed by the shell while the launcher is already up (a
