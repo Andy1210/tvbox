@@ -34,3 +34,8 @@ image/stage-tvbox/01-tvbox/files/
 # the public half it tells you to copy into deploy/, so the obvious invocation
 # puts it one `git add -A` away from the repo.
 *.priv.pem
+
+# rendered docs site (scripts/docs-site/build.js); published by CI, never committed.
+# Anchored: a bare `docs-site/` matches at any depth, so it also hid the
+# generator's own scripts/docs-site/ from git.
+/docs-site/

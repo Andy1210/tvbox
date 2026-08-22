@@ -16,6 +16,12 @@ jobs:
       - run: npm ci --no-audit --no-fund
       - run: npm run lint
       - run: npm run format:check
+      # The docs-site generator lives in this dependency tree (it is the only
+      # thing in the repo root that has one), and the demo workflow that publishes
+      # it only runs on main - so its tests run here, where a pull request sees
+      # them. They build the real docs/ tree and resolve every internal link.
+      - name: docs site generator unit tests
+        run: node --test scripts/docs-site/*.test.js
 
   launcher:
     runs-on: ubuntu-latest

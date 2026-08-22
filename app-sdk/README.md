@@ -40,8 +40,10 @@ the host that consumes the source.
 
 ## For app authors
 
-Writing an app package? See
+Writing an app package? The export-by-export reference for this SDK, alongside
+the `window.tvbox` bridge, the box's HTTP routes and the host plugin API, is
+[docs/app-api.md](../docs/app-api.md). The capability model behind `tvbox()`
+(`player`, `fetch`, `storage`) is in
+[docs/capabilities.md](../docs/capabilities.md), and
 [tvbox-apps/AUTHORING.md](https://github.com/Andy1210/tvbox-apps/blob/main/AUTHORING.md)
-for the package layout, manifest reference, and how an app's `web/` UI consumes
-this SDK. The capability model behind `tvbox()` (`player`, `fetch`, `storage`)
-is documented in [docs/capabilities.md](../docs/capabilities.md).
+covers the package layout and how to publish.

@@ -1,7 +1,8 @@
 # Publishes the browser demo (launcher built with --mode demo: mocked shell
 # API, no real box needed) to GitHub Pages: https://andy1210.github.io/tvbox/
-# Also hosts the static tvbox.conf generator at /tvbox/config/ and the TV-code
-# index every box reads at /tvbox/ir/ (scripts/ir-index/).
+# Also hosts the docs at /tvbox/docs/ (scripts/docs-site/), the static tvbox.conf
+# generator at /tvbox/config/ and the TV-code index every box reads at /tvbox/ir/
+# (scripts/ir-index/).
 #
 # One workflow, because a Pages site is ONE artifact: a second workflow uploading
 # its own would replace this one's. The weekly run is for the index - the two
@@ -13,10 +14,12 @@ on:
     paths:
       - "launcher/**"
       - "app-sdk/**"
-      - "docs/config/**"
+      - "docs/**"
+      - "scripts/docs-site/**"
       - "scripts/ir-index/**"
       - "remote/ir_protocols.py"
       - "remote/flipper_protocols.py"
+      - "package-lock.json"
       - ".github/workflows/demo.yml"
   schedule:
     - cron: "17 4 * * 1"
@@ -52,8 +55,31 @@ jobs:
       - uses: actions/upload-artifact@v4
         with: { name: ir-index, path: ir-index, retention-days: 7 }
 
+  # docs/ rendered to a static site. Its own job rather than a step in `build`,
+  # because that one runs inside launcher/ against launcher's dependency tree and
+  # this needs the repo root's.
+  docsite:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: npm, cache-dependency-path: package-lock.json }
+      - run: npm ci --no-audit --no-fund
+      # The link rewriting and every in-page anchor are asserted here, offline -
+      # a table of contents written against GitHub's heading anchors breaks with
+      # no error anywhere, on a site nobody diffs.
+      - name: docs site generator unit tests
+        run: node --test scripts/docs-site/*.test.js
+      # --ref stays at the default `main`: the links that leave the site are
+      # "edit this page" and "here is the source file", and both want the branch a
+      # reader can act on rather than the commit this run happened to publish.
+      - name: build the docs site
+        run: node scripts/docs-site/build.js --docs docs --out docs-site
+      - uses: actions/upload-artifact@v4
+        with: { name: docs-site, path: docs-site, retention-days: 7 }
+
   build:
-    needs: irdata
+    needs: [irdata, docsite]
     runs-on: ubuntu-latest
     defaults: { run: { working-directory: launcher } }
     steps:
@@ -68,6 +94,10 @@ jobs:
       # After the build, because that is what creates dist-demo.
       - uses: actions/download-artifact@v4
         with: { name: ir-index, path: launcher/dist-demo/ir }
+      # ...and the docs -> /tvbox/docs/. Paths here are workspace-relative, not
+      # relative to this job's working-directory.
+      - uses: actions/download-artifact@v4
+        with: { name: docs-site, path: launcher/dist-demo/docs }
       - uses: actions/upload-pages-artifact@v3
         with: { path: launcher/dist-demo }
 
