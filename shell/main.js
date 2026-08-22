@@ -3174,14 +3174,17 @@ function pluginAppClosed(id) {
 // unhandled rejection in the main process - so a thenable return is caught too.
 // And `e` need not be an Error: `throw null` arrives here as well, and reading
 // `.message` off it would throw again, out of the catch and into whatever asked.
+// Returns whether it got through SYNCHRONOUSLY, which is all a caller can be told
+// at this point: an async plugin has only been started, not finished.
 function callPlugin(id, what, run) {
   const failed = (e) => console.warn("[plugin]", what, id, "failed:", String((e && e.message) || e));
   try {
     const r = run();
     if (r && typeof r.then === "function") r.then(undefined, failed);
-    return r;
+    return true;
   } catch (e) {
     failed(e);
+    return false;
   }
 }
 
@@ -3857,8 +3860,12 @@ function hotLoadPlugin(id) {
   }
   const plugin = loadOnePlugin(m);
   if (!plugin) return false;
-  if (typeof plugin.start === "function") callPlugin(id, "start", () => plugin.start());
-  console.log("[plugin] hot-started", id);
+  // Say which of the three actually happened. One line for all of them read
+  // "hot-started" even when there was no start to run, or when it threw and
+  // callPlugin had just logged the failure above it - which is the wrong thing
+  // to find in the log of a box whose app went in and did nothing.
+  if (typeof plugin.start !== "function") console.log("[plugin] hot-loaded", id, "(no start)");
+  else if (callPlugin(id, "start", () => plugin.start())) console.log("[plugin] hot-started", id);
   return true;
 }
 // Stop ONE app's plugin and forget it: the app is going away (uninstall) or being
