@@ -13,6 +13,9 @@ write for the person on the couch (what changes for THEM), not for developers.
   csak akkor működött, ha a zenélő alkalmazás épp a képernyőn volt: ha közben
   visszamentél a főoldalra, a "szüneteltesd a zenét" nem jutott el hozzá. Most
   ahhoz az alkalmazáshoz megy, amelyik a hangot adja.
+- **A hangparancs ahhoz az alkalmazáshoz megy, amelyik tényleg szól.** Ha a
+  nappaliban a Spotify játszik, de a képernyőn a Média app van, a "következő szám"
+  a Spotifyt lépteti - nem indít el mellé egy másik számot.
 - **A dalszöveg csak akkor veszi el a képernyőt, ha van kinek.** A box nem indít el
   egy appot a dalszövegért, és nem vesz el egy futó játékot vagy filmet - és a
   háttérben szóló zenét onnantól ahhoz az apphoz küldi, amelyik tényleg szól.

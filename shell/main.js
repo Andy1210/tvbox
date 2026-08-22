@@ -1696,16 +1696,25 @@ function appWindowGone(id) {
     player.stop();
   }
   clearSoundWidget(id);
-  // ...and the now-playing claim itself, which nothing else clears: it is only
-  // ever assigned from an app's POST, so a box that has not played anything since
-  // it booted still reports the last song of the previous session - which is what
-  // decides where a forwarded transport command goes.
-  if (nowPlaying && String(nowPlaying.app || "") === String(id)) {
-    nowPlaying = null;
-    if (mqttCtl) mqttCtl.publish("nowplaying", { app: String(id), state: "idle" }, { retain: true });
-    publishMediaState({ force: true });
-  }
   appsChanged();
+}
+
+// The now-playing claim, dropped when the app that made it is QUIT.
+//
+// Nothing else clears it - it is only ever assigned from an app's POST - so a box
+// that has not played anything since it booted still reported the last song of
+// the previous session, which is what decided where a forwarded transport command
+// went. But it must NOT be cleared by the teardown hook: that fires for the LRU
+// cap, the memory guard and a crashed renderer, and a plugin's daemon outlives
+// all three (librespot is not mpv). `boxIdle` reads exactly this claim to know
+// that Spotify is playing, so clearing it there let the box sleep the television
+// mid-song. The deliberate quit is the one place where the sound really has
+// stopped, because `pluginAppClosed` has just stopped it.
+function clearNowPlayingFor(id) {
+  if (!nowPlaying || String(nowPlaying.app || "") !== String(id)) return;
+  nowPlaying = null;
+  if (mqttCtl) mqttCtl.publish("nowplaying", { app: String(id), state: "idle" }, { retain: true });
+  publishMediaState({ force: true });
 }
 
 const destroyAppWindow = (id) => {
@@ -2498,14 +2507,12 @@ function bridgesCmd(cmd) {
   fifoCmd(CEC_CMD_FIFO, cmd, "cec");
   fifoCmd(REMOTE_CMD_FIFO, cmd, "remote");
 }
-// Which app is making the sound, or "" when nothing is. The claim comes from the
-// app's own now-playing POST, so it is only read while it says something IS
-// playing - and it is cleared when the app that made it dies (`appWindowGone`),
-// because a retained claim outlives its app by days and used to point at one that
-// had not run since the last boot.
+// Which app is making the sound, or "" when nothing is. The rule itself lives in
+// mediastate.js, where it is unit-tested next to the state machine that already
+// asks the same question of the same field - main.js needs Electron, so nothing
+// written here can be tested at all.
 function soundingApp() {
-  if (!nowPlaying || (nowPlaying.state !== "playing" && nowPlaying.state !== "paused")) return "";
-  return String(nowPlaying.app || "");
+  return mediastate.soundingApp(nowPlaying);
 }
 
 function forwardCommand(cmd) {
@@ -2530,9 +2537,16 @@ function forwardCommand(cmd) {
   const sounding = soundingApp();
   const owner = sounding && sounding !== currentAppId ? appWindow(sounding) : null;
   if (owner) targets.add(owner.webContents);
+  // Every target is told WHICH app the shell believes is sounding, because the
+  // command goes to more than one window: with a queue paused in the media client
+  // and Spotify playing, a spoken "next song" reached both and skipped Spotify
+  // while starting house music over it. Only the shell knows; an app cannot see
+  // past its own state. Empty means the shell does not know either, and then an
+  // app falls back to judging for itself.
+  const payload = { ...(cmd || {}), sounding };
   for (const wc of targets) {
     try {
-      wc.send("tv-command", cmd);
+      wc.send("tv-command", payload);
     } catch (e) {}
   }
 }
@@ -2558,6 +2572,11 @@ function showLyrics(cmd) {
   const screenFree = !nativeapp.running() && (!currentAppId || currentAppId === target);
   // Hiding them needs no screen, so "off" never navigates.
   if (running && state !== "off" && screenFree && currentAppId !== target) navTo(target);
+  // Nothing is playing and no app is up, so the only window this reaches is the
+  // launcher, which has no transport listener: the request cannot land anywhere.
+  // Said out loud rather than dropped in silence, because the assistant will have
+  // reported the publish and this log is the only place the difference shows.
+  else if (!running) console.warn("[mqtt] lyrics: nothing is playing here, nobody to show them");
   forwardCommand(cmd);
 }
 
@@ -3223,6 +3242,7 @@ function exitApp(id) {
   if (currentAppId === id) showLauncher();
   destroyAppWindow(id);
   pluginAppClosed(id);
+  clearNowPlayingFor(id);
 }
 
 // Tell an app's plugin that its app was CLOSED, so it can stop sound the shell
