@@ -1048,6 +1048,12 @@ function serve() {
     audioSink: () => audioSink,
     childEnv: () => ({ ...process.env, ...WL_ENV }),
     destroyAppWindow,
+    // For the two paths that REMOVE an app rather than tear its window down: an
+    // app that is no longer installed cannot still be playing, so its retained
+    // now-playing claim has to go with it. Deliberately not part of
+    // destroyAppWindow, which a crashed renderer also reaches - a plugin's daemon
+    // outlives that, and `boxIdle` reads the claim to know it is playing.
+    clearNowPlaying: clearNowPlayingFor,
     // Uninstalling an app has to stop its plugin: only the plugin can release what
     // it holds (a daemon, a socket on the LAN), and the app's switch disappears from
     // Settings at the same moment - leaving no way to turn it off.

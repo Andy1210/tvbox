@@ -57,6 +57,7 @@ function fakeCtx(over = {}) {
     audioSink: () => null,
     childEnv: () => process.env,
     destroyAppWindow: () => {},
+    clearNowPlaying: () => {},
     unloadPlugin: () => {},
     dmode: { rearm: () => {}, refresh: (cb) => cb && cb(true, "") },
     emitConfigChange: () => {},
