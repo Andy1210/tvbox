@@ -2523,6 +2523,29 @@ function forwardCommand(cmd) {
  * and ready, or nothing happens: an id that is not one must not silently take
  * the television somewhere else.
  */
+/**
+ * A play_media is a CLAIM on the room's audio, so whatever else is playing stops.
+ *
+ * `soundOutlivesTheScreen` deliberately keeps audio-only playback through a
+ * screen change, which is right for pressing Home and wrong for this: measured
+ * on the box, a song asked for by voice that fell through to Spotify started
+ * over the media client's album and both played at once. This is the other half
+ * of that rule as it is already written - what ends music is something else
+ * claiming the player - said out loud for the one caller that means it.
+ *
+ * Not when the app being asked is the one already playing: it is about to be
+ * handed a new song and stopping first would only add a gap.
+ */
+function silenceForPlayMedia(id) {
+  if (!player.running() || player.owner() === id) return;
+  player.setPlaying(null);
+  player.stop();
+  setVideoMode(false);
+  // With a reason, so the app that owned it does not read the end of its file as
+  // "the track finished" and start the next one over what is about to play.
+  player.emit({ type: "finished", reason: "stopped" });
+}
+
 function playMediaIn(cmd) {
   const id = String((cmd && cmd.app) || "").trim();
   const m = id && apps.manifestById(id);
@@ -2532,11 +2555,13 @@ function playMediaIn(cmd) {
     // `launch` is a url query string (e.g. "v=<id>"), not a phrase: a site we do
     // not control has no other way in. withLaunchQuery is what keeps it to a few
     // short, ordinary parameters on the app's OWN url.
+    silenceForPlayMedia(id);
     if (!navTo(id, { query: String((cmd && cmd.launch) || "") })) console.warn("[mqtt] play_media: not opened:", id);
     return;
   }
   const query = playQuery(cmd && cmd.query);
   if (!query) return console.warn("[mqtt] play_media: nothing to look for");
+  silenceForPlayMedia(id);
   if (!navTo(id)) return console.warn("[mqtt] play_media: not opened:", id);
   const w = appWindow(id);
   if (!w || w.isDestroyed()) return console.warn("[mqtt] play_media: no window for", id);
