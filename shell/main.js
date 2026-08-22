@@ -3160,11 +3160,17 @@ function exitApp(id) {
 // Running row's ✕ and an app's own Exit both arrive here, and nothing else does.
 function pluginAppClosed(id) {
   const plugin = loadedPlugins.get(id);
-  if (!plugin || !plugin.appClosed) return;
+  // `typeof`, not truthiness: a plugin is somebody's JavaScript object, and
+  // calling a truthy non-function throws out of here into the route that asked
+  // for the quit.
+  if (!plugin || typeof plugin.appClosed !== "function") return;
   try {
     plugin.appClosed();
   } catch (e) {
-    console.warn("[plugin] appClosed", id, "failed:", e.message);
+    // `e` need not be an Error - `throw null` reaches here too - and reading
+    // .message off it would throw again, out of the catch, turning a plugin's
+    // bad moment into a failed quit.
+    console.warn("[plugin] appClosed", id, "failed:", String((e && e.message) || e));
   }
 }
 
@@ -3869,9 +3875,15 @@ function unloadPlugin(id) {
   // before the call means a `stop` that throws leaves the plugin's socket open with
   // nothing left that can reach it.
   try {
-    if (plugin.stop) plugin.stop();
+    if (typeof plugin.stop === "function") plugin.stop();
   } catch (e) {
-    console.warn("[plugin] stop", id, "failed:", e.message, "- whatever it held stays until a restart");
+    console.warn(
+      "[plugin] stop",
+      id,
+      "failed:",
+      String((e && e.message) || e),
+      "- whatever it held stays until a restart",
+    );
   }
   loadedPlugins.delete(id);
   for (let i = configListeners.length - 1; i >= 0; i--) if (configListeners[i].id === id) configListeners.splice(i, 1);
