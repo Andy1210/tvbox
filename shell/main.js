@@ -3145,6 +3145,47 @@ function exitApp(id) {
   console.log("[nav] exit", id);
   if (currentAppId === id) showLauncher();
   destroyAppWindow(id);
+  pluginAppClosed(id);
+}
+
+// Tell an app's plugin that its app was CLOSED, so it can stop sound the shell
+// cannot see. `appWindowGone` only ends the shared mpv, and a plugin's daemon is
+// not that: Spotify plays through librespot, which outlived the ✕ in the Running
+// row and kept the album going with no page left to reach it.
+//
+// Here rather than in the teardown hook, because that hook fires for every way a
+// window dies - the LRU cap, the memory guard, a crashed renderer - and the guard
+// that spares a sounding app from eviction asks the mpv player who owns it, so a
+// plugin's audio is invisible to it. Hung off the deliberate quit instead: the
+// Running row's ✕ and an app's own Exit both arrive here, and nothing else does.
+function pluginAppClosed(id) {
+  const plugin = loadedPlugins.get(id);
+  // `typeof`, not truthiness: a plugin is somebody's JavaScript object, and
+  // calling a truthy non-function throws out of here into the route that asked
+  // for the quit.
+  if (!plugin || typeof plugin.appClosed !== "function") return;
+  callPlugin(id, "appClosed", () => plugin.appClosed());
+}
+
+// Run one of a plugin's own methods without letting its failure reach us.
+//
+// Two ways it can, and a try/catch alone stops neither. A plugin may be ASYNC -
+// a rejected promise walks straight past a synchronous catch and lands as an
+// unhandled rejection in the main process - so a thenable return is caught too.
+// And `e` need not be an Error: `throw null` arrives here as well, and reading
+// `.message` off it would throw again, out of the catch and into whatever asked.
+// Returns whether it got through SYNCHRONOUSLY, which is all a caller can be told
+// at this point: an async plugin has only been started, not finished.
+function callPlugin(id, what, run) {
+  const failed = (e) => console.warn("[plugin]", what, id, "failed:", String((e && e.message) || e));
+  try {
+    const r = run();
+    if (r && typeof r.then === "function") r.then(undefined, failed);
+    return true;
+  } catch (e) {
+    failed(e);
+    return false;
+  }
 }
 
 // Cycle foreground through the running apps (the `appswitcher` remap action).
@@ -3819,12 +3860,12 @@ function hotLoadPlugin(id) {
   }
   const plugin = loadOnePlugin(m);
   if (!plugin) return false;
-  try {
-    if (plugin.start) plugin.start();
-    console.log("[plugin] hot-started", id);
-  } catch (e) {
-    console.warn("[plugin] hot-start", id, "failed:", e.message);
-  }
+  // Say which of the three actually happened. One line for all of them read
+  // "hot-started" even when there was no start to run, or when it threw and
+  // callPlugin had just logged the failure above it - which is the wrong thing
+  // to find in the log of a box whose app went in and did nothing.
+  if (typeof plugin.start !== "function") console.log("[plugin] hot-loaded", id, "(no start)");
+  else if (callPlugin(id, "start", () => plugin.start())) console.log("[plugin] hot-started", id);
   return true;
 }
 // Stop ONE app's plugin and forget it: the app is going away (uninstall) or being
@@ -3847,11 +3888,8 @@ function unloadPlugin(id) {
   // Its own `stop` FIRST, while the shell still holds the handle: dropping the entry
   // before the call means a `stop` that throws leaves the plugin's socket open with
   // nothing left that can reach it.
-  try {
-    if (plugin.stop) plugin.stop();
-  } catch (e) {
-    console.warn("[plugin] stop", id, "failed:", e.message, "- whatever it held stays until a restart");
-  }
+  // A failure here leaves whatever the plugin held until a restart.
+  if (typeof plugin.stop === "function") callPlugin(id, "stop", () => plugin.stop());
   loadedPlugins.delete(id);
   for (let i = configListeners.length - 1; i >= 0; i--) if (configListeners[i].id === id) configListeners.splice(i, 1);
   for (let i = pluginRoutes.length - 1; i >= 0; i--) if (pluginRoutes[i].id === id) pluginRoutes.splice(i, 1);
@@ -3864,19 +3902,16 @@ function unloadPlugin(id) {
   return true;
 }
 function startPlugins() {
-  for (const p of loadedPlugins.values()) {
-    try {
-      if (p.start) p.start();
-    } catch (e) {
-      console.warn("[plugin] start:", e.message);
-    }
+  for (const [id, p] of loadedPlugins) {
+    if (typeof p.start === "function") callPlugin(id, "start", () => p.start());
   }
 }
 function stopPlugins() {
-  for (const p of loadedPlugins.values()) {
-    try {
-      if (p.stop) p.stop();
-    } catch (e) {}
+  for (const [id, p] of loadedPlugins) {
+    // Logged rather than swallowed: this runs on the way out, and a plugin that
+    // could not put its daemon down is the reason the next start finds the port
+    // taken.
+    if (typeof p.stop === "function") callPlugin(id, "stop", () => p.stop());
   }
   supervisor.stopAll();
   fileserver.stop(null); // the symlinked view of the box's folders is not left behind

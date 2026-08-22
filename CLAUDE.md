@@ -118,11 +118,15 @@ Launcher (launcher/) is React+TS+Vite+Tailwind, spatial nav via
    only to capability apps). A new capability = a new broker gated on its cap
    name; never expose one unconditionally. The `fetch` broker is origin-locked +
    SSRF-guarded (appfetch.js) - see [docs/capabilities.md](docs/capabilities.md).
-3. **Manifests reload live, plugins don't.** `GET /tvbox/api/apps` re-reads
-   `shell/apps/` + `~/.tvbox/apps/` on every call; a dropped-in manifest
-   appears immediately. `service` plugins load at boot only (deps-gated) - a
-   new plugin needs a shell restart. `manifestVersion` is 1; the validator in
-   install.js skips anything else.
+3. **A manifest reloads live; a plugin reloads only when the STORE puts it
+   there.** `GET /tvbox/api/apps` re-reads `shell/apps/` + `~/.tvbox/apps/` on
+   every call, so a dropped-in manifest appears immediately. A `service` plugin
+   is loaded at boot (deps-gated) and hot-loaded by an install or an update
+   (`hotLoadPlugin`, which unloads the old code first) - but a `plugin.js` you
+   copied in by hand needs a shell restart, because nothing told the shell.
+   Every lifecycle call goes through `callPlugin`, so a plugin that throws or
+   rejects is logged, never rethrown at the shell. `manifestVersion` is 1; the
+   validator in install.js skips anything else.
 4. **i18n both-or-nothing:** every launcher string goes through `t()`/`loc()`
    and must exist in BOTH `locales/en.json` and `hu.json` -
    `locales.test.ts` fails on drift or dead keys. Defaults are `en`

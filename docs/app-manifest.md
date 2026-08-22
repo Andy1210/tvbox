@@ -175,11 +175,22 @@ custom HTTP routes - declares `"service": "<name>"` and ships `plugin.js` in its
 package, next to its `manifest.json` (`~/.tvbox/apps/<id>/plugin.js`). There is
 no separate in-shell plugin location: the plugin ships with the app package.
 
-A plugin is a factory `(host) => ({ start?, stop? })`; the `host` surface
-(routes, config, pairing, supervised children, `onConfigChange`, `navTo`, …) and
-a worked example are in **[tvbox-apps/AUTHORING.md](https://github.com/Andy1210/tvbox-apps/blob/main/AUTHORING.md)**.
-Plugins load **at shell boot only** (unlike manifests, which reload live) and
-only when the app's `requires.bin` all resolve.
+A plugin is a factory `(host) => ({ start?, stop?, appClosed? })`; the `host`
+surface (routes, config, pairing, supervised children, `onConfigChange`,
+`navTo`, …) and a worked example are in
+**[tvbox-apps/AUTHORING.md](https://github.com/Andy1210/tvbox-apps/blob/main/AUTHORING.md)**.
+`appClosed()` is called when the app is CLOSED - the ✕ in HOME's Running row, or
+the app's own Exit - and only then: not when a window is dropped for the LRU cap
+or a crash, so it means "somebody put this app away", not "the page is gone". It
+exists for state the shell cannot see: the shell ends its own shared player when
+an app closes, but a plugin's daemon is invisible to it, and Spotify's music
+went on playing out of a box with nothing left to reach it. Any of the three may
+be async; a rejection is logged, never rethrown.
+Plugins load at shell boot, and only when the app's `requires.bin` all resolve.
+An install or an update hot-loads one straight away (replacing the old code if it
+is still loaded), so a package fix takes effect without a reboot - but only for
+an app the store handled: a `plugin.js` dropped into `~/.tvbox/apps` by hand
+needs a shell restart, unlike a manifest, which reloads live.
 
 > **Trust note:** a plugin is Node code running in the shell's host process -
 > installing one is code execution on the box. The registry is curated (every app
