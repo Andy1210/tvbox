@@ -19,6 +19,15 @@ const { ipcRenderer } = require("electron");
   })();
   const caps = info.capabilities || [];
 
+  // Commands that arrived before the page had a listener - see `onCommand`. The
+  // subscription is here rather than inside it so the gap starts at preload
+  // time, which is the only moment early enough to cover a page that is still
+  // loading its bundle. Capped, and handed to the first listener.
+  var earlyCommands = [];
+  ipcRenderer.on("tv-command", function (_e, c) {
+    if (earlyCommands && earlyCommands.length < 4) earlyCommands.push(c);
+  });
+
   // ---- universal: shell navigation (works in every app) ----
   window.tvbox = {
     launch: function (appId) {
@@ -67,6 +76,13 @@ const { ipcRenderer } = require("electron");
     },
     // Media commands forwarded from the shell (MQTT tv_control) so the active app
     // can drive its own player (e.g. Spotify transport).
+    //
+    // A command that arrives before the page has a listener is HELD rather than
+    // dropped: a window opened BY a command (music asked for by voice) is still
+    // executing its bundle when the shell delivers it, and its listener goes on
+    // in an effect after that. Only what arrived before the first listener, and
+    // only a few of them - this is a hand-over gap of milliseconds, not a
+    // mailbox, and a page that never listens must not accumulate one.
     onCommand: function (cb) {
       var h = function (_e, c) {
         try {
@@ -74,6 +90,17 @@ const { ipcRenderer } = require("electron");
         } catch (e) {}
       };
       ipcRenderer.on("tv-command", h);
+      var held = earlyCommands;
+      earlyCommands = null; // the first listener takes them; later ones start clean
+      if (held && held.length) {
+        setTimeout(function () {
+          for (var i = 0; i < held.length; i++) {
+            try {
+              cb(held[i]);
+            } catch (e) {}
+          }
+        }, 0);
+      }
       return function () {
         try {
           ipcRenderer.removeListener("tv-command", h);

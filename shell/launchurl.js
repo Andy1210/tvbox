@@ -47,4 +47,27 @@ function withLaunchQuery(url, query) {
   return u.toString();
 }
 
-module.exports = { withLaunchQuery, MAX_LAUNCH_PARAMS, MAX_LAUNCH_KEY, MAX_LAUNCH_VALUE };
+/**
+ * What a LOCAL app is asked to look for, on a `play_media` command.
+ *
+ * The other half of the same question: a remote site can only be handed url
+ * parameters, and one of ours is handed words. Same reasoning about the
+ * boundary - this arrives over MQTT, reaches an app's search box and a log line
+ * - so control characters are replaced rather than stripped (removing them
+ * would join two words into one that was never asked for) and the length is
+ * capped. Empty means there was nothing to look for.
+ */
+const MAX_PLAY_QUERY = 200;
+function playQuery(raw) {
+  return (
+    String(raw == null ? "" : raw)
+      // eslint-disable-next-line no-control-regex
+      .replace(/[\u0000-\u001f\u007f]/g, " ")
+      .replace(/\s+/g, " ")
+      .trim()
+      .slice(0, MAX_PLAY_QUERY)
+      .trim()
+  );
+}
+
+module.exports = { withLaunchQuery, playQuery, MAX_LAUNCH_PARAMS, MAX_LAUNCH_KEY, MAX_LAUNCH_VALUE, MAX_PLAY_QUERY };
