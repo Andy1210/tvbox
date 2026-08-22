@@ -3164,13 +3164,24 @@ function pluginAppClosed(id) {
   // calling a truthy non-function throws out of here into the route that asked
   // for the quit.
   if (!plugin || typeof plugin.appClosed !== "function") return;
+  callPlugin(id, "appClosed", () => plugin.appClosed());
+}
+
+// Run one of a plugin's own methods without letting its failure reach us.
+//
+// Two ways it can, and a try/catch alone stops neither. A plugin may be ASYNC -
+// a rejected promise walks straight past a synchronous catch and lands as an
+// unhandled rejection in the main process - so a thenable return is caught too.
+// And `e` need not be an Error: `throw null` arrives here as well, and reading
+// `.message` off it would throw again, out of the catch and into whatever asked.
+function callPlugin(id, what, run) {
+  const failed = (e) => console.warn("[plugin]", what, id, "failed:", String((e && e.message) || e));
   try {
-    plugin.appClosed();
+    const r = run();
+    if (r && typeof r.then === "function") r.then(undefined, failed);
+    return r;
   } catch (e) {
-    // `e` need not be an Error - `throw null` reaches here too - and reading
-    // .message off it would throw again, out of the catch, turning a plugin's
-    // bad moment into a failed quit.
-    console.warn("[plugin] appClosed", id, "failed:", String((e && e.message) || e));
+    failed(e);
   }
 }
 
@@ -3874,17 +3885,8 @@ function unloadPlugin(id) {
   // Its own `stop` FIRST, while the shell still holds the handle: dropping the entry
   // before the call means a `stop` that throws leaves the plugin's socket open with
   // nothing left that can reach it.
-  try {
-    if (typeof plugin.stop === "function") plugin.stop();
-  } catch (e) {
-    console.warn(
-      "[plugin] stop",
-      id,
-      "failed:",
-      String((e && e.message) || e),
-      "- whatever it held stays until a restart",
-    );
-  }
+  // A failure here leaves whatever the plugin held until a restart.
+  if (typeof plugin.stop === "function") callPlugin(id, "stop", () => plugin.stop());
   loadedPlugins.delete(id);
   for (let i = configListeners.length - 1; i >= 0; i--) if (configListeners[i].id === id) configListeners.splice(i, 1);
   for (let i = pluginRoutes.length - 1; i >= 0; i--) if (pluginRoutes[i].id === id) pluginRoutes.splice(i, 1);
