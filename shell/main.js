@@ -3145,6 +3145,27 @@ function exitApp(id) {
   console.log("[nav] exit", id);
   if (currentAppId === id) showLauncher();
   destroyAppWindow(id);
+  pluginAppClosed(id);
+}
+
+// Tell an app's plugin that its app was CLOSED, so it can stop sound the shell
+// cannot see. `appWindowGone` only ends the shared mpv, and a plugin's daemon is
+// not that: Spotify plays through librespot, which outlived the ✕ in the Running
+// row and kept the album going with no page left to reach it.
+//
+// Here rather than in the teardown hook, because that hook fires for every way a
+// window dies - the LRU cap, the memory guard, a crashed renderer - and the guard
+// that spares a sounding app from eviction asks the mpv player who owns it, so a
+// plugin's audio is invisible to it. Hung off the deliberate quit instead: the
+// Running row's ✕ and an app's own Exit both arrive here, and nothing else does.
+function pluginAppClosed(id) {
+  const plugin = loadedPlugins.get(id);
+  if (!plugin || !plugin.appClosed) return;
+  try {
+    plugin.appClosed();
+  } catch (e) {
+    console.warn("[plugin] appClosed", id, "failed:", e.message);
+  }
 }
 
 // Cycle foreground through the running apps (the `appswitcher` remap action).
