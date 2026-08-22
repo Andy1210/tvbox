@@ -1,7 +1,7 @@
 {
   "name": "tvbox",
   "private": true,
-  "description": "Repo-level tooling only (lint/format standard) - the shell and the launcher have their own package.json.",
+  "description": "Repo-level tooling only (lint/format standard, the docs site generator) - the shell and the launcher have their own package.json.",
   "license": "MIT",
   "repository": {
     "type": "git",
@@ -11,7 +11,9 @@
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
     "format": "prettier --write .",
-    "format:check": "prettier --check ."
+    "format:check": "prettier --check .",
+    "docs:site": "node scripts/docs-site/build.js --docs docs --out docs-site",
+    "docs:site:test": "node --test scripts/docs-site/*.test.js"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
@@ -19,6 +21,7 @@
     "eslint-config-prettier": "^10.1.8",
     "eslint-plugin-react-hooks": "^7.1.1",
     "globals": "^17.7.0",
+    "marked": "^18.0.10",
     "prettier": "^3.9.5",
     "typescript": "^6.0.3",
     "typescript-eslint": "^8.63.0"

@@ -18,9 +18,11 @@ What the user sees:
 
 - **Media goes quiet in the background.** On hide the renderer is muted and any
   in-page `<video>/<audio>` is pause()d best-effort (YouTube/Plex web players).
-  The shared **mpv player always stops** on leave, exactly as before - it's a
-  single global process, not per-app; what survives is the app's _UI state_,
-  so pressing play again is two clicks, not a full app boot.
+  A **picture** in the shared mpv player stops on leave - it's a single global
+  process, not per-app - and the app hears `finished` with `reason: "stopped"`.
+  **Sound outlives the screen**: audio-only playback keeps going, which is what
+  lets a music app be left while the album plays on. What survives either way is
+  the app's _UI state_, so pressing play again is two clicks, not a full app boot.
 - **Limits scale with the box's RAM** (Pi 5 ships as 2/4/8/16GB; logged at boot
   as `[apps] background limits`): the hidden-window count cap is 1 (<3.5GB) /
   3 (<7GB) / 6 (more), LRU-evicted beyond that; and a once-a-minute RAM guard

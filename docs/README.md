@@ -3,6 +3,10 @@
 The [README](../README.md) is the tour. These are the pages it points at, each
 one about a single thing the box does and why it does it that way.
 
+They are also published as a site, at
+<https://andy1210.github.io/tvbox/docs/>, for reading somewhere that is not a git
+checkout. Same files, built by [scripts/docs-site](../scripts/docs-site/build.js).
+
 ## Setting a box up
 
 | Page                                           | What it covers                                                                             |
@@ -27,16 +31,17 @@ one about a single thing the box does and why it does it that way.
 | [screen-mirroring.md](screen-mirroring.md)                   | A phone's screen on the TV, and what it costs the box's wifi.                     |
 | [mqtt-integration.md](mqtt-integration.md)                   | Every topic the box publishes and listens on.                                     |
 | [homeassistant-integration.md](homeassistant-integration.md) | The integration that makes the box a real `media_player` entity.                  |
-| [background-apps.md](background-apps.md)                     | Why leaving an app is instant to come back to, and what it costs in RAM.          |
 | [app-store-sources.md](app-store-sources.md)                 | Adding your own registry next to the official one, and what that means for trust. |
 
 ## Writing an app
 
-| Page                               | What it covers                                                                              |
-| ---------------------------------- | ------------------------------------------------------------------------------------------- |
-| [app-manifest.md](app-manifest.md) | The manifest field reference. Schema: [app-manifest.schema.json](app-manifest.schema.json). |
-| [capabilities.md](capabilities.md) | The security boundary: what each capability exposes and how it is brokered.                 |
-| [native-apps.md](native-apps.md)   | Programs that draw their own fullscreen window, like RetroArch.                             |
+| Page                                     | What it covers                                                                                   |
+| ---------------------------------------- | ------------------------------------------------------------------------------------------------ |
+| [app-api.md](app-api.md)                 | **The API reference**: every `window.tvbox` call, the SDK, the HTTP routes, the host plugin API. |
+| [app-manifest.md](app-manifest.md)       | The manifest field reference. Schema: [app-manifest.schema.json](app-manifest.schema.json).      |
+| [capabilities.md](capabilities.md)       | The security boundary: what each capability exposes and how it is brokered.                      |
+| [native-apps.md](native-apps.md)         | Programs that draw their own fullscreen window, like RetroArch.                                  |
+| [background-apps.md](background-apps.md) | What leaving an app does to it - the lifecycle an app has to survive.                            |
 
 The full authoring guide lives with the apps themselves, in the registry:
 [AUTHORING.md](https://github.com/Andy1210/tvbox-apps/blob/main/AUTHORING.md).

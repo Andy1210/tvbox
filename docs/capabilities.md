@@ -6,6 +6,10 @@ in `runtime.capabilities` - the security boundary. This page is the capability
 reference and the model behind it: how an app can be powerful (play video, fetch
 a feed, persist state) **without** being trusted with the host process.
 
+This page is the model and the boundary. The call-by-call reference - every
+method each capability exposes, what it takes and what it answers - is
+[app-api.md](app-api.md).
+
 The guiding idea: **"complex" should not mean "arbitrary native code."** A
 capability is a narrow, brokered API the shell hands the app through its
 preload bridge - the app calls it, the shell enforces the rules. So a
@@ -83,7 +87,11 @@ Four things it will not do, all of them silent (the call is fire-and-forget):
 - fire for an app that is **not the one on screen** - a background app's timer
   must not take the person out of what they are watching;
 - fire while a **native program** is running (the shell would end it, not hide
-  it), while the shared **player** is running, or while a phone is **mirroring**;
+  it), while the shared player is showing a **picture**, or while a phone is
+  **mirroring**. Audio-only playback is allowed - sound already survives a screen
+  change, so a paused album on a media screen is exactly the still picture this
+  exists for; whether it is worth asking over _playing_ music is the app's
+  decision, because it knows if its own screen is the thing to look at;
 - fire when the owner has the screensaver **off** (Settings - Ambient);
 - fire on a shell that predates it, where `tvbox().ambient` is simply absent -
   and in the isolated window, on an app that declares no capability beyond `nav`,

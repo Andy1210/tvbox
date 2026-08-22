@@ -323,13 +323,18 @@ added. [docs/app-store-sources.md](docs/app-store-sources.md)
 
 ## Adding an app
 
-An app is a **package**. The full authoring guide (layout, manifest reference,
-the web UI via `@tvbox/app-sdk`, the host plugin API, dependencies, versioning)
-is
+An app is a **package**. Two pages between them cover writing one: what you can
+CALL is [docs/app-api.md](docs/app-api.md) - every `window.tvbox` method, the
+`@tvbox/app-sdk` exports, the box's own HTTP routes and the host plugin API, with
+the lifecycle an app has to survive - and how to build and PUBLISH one is
 [AUTHORING.md](https://github.com/Andy1210/tvbox-apps/blob/main/AUTHORING.md) in
-the registry; the manifest field reference is
+the registry. The manifest field reference is
 [docs/app-manifest.md](docs/app-manifest.md) (schema:
 [docs/app-manifest.schema.json](docs/app-manifest.schema.json)).
+
+All of it is also published at
+<https://andy1210.github.io/tvbox/docs/>, next to the
+[browser demo](https://andy1210.github.io/tvbox/) of the launcher itself.
 
 To publish for everyone, open a PR against the
 [registry](https://github.com/Andy1210/tvbox-apps). For a **private** app, drop a
