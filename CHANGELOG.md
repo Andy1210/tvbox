@@ -5,6 +5,24 @@ updates). `scripts/make-release.sh` lifts the current version's `hu`/`en`
 blocks into the OTA feed's `notes` - keep both languages, keep it short, and
 write for the person on the couch (what changes for THEM), not for developers.
 
+## 3.8.1
+
+### hu
+
+- **Egy alkalmazás bezárása elhallgattatja azt is, amit nem a box játszik.** A
+  Futó appok sorában a Spotifyt bezárva eddig ment tovább a zene, mert azt a saját
+  háttérszolgálata szólaltatja meg, nem a box lejátszója. Most megáll. A box közben
+  a Spotify Connect listáján marad, tehát a telefonról továbbra is ideküldhetsz
+  zenét zárt alkalmazás mellett is.
+
+### en
+
+- **Closing an app now silences sound the box itself is not playing.** Closing
+  Spotify from the Running apps row used to leave the music going, because its own
+  background service is what makes the sound, not the box's player. It stops now.
+  The box stays on the Spotify Connect list either way, so you can still send music
+  here from a phone with the app closed.
+
 ## 3.8.0
 
 ### hu
