@@ -460,6 +460,7 @@ function post(p, data, res, ctx) {
     if (ctx.foregroundApp() === id) ctx.showLauncher();
     ctx.destroyAppWindow(id); // a background window must not outlive its app
     ctx.setWidget(id, null);
+    ctx.clearNowPlaying(id); // an app that is gone is not playing anything
     // ...and neither must its plugin. A window is ours to destroy; a daemon or a
     // socket on the LAN is the plugin's, and its own `stop` is the only thing that
     // releases it. Before the files go, so `stop` still has its module.
@@ -585,6 +586,7 @@ function post(p, data, res, ctx) {
     if (maintenance.isInstalling(id)) return httpserver.jsonRes(res, { ok: false, error: "install in progress" });
     if (ctx.foregroundApp() === id) ctx.showLauncher(); // never yank the bundle out from under the running app
     ctx.destroyAppWindow(id); // incl. a hidden background window
+    ctx.clearNowPlaying(id); // ...and the claim it left behind
     return httpserver.jsonRes(res, { ok: true, removed: apps.removeApp(id) });
   }
   if (p === "/tvbox/api/wifi/connect") {
