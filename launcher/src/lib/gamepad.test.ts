@@ -234,3 +234,24 @@ it("adopting what is held does not deafen the OTHER buttons", () => {
   tick();
   expect(keys).toEqual(["Backspace"]);
 });
+
+it("starting while an unrecognised pad's hat is held does not fix that as its rest point", () => {
+  // On some unrecognised pads axes 6/7 are a hat, on others analog pedals - and a
+  // pedal RESTS at -1, which is why the first sample is taken as the zero point.
+  // But `start()` runs at exactly the moment a direction is most likely to be
+  // held: recording -1 there would make RELEASING the hat read as a full
+  // deflection the other way, and fire the opposite arrow.
+  const p = pad({ mapping: "" as Gamepad["mapping"], axes: [0, 0, 0, 0, 0, 0, -1, 0] });
+  pads = [p];
+  begin();
+  // Released before the first poll ever runs.
+  (p.axes as number[])[6] = 0;
+  tick();
+  tick(600);
+  expect(keys).toEqual([]);
+
+  // And the hat still works from its real centre.
+  (p.axes as number[])[6] = -1;
+  tick();
+  expect(keys).toEqual(["ArrowLeft"]);
+});

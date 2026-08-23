@@ -105,21 +105,31 @@ function due(action: string, pressed: boolean, now: number) {
  *
  * Shared by the polling loop and by `start()`, which needs the same answer at the
  * moment navigation begins - see there.
+ *
+ * `baseline` says whether this read may DECIDE where an unrecognised pad's
+ * ambiguous axes rest. Only the polling loop may: a first sample taken while a hat
+ * is held would record "held left" as the zero point, and releasing it would then
+ * read as a full deflection the other way. `start()` is called at exactly the
+ * moment a direction is most likely to be held, so it reads without recording, and
+ * skips the ambiguous pair when no baseline exists yet.
  */
-function readHeld(pads: Gamepad[]): Set<string> {
+function readHeld(pads: Gamepad[], baseline: boolean): Set<string> {
   const held = new Set<string>();
   const defl: Record<string, number> = { up: 0, down: 0, left: 0, right: 0 };
   for (const pad of pads) {
     const buttons = pad.mapping === "standard" ? STANDARD_BUTTONS : RAW_BUTTONS;
     for (const [i, action] of buttons) if (pad.buttons[i]?.pressed) held.add(action);
-    if (!rest.has(pad.index)) rest.set(pad.index, pad.axes.slice());
-    const zero = rest.get(pad.index) as number[];
+    if (baseline && !rest.has(pad.index)) rest.set(pad.index, pad.axes.slice());
+    const zero = rest.get(pad.index);
     for (const [xi, yi] of STICKS) {
+      // The left stick's centre is 0 by definition, so it needs no baseline; the
+      // ambiguous pair is skipped until the polling loop has taken one.
+      if (xi !== 0 && !zero) continue;
       // Relative to rest for the ambiguous pair, absolute for the left stick (whose
       // centre is 0 by definition in the Gamepad API).
       const base = xi === 0 ? 0 : 1;
-      const x = (pad.axes[xi] ?? 0) - base * (zero[xi] ?? 0);
-      const y = (pad.axes[yi] ?? 0) - base * (zero[yi] ?? 0);
+      const x = (pad.axes[xi] ?? 0) - base * (zero?.[xi] ?? 0);
+      const y = (pad.axes[yi] ?? 0) - base * (zero?.[yi] ?? 0);
       // Strongest deflection per direction across every pad and axis pair. Taking
       // the max FIRST matters: applying hysteresis per pair let a centred hat
       // cancel a deflected stick (whichever pair happened to be read last won).
@@ -146,7 +156,7 @@ function poll() {
     return;
   }
   const now = performance.now();
-  const held = readHeld(pads);
+  const held = readHeld(pads, true);
   for (const action of Object.keys(KEYS)) if (due(action, held.has(action), now)) sendKey(KEYS[action]);
   frame = requestAnimationFrame(poll);
 }
@@ -187,7 +197,7 @@ function start() {
   // `Infinity` means "fires nothing until released" - directions included, because
   // a repeat that begins because navigation restarted is the same unasked-for
   // action in a milder form.
-  for (const action of readHeld(pads)) nextAt.set(action, Infinity);
+  for (const action of readHeld(pads, false)) nextAt.set(action, Infinity);
   frame = requestAnimationFrame(poll);
 }
 
