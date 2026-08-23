@@ -117,7 +117,12 @@ function ownOrigins(port) {
 function foreignOrigin(req, origins) {
   const h = (req && req.headers) || {};
   const o = h.origin;
-  if (o && !origins.has(String(o).toLowerCase())) return true;
+  // `Origin` DECIDES when it is there. A page cannot forge it, so one of ours is
+  // proof enough - and it has to win, because the two spellings this server
+  // answers to are not the same site: measured, a page at `localhost:8097`
+  // fetching `127.0.0.1:8097` sends `Sec-Fetch-Site: cross-site` even though it
+  // is the very same server, and `ownOrigins` deliberately blesses both.
+  if (o) return !origins.has(String(o).toLowerCase());
   // `Origin` is not sent for a cross-origin GET the browser makes on a page's
   // behalf - measured: an <img>, an <iframe> and a no-cors fetch to another origin
   // all arrive with no Origin at all. So the header cannot see the one case the
@@ -185,6 +190,7 @@ function pluginRouteGuarded(routes, method, pathname) {
 
 module.exports = {
   MIME,
+  resolvePluginRoute,
   jsonRes,
   serveStatic,
   ownOrigins,

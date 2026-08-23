@@ -1138,6 +1138,9 @@ function serve() {
       res.end("bad request");
       return;
     }
+    // Which plugin route, if any, this GET would reach. Resolved before the gate
+    // because the gate consults it, and reused when dispatching.
+    const pluginGet = req.method === "GET" ? httpserver.resolvePluginRoute(pluginRoutes, "GET", p) : null;
     // Same-origin gate for everything state-changing: every non-GET (the POST
     // API + plugin POST routes) plus the GETs that have side effects - tv/standby
     // (stops playback) and the firetvir reads (they spawn a python subprocess /
@@ -1160,9 +1163,20 @@ function serve() {
       p === "/tvbox/api/remote/finder/capable" ||
       // …and whatever a plugin declared, for the same reason: only the plugin
       // knows which of its own reads cost something. See registerRoutes below.
-      httpserver.pluginRouteGuarded(pluginRoutes, "GET", p);
+      // ONE resolution, reused below to dispatch: asking twice would let the gate
+      // be decided against one route and the request served by another.
+      !!(pluginGet && pluginGet.guarded);
     if ((req.method !== "GET" || guardedGet) && httpserver.foreignOrigin(req, OWN_ORIGINS)) {
-      console.warn("[main] rejected cross-origin", req.method, p, "from", req.headers.origin);
+      // Both headers: the whole new class of refusals - a cross-site GET a page
+      // made on our behalf - carries NO Origin at all, so logging only that told
+      // an app author their request came "from undefined".
+      console.warn(
+        "[main] rejected cross-origin",
+        req.method,
+        p,
+        "origin=" + (req.headers.origin || "(none)"),
+        "sec-fetch-site=" + (req.headers["sec-fetch-site"] || "(none)"),
+      );
       res.writeHead(403, { "Content-Type": "text/plain" });
       res.end("cross-origin request rejected");
       return;
@@ -1195,10 +1209,9 @@ function serve() {
       return;
     }
     // plugin-registered GET routes (e.g. all of Spotify's) take precedence
-    const gRoute = httpserver.matchPluginRoute(pluginRoutes, "GET", p);
-    if (gRoute) {
+    if (pluginGet) {
       try {
-        gRoute(req, res, {});
+        pluginGet.fn(req, res, {});
       } catch (e) {
         try {
           res.writeHead(500);

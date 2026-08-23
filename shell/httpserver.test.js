@@ -234,15 +234,17 @@ test("a cross-site load with no Origin is still foreign", () => {
   // hostile local port.
   // And a non-browser sends neither header: curl, the CEC bridge, the tvbox CLI.
   assert.equal(httpserver.foreignOrigin(req({}), origins), false);
-  // Origin still decides on its own when it is there, whatever the fetch metadata
-  // says - a client that sets only one of them must not get the weaker answer.
+  // Origin DECIDES when it is there, in both directions. A page cannot forge it,
+  // and it has to win: the two spellings this server answers to are not the same
+  // site, so a page at `localhost:8097` fetching `127.0.0.1:8097` sends
+  // `cross-site` for one server - measured - and `ownOrigins` blesses both.
   assert.equal(
     httpserver.foreignOrigin(req({ origin: "http://evil.invalid", "sec-fetch-site": "same-origin" }), origins),
     true,
   );
   assert.equal(
-    httpserver.foreignOrigin(req({ origin: "http://127.0.0.1:8097", "sec-fetch-site": "cross-site" }), origins),
-    true,
+    httpserver.foreignOrigin(req({ origin: "http://localhost:8097", "sec-fetch-site": "cross-site" }), origins),
+    false,
   );
   assert.equal(httpserver.foreignOrigin(req({ origin: "HTTP://LOCALHOST:8097" }), origins), false);
 });

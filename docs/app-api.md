@@ -691,6 +691,20 @@ the answer, but the cost is already paid: xcloud's wait-time lookup is one
 authenticated request to Microsoft per distinct id, so an `<img src>` in a remote
 app's window could drive the household's Xbox account unattended.
 
+**Never guard a route something outside the box redirects INTO.** An OAuth
+callback is the case: the provider's own page navigates down to
+`http://127.0.0.1:8097/tvbox/api/<you>/auth/callback`, and a page-initiated
+navigation carries `Sec-Fetch-Site: cross-site` — measured, so a guarded callback
+answers 403 and the sign-in window simply sits there. It looks exactly like "a
+read that spends something", which is the trap. The gate is for reads your OWN
+page makes.
+
+A guard entry that names no `GET` in the same table is a mistake the shell
+refuses: `registerRoutes` throws and your plugin does not load, with the bad key
+in the log. The quiet alternative would be the very bug the option exists to
+prevent — a typo that matches nothing, a route that still answers, and nothing
+anywhere saying it is unguarded.
+
 ## The host plugin API
 
 If your app needs host-side Node - a daemon, an OAuth window, server routes -

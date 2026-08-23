@@ -39,7 +39,11 @@ function hasLocale(id: string): boolean {
 // hardcoded `import hu/en` + `AVAILABLE_LOCALES` const.
 export function configureI18n(locales: Record<string, LocaleDict>, opts?: { fallback?: string }): void {
   LOCALES = locales;
-  FALLBACK = opts?.fallback ?? Object.keys(locales)[0] ?? "en";
+  // Held to a locale that EXISTS: an unknown fallback renders raw keys, and since
+  // it now also reaches `<html lang>` it would tell a screen reader the page is in
+  // a language nothing on it is written in.
+  const asked = opts?.fallback;
+  FALLBACK = (asked && locales[asked] ? asked : Object.keys(locales)[0]) ?? "en";
   LOCALE_INFO = Object.entries(LOCALES).map(([id, d]) => ({
     id,
     name: d._meta.name,

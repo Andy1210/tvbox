@@ -614,6 +614,17 @@ function installDownload(entry, log) {
   }
 }
 
+// Where an upgrade-in-place puts the install it is replacing.
+//
+// Dotted, for the same reason the temp dir is: `<id>.bak-<pid>` is neither a
+// dotfile nor a `.json`, so loadManifests enumerated it as a PACKAGE claiming the
+// same id - and with the directory listing in the wrong order the app that
+// resolved was the one being replaced, `_dir` and all, so its old plugin.js is
+// what would have been required. Normally a window of milliseconds, permanent if
+// the process dies mid-swap: two orphaned `.<id>.tmp-*` dirs from nightly updates
+// were sitting on a real box when this was written.
+const backupPath = (id) => path.join(USER_APPS_DIR, "." + id + ".bak-" + process.pid);
+
 // Install a PACKAGE app - a dir-app that ships its OWN code/UI (manifest.json +
 // optional plugin.js + web/** + pairing/**) - into ~/.tvbox/apps/<id>/. This is
 // how a registry app carries everything (the Kodi model): the shell only
@@ -657,7 +668,7 @@ async function installPackage(id, baseUrl, files, log) {
   // temp dir is a SIBLING (same filesystem as dst) so the final rename is atomic;
   // the leading "." keeps loadManifests from picking it up mid-install.
   const tmp = fs.mkdtempSync(path.join(USER_APPS_DIR, "." + id + ".tmp-"));
-  const bak = fs.existsSync(dst) ? dst + ".bak-" + process.pid : null; // upgrade-in-place backup
+  const bak = fs.existsSync(dst) ? backupPath(id) : null;
   try {
     for (const f of files) {
       const rel = String((f && f.path) || "");
@@ -732,8 +743,10 @@ async function installPackage(id, baseUrl, files, log) {
       // `wasremote.json` may perfectly well declare `id: "other-app"`, and
       // deleting it on the strength of its name would remove somebody else's app.
       const legacy = path.join(USER_APPS_DIR, id + ".json");
+      // recursive as well as force: rmSync throws on a directory without it, and
+      // "<id>.json is somehow a directory" must not be what breaks an install.
       if (fs.existsSync(legacy) && JSON.parse(fs.readFileSync(legacy, "utf8")).id === id) {
-        fs.rmSync(legacy);
+        fs.rmSync(legacy, { recursive: true, force: true });
         log("removed the legacy manifest " + legacy + " this package replaces");
       }
     } catch (e) {
@@ -1017,6 +1030,7 @@ module.exports = {
   installDownload,
   installUiDeps,
   installPackage,
+  backupPath,
   onPath,
   validateManifest,
   USER_BIN,

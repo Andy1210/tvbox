@@ -20,7 +20,7 @@ describe("configureI18n and the document language", () => {
     }
   });
 
-  it("applies the PERSISTED locale to the document, without anyone picking one", () => {
+  it("applies the locale the STORE already holds, with nobody picking one", () => {
     useLocaleStore.setState({ locale: "hu" });
     configureI18n(DICTS, { fallback: "en" });
     expect(document.documentElement.lang).toBe("hu-HU");
@@ -49,5 +49,23 @@ describe("configureI18n and the document language", () => {
     configureI18n(DICTS, { fallback: "en" });
     useLocaleStore.getState().setLocale("de");
     expect(document.documentElement.lang).toBe("en-GB");
+  });
+});
+
+describe("configureI18n called again, or badly", () => {
+  it("drops a stored locale the new dictionaries do not have", () => {
+    useLocaleStore.setState({ locale: "hu" });
+    configureI18n({ en: DICTS.en }, { fallback: "en" });
+    expect(useLocaleStore.getState().locale).toBe(null);
+    expect(document.documentElement.lang).toBe("en-GB");
+  });
+
+  it("refuses a fallback it has no dictionary for", () => {
+    // It renders raw keys, and since it now also reaches `<html lang>` it would
+    // tell a screen reader the page is in a language nothing on it is written in.
+    useLocaleStore.setState({ locale: null });
+    configureI18n(DICTS, { fallback: "de" });
+    expect(document.documentElement.lang).not.toBe("de");
+    expect(["en-GB", "hu-HU"]).toContain(document.documentElement.lang);
   });
 });

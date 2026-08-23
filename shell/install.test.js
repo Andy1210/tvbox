@@ -785,3 +785,63 @@ test("a leftover <id>.json belonging to a DIFFERENT app is left alone", () => {
     }
   });
 });
+
+test("the upgrade backup is not enumerated as an app of its own", () => {
+  // `<id>.bak-<pid>` is neither a dotfile nor a `.json`, so it was read as a
+  // PACKAGE claiming the same id - and with the directory listing the other way
+  // round the app that resolved was the one being replaced, `_dir` and all. The
+  // window is milliseconds, and permanent if the process dies mid-swap.
+  const dir = apps.USER_APPS_DIR;
+  fs.mkdirSync(path.join(dir, "upg"), { recursive: true });
+  fs.writeFileSync(
+    path.join(dir, "upg", "manifest.json"),
+    JSON.stringify({
+      id: "upg",
+      manifestVersion: 1,
+      name: "New",
+      version: "2.0.0",
+      type: "webclient",
+      status: "ready",
+      runtime: { serve: "local", entry: "index.html" },
+    }),
+  );
+  // What installPackage leaves behind mid-swap - asked of it, so the name and the
+  // enumeration cannot drift apart.
+  const bak = apps.backupPath("upg");
+  assert.ok(path.basename(bak).startsWith("."), "the backup has to be invisible to loadManifests: " + bak);
+  assert.equal(path.dirname(bak), dir);
+  fs.mkdirSync(bak, { recursive: true });
+  fs.writeFileSync(
+    path.join(bak, "manifest.json"),
+    JSON.stringify({
+      id: "upg",
+      manifestVersion: 1,
+      name: "Old",
+      version: "1.0.0",
+      type: "webclient",
+      status: "ready",
+      runtime: { serve: "remote", url: "https://old.invalid/" },
+    }),
+  );
+  try {
+    for (const reversed of [false, true]) {
+      const real = fs.readdirSync;
+      if (reversed) {
+        fs.readdirSync = (p, o) => {
+          const out = real(p, o);
+          return Array.isArray(out) ? [...out].reverse() : out;
+        };
+      }
+      try {
+        const found = apps.loadManifests().filter((m) => m.id === "upg");
+        assert.equal(found.length, 1, "reversed=" + reversed);
+        assert.equal(found[0].name, "New", "the backup won, reversed=" + reversed);
+      } finally {
+        fs.readdirSync = real;
+      }
+    }
+  } finally {
+    fs.rmSync(bak, { recursive: true, force: true });
+    fs.rmSync(path.join(dir, "upg"), { recursive: true, force: true });
+  }
+});
