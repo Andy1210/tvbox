@@ -100,6 +100,50 @@ function due(action: string, pressed: boolean, now: number) {
   return true;
 }
 
+/**
+ * Which actions the pads are asking for right now.
+ *
+ * Shared by the polling loop and by `start()`, which needs the same answer at the
+ * moment navigation begins - see there.
+ *
+ * `baseline` says whether this read may DECIDE where an unrecognised pad's
+ * ambiguous axes rest. Only the polling loop may: a first sample taken while a hat
+ * is held would record "held left" as the zero point, and releasing it would then
+ * read as a full deflection the other way. `start()` is called at exactly the
+ * moment a direction is most likely to be held, so it reads without recording, and
+ * skips the ambiguous pair when no baseline exists yet.
+ */
+function readHeld(pads: Gamepad[], baseline: boolean): Set<string> {
+  const held = new Set<string>();
+  const defl: Record<string, number> = { up: 0, down: 0, left: 0, right: 0 };
+  for (const pad of pads) {
+    const buttons = pad.mapping === "standard" ? STANDARD_BUTTONS : RAW_BUTTONS;
+    for (const [i, action] of buttons) if (pad.buttons[i]?.pressed) held.add(action);
+    if (baseline && !rest.has(pad.index)) rest.set(pad.index, pad.axes.slice());
+    const zero = rest.get(pad.index);
+    for (const [xi, yi] of STICKS) {
+      // The left stick's centre is 0 by definition, so it needs no baseline; the
+      // ambiguous pair is skipped until the polling loop has taken one.
+      if (xi !== 0 && !zero) continue;
+      // Relative to rest for the ambiguous pair, absolute for the left stick (whose
+      // centre is 0 by definition in the Gamepad API).
+      const base = xi === 0 ? 0 : 1;
+      const x = (pad.axes[xi] ?? 0) - base * (zero?.[xi] ?? 0);
+      const y = (pad.axes[yi] ?? 0) - base * (zero?.[yi] ?? 0);
+      // Strongest deflection per direction across every pad and axis pair. Taking
+      // the max FIRST matters: applying hysteresis per pair let a centred hat
+      // cancel a deflected stick (whichever pair happened to be read last won).
+      defl.left = Math.max(defl.left, -x);
+      defl.right = Math.max(defl.right, x);
+      defl.up = Math.max(defl.up, -y);
+      defl.down = Math.max(defl.down, y);
+    }
+  }
+  for (const action of Object.keys(defl)) hold(action, defl[action]);
+  for (const action of stickHeld) held.add(action);
+  return held;
+}
+
 function poll() {
   const pads = (navigator.getGamepads ? navigator.getGamepads() : []).filter(Boolean) as Gamepad[];
   if (!pads.length) {
@@ -112,30 +156,7 @@ function poll() {
     return;
   }
   const now = performance.now();
-  const held = new Set<string>();
-  const defl: Record<string, number> = { up: 0, down: 0, left: 0, right: 0 };
-  for (const pad of pads) {
-    const buttons = pad.mapping === "standard" ? STANDARD_BUTTONS : RAW_BUTTONS;
-    for (const [i, action] of buttons) if (pad.buttons[i]?.pressed) held.add(action);
-    if (!rest.has(pad.index)) rest.set(pad.index, pad.axes.slice());
-    const zero = rest.get(pad.index) as number[];
-    for (const [xi, yi] of STICKS) {
-      // Relative to rest for the ambiguous pair, absolute for the left stick (whose
-      // centre is 0 by definition in the Gamepad API).
-      const base = xi === 0 ? 0 : 1;
-      const x = (pad.axes[xi] ?? 0) - base * (zero[xi] ?? 0);
-      const y = (pad.axes[yi] ?? 0) - base * (zero[yi] ?? 0);
-      // Strongest deflection per direction across every pad and axis pair. Taking
-      // the max FIRST matters: applying hysteresis per pair let a centred hat
-      // cancel a deflected stick (whichever pair happened to be read last won).
-      defl.left = Math.max(defl.left, -x);
-      defl.right = Math.max(defl.right, x);
-      defl.up = Math.max(defl.up, -y);
-      defl.down = Math.max(defl.down, y);
-    }
-  }
-  for (const action of Object.keys(defl)) hold(action, defl[action]);
-  for (const action of stickHeld) held.add(action);
+  const held = readHeld(pads, true);
   for (const action of Object.keys(KEYS)) if (due(action, held.has(action), now)) sendKey(KEYS[action]);
   frame = requestAnimationFrame(poll);
 }
@@ -158,6 +179,25 @@ function stop() {
 function start() {
   if (running || document.visibilityState === "hidden") return;
   running = true;
+  // A button still DOWN when this starts is not a new press, and `stop()` clears
+  // the map that would have remembered it - so without this the first poll fires
+  // it as one.
+  //
+  // Measured on the box: the A press that launches a cloud game is still held when
+  // the app hands the pad back for its own screen, so it was replayed as Enter
+  // onto whatever had just been focused. The game started and quit again in the
+  // same instant, and the press carried on into the screen behind it.
+  //
+  // Stopping and starting this IS the sanctioned way to give a pad to a game (see
+  // the header), so anywhere that does it has the same problem.
+  //
+  // Read NOW rather than on the first poll: that is a frame later, and a button
+  // pressed in between is a real press that would be swallowed.
+  const pads = (navigator.getGamepads ? navigator.getGamepads() : []).filter(Boolean) as Gamepad[];
+  // `Infinity` means "fires nothing until released" - directions included, because
+  // a repeat that begins because navigation restarted is the same unasked-for
+  // action in a milder form.
+  for (const action of readHeld(pads, false)) nextAt.set(action, Infinity);
   frame = requestAnimationFrame(poll);
 }
 

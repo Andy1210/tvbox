@@ -187,3 +187,71 @@ it("stops polling when the last pad goes away", () => {
   tick();
   expect(pending()).toBe(0);
 });
+
+it("a button still held when navigation STARTS fires nothing until it is released", () => {
+  // Stopping and starting this is the sanctioned way to hand a pad to a game, so
+  // it happens whenever an app takes the pad back for a screen of its own - and
+  // the press that got there is usually still down.
+  //
+  // Measured on the box: A launches a cloud game, the stream screen asks for the
+  // pad back, and A - still held - was replayed as Enter onto the freshly focused
+  // Leave button. The game started and quit in the same instant, and the press
+  // carried on into the screen behind it.
+  const p = pad();
+  (p.buttons as unknown as Btn[])[0].pressed = true; // A, already down
+  pads = [p];
+  begin();
+  tick();
+  tick(600); // long enough for a repeat, had it been treated as a press
+  expect(keys).toEqual([]);
+
+  // Released and pressed again is an ordinary press.
+  (p.buttons as unknown as Btn[])[0].pressed = false;
+  tick();
+  (p.buttons as unknown as Btn[])[0].pressed = true;
+  tick();
+  expect(keys).toEqual(["Enter"]);
+});
+
+it("a direction held across a restart does not start repeating on its own", () => {
+  const p = pad();
+  (p.buttons as unknown as Btn[])[14].pressed = true; // D-pad left
+  pads = [p];
+  begin();
+  tick();
+  tick(600);
+  tick(600);
+  expect(keys).toEqual([]);
+});
+
+it("adopting what is held does not deafen the OTHER buttons", () => {
+  const p = pad();
+  (p.buttons as unknown as Btn[])[0].pressed = true; // A held from before
+  pads = [p];
+  begin();
+  tick();
+  (p.buttons as unknown as Btn[])[1].pressed = true; // B pressed now
+  tick();
+  expect(keys).toEqual(["Backspace"]);
+});
+
+it("starting while an unrecognised pad's hat is held does not fix that as its rest point", () => {
+  // On some unrecognised pads axes 6/7 are a hat, on others analog pedals - and a
+  // pedal RESTS at -1, which is why the first sample is taken as the zero point.
+  // But `start()` runs at exactly the moment a direction is most likely to be
+  // held: recording -1 there would make RELEASING the hat read as a full
+  // deflection the other way, and fire the opposite arrow.
+  const p = pad({ mapping: "" as Gamepad["mapping"], axes: [0, 0, 0, 0, 0, 0, -1, 0] });
+  pads = [p];
+  begin();
+  // Released before the first poll ever runs.
+  (p.axes as number[])[6] = 0;
+  tick();
+  tick(600);
+  expect(keys).toEqual([]);
+
+  // And the hat still works from its real centre.
+  (p.axes as number[])[6] = -1;
+  tick();
+  expect(keys).toEqual(["ArrowLeft"]);
+});

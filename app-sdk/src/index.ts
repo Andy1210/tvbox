@@ -14,5 +14,6 @@ export * from "./i18n";
 export * from "./capability";
 export * from "./display";
 export * from "./gamepad";
+export * from "./moveTo";
 export * from "./spatial-nav";
 export * from "./sounds";
