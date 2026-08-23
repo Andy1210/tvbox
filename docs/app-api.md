@@ -677,6 +677,34 @@ host.registerRoutes("/tvbox/api/myapp", {
 });
 ```
 
+**Every non-GET is same-origin gated; a GET is not.** That is deliberate - a
+side-effect-free read stays open so `<img>` and no-CORS uses keep working. So if
+one of your GETs _spends_ something - an authenticated request upstream, a forked
+process, a device woken - say so, and it gets the same gate:
+
+```js
+host.registerRoutes("/tvbox/api/myapp", table, { guard: ["GET /waittime"] });
+```
+
+Without it, any page the box loads can fire that GET cross-origin. It cannot read
+the answer, but the cost is already paid: xcloud's wait-time lookup is one
+authenticated request to Microsoft per distinct id, so an `<img src>` in a remote
+app's window could drive the household's Xbox account unattended.
+
+**Never guard a route something outside the box redirects INTO.** An OAuth
+callback is the case: the provider's own page navigates down to
+`http://127.0.0.1:8097/tvbox/api/<you>/auth/callback`, and a page-initiated
+navigation carries `Sec-Fetch-Site: cross-site` — measured, so a guarded callback
+answers 403 and the sign-in window simply sits there. It looks exactly like "a
+read that spends something", which is the trap. The gate is for reads your OWN
+page makes.
+
+A guard entry that names no `GET` in the same table is a mistake the shell
+refuses: `registerRoutes` throws and your plugin does not load, with the bad key
+in the log. The quiet alternative would be the very bug the option exists to
+prevent — a typo that matches nothing, a route that still answers, and nothing
+anywhere saying it is unguarded.
+
 ## The host plugin API
 
 If your app needs host-side Node - a daemon, an OAuth window, server routes -
@@ -702,7 +730,7 @@ registry's merge review exists for - there is no sandbox here.
 | `config`                                                                         | The config store (`rawSpotify`/`setSpotify`/`publicConfig`, …). **Read config through this, never by requiring a core config module.**                                                                                                                                                                                                              |
 | `json(res, obj)`                                                                 | Write a JSON response.                                                                                                                                                                                                                                                                                                                              |
 | `log(...args)`                                                                   | Prefixed console logging, into `~/.tvbox/shell.log`.                                                                                                                                                                                                                                                                                                |
-| `registerRoutes(prefix, table)`                                                  | HTTP routes, keyed `"METHOD /subpath"`. Call from the factory, before the server starts.                                                                                                                                                                                                                                                            |
+| `registerRoutes(prefix, table, opts)`                                            | HTTP routes, keyed `"METHOD /subpath"`. Call from the factory, before the server starts. `opts.guard` lists the GET keys that need the same-origin gate - see above.                                                                                                                                                                                |
 | `onConfigChange(cb)`                                                             | `cb(sections)` after a config write. Tagged with your app, so unloading the plugin removes it - an untagged listener would survive its plugin and start a daemon nothing is left to stop.                                                                                                                                                           |
 | `switchOn(key)`                                                                  | The value in force for one of your manifest's own `switches`. Scoped: a plugin reading another app's settings is not a thing this API allows.                                                                                                                                                                                                       |
 | `spawnService(name, spec)` / `stopService(name)` / `restartService(name, delay)` | A supervised child process.                                                                                                                                                                                                                                                                                                                         |

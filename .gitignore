@@ -39,3 +39,6 @@ image/stage-tvbox/01-tvbox/files/
 # Anchored: a bare `docs-site/` matches at any depth, so it also hid the
 # generator's own scripts/docs-site/ from git.
 /docs-site/
+
+# Claude Code session state
+.claude/

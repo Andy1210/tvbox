@@ -39,7 +39,11 @@ function hasLocale(id: string): boolean {
 // hardcoded `import hu/en` + `AVAILABLE_LOCALES` const.
 export function configureI18n(locales: Record<string, LocaleDict>, opts?: { fallback?: string }): void {
   LOCALES = locales;
-  FALLBACK = opts?.fallback ?? Object.keys(locales)[0] ?? "en";
+  // Held to a locale that EXISTS: an unknown fallback renders raw keys, and since
+  // it now also reaches `<html lang>` it would tell a screen reader the page is in
+  // a language nothing on it is written in.
+  const asked = opts?.fallback;
+  FALLBACK = (asked && locales[asked] ? asked : Object.keys(locales)[0]) ?? "en";
   LOCALE_INFO = Object.entries(LOCALES).map(([id, d]) => ({
     id,
     name: d._meta.name,
@@ -57,6 +61,24 @@ export function configureI18n(locales: Record<string, LocaleDict>, opts?: { fall
     if (legacy) useLocaleStore.setState({ locale: legacy });
   } else if (!hasLocale(current)) {
     useLocaleStore.setState({ locale: null });
+  }
+  // And put the resolved language on the document. `setLocale` does it when
+  // somebody PICKS one, which means a page that merely loads with a locale
+  // already persisted keeps whatever its index.html declared - "en" in every app
+  // here. That is not cosmetic: it is what a screen reader announces, what
+  // `:lang()` and hyphenation key off, and what the media client reads to build
+  // its own Accept-Language header, so a Hungarian box was asking Plex and
+  // Jellyfin for English metadata.
+  applyDocumentLang(useLocaleStore.getState().locale ?? FALLBACK);
+}
+
+function applyDocumentLang(id: string): void {
+  try {
+    // The BCP-47 tag rather than our own id: `lang` is a language tag, and the two
+    // differ ("hu" vs "hu-HU") for every locale whose _meta says so.
+    document.documentElement.lang = LOCALES[id]?._meta.tag ?? id;
+  } catch {
+    /* ssr/no-dom */
   }
 }
 
@@ -117,11 +139,7 @@ export const useLocaleStore = create<LocaleState>()(
       locale: legacyLocale(),
       setLocale: (id) => {
         if (!hasLocale(id)) return;
-        try {
-          document.documentElement.lang = id;
-        } catch {
-          /* ssr/no-dom */
-        }
+        applyDocumentLang(id);
         set({ locale: id });
       },
     }),

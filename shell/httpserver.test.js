@@ -176,3 +176,95 @@ test("a URL is logged as its origin, and an unparseable one says so", () => {
   assert.strictEqual(httpserver.originOf("not a url"), "(unparseable url)");
   assert.strictEqual(httpserver.originOf(undefined), "(unparseable url)");
 });
+
+test("a plugin can put the same-origin gate on one of its own GETs", () => {
+  // An open GET is the policy for a side-effect-free read. A read that SPENDS
+  // something is not one - xcloud's wait-time lookup is an authenticated request
+  // to Microsoft per distinct id, and any page the box loads can fire a
+  // cross-origin GET through an <img> tag even though it cannot read the answer.
+  const hit = () => "x";
+  const routes = [
+    {
+      prefix: "/tvbox/api/xcloud",
+      table: { "GET /status": hit, "GET /waittime": hit, "POST /session/start": hit },
+      guard: ["GET /waittime"],
+    },
+  ];
+  assert.strictEqual(httpserver.pluginRouteGuarded(routes, "GET", "/tvbox/api/xcloud/waittime"), true);
+  assert.strictEqual(httpserver.pluginRouteGuarded(routes, "GET", "/tvbox/api/xcloud/status"), false);
+  // A path no route serves must not be reported as guarded - the gate would then
+  // 403 a request the 404 handler was going to answer.
+  assert.strictEqual(httpserver.pluginRouteGuarded(routes, "GET", "/tvbox/api/xcloud/nope"), false);
+  assert.strictEqual(httpserver.pluginRouteGuarded(routes, "GET", "/tvbox/api/other/waittime"), false);
+  // Declaring no guard is the default, and the handler still resolves.
+  const plain = [{ prefix: "/tvbox/api/xcloud", table: { "GET /waittime": hit } }];
+  assert.strictEqual(httpserver.pluginRouteGuarded(plain, "GET", "/tvbox/api/xcloud/waittime"), false);
+  assert.strictEqual(httpserver.matchPluginRoute(plain, "GET", "/tvbox/api/xcloud/waittime"), hit);
+});
+
+test("the guard and the handler are decided by ONE resolution", () => {
+  // Two plugins claiming overlapping prefixes: matching is first-wins, so asking
+  // the two questions separately could gate against one route and serve another.
+  const a = () => "a";
+  const b = () => "b";
+  const routes = [
+    { prefix: "/tvbox/api/x", table: { "GET /go": a } },
+    { prefix: "/tvbox/api/x", table: { "GET /go": b }, guard: ["GET /go"] },
+  ];
+  assert.strictEqual(httpserver.matchPluginRoute(routes, "GET", "/tvbox/api/x/go"), a);
+  assert.strictEqual(httpserver.pluginRouteGuarded(routes, "GET", "/tvbox/api/x/go"), false);
+});
+
+test("a cross-site load with no Origin is still foreign", () => {
+  // The hole the guarded-GET list was built to close and could not: `Origin` is not
+  // sent for a cross-origin GET the browser makes on a page's behalf, so an <img
+  // src="http://127.0.0.1:8097/tvbox/api/xcloud/waittime?id=…"> in a remote app's
+  // window arrived indistinguishable from our own launcher.
+  const origins = httpserver.ownOrigins(8097);
+  const req = (headers) => ({ headers });
+  assert.equal(httpserver.foreignOrigin(req({ "sec-fetch-site": "cross-site" }), origins), true);
+  assert.equal(httpserver.foreignOrigin(req({ "sec-fetch-site": "same-origin" }), origins), false);
+  assert.equal(httpserver.foreignOrigin(req({ "sec-fetch-site": "same-site" }), origins), false);
+  // A typed URL is a person, not a page acting on one.
+  assert.equal(httpserver.foreignOrigin(req({ "sec-fetch-site": "none" }), origins), false);
+  // `same-site` is deliberately allowed, and it is not the tautology it looks:
+  // measured against a real Chromium, a page on ANOTHER loopback port reports
+  // same-site, because a port is not part of a site. On this box that is right -
+  // the pairing server is ours - but it is why this is no defence against a
+  // hostile local port.
+  // And a non-browser sends neither header: curl, the CEC bridge, the tvbox CLI.
+  assert.equal(httpserver.foreignOrigin(req({}), origins), false);
+  // Origin DECIDES when it is there, in both directions. A page cannot forge it,
+  // and it has to win: the two spellings this server answers to are not the same
+  // site, so a page at `localhost:8097` fetching `127.0.0.1:8097` sends
+  // `cross-site` for one server - measured - and `ownOrigins` blesses both.
+  assert.equal(
+    httpserver.foreignOrigin(req({ origin: "http://evil.invalid", "sec-fetch-site": "same-origin" }), origins),
+    true,
+  );
+  assert.equal(
+    httpserver.foreignOrigin(req({ origin: "http://localhost:8097", "sec-fetch-site": "cross-site" }), origins),
+    false,
+  );
+  assert.equal(httpserver.foreignOrigin(req({ origin: "HTTP://LOCALHOST:8097" }), origins), false);
+});
+
+test("a guard that names no route is a plugin that does not load", () => {
+  // The mechanism's own failure mode: `guard: ["GET /waitTime"]` beside a table
+  // defining `"GET /waittime"` matches nothing, the route still answers, and the
+  // costly read is open to any page the box loads with nothing saying so. main.js
+  // refuses the registration instead - a plugin that does not load is logged, and
+  // its tile still works.
+  //
+  // The rule lives in main.js (which cannot be required here - it needs electron),
+  // so this pins the CONTRACT the guard list depends on: an entry only ever gates
+  // anything when it is exactly a key of the same table.
+  const hit = () => "x";
+  const table = { "GET /waittime": hit, "POST /start": hit };
+  const routes = [{ prefix: "/tvbox/api/x", table, guard: ["GET /waitTime"] }];
+  assert.strictEqual(httpserver.pluginRouteGuarded(routes, "GET", "/tvbox/api/x/waittime"), false);
+  assert.strictEqual(httpserver.matchPluginRoute(routes, "GET", "/tvbox/api/x/waittime"), hit);
+  // Spelled the way the table spells it, it gates.
+  routes[0].guard = ["GET /waittime"];
+  assert.strictEqual(httpserver.pluginRouteGuarded(routes, "GET", "/tvbox/api/x/waittime"), true);
+});

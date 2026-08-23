@@ -444,11 +444,21 @@ function loadManifests() {
   // Every app is a package/manifest under ~/.tvbox/apps/ (installed from the
   // registry). There's no first-party in-shell manifest slot anymore.
   try {
-    for (const f of fs.readdirSync(USER_APPS_DIR)) {
-      if (f.startsWith(".")) continue; // dotfiles + in-flight package temp dirs (.<id>.tmp-*)
+    // PACKAGES FIRST, then bare manifests. `readdirSync` returns the filesystem's
+    // own order, so with both `<id>/` and `<id>.json` present the winner was
+    // whichever the directory happened to list first - arbitrary, and different on
+    // two boxes. An app that used to be manifest-only and became a package leaves
+    // exactly that pair behind, and the bare manifest is the stale half: the
+    // package is what the store installed.
+    const names = fs.readdirSync(USER_APPS_DIR).filter((f) => !f.startsWith("."));
+    for (const f of names) {
+      if (f.endsWith(".json")) continue;
       const p = path.join(USER_APPS_DIR, f);
-      if (f.endsWith(".json")) add(readManifestFile(p, null));
-      else if (fs.existsSync(path.join(p, "manifest.json"))) add(readManifestFile(path.join(p, "manifest.json"), p));
+      if (fs.existsSync(path.join(p, "manifest.json"))) add(readManifestFile(path.join(p, "manifest.json"), p));
+    }
+    for (const f of names) {
+      if (!f.endsWith(".json")) continue;
+      add(readManifestFile(path.join(USER_APPS_DIR, f), null));
     }
   } catch (e) {
     /* optional dir - most boxes have no user apps */
@@ -604,6 +614,17 @@ function installDownload(entry, log) {
   }
 }
 
+// Where an upgrade-in-place puts the install it is replacing.
+//
+// Dotted, for the same reason the temp dir is: `<id>.bak-<pid>` is neither a
+// dotfile nor a `.json`, so loadManifests enumerated it as a PACKAGE claiming the
+// same id - and with the directory listing in the wrong order the app that
+// resolved was the one being replaced, `_dir` and all, so its old plugin.js is
+// what would have been required. Normally a window of milliseconds, permanent if
+// the process dies mid-swap: two orphaned `.<id>.tmp-*` dirs from nightly updates
+// were sitting on a real box when this was written.
+const backupPath = (id) => path.join(USER_APPS_DIR, "." + id + ".bak-" + process.pid);
+
 // Install a PACKAGE app - a dir-app that ships its OWN code/UI (manifest.json +
 // optional plugin.js + web/** + pairing/**) - into ~/.tvbox/apps/<id>/. This is
 // how a registry app carries everything (the Kodi model): the shell only
@@ -647,7 +668,7 @@ async function installPackage(id, baseUrl, files, log) {
   // temp dir is a SIBLING (same filesystem as dst) so the final rename is atomic;
   // the leading "." keeps loadManifests from picking it up mid-install.
   const tmp = fs.mkdtempSync(path.join(USER_APPS_DIR, "." + id + ".tmp-"));
-  const bak = fs.existsSync(dst) ? dst + ".bak-" + process.pid : null; // upgrade-in-place backup
+  const bak = fs.existsSync(dst) ? backupPath(id) : null;
   try {
     for (const f of files) {
       const rel = String((f && f.path) || "");
@@ -708,6 +729,30 @@ async function installPackage(id, baseUrl, files, log) {
     } catch (e) {
       if (bak) fs.renameSync(bak, dst); // restore the previous install
       throw e;
+    }
+    // An app that used to be manifest-only and became a PACKAGE leaves its old
+    // `~/.tvbox/apps/<id>.json` behind, and both are enumerated - so one id has two
+    // manifests and `readdirSync` order decides which one the box runs. That order
+    // is the filesystem's, not alphabetical, so the answer is arbitrary per box:
+    // xcloud shipped as a manifest-only remote page before it shipped as a package,
+    // and a box could keep opening Microsoft's own web page after installing ours.
+    // The package is what the store just put here, so the leftover goes.
+    try {
+      // Only if the file really IS this app. `loadManifests` identifies a
+      // standalone manifest by the `id` INSIDE it, not by its filename - so
+      // `wasremote.json` may perfectly well declare `id: "other-app"`, and
+      // deleting it on the strength of its name would remove somebody else's app.
+      const legacy = path.join(USER_APPS_DIR, id + ".json");
+      // recursive as well as force: rmSync throws on a directory without it, and
+      // "<id>.json is somehow a directory" must not be what breaks an install.
+      if (fs.existsSync(legacy) && JSON.parse(fs.readFileSync(legacy, "utf8")).id === id) {
+        fs.rmSync(legacy, { recursive: true, force: true });
+        log("removed the legacy manifest " + legacy + " this package replaces");
+      }
+    } catch (e) {
+      // Not fatal: the app is installed either way, and the duplicate-id warning
+      // in loadManifests() is what a person would then see.
+      log("could not remove a legacy manifest for " + id + ": " + e.message);
     }
     log("installed package " + id + " -> " + dst);
     return dst;
@@ -985,6 +1030,7 @@ module.exports = {
   installDownload,
   installUiDeps,
   installPackage,
+  backupPath,
   onPath,
   validateManifest,
   USER_BIN,

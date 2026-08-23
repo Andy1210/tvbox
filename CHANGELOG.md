@@ -5,6 +5,39 @@ updates). `scripts/make-release.sh` lifts the current version's `hu`/`en`
 blocks into the OTA feed's `notes` - keep both languages, keep it short, and
 write for the person on the couch (what changes for THEM), not for developers.
 
+## 3.10.0
+
+### hu
+
+- **Egy app a nyelveden szólal meg akkor is, ha nem most választottad ki.**
+  Eddig az oldal nyelve csak akkor állt át, amikor valaki kézzel átkapcsolta - így a
+  Média app magyar boxon is angolul kérte a filmek adatait a Plextől és a
+  Jellyfintől.
+- **Egy frissített app nem nyithatja meg többé a régi változatát.** Ha egy app
+  korábban csak egy weboldalt nyitott meg, és azóta valódi alkalmazás lett belőle, a
+  régi bejegyzése ottmaradt a boxon - és véletlenszerű volt, melyiket indította el.
+  Most mindig az új indul, a régi pedig telepítéskor eltűnik.
+- **Az appok görgetése egy helyen készül.** A hosszú listák ugyanazzal a sima
+  mozgással csúsznak minden appban, mert már nem másolja mindegyik a magáét.
+- **Egy lenyomva tartott gomb nem nyom meg magától semmit.** Az a gombnyomás, amivel
+  elindítasz egy játékot, eddig még egyszer lefutott abban a képernyőben, ami utána
+  jött - a felhős játék így az indítás pillanatában ki is lépett.
+
+### en
+
+- **An app speaks your language even when you did not just pick it.** The page's
+  language only followed a manual switch, so on a Hungarian box the media client was
+  still asking Plex and Jellyfin for English metadata.
+- **An updated app can no longer open its own older version.** An app that used to be
+  just a web page and has since become a real application left its old entry behind
+  on the box, and which one started was arbitrary. The new one always wins now, and
+  the leftover is removed on install.
+- **App scrolling is built in one place.** Long lists move with the same smooth glide
+  in every app, because each no longer carries its own copy of it.
+- **A button held down no longer presses something by itself.** The press that starts
+  a game used to fire once more in the screen that came next - so a cloud game quit
+  in the same instant it started.
+
 ## 3.9.0
 
 ### hu

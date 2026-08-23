@@ -78,7 +78,26 @@ export function createMover(axis: "x" | "y"): Mover & { attach(el: HTMLElement |
       // The previous animation is cancelled rather than left to finish: two
       // overlapping transform animations on one element compose, and a held
       // arrow would otherwise send the list somewhere neither press asked for.
-      animation?.cancel();
+      //
+      // But the new one has to start where the element IS, not where the last one
+      // was heading. `current` is a DESTINATION, set the moment `to` was called,
+      // so on a held arrow the replacement keyframe began at a position the
+      // element had not reached yet and it jumped forward before animating.
+      // `commitStyles` writes the animation's present value into the inline
+      // style, which is then a plain string to read back - and it is only paid
+      // when an animation is actually in flight, so an ordinary single move costs
+      // nothing extra.
+      let fromCss = transform(from);
+      if (animation) {
+        try {
+          animation.commitStyles();
+          fromCss = node.style.transform || fromCss;
+        } catch {
+          // commitStyles throws for an element that is not rendered; the
+          // destination is then as good a starting point as any.
+        }
+        animation.cancel();
+      }
       if (!animate) {
         animation = null;
         node.style.transform = transform(next);
@@ -87,7 +106,7 @@ export function createMover(axis: "x" | "y"): Mover & { attach(el: HTMLElement |
       // `fill: "forwards"` and then the style, so the element keeps the
       // position after the animation is discarded - an animation that is
       // cancelled later must not snap the list back to where it started.
-      animation = node.animate([{ transform: transform(from) }, { transform: transform(next) }], {
+      animation = node.animate([{ transform: fromCss }, { transform: transform(next) }], {
         duration: MOVE_MS,
         easing: "ease-out",
         fill: "forwards",

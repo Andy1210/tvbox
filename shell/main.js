@@ -222,6 +222,31 @@ const loadedPlugins = new Map();
 // closures over an instance that has been stopped, and a route table is matched
 // first-wins, so a replacement plugin's routes would sit behind the dead one's.
 const pluginRoutes = [];
+// Which of a plugin's route keys the same-origin gate covers, from the third
+// argument to registerRoutes.
+//
+// Every entry has to NAME a GET handler in the same table, and a plugin that gets
+// that wrong fails to load rather than registering. The quiet alternative is the
+// bug this whole mechanism exists to prevent: `guard: ["GET /waitTime"]` beside a
+// table defining `"GET /waittime"` matches nothing, the route still answers, and
+// the costly read is open to any page the box loads - with nothing anywhere
+// saying so. A plugin that does not load is logged, and its tile still works.
+function guardList(opts, table) {
+  const g = opts && opts.guard;
+  if (g === undefined || g === null) return [];
+  if (!Array.isArray(g)) throw new Error("registerRoutes: guard must be an array of route keys");
+  for (const key of g) {
+    if (typeof key !== "string" || typeof (table || {})[key] !== "function") {
+      throw new Error("registerRoutes: guard names no route in this table: " + JSON.stringify(key));
+    }
+    // Everything else is gated already, so a non-GET here is a misunderstanding
+    // worth correcting rather than a no-op to carry.
+    if (!key.startsWith("GET ")) {
+      throw new Error("registerRoutes: only a GET needs guarding, not " + JSON.stringify(key));
+    }
+  }
+  return g;
+}
 // [{ id, cb }] - plugins that react to a config write (e.g. Live TV drops its cache).
 // Tagged with the app id for the same reason as the routes: a listener that outlives
 // its plugin is a way back in. Measured before it was tagged - an uninstalled app's
@@ -1113,6 +1138,9 @@ function serve() {
       res.end("bad request");
       return;
     }
+    // Which plugin route, if any, this GET would reach. Resolved before the gate
+    // because the gate consults it, and reused when dispatching.
+    const pluginGet = req.method === "GET" ? httpserver.resolvePluginRoute(pluginRoutes, "GET", p) : null;
     // Same-origin gate for everything state-changing: every non-GET (the POST
     // API + plugin POST routes) plus the GETs that have side effects - tv/standby
     // (stops playback) and the firetvir reads (they spawn a python subprocess /
@@ -1132,9 +1160,23 @@ function serve() {
       p.startsWith("/tvbox/api/browse/") ||
       p.startsWith("/tvbox/api/photoshare") ||
       // Same reason as firetvir: it forks a bluetoothctl per connected device.
-      p === "/tvbox/api/remote/finder/capable";
+      p === "/tvbox/api/remote/finder/capable" ||
+      // …and whatever a plugin declared, for the same reason: only the plugin
+      // knows which of its own reads cost something. See registerRoutes below.
+      // ONE resolution, reused below to dispatch: asking twice would let the gate
+      // be decided against one route and the request served by another.
+      !!(pluginGet && pluginGet.guarded);
     if ((req.method !== "GET" || guardedGet) && httpserver.foreignOrigin(req, OWN_ORIGINS)) {
-      console.warn("[main] rejected cross-origin", req.method, p, "from", req.headers.origin);
+      // Both headers: the whole new class of refusals - a cross-site GET a page
+      // made on our behalf - carries NO Origin at all, so logging only that told
+      // an app author their request came "from undefined".
+      console.warn(
+        "[main] rejected cross-origin",
+        req.method,
+        p,
+        "origin=" + (req.headers.origin || "(none)"),
+        "sec-fetch-site=" + (req.headers["sec-fetch-site"] || "(none)"),
+      );
       res.writeHead(403, { "Content-Type": "text/plain" });
       res.end("cross-origin request rejected");
       return;
@@ -1167,10 +1209,9 @@ function serve() {
       return;
     }
     // plugin-registered GET routes (e.g. all of Spotify's) take precedence
-    const gRoute = httpserver.matchPluginRoute(pluginRoutes, "GET", p);
-    if (gRoute) {
+    if (pluginGet) {
       try {
-        gRoute(req, res, {});
+        pluginGet.fn(req, res, {});
       } catch (e) {
         try {
           res.writeHead(500);
@@ -3882,8 +3923,13 @@ const host = {
   // Register a plugin's HTTP routes under a path prefix. `table` is keyed
   // "METHOD /subpath" (e.g. "GET /state"); the generic server tries these before
   // its own built-in routes. Called from a plugin factory (before serve()).
-  registerRoutes: (prefix, table) => {
-    pluginRoutes.push({ id: null, prefix, table });
+  // `guard` names the GET routes in `table` (same "METHOD /subpath" keys) that
+  // the same-origin gate must cover. Every non-GET is gated already; an open GET
+  // is the policy for a side-effect-free read, so a read that spends something -
+  // an authenticated upstream request, a forked process - has to say so or any
+  // page the box loads can drive it through an <img> tag.
+  registerRoutes: (prefix, table, opts) => {
+    pluginRoutes.push({ id: null, prefix, table, guard: guardList(opts, table) });
   },
   spawnService: (name, spec) => supervisor.spawn(name, spec),
   stopService: (name) => supervisor.stop(name),
@@ -3942,8 +3988,8 @@ function loadOnePlugin(m) {
         onConfigChange: (cb) => {
           if (typeof cb === "function") configListeners.push({ id: m.id, cb });
         },
-        registerRoutes: (prefix, table) => {
-          pluginRoutes.push({ id: m.id, prefix, table });
+        registerRoutes: (prefix, table, opts) => {
+          pluginRoutes.push({ id: m.id, prefix, table, guard: guardList(opts, table) });
         },
       }) || {};
     loadedPlugins.set(m.id, plugin);

@@ -625,12 +625,11 @@ async function install(config, id, sourceUrl) {
       return { ok: false, error: "package install failed: " + (e && e.message ? e.message : String(e)) };
     }
     // An app can GROW from a single manifest into a package (Plex did, to carry
-    // its own bridge). Both forms live under ~/.tvbox/apps/ and loadManifests
-    // walks that dir, so leaving the old <id>.json behind would make two
-    // manifests claim one id and let readdir order decide which one wins.
-    // recursive as well as force: rmSync throws on a directory without it, and
-    // "<id>.json is somehow a directory" must not be what breaks an install.
-    fs.rmSync(storeManifestPath(id), { recursive: true, force: true });
+    // its own bridge), and the old <id>.json would then make two manifests claim
+    // one id. `installPackage` removes it - there rather than here, because every
+    // package install goes through it and it checks the id INSIDE the file first:
+    // a standalone manifest is identified by that, not by its filename, so
+    // `<id>.json` may perfectly well belong to somebody else.
     console.log("[store] installed package:", id);
   } else {
     fs.mkdirSync(apps.USER_APPS_DIR, { recursive: true });

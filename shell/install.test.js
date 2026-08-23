@@ -664,3 +664,184 @@ test("a label or hint must be text all the way down, and bounded", () => {
   assert.equal(apps.validateManifest(withPairing({ en: { x: 1 } }), "y.json"), null);
   assert.ok(apps.validateManifest(withPairing({ en: "Upload games" }), "y.json"));
 });
+
+// ---- an app that was manifest-only and became a package ----
+// Both `~/.tvbox/apps/<id>.json` and `~/.tvbox/apps/<id>/manifest.json` are
+// enumerated, so such an app leaves two manifests under one id. `readdirSync`
+// returns the FILESYSTEM's order, so which one won was arbitrary and could differ
+// between two boxes - xcloud shipped as a manifest-only remote page before it
+// shipped as a package, and a box could keep opening Microsoft's own page after
+// installing ours.
+function writeLegacyAndPackage(id, legacyUrl) {
+  const dir = apps.USER_APPS_DIR;
+  fs.mkdirSync(path.join(dir, id), { recursive: true });
+  fs.writeFileSync(
+    path.join(dir, id + ".json"),
+    JSON.stringify({
+      id,
+      manifestVersion: 1,
+      name: "Legacy",
+      version: "1.0.0",
+      type: "webclient",
+      status: "ready",
+      runtime: { serve: "remote", url: legacyUrl },
+    }),
+  );
+  fs.writeFileSync(
+    path.join(dir, id, "manifest.json"),
+    JSON.stringify({
+      id,
+      manifestVersion: 1,
+      name: "Package",
+      version: "2.0.0",
+      type: "webclient",
+      status: "ready",
+      runtime: { serve: "local", entry: "index.html" },
+    }),
+  );
+}
+
+test("a package beats a leftover <id>.json for the same id", () => {
+  writeLegacyAndPackage("dualid", "https://example.invalid/old");
+  const found = apps.loadManifests().filter((m) => m.id === "dualid");
+  assert.equal(found.length, 1, "one id must yield one manifest");
+  assert.equal(found[0].name, "Package");
+  assert.equal(found[0].runtime.serve, "local");
+});
+
+test("...whatever order the directory reports", () => {
+  // The real risk is order-dependence, so assert the choice does not move when the
+  // listing is reversed - the only thing the old code depended on.
+  //
+  // Its own fixture, not the previous test's: run alone under a name filter, this
+  // would otherwise find nothing and fail before it checked anything.
+  writeLegacyAndPackage("dualid", "https://example.invalid/old");
+  const real = fs.readdirSync;
+  try {
+    fs.readdirSync = (p, o) => {
+      const out = real(p, o);
+      return Array.isArray(out) ? [...out].reverse() : out;
+    };
+    const found = apps.loadManifests().filter((m) => m.id === "dualid");
+    assert.equal(found.length, 1);
+    assert.equal(found[0].name, "Package");
+  } finally {
+    fs.readdirSync = real;
+  }
+});
+
+test("installing a package removes the legacy <id>.json it replaces", async () => {
+  // Belt and braces beside the ordering rule above: the leftover is what makes the
+  // duplicate-id warning fire on every load, and it would otherwise sit there
+  // forever - the store has no reason to touch a file it did not put down.
+  const legacy = path.join(apps.USER_APPS_DIR, "wasremote.json");
+  fs.mkdirSync(apps.USER_APPS_DIR, { recursive: true });
+  fs.writeFileSync(
+    legacy,
+    JSON.stringify({
+      id: "wasremote",
+      manifestVersion: 1,
+      name: "Old",
+      type: "webclient",
+      status: "ready",
+      runtime: { serve: "remote", url: "https://example.invalid/" },
+    }),
+  );
+  const srv = await servePackage({ "manifest.json": '{"id":"wasremote","name":"New","type":"webclient"}' });
+  try {
+    await apps.installPackage("wasremote", srv.base, srv.files);
+    assert.equal(fs.existsSync(legacy), false, "the legacy manifest is still there");
+  } finally {
+    srv.close();
+  }
+});
+
+test("a leftover <id>.json belonging to a DIFFERENT app is left alone", () => {
+  // A standalone manifest is identified by the `id` INSIDE it, not by its
+  // filename, so `squatter.json` may legitimately declare some other app. Removing
+  // it on the strength of its name would uninstall a stranger.
+  const dir = apps.USER_APPS_DIR;
+  fs.mkdirSync(dir, { recursive: true });
+  const file = path.join(dir, "squatter.json");
+  fs.writeFileSync(
+    file,
+    JSON.stringify({
+      id: "someone-else",
+      manifestVersion: 1,
+      name: "Someone else",
+      type: "webclient",
+      status: "ready",
+      runtime: { serve: "remote", url: "https://example.invalid/" },
+    }),
+  );
+  return servePackage({ "manifest.json": '{"id":"squatter","name":"Sq","type":"webclient"}' }).then(async (srv) => {
+    try {
+      await apps.installPackage("squatter", srv.base, srv.files);
+      assert.equal(fs.existsSync(file), true, "another app's manifest was deleted");
+      assert.equal(JSON.parse(fs.readFileSync(file, "utf8")).id, "someone-else");
+    } finally {
+      srv.close();
+      fs.rmSync(file, { force: true });
+    }
+  });
+});
+
+test("the upgrade backup is not enumerated as an app of its own", () => {
+  // `<id>.bak-<pid>` is neither a dotfile nor a `.json`, so it was read as a
+  // PACKAGE claiming the same id - and with the directory listing the other way
+  // round the app that resolved was the one being replaced, `_dir` and all. The
+  // window is milliseconds, and permanent if the process dies mid-swap.
+  const dir = apps.USER_APPS_DIR;
+  fs.mkdirSync(path.join(dir, "upg"), { recursive: true });
+  fs.writeFileSync(
+    path.join(dir, "upg", "manifest.json"),
+    JSON.stringify({
+      id: "upg",
+      manifestVersion: 1,
+      name: "New",
+      version: "2.0.0",
+      type: "webclient",
+      status: "ready",
+      runtime: { serve: "local", entry: "index.html" },
+    }),
+  );
+  // What installPackage leaves behind mid-swap - asked of it, so the name and the
+  // enumeration cannot drift apart.
+  const bak = apps.backupPath("upg");
+  assert.ok(path.basename(bak).startsWith("."), "the backup has to be invisible to loadManifests: " + bak);
+  assert.equal(path.dirname(bak), dir);
+  fs.mkdirSync(bak, { recursive: true });
+  fs.writeFileSync(
+    path.join(bak, "manifest.json"),
+    JSON.stringify({
+      id: "upg",
+      manifestVersion: 1,
+      name: "Old",
+      version: "1.0.0",
+      type: "webclient",
+      status: "ready",
+      runtime: { serve: "remote", url: "https://old.invalid/" },
+    }),
+  );
+  try {
+    for (const reversed of [false, true]) {
+      const real = fs.readdirSync;
+      if (reversed) {
+        fs.readdirSync = (p, o) => {
+          const out = real(p, o);
+          return Array.isArray(out) ? [...out].reverse() : out;
+        };
+      }
+      try {
+        const found = apps.loadManifests().filter((m) => m.id === "upg");
+        assert.equal(found.length, 1, "reversed=" + reversed);
+        assert.equal(found[0].name, "New", "the backup won, reversed=" + reversed);
+      } finally {
+        fs.readdirSync = real;
+      }
+    }
+  } finally {
+    fs.rmSync(bak, { recursive: true, force: true });
+    fs.rmSync(path.join(dir, "upg"), { recursive: true, force: true });
+  }
+});
