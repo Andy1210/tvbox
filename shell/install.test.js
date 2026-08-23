@@ -712,6 +712,10 @@ test("a package beats a leftover <id>.json for the same id", () => {
 test("...whatever order the directory reports", () => {
   // The real risk is order-dependence, so assert the choice does not move when the
   // listing is reversed - the only thing the old code depended on.
+  //
+  // Its own fixture, not the previous test's: run alone under a name filter, this
+  // would otherwise find nothing and fail before it checked anything.
+  writeLegacyAndPackage("dualid", "https://example.invalid/old");
   const real = fs.readdirSync;
   try {
     fs.readdirSync = (p, o) => {
@@ -750,4 +754,34 @@ test("installing a package removes the legacy <id>.json it replaces", async () =
   } finally {
     srv.close();
   }
+});
+
+test("a leftover <id>.json belonging to a DIFFERENT app is left alone", () => {
+  // A standalone manifest is identified by the `id` INSIDE it, not by its
+  // filename, so `squatter.json` may legitimately declare some other app. Removing
+  // it on the strength of its name would uninstall a stranger.
+  const dir = apps.USER_APPS_DIR;
+  fs.mkdirSync(dir, { recursive: true });
+  const file = path.join(dir, "squatter.json");
+  fs.writeFileSync(
+    file,
+    JSON.stringify({
+      id: "someone-else",
+      manifestVersion: 1,
+      name: "Someone else",
+      type: "webclient",
+      status: "ready",
+      runtime: { serve: "remote", url: "https://example.invalid/" },
+    }),
+  );
+  return servePackage({ "manifest.json": '{"id":"squatter","name":"Sq","type":"webclient"}' }).then(async (srv) => {
+    try {
+      await apps.installPackage("squatter", srv.base, srv.files);
+      assert.equal(fs.existsSync(file), true, "another app's manifest was deleted");
+      assert.equal(JSON.parse(fs.readFileSync(file, "utf8")).id, "someone-else");
+    } finally {
+      srv.close();
+      fs.rmSync(file, { force: true });
+    }
+  });
 });

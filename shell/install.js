@@ -727,8 +727,12 @@ async function installPackage(id, baseUrl, files, log) {
     // and a box could keep opening Microsoft's own web page after installing ours.
     // The package is what the store just put here, so the leftover goes.
     try {
+      // Only if the file really IS this app. `loadManifests` identifies a
+      // standalone manifest by the `id` INSIDE it, not by its filename - so
+      // `wasremote.json` may perfectly well declare `id: "other-app"`, and
+      // deleting it on the strength of its name would remove somebody else's app.
       const legacy = path.join(USER_APPS_DIR, id + ".json");
-      if (fs.existsSync(legacy)) {
+      if (fs.existsSync(legacy) && JSON.parse(fs.readFileSync(legacy, "utf8")).id === id) {
         fs.rmSync(legacy);
         log("removed the legacy manifest " + legacy + " this package replaces");
       }

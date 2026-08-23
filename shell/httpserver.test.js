@@ -246,3 +246,23 @@ test("a cross-site load with no Origin is still foreign", () => {
   );
   assert.equal(httpserver.foreignOrigin(req({ origin: "HTTP://LOCALHOST:8097" }), origins), false);
 });
+
+test("a guard that names no route is a plugin that does not load", () => {
+  // The mechanism's own failure mode: `guard: ["GET /waitTime"]` beside a table
+  // defining `"GET /waittime"` matches nothing, the route still answers, and the
+  // costly read is open to any page the box loads with nothing saying so. main.js
+  // refuses the registration instead - a plugin that does not load is logged, and
+  // its tile still works.
+  //
+  // The rule lives in main.js (which cannot be required here - it needs electron),
+  // so this pins the CONTRACT the guard list depends on: an entry only ever gates
+  // anything when it is exactly a key of the same table.
+  const hit = () => "x";
+  const table = { "GET /waittime": hit, "POST /start": hit };
+  const routes = [{ prefix: "/tvbox/api/x", table, guard: ["GET /waitTime"] }];
+  assert.strictEqual(httpserver.pluginRouteGuarded(routes, "GET", "/tvbox/api/x/waittime"), false);
+  assert.strictEqual(httpserver.matchPluginRoute(routes, "GET", "/tvbox/api/x/waittime"), hit);
+  // Spelled the way the table spells it, it gates.
+  routes[0].guard = ["GET /waittime"];
+  assert.strictEqual(httpserver.pluginRouteGuarded(routes, "GET", "/tvbox/api/x/waittime"), true);
+});

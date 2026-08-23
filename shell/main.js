@@ -223,12 +223,29 @@ const loadedPlugins = new Map();
 // first-wins, so a replacement plugin's routes would sit behind the dead one's.
 const pluginRoutes = [];
 // Which of a plugin's route keys the same-origin gate covers, from the third
-// argument to registerRoutes. Held to strings from the plugin's OWN table, so a
-// malformed value cannot silently gate nothing (an array of the wrong shape would
-// otherwise just never match) and cannot reach the gate as something else.
-function guardList(opts) {
+// argument to registerRoutes.
+//
+// Every entry has to NAME a GET handler in the same table, and a plugin that gets
+// that wrong fails to load rather than registering. The quiet alternative is the
+// bug this whole mechanism exists to prevent: `guard: ["GET /waitTime"]` beside a
+// table defining `"GET /waittime"` matches nothing, the route still answers, and
+// the costly read is open to any page the box loads - with nothing anywhere
+// saying so. A plugin that does not load is logged, and its tile still works.
+function guardList(opts, table) {
   const g = opts && opts.guard;
-  return Array.isArray(g) ? g.filter((k) => typeof k === "string") : [];
+  if (g === undefined || g === null) return [];
+  if (!Array.isArray(g)) throw new Error("registerRoutes: guard must be an array of route keys");
+  for (const key of g) {
+    if (typeof key !== "string" || typeof (table || {})[key] !== "function") {
+      throw new Error("registerRoutes: guard names no route in this table: " + JSON.stringify(key));
+    }
+    // Everything else is gated already, so a non-GET here is a misunderstanding
+    // worth correcting rather than a no-op to carry.
+    if (!key.startsWith("GET ")) {
+      throw new Error("registerRoutes: only a GET needs guarding, not " + JSON.stringify(key));
+    }
+  }
+  return g;
 }
 // [{ id, cb }] - plugins that react to a config write (e.g. Live TV drops its cache).
 // Tagged with the app id for the same reason as the routes: a listener that outlives
@@ -3899,7 +3916,7 @@ const host = {
   // an authenticated upstream request, a forked process - has to say so or any
   // page the box loads can drive it through an <img> tag.
   registerRoutes: (prefix, table, opts) => {
-    pluginRoutes.push({ id: null, prefix, table, guard: guardList(opts) });
+    pluginRoutes.push({ id: null, prefix, table, guard: guardList(opts, table) });
   },
   spawnService: (name, spec) => supervisor.spawn(name, spec),
   stopService: (name) => supervisor.stop(name),
@@ -3959,7 +3976,7 @@ function loadOnePlugin(m) {
           if (typeof cb === "function") configListeners.push({ id: m.id, cb });
         },
         registerRoutes: (prefix, table, opts) => {
-          pluginRoutes.push({ id: m.id, prefix, table, guard: guardList(opts) });
+          pluginRoutes.push({ id: m.id, prefix, table, guard: guardList(opts, table) });
         },
       }) || {};
     loadedPlugins.set(m.id, plugin);
