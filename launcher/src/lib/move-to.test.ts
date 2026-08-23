@@ -100,3 +100,67 @@ describe("nearest", () => {
     expect(nearest({ ...base, at: 0, start: 9000 })).toBe(4100);
   });
 });
+
+describe("a move that replaces one still running", () => {
+  // The element is somewhere between the last two positions, but `current` is a
+  // DESTINATION - set the moment `to` was called. So the replacement keyframe used
+  // to start where the previous move was HEADING, and on a held arrow the list
+  // jumped forward before animating. `commitStyles` writes the animation's present
+  // value into the inline style, which is then just a string to read back.
+  function element(commitThrows = false) {
+    const el = document.createElement("div");
+    const animations: Array<{ keyframes: Array<Record<string, string>>; committed: boolean; cancelled: boolean }> = [];
+    (el as unknown as { animate: unknown }).animate = (keyframes: Array<Record<string, string>>) => {
+      const rec = { keyframes, committed: false, cancelled: false };
+      animations.push(rec);
+      return {
+        // What a browser does: persist the value the animation is showing RIGHT
+        // NOW into the element's own style.
+        commitStyles: () => {
+          if (commitThrows) throw new Error("not rendered");
+          rec.committed = true;
+          el.style.transform = "matrix(1, 0, 0, 1, 0, -37)";
+        },
+        cancel: () => {
+          rec.cancelled = true;
+        },
+      } as unknown as Animation;
+    };
+    return { el, animations };
+  }
+
+  it("starts from where the element IS, not from the last destination", () => {
+    const { el, animations } = element();
+    const mover = createMover("y");
+    mover.attach(el);
+
+    mover.to(200, true);
+    expect(animations[0].keyframes[0].transform).toBe("translateY(0px)");
+    // …and now, mid-flight, a second press.
+    mover.to(400, true);
+    expect(animations[0].committed, "the running animation has to be committed first").toBe(true);
+    expect(animations[0].cancelled).toBe(true);
+    expect(animations[1].keyframes[0].transform).toBe("matrix(1, 0, 0, 1, 0, -37)");
+    expect(animations[1].keyframes[1].transform).toBe("translateY(-400px)");
+  });
+
+  it("falls back to the destination when the element cannot be committed", () => {
+    // `commitStyles` throws for an element that is not rendered, and an unmoving
+    // list is a worse failure than a jumping one.
+    const { el, animations } = element(true);
+    const mover = createMover("y");
+    mover.attach(el);
+    mover.to(200, true);
+    expect(() => mover.to(400, true)).not.toThrow();
+    expect(animations[1].keyframes[0].transform).toBe("translateY(-200px)");
+  });
+
+  it("does not reach for a running animation when there is none", () => {
+    const { el, animations } = element();
+    const mover = createMover("y");
+    mover.attach(el);
+    mover.to(200, true);
+    expect(animations[0].keyframes[0].transform).toBe("translateY(0px)");
+    expect(animations[0].committed).toBe(false);
+  });
+});
