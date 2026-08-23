@@ -664,3 +664,90 @@ test("a label or hint must be text all the way down, and bounded", () => {
   assert.equal(apps.validateManifest(withPairing({ en: { x: 1 } }), "y.json"), null);
   assert.ok(apps.validateManifest(withPairing({ en: "Upload games" }), "y.json"));
 });
+
+// ---- an app that was manifest-only and became a package ----
+// Both `~/.tvbox/apps/<id>.json` and `~/.tvbox/apps/<id>/manifest.json` are
+// enumerated, so such an app leaves two manifests under one id. `readdirSync`
+// returns the FILESYSTEM's order, so which one won was arbitrary and could differ
+// between two boxes - xcloud shipped as a manifest-only remote page before it
+// shipped as a package, and a box could keep opening Microsoft's own page after
+// installing ours.
+function writeLegacyAndPackage(id, legacyUrl) {
+  const dir = apps.USER_APPS_DIR;
+  fs.mkdirSync(path.join(dir, id), { recursive: true });
+  fs.writeFileSync(
+    path.join(dir, id + ".json"),
+    JSON.stringify({
+      id,
+      manifestVersion: 1,
+      name: "Legacy",
+      version: "1.0.0",
+      type: "webclient",
+      status: "ready",
+      runtime: { serve: "remote", url: legacyUrl },
+    }),
+  );
+  fs.writeFileSync(
+    path.join(dir, id, "manifest.json"),
+    JSON.stringify({
+      id,
+      manifestVersion: 1,
+      name: "Package",
+      version: "2.0.0",
+      type: "webclient",
+      status: "ready",
+      runtime: { serve: "local", entry: "index.html" },
+    }),
+  );
+}
+
+test("a package beats a leftover <id>.json for the same id", () => {
+  writeLegacyAndPackage("dualid", "https://example.invalid/old");
+  const found = apps.loadManifests().filter((m) => m.id === "dualid");
+  assert.equal(found.length, 1, "one id must yield one manifest");
+  assert.equal(found[0].name, "Package");
+  assert.equal(found[0].runtime.serve, "local");
+});
+
+test("...whatever order the directory reports", () => {
+  // The real risk is order-dependence, so assert the choice does not move when the
+  // listing is reversed - the only thing the old code depended on.
+  const real = fs.readdirSync;
+  try {
+    fs.readdirSync = (p, o) => {
+      const out = real(p, o);
+      return Array.isArray(out) ? [...out].reverse() : out;
+    };
+    const found = apps.loadManifests().filter((m) => m.id === "dualid");
+    assert.equal(found.length, 1);
+    assert.equal(found[0].name, "Package");
+  } finally {
+    fs.readdirSync = real;
+  }
+});
+
+test("installing a package removes the legacy <id>.json it replaces", async () => {
+  // Belt and braces beside the ordering rule above: the leftover is what makes the
+  // duplicate-id warning fire on every load, and it would otherwise sit there
+  // forever - the store has no reason to touch a file it did not put down.
+  const legacy = path.join(apps.USER_APPS_DIR, "wasremote.json");
+  fs.mkdirSync(apps.USER_APPS_DIR, { recursive: true });
+  fs.writeFileSync(
+    legacy,
+    JSON.stringify({
+      id: "wasremote",
+      manifestVersion: 1,
+      name: "Old",
+      type: "webclient",
+      status: "ready",
+      runtime: { serve: "remote", url: "https://example.invalid/" },
+    }),
+  );
+  const srv = await servePackage({ "manifest.json": '{"id":"wasremote","name":"New","type":"webclient"}' });
+  try {
+    await apps.installPackage("wasremote", srv.base, srv.files);
+    assert.equal(fs.existsSync(legacy), false, "the legacy manifest is still there");
+  } finally {
+    srv.close();
+  }
+});

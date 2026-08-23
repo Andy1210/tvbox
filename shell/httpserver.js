@@ -97,6 +97,11 @@ function isFile(p) {
   }
 }
 
+// Is this request from somewhere that is not one of our own pages? Two signals,
+// because neither covers the other: `Origin` (sent on every cross-origin POST, and
+// on a cross-origin fetch) and `Sec-Fetch-Site` (sent on everything Chromium asks
+// for, including the <img> and <iframe> loads that carry no Origin at all).
+//
 // Origins allowed to issue state-changing requests: only our own pages (the
 // launcher and local app bundles are all served by this same server, loaded via
 // BASE=localhost). Browsers attach an Origin header to every cross-origin POST, so
@@ -110,8 +115,28 @@ function ownOrigins(port) {
 }
 
 function foreignOrigin(req, origins) {
-  const o = req && req.headers && req.headers.origin;
-  return !!o && !origins.has(String(o).toLowerCase());
+  const h = (req && req.headers) || {};
+  const o = h.origin;
+  if (o && !origins.has(String(o).toLowerCase())) return true;
+  // `Origin` is not sent for a cross-origin GET the browser makes on a page's
+  // behalf - measured: an <img>, an <iframe> and a no-cors fetch to another origin
+  // all arrive with no Origin at all. So the header cannot see the one case the
+  // guarded-GET list exists for: a remote page in an app window firing at a read
+  // that COSTS something. Chromium sends `Sec-Fetch-Site` on all three, and this
+  // box has one browser.
+  //
+  // Measured against a real Chromium, because the answer is not what it looks
+  // like: a "site" is registrable domain plus scheme and does NOT include the
+  // port, so a page on another loopback PORT (our own pairing server) reports
+  // `same-site`, while a page on a remote domain reports `cross-site`. That is the
+  // split this box wants - everything on loopback is ours - but it means this is
+  // not a defence against a hostile local port, and never was.
+  //
+  // Only an explicit `cross-site` is refused. `none` is a user-initiated
+  // navigation - somebody typing the URL - and an ABSENT header is a non-browser
+  // (curl, the CEC bridge, the tvbox CLI), which is the same tool class this
+  // function has always let through.
+  return String(h["sec-fetch-site"] || "").toLowerCase() === "cross-site";
 }
 
 // A URL's origin, for logging a refusal without echoing the whole thing back.
@@ -126,15 +151,45 @@ function originOf(url) {
 // Match a request against a plugin's registered route table. A plugin declares a
 // prefix (e.g. "/tvbox/api/spotify") and a table keyed "METHOD /subpath"; the
 // generic server tries these before its own built-in routes.
-function matchPluginRoute(routes, method, pathname) {
-  for (const { prefix, table } of routes) {
+//
+// Returns the whole entry rather than just the handler, because the SAME
+// resolution has to answer two questions - which handler runs, and whether this
+// route is one the same-origin gate applies to. Asking them separately let the
+// gate be decided against one route and the request served by another.
+function resolvePluginRoute(routes, method, pathname) {
+  for (const { prefix, table, guard } of routes) {
     if (!pathname.startsWith(prefix)) continue;
     const sub = pathname.slice(prefix.length);
     if (sub && sub[0] !== "/") continue; // don't let "/spotify" match "/spotifyX"
-    const fn = table[method + " " + sub];
-    if (fn) return fn;
+    const key = method + " " + sub;
+    const fn = table[key];
+    if (fn) return { fn, guarded: !!(guard && guard.includes(key)) };
   }
   return null;
 }
 
-module.exports = { MIME, jsonRes, serveStatic, ownOrigins, foreignOrigin, originOf, matchPluginRoute };
+function matchPluginRoute(routes, method, pathname) {
+  const hit = resolvePluginRoute(routes, method, pathname);
+  return hit ? hit.fn : null;
+}
+
+// Does a plugin want the same-origin gate on this GET? Non-GET is already gated
+// for everything, so only GET is ever asked. A plugin declares it because only the
+// plugin knows which of its reads are expensive: xcloud's wait-time lookup is one
+// authenticated request to Microsoft per distinct id, so any page the box loads
+// could otherwise drive the household's account through an <img> tag.
+function pluginRouteGuarded(routes, method, pathname) {
+  const hit = resolvePluginRoute(routes, method, pathname);
+  return !!(hit && hit.guarded);
+}
+
+module.exports = {
+  MIME,
+  jsonRes,
+  serveStatic,
+  ownOrigins,
+  foreignOrigin,
+  originOf,
+  matchPluginRoute,
+  pluginRouteGuarded,
+};

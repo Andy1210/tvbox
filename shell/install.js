@@ -444,11 +444,21 @@ function loadManifests() {
   // Every app is a package/manifest under ~/.tvbox/apps/ (installed from the
   // registry). There's no first-party in-shell manifest slot anymore.
   try {
-    for (const f of fs.readdirSync(USER_APPS_DIR)) {
-      if (f.startsWith(".")) continue; // dotfiles + in-flight package temp dirs (.<id>.tmp-*)
+    // PACKAGES FIRST, then bare manifests. `readdirSync` returns the filesystem's
+    // own order, so with both `<id>/` and `<id>.json` present the winner was
+    // whichever the directory happened to list first - arbitrary, and different on
+    // two boxes. An app that used to be manifest-only and became a package leaves
+    // exactly that pair behind, and the bare manifest is the stale half: the
+    // package is what the store installed.
+    const names = fs.readdirSync(USER_APPS_DIR).filter((f) => !f.startsWith("."));
+    for (const f of names) {
+      if (f.endsWith(".json")) continue;
       const p = path.join(USER_APPS_DIR, f);
-      if (f.endsWith(".json")) add(readManifestFile(p, null));
-      else if (fs.existsSync(path.join(p, "manifest.json"))) add(readManifestFile(path.join(p, "manifest.json"), p));
+      if (fs.existsSync(path.join(p, "manifest.json"))) add(readManifestFile(path.join(p, "manifest.json"), p));
+    }
+    for (const f of names) {
+      if (!f.endsWith(".json")) continue;
+      add(readManifestFile(path.join(USER_APPS_DIR, f), null));
     }
   } catch (e) {
     /* optional dir - most boxes have no user apps */
@@ -708,6 +718,24 @@ async function installPackage(id, baseUrl, files, log) {
     } catch (e) {
       if (bak) fs.renameSync(bak, dst); // restore the previous install
       throw e;
+    }
+    // An app that used to be manifest-only and became a PACKAGE leaves its old
+    // `~/.tvbox/apps/<id>.json` behind, and both are enumerated - so one id has two
+    // manifests and `readdirSync` order decides which one the box runs. That order
+    // is the filesystem's, not alphabetical, so the answer is arbitrary per box:
+    // xcloud shipped as a manifest-only remote page before it shipped as a package,
+    // and a box could keep opening Microsoft's own web page after installing ours.
+    // The package is what the store just put here, so the leftover goes.
+    try {
+      const legacy = path.join(USER_APPS_DIR, id + ".json");
+      if (fs.existsSync(legacy)) {
+        fs.rmSync(legacy);
+        log("removed the legacy manifest " + legacy + " this package replaces");
+      }
+    } catch (e) {
+      // Not fatal: the app is installed either way, and the duplicate-id warning
+      // in loadManifests() is what a person would then see.
+      log("could not remove a legacy manifest for " + id + ": " + e.message);
     }
     log("installed package " + id + " -> " + dst);
     return dst;

@@ -222,6 +222,14 @@ const loadedPlugins = new Map();
 // closures over an instance that has been stopped, and a route table is matched
 // first-wins, so a replacement plugin's routes would sit behind the dead one's.
 const pluginRoutes = [];
+// Which of a plugin's route keys the same-origin gate covers, from the third
+// argument to registerRoutes. Held to strings from the plugin's OWN table, so a
+// malformed value cannot silently gate nothing (an array of the wrong shape would
+// otherwise just never match) and cannot reach the gate as something else.
+function guardList(opts) {
+  const g = opts && opts.guard;
+  return Array.isArray(g) ? g.filter((k) => typeof k === "string") : [];
+}
 // [{ id, cb }] - plugins that react to a config write (e.g. Live TV drops its cache).
 // Tagged with the app id for the same reason as the routes: a listener that outlives
 // its plugin is a way back in. Measured before it was tagged - an uninstalled app's
@@ -1132,7 +1140,10 @@ function serve() {
       p.startsWith("/tvbox/api/browse/") ||
       p.startsWith("/tvbox/api/photoshare") ||
       // Same reason as firetvir: it forks a bluetoothctl per connected device.
-      p === "/tvbox/api/remote/finder/capable";
+      p === "/tvbox/api/remote/finder/capable" ||
+      // …and whatever a plugin declared, for the same reason: only the plugin
+      // knows which of its own reads cost something. See registerRoutes below.
+      httpserver.pluginRouteGuarded(pluginRoutes, "GET", p);
     if ((req.method !== "GET" || guardedGet) && httpserver.foreignOrigin(req, OWN_ORIGINS)) {
       console.warn("[main] rejected cross-origin", req.method, p, "from", req.headers.origin);
       res.writeHead(403, { "Content-Type": "text/plain" });
@@ -3882,8 +3893,13 @@ const host = {
   // Register a plugin's HTTP routes under a path prefix. `table` is keyed
   // "METHOD /subpath" (e.g. "GET /state"); the generic server tries these before
   // its own built-in routes. Called from a plugin factory (before serve()).
-  registerRoutes: (prefix, table) => {
-    pluginRoutes.push({ id: null, prefix, table });
+  // `guard` names the GET routes in `table` (same "METHOD /subpath" keys) that
+  // the same-origin gate must cover. Every non-GET is gated already; an open GET
+  // is the policy for a side-effect-free read, so a read that spends something -
+  // an authenticated upstream request, a forked process - has to say so or any
+  // page the box loads can drive it through an <img> tag.
+  registerRoutes: (prefix, table, opts) => {
+    pluginRoutes.push({ id: null, prefix, table, guard: guardList(opts) });
   },
   spawnService: (name, spec) => supervisor.spawn(name, spec),
   stopService: (name) => supervisor.stop(name),
@@ -3942,8 +3958,8 @@ function loadOnePlugin(m) {
         onConfigChange: (cb) => {
           if (typeof cb === "function") configListeners.push({ id: m.id, cb });
         },
-        registerRoutes: (prefix, table) => {
-          pluginRoutes.push({ id: m.id, prefix, table });
+        registerRoutes: (prefix, table, opts) => {
+          pluginRoutes.push({ id: m.id, prefix, table, guard: guardList(opts) });
         },
       }) || {};
     loadedPlugins.set(m.id, plugin);

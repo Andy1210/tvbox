@@ -677,6 +677,20 @@ host.registerRoutes("/tvbox/api/myapp", {
 });
 ```
 
+**Every non-GET is same-origin gated; a GET is not.** That is deliberate - a
+side-effect-free read stays open so `<img>` and no-CORS uses keep working. So if
+one of your GETs _spends_ something - an authenticated request upstream, a forked
+process, a device woken - say so, and it gets the same gate:
+
+```js
+host.registerRoutes("/tvbox/api/myapp", table, { guard: ["GET /waittime"] });
+```
+
+Without it, any page the box loads can fire that GET cross-origin. It cannot read
+the answer, but the cost is already paid: xcloud's wait-time lookup is one
+authenticated request to Microsoft per distinct id, so an `<img src>` in a remote
+app's window could drive the household's Xbox account unattended.
+
 ## The host plugin API
 
 If your app needs host-side Node - a daemon, an OAuth window, server routes -
@@ -702,7 +716,7 @@ registry's merge review exists for - there is no sandbox here.
 | `config`                                                                         | The config store (`rawSpotify`/`setSpotify`/`publicConfig`, …). **Read config through this, never by requiring a core config module.**                                                                                                                                                                                                              |
 | `json(res, obj)`                                                                 | Write a JSON response.                                                                                                                                                                                                                                                                                                                              |
 | `log(...args)`                                                                   | Prefixed console logging, into `~/.tvbox/shell.log`.                                                                                                                                                                                                                                                                                                |
-| `registerRoutes(prefix, table)`                                                  | HTTP routes, keyed `"METHOD /subpath"`. Call from the factory, before the server starts.                                                                                                                                                                                                                                                            |
+| `registerRoutes(prefix, table, opts)`                                            | HTTP routes, keyed `"METHOD /subpath"`. Call from the factory, before the server starts. `opts.guard` lists the GET keys that need the same-origin gate - see above.                                                                                                                                                                                |
 | `onConfigChange(cb)`                                                             | `cb(sections)` after a config write. Tagged with your app, so unloading the plugin removes it - an untagged listener would survive its plugin and start a daemon nothing is left to stop.                                                                                                                                                           |
 | `switchOn(key)`                                                                  | The value in force for one of your manifest's own `switches`. Scoped: a plugin reading another app's settings is not a thing this API allows.                                                                                                                                                                                                       |
 | `spawnService(name, spec)` / `stopService(name)` / `restartService(name, delay)` | A supervised child process.                                                                                                                                                                                                                                                                                                                         |
