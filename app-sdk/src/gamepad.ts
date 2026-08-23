@@ -100,18 +100,13 @@ function due(action: string, pressed: boolean, now: number) {
   return true;
 }
 
-function poll() {
-  const pads = (navigator.getGamepads ? navigator.getGamepads() : []).filter(Boolean) as Gamepad[];
-  if (!pads.length) {
-    // Last pad unplugged: stop polling entirely rather than spin on an empty list.
-    running = false;
-    frame = 0;
-    nextAt.clear();
-    stickHeld.clear();
-    rest.clear();
-    return;
-  }
-  const now = performance.now();
+/**
+ * Which actions the pads are asking for right now.
+ *
+ * Shared by the polling loop and by `start()`, which needs the same answer at the
+ * moment navigation begins - see there.
+ */
+function readHeld(pads: Gamepad[]): Set<string> {
   const held = new Set<string>();
   const defl: Record<string, number> = { up: 0, down: 0, left: 0, right: 0 };
   for (const pad of pads) {
@@ -136,6 +131,22 @@ function poll() {
   }
   for (const action of Object.keys(defl)) hold(action, defl[action]);
   for (const action of stickHeld) held.add(action);
+  return held;
+}
+
+function poll() {
+  const pads = (navigator.getGamepads ? navigator.getGamepads() : []).filter(Boolean) as Gamepad[];
+  if (!pads.length) {
+    // Last pad unplugged: stop polling entirely rather than spin on an empty list.
+    running = false;
+    frame = 0;
+    nextAt.clear();
+    stickHeld.clear();
+    rest.clear();
+    return;
+  }
+  const now = performance.now();
+  const held = readHeld(pads);
   for (const action of Object.keys(KEYS)) if (due(action, held.has(action), now)) sendKey(KEYS[action]);
   frame = requestAnimationFrame(poll);
 }
@@ -158,6 +169,25 @@ function stop() {
 function start() {
   if (running || document.visibilityState === "hidden") return;
   running = true;
+  // A button still DOWN when this starts is not a new press, and `stop()` clears
+  // the map that would have remembered it - so without this the first poll fires
+  // it as one.
+  //
+  // Measured on the box: the A press that launches a cloud game is still held when
+  // the app hands the pad back for its own screen, so it was replayed as Enter
+  // onto whatever had just been focused. The game started and quit again in the
+  // same instant, and the press carried on into the screen behind it.
+  //
+  // Stopping and starting this IS the sanctioned way to give a pad to a game (see
+  // the header), so anywhere that does it has the same problem.
+  //
+  // Read NOW rather than on the first poll: that is a frame later, and a button
+  // pressed in between is a real press that would be swallowed.
+  const pads = (navigator.getGamepads ? navigator.getGamepads() : []).filter(Boolean) as Gamepad[];
+  // `Infinity` means "fires nothing until released" - directions included, because
+  // a repeat that begins because navigation restarted is the same unasked-for
+  // action in a milder form.
+  for (const action of readHeld(pads)) nextAt.set(action, Infinity);
   frame = requestAnimationFrame(poll);
 }
 
