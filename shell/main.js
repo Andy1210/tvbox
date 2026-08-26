@@ -12,181 +12,21 @@ const fs = require("fs");
 const path = require("path");
 const os = require("os");
 
-// The two uinput bridges' control FIFOs, and the log guard around writing to them.
-//
-// Declared HERE, above everything, because the crash handler below is the earliest
-// code in this file and it writes to both: a `const` further down is in its
-// temporal dead zone until the module has run that far, so a crash while the shell
-// is still loading would silently skip taking the bridges out of native mode - and
-// in that mode Home is POSTed to an API that is not listening yet, i.e. the one
-// escape hatch on a keyboardless TV.
-//
-// tvbox-cec owns the CEC adapter and its cec-client stdin, so we cannot open a
-// second one; a whitelisted command ("on 0" / "standby 0") goes into the FIFO it
-// forwards from. tvbox-remote takes "reload" (re-read the remap config), learn mode
-// and the native-mode flag. Every write is O_NONBLOCK, so a bridge that is not
-// running can never hang the shell.
-const CEC_CMD_FIFO = "/tmp/tvbox-cec-cmd";
-const REMOTE_CMD_FIFO = "/tmp/tvbox-remote-cmd";
-// FIFOs we have already complained about, so a bridge that simply is not there (a
-// box with no CEC is normal) does not fill the log: bridgesCmd runs on a timer for
-// the whole of a native-app session. Cleared by the next successful write.
-const fifoQuiet = new Set();
+const crashlog = require("./crashlog"); // the uncaught-exception handler + its log
+const bridges = require("./bridgefifo"); // the two uinput bridges' control FIFOs
 
-// ---- an uncaught exception must not leave the box on a dialog ----
-// Electron's default handler draws an error box and keeps the process ALIVE, so
-// the session's respawn loop never runs: the television stays on a message no
-// remote can dismiss, only ssh gets the box back, and the wedged process does not
-// even take a SIGTERM. Exiting instead brings the launcher back in ten to twenty
-// seconds, and during an OTA it is what run-shell.sh's attempt counter and
-// rollback need to see - the boot watchdog that used to reach them only exists
-// while an update is pending. Note what that does NOT cover: a COMMITTED release
-// that throws before the launcher ever loads has no pending marker and no counter,
-// and safe mode counts boots rather than shell starts, so the only thing between
-// it and a permanent flicker is session.sh's backoff.
-//
 // Registered BEFORE the rest of the requires, because a module that throws while
 // it loads is the failure shape this repo has actually had (a value built at
-// module level out of a const declared further down, read in its temporal dead
-// zone). Everything it uses is therefore required lazily inside its own try:
-// require() is cached, and a module that is the one that failed must not take the
-// crash log down with it.
-const CRASH_LOG = path.join(os.homedir(), ".tvbox", "shell.crash.log");
-const CRASH_LOG_MAX = 32 * 1024; // a few stacks; a crash LOOP must not fill the card
-// How long the crash path waits for a native app to write its save and exit. Short:
-// the television is already black, and an app that ignores it is killed anyway.
-const NATIVE_CRASH_WAIT_MS = 800;
-// How much of one stack is kept. An Error's MESSAGE is whatever threw it - a
-// plugin can put a whole payload in one - and this file is copied onto the boot
-// partition, which any laptop can read.
-const CRASH_STACK_MAX = 8 * 1024;
-// A restart the viewer did not ask for looks exactly like the box deciding to stop
-// their film, so the launcher says one line about it. A marker rather than the
-// crash log itself, because it has to be CONSUMED: read from the log, every boot
-// for the rest of the box's life would carry a notice about a crash last March.
-const CRASH_NOTICE = path.join(os.homedir(), ".tvbox", "crash-notice");
-const CRASH_NOTICE_DELAY_MS = 2500; // the launcher has to be listening before it is told
-let crashing = false;
-process.on("uncaughtException", (err) => {
-  if (crashing) return; // a throw from the handling below must not recurse
-  crashing = true;
-  // String(): `stack` is whatever was thrown, and a native module or a Proxy can
-  // make it a non-string - which would then throw on .slice() inside the writer,
-  // losing the one record that survives the restart.
-  let stack;
-  try {
-    stack = String((err && err.stack) || err);
-  } catch (e) {
-    stack = "(an exception whose own stack could not be read)";
-  }
-  try {
-    // An error message carries whatever threw it: a URL with a token, an app's
-    // credentials. This goes to shell.log, which tvbox-diag copies onto the FAT
-    // boot partition, so it gets the same treatment as an app's console line.
-    stack = require("./redact").redact(stack);
-  } catch (e) {}
-  console.error("[shell] uncaught exception - restarting:", stack);
-  writeCrashLog(stack);
-  // The next launcher load says so, once. O_CREAT|O_EXCL never follows a symlink,
-  // which is what a planted one at this path would be - and an EEXIST here is a
-  // previous crash nobody has been told about yet, i.e. nothing to do.
-  try {
-    fs.closeSync(fs.openSync(CRASH_NOTICE, "wx", 0o600));
-  } catch (e) {}
-  // The three things an ordinary exit does that the television would otherwise be
-  // left holding. mpv first: it is a child that outlives us, so a film would play
-  // on with no shell able to stop it.
-  try {
-    require("./player").stop();
-  } catch (e) {}
-  // A native app owns the screen and reads the pad itself, so one left running
-  // would sit behind the new launcher with nothing in the UI able to end it, and
-  // the next launch would start a SECOND instance racing the first for the same
-  // save file. SIGTERM first, because that is what makes an emulator write that
-  // save; `forceStop` alone does nothing until `stop` has named the app's
-  // processes, and the escalation timers `stop` arms die with this process. The
-  // wait for it is synchronous for the same reason - no timer here will ever run -
-  // and a fraction of a second against a ten-second recovery is nothing next to a
-  // lost afternoon of a game.
-  let nativeGone = false;
-  try {
-    const nativeapp = require("./native");
-    if (!nativeapp.running()) {
-      nativeGone = true;
-    } else {
-      nativeapp.stop();
-      const idle = new Int32Array(new SharedArrayBuffer(4));
-      const until = Date.now() + NATIVE_CRASH_WAIT_MS;
-      while (!nativeapp.settled() && Date.now() < until) Atomics.wait(idle, 0, 0, 50);
-      nativeGone = nativeapp.settled();
-      if (!nativeGone) nativeapp.forceStop();
-    }
-  } catch (e) {}
-  // Only once the app is really gone. A SIGKILLed child is still in /proc as a
-  // zombie until we exit, so "gone" here means it left on the SIGTERM - and being
-  // wrong the other way is what costs the television: in native mode both uinput
-  // bridges post Home to the API instead of emitting a key, which is the one
-  // escape hatch that works whatever holds the screen. Leaving that mode on is
-  // harmless (the next launch or exit resets it); turning it off over a surface
-  // still in front is a box the remote cannot get out of.
-  if (nativeGone) {
-    try {
-      bridgesCmd("native off");
-    } catch (e) {}
-  }
-  // The supervised children (rclone serving the box's folders, librespot) are ours
-  // and outlive us: a crash skips stopPlugins, so without this one keeps serving the
-  // LAN on the credentials it started with, and the restarted shell finds its port
-  // held. Synchronous SIGTERMs, same cost as the player stop above.
-  try {
-    supervisor.stopAll();
-  } catch (e) {}
-  try {
-    app.exit(1);
-  } catch (e) {
-    process.exit(1);
-  }
+// module level out of a const declared further down the file, read in its
+// temporal dead zone). `supervisor` is reached through a closure for the same
+// reason it always was: a crash during load leaves it in its own dead zone, and
+// the handler's try is what covers that.
+crashlog.install({
+  stopServices: () => supervisor.stopAll(),
+  exit: (code) => app.exit(code),
 });
-
-// APPENDED, capped, and 0600 - the three things this file needs to be worth
-// having. Appended because a crash LOOP reads exactly like a single crash when
-// each one overwrites the last; capped so that loop cannot fill the card; and
-// created the way player.js creates mpv.log, with O_NOFOLLOW, because ~/.tvbox is
-// reachable through the file server and a symlink planted here would otherwise be
-// written through as the box user.
-function writeCrashLog(stack) {
-  let fd = null;
-  try {
-    fd = fs.openSync(
-      CRASH_LOG,
-      fs.constants.O_CREAT | fs.constants.O_WRONLY | fs.constants.O_APPEND | fs.constants.O_NOFOLLOW,
-      0o600,
-    );
-    const st = fs.fstatSync(fd);
-    if (!st.isFile()) return; // a fifo or a device would take the write somewhere of its own
-    fs.fchmodSync(fd, 0o600);
-    if (st.size > CRASH_LOG_MAX) fs.ftruncateSync(fd, 0);
-    const version = (() => {
-      try {
-        return require("./package.json").version;
-      } catch (e) {
-        return "?";
-      }
-    })();
-    fs.writeSync(fd, new Date().toISOString() + " v" + version + "\n" + stack.slice(0, CRASH_STACK_MAX) + "\n\n");
-  } catch (e) {
-    /* no crash log rather than a crash log we are not sure of */
-  } finally {
-    if (fd !== null) {
-      try {
-        fs.closeSync(fd);
-      } catch (e) {}
-    }
-  }
-}
 const config = require("./config");
 const pairing = require("./pairing");
-const playeropts = require("./playeropts"); // app stream terms -> mpv args/commands + the settable-property allowlist
 const { redact } = require("./redact"); // an app's console line may carry ITS credentials; the shell's log is a file
 const display = require("./display"); // resolution/refresh selection
 const displaymode = require("./displaymode"); // adaptive mode: UI mode + per-video claims
@@ -198,7 +38,6 @@ const system = require("./system"); // network, clock, keyboard, name, About num
 const hdrout = require("./hdr"); // whether the output should be in PQ for this film
 const compositor = require("./compositor"); // the compositor's control socket
 const wifiradio = require("./wifiradio"); // the wifi radio as a setting, not just a pairing dip
-const builtinradio = require("./builtinradio"); // the same radios turned off for good, in the boot config
 const textinput = require("./textinput"); // typing into a keyboard-less app (OSK / phone)
 // The compositor build from which `type_text` REPLACES a field rather than appending
 // to it - before this its select-all chord went out without its modifier, so the
@@ -212,10 +51,10 @@ const TYPING_REPLACES_MIN_COMPOSITOR = "0.1.10";
 const deliveryReplaces = () => compositor.atLeast(TYPING_REPLACES_MIN_COMPOSITOR);
 const lang = require("./lang"); // what language a remote web app is told it runs in
 // what a launch may carry: a remote app's url query, a local app's search words
-const { withLaunchQuery, playQuery, hasUsableLaunch } = require("./launchurl");
+const launchurl = require("./launchurl");
+const { withLaunchQuery } = launchurl;
 const audio = require("./audio"); // wpctl sink list + volume (device audio settings)
 const bluetooth = require("./bluetooth"); // bluetoothctl pair/connect (audio + input devices)
-const ambient = require("./ambient"); // weather + local photos for the idle/ambient screen
 const mqttBridge = require("./mqtt"); // MQTT: now-playing publish + command/notify (HA integration)
 const mediastate = require("./mediastate"); // mpv + app now-playing + sink -> ONE player state (HA media_player)
 const ir = require("./ir"); // IR blaster hub: TV volume/mute over ESPHome or Home Assistant
@@ -225,17 +64,13 @@ const fileserver = require("./fileserver"); // the box's folders over WebDAV (rc
 const appshares = require("./appshares"); // folders an app declares, read-only, to another box
 const peers = require("./peers"); // the other box: found, paired with, pulled from
 const peerPairing = require("./pairing/peer"); // hands a peer the token for those shares
-const browse = require("./browse"); // local + USB media: which roots exist, and listing one
-const images = require("./images"); // photo thumbnails + view renders, and their cache
 const photoshare = require("./photoshare"); // photos a phone cast at the viewer
 const phoneremote = require("./phoneremote"); // a phone acting as the remote, on the LAN
 const shares = require("./shares"); // network shares (SMB over rclone, no root), mounted per config
 const miracast = require("./miracast"); // screen mirroring: the unprivileged half of a Wi-Fi Display sink
-const firetvir = require("./firetvir"); // Fire TV remote IR programming (venv deps + irdb codesets + BLE tool)
 const remotefinder = require("./remotefinder"); // make a lost remote ring (Remote Pro's buzzer)
 const diag = require("./diag"); // what this box says about itself to the fleet (version, rollback, link, heat)
 const apps = require("./install"); // manifests + install-recipe runner (shared with the tvbox CLI)
-const store = require("./store"); // app-store registry client (manifest-only apps -> ~/.tvbox/apps)
 const appfetch = require("./appfetch"); // capability: scoped server-side fetch (data proxy), origin-locked + SSRF-guarded
 const netguard = require("./netguard"); // shared loopback/LAN/public host classification + lanIp
 const appdata = require("./appdata"); // capability: per-app key/value storage under ~/.tvbox/appdata
@@ -243,10 +78,24 @@ const updater = require("./updater"); // OTA self-update (versions/ + `current` 
 const boothealth = require("./boothealth"); // "this boot reached the launcher" - the root-side safe-mode counter reads it
 const backup = require("./backup"); // encrypted settings backup/restore (phone pairing page)
 const backupPairing = require("./pairing/backup");
-const reconcile = require("./reconcile"); // re-acquire what a restore could not carry (packages, deps, bundles)
 const identity = require("./identity"); // per-box identity (hostname, derived device names)
 const { Supervisor } = require("./service_supervisor"); // generic supervised child procs (plugins use it)
 const pkg = require("./package.json"); // shell version (About/diagnostics)
+
+// The shell's own decisions, each in a file of its own. Nothing in the test suite
+// can load THIS file - it requires electron - so a rule that lives here cannot be
+// checked at all; one that lives in a module beside it can.
+const appinfo = require("./appinfo"); // what the shell knows about an installed app
+const cards = require("./widgets"); // the cards on the HOME screen
+const getroutes = require("./getroutes"); // the box's read API
+const mediapublish = require("./mediapublish"); // the box as one media_player, on the wire
+const notify = require("./notify"); // the note that appears over everything
+const playerapi = require("./playerapi"); // what an app's page may do to the shared mpv
+const plugins = require("./plugins"); // the plugin registry + loader
+const powermenu = require("./powermenu"); // the power menu and the sleep timer
+const remotepolicy = require("./remotepolicy"); // where a remote web app may go
+const sharing = require("./sharing"); // the box's folders, an app's folders, the other box
+const tvcommand = require("./tvcommand"); // a command that arrived from outside the box
 
 const { PORT } = require("./constants");
 const BASE = "http://localhost:" + PORT;
@@ -337,18 +186,8 @@ function appWindow(id) {
 function foregroundWindow() {
   return (currentAppId && appWindow(currentAppId)) || (win && !win.isDestroyed() ? win : null);
 }
-let mqttCtl = null; // MQTT bridge control (publish/…) once connected; null if not configured
 let nowPlaying = null; // last launcher-reported now-playing (Spotify/Live TV) - gates auto-update idleness
 let restoredAt = null; // a backup restore just ran; the launcher polls this to show "restarting"
-// `streams` is the app's own track decision (a media client that resolved which
-// audio/subtitle stream to play server-side, e.g. Plex): 0-based ordinals within
-// their type, `sub: -1` = subtitles off, `subFile` = a sidecar subtitle URL.
-// null anywhere = "no opinion", which leaves mpv's own selection alone.
-// `kind` is the app saying what this is, not the shell guessing: "audio" skips
-// the output-mode handshake and the video reveal, which belong to a film and cost
-// a screen blank and a round trip before the first note.
-const queued = { url: null, startPos: 0, streams: null, kind: null };
-
 // The box counts as idle for a self-initiated restart (nightly auto-update)
 // only when nothing is on screen or audible: no mpv, launcher focused, and the
 // last now-playing report isn't "playing" (librespot audio has no mpv process
@@ -383,141 +222,39 @@ function restartShell(why) {
 
 // ---- plugins (manifest-selected shell-side modules, e.g. Spotify) ----
 // A plugin is loaded ONLY when its app is present and its declared binary deps
-// resolve; it gets a scoped `host` API (below) and never touches shell internals.
+// resolve; it gets a scoped `host` API (built further down) and never touches
+// shell internals. The registries an unload has to reach - the plugin objects,
+// their routes, their config listeners - live in plugins.js.
 const supervisor = new Supervisor(); // shared supervised-child manager for plugins
-// app id -> { start, stop } from its plugin factory. Keyed rather than a list,
-// because a plugin has to be findable by id: uninstalling an app has to be able to
-// STOP its plugin (a daemon or a LAN listener would otherwise outlive the app that
-// owns it, with its switch gone from Settings), and an update has to replace one.
-const loadedPlugins = new Map();
-// [{ id, prefix, table }] - HTTP routes a plugin registered. Tagged with the app id
-// so they can go WITH it: a table left behind after an unload keeps answering out of
-// closures over an instance that has been stopped, and a route table is matched
-// first-wins, so a replacement plugin's routes would sit behind the dead one's.
-const pluginRoutes = [];
-// Which of a plugin's route keys the same-origin gate covers, from the third
-// argument to registerRoutes.
-//
-// Every entry has to NAME a GET handler in the same table, and a plugin that gets
-// that wrong fails to load rather than registering. The quiet alternative is the
-// bug this whole mechanism exists to prevent: `guard: ["GET /waitTime"]` beside a
-// table defining `"GET /waittime"` matches nothing, the route still answers, and
-// the costly read is open to any page the box loads - with nothing anywhere
-// saying so. A plugin that does not load is logged, and its tile still works.
-function guardList(opts, table) {
-  const g = opts && opts.guard;
-  if (g === undefined || g === null) return [];
-  if (!Array.isArray(g)) throw new Error("registerRoutes: guard must be an array of route keys");
-  for (const key of g) {
-    if (typeof key !== "string" || typeof (table || {})[key] !== "function") {
-      throw new Error("registerRoutes: guard names no route in this table: " + JSON.stringify(key));
-    }
-    // Everything else is gated already, so a non-GET here is a misunderstanding
-    // worth correcting rather than a no-op to carry.
-    if (!key.startsWith("GET ")) {
-      throw new Error("registerRoutes: only a GET needs guarding, not " + JSON.stringify(key));
-    }
-  }
-  return g;
-}
-// [{ id, cb }] - plugins that react to a config write (e.g. Live TV drops its cache).
-// Tagged with the app id for the same reason as the routes: a listener that outlives
-// its plugin is a way back in. Measured before it was tagged - an uninstalled app's
-// receiver came back on the LAN the next time anything wrote config, with the shell no
-// longer knowing the plugin existed and its switch gone from Settings.
-const configListeners = [];
-// Notify plugins that config sections changed (host.onConfigChange). A package
-// plugin can't reach the shell config write directly, so this is how e.g. the
-// Live TV plugin invalidates its channel/EPG cache when the IPTV source changes.
-function emitConfigChange(sections) {
-  if (!sections || !sections.length) return;
-  for (const { id, cb } of configListeners) {
-    try {
-      cb(sections);
-    } catch (e) {
-      console.warn("[config] listener", id || "(shell)", ":", e.message);
-    }
-  }
-}
-// ---- LAN file server (WebDAV) ----
+
+// ---- the box's folders, an app's folders, and the other box ----
 // Copying a screensaver image onto the box, or a console BIOS into the folder an
-// emulator reads, is not something a TV can do - and should not need ssh. The module
-// owns the decisions (which folders are offered, what gets served, refusing to serve
-// without a password); this is the wiring: config in, supervisor out.
-// PATH matters here (rclone lands in ~/.tvbox/bin, which install.js prepends);
-// the Wayland vars do not - this serves files, it draws nothing.
-const fileserverDeps = { onPath: apps.onPath, childEnv: () => ({ ...process.env }), supervisor };
-// The same wiring for the shares an APP declares, with one addition: what there is
-// to offer comes from the installed manifests, and it is a function because an app
-// can be installed while the box is running.
-const appsharesDeps = {
-  onPath: apps.onPath,
-  childEnv: () => ({ ...process.env }),
+// emulator reads, is not something a TV can do - and should not need ssh. Which
+// folders are offered, what gets served, and the lifecycle of the credential two
+// boxes pair on are all sharing.js's; this is what it cannot know by itself.
+sharing.init({
+  config,
+  apps,
+  appshares,
+  fileserver,
+  shares,
+  peers,
+  identity,
   supervisor,
-  entries: () => appshares.entries(apps.getManifests(), apps.appShareRoot),
-};
-// Same reason for the same one field: `udisksctl` is what mounts a stick and it is
-// not on every box (udisks2 is a soft dep, and OTA can never add an apt package),
-// so browse.js asks before it runs anything. `shares` is a function rather than a
-// list because a share can be added while the box is running.
-const browseDeps = { onPath: apps.onPath, shares: () => config.rawShares() };
-
-// A rendered photo, out of the thumbnail cache. The entry is keyed on the source
-// file's size and mtime, so for one URL (which the caller stamps with that mtime)
-// the answer can never change - which is what lets a grid re-use a tile it has
-// already scrolled past instead of asking for it again.
-function sendImage(res, file) {
-  // The headers wait for the file to actually open. They promise the answer is
-  // good for a year, so writing them first and failing afterwards would put an
-  // empty response in Chromium's cache under a URL it will not ask about again -
-  // and the entry CAN be gone by now, because the prune runs between the check
-  // that found it and this read.
-  const stream = fs.createReadStream(file);
-  stream.on("open", () => {
-    res.writeHead(200, {
-      "Content-Type": "image/jpeg",
-      "Cache-Control": "public, max-age=31536000, immutable",
-      // The fast path forwards a JPEG a stranger's camera wrote, so the declared
-      // type is the only thing that should decide how it is treated.
-      "X-Content-Type-Options": "nosniff",
+  // PATH matters here (rclone lands in ~/.tvbox/bin, which install.js prepends);
+  // the Wayland vars do not - these serve files, they draw nothing.
+  childEnv: () => ({ ...process.env }),
+  // rclone is a ~20MB download, so it runs out of process like every other
+  // no-root binary install - the UI polls the status for `rclone`.
+  installDeps: (done) => {
+    const child = spawn(process.execPath, [path.join(__dirname, "cli.js"), "fileserver-deps"], {
+      env: { ...process.env, ...WL_ENV, ELECTRON_RUN_AS_NODE: "1" },
+      stdio: "ignore",
     });
-    stream.pipe(res);
-  });
-  stream.on("error", (e) => {
-    console.warn("[images] read failed:", file, e.message);
-    if (!res.headersSent) return imageError(res, "not_found");
-    try {
-      res.end(); // it broke half way; the status is already out there
-    } catch (e2) {}
-  });
-  // A grid scrolling quickly abandons tiles it has moved past, and `pipe` only
-  // unpipes on a closed response - it does not close the file. Without this each
-  // abandoned tile would leave a descriptor open until the process exits.
-  res.on("close", () => stream.destroy());
-}
-
-// Why there is no picture, as a status the UI can tell apart: a missing box
-// dependency is something a person can fix, and a file this box cannot decode is
-// not. The body stays empty - the caller is an <img>.
-const IMAGE_ERROR_STATUS = { no_ffmpeg: 501, unsupported: 415, timeout: 504, failed: 500 };
-function imageError(res, reason) {
-  res.writeHead(IMAGE_ERROR_STATUS[reason] || 404, { "X-Tvbox-Reason": String(reason || "not_found") });
-  res.end();
-}
-const sharesDeps = {
-  onPath: apps.onPath,
-  childEnv: () => ({ ...process.env }),
-  supervisor,
-};
-// Mount what is configured (and unmount what is not) - on boot, and after every
-// change to the list.
-function applyShares() {
-  const r = shares.apply(config.rawShares(), sharesDeps);
-  if (!r.ok) console.warn("[shares] not mounted:", r.error);
-  else if (r.mounted.length) console.log("[shares] mounting", r.mounted.join(", "));
-  return r;
-}
-let rcloneInstalling = false;
+    child.on("error", done);
+    child.on("exit", done);
+  },
+});
 
 // Screen mirroring. The radio half is root's and runs behind a systemd unit
 // (miracast.js); what happens here is the other end of it - when frames start
@@ -565,460 +302,37 @@ const mirroring = miracast.create({
 // Tell the launcher which full-screen surface to show. Safe before the window
 // exists (mirroring cannot be armed then) and safe after it has gone.
 function pushNav(dest) {
-  if (!win || win.isDestroyed()) return;
-  try {
-    win.webContents.send("tvbox-nav", { dest });
-  } catch (e) {}
+  sendToLauncher("tvbox-nav", { dest });
 }
 
-function applyFileserver() {
+// Everything the launcher hears goes through here: a send into a window that has
+// gone, or one whose renderer died between the check and the call, must never be
+// the thing that takes the shell down.
+function sendToLauncher(channel, payload) {
+  if (!win || win.isDestroyed()) return false;
   try {
-    return applyFileserverInner();
+    win.webContents.send(channel, payload);
+    return true;
   } catch (e) {
-    // The settings POST calls this synchronously; one feature's bad day must not be
-    // the shell's last.
-    console.warn("[fileserver] apply failed:", e.message);
-    return { ok: false, error: "failed" };
-  }
-}
-function applyFileserverInner() {
-  const cfg = config.rawFileserver();
-  if (!cfg.enabled) {
-    fileserver.stop(fileserverDeps);
-    return { ok: true, stopped: true };
-  }
-  const r = fileserver.start(cfg, fileserverDeps);
-  if (!r.ok) {
-    fileserver.stop(fileserverDeps); // never leave a half-started share behind
-    console.warn("[fileserver] not started:", r.error);
-  } else {
-    console.log("[fileserver] serving", r.shared.length, "folder(s) on", r.url || ":" + r.port);
-  }
-  return r;
-}
-
-function applyAppshares() {
-  try {
-    return applyAppsharesInner();
-  } catch (e) {
-    console.warn("[appshares] apply failed:", e.message);
-    return { ok: false, error: "failed" };
-  }
-}
-function applyAppsharesInner() {
-  const cfg = config.rawAppshares();
-  // Drop ids no installed app declares any more. Without this an app that was
-  // uninstalled leaves its share in the list, the server refuses to start with
-  // "nothing shared", and the screen offers nothing to switch off - the stale
-  // entry is invisible there, because the list is built from the manifests.
-  const known = new Set(appsharesDeps.entries().map((e) => e.id));
-  const kept = (Array.isArray(cfg.enabled) ? cfg.enabled : []).filter((id) => known.has(id));
-  if (kept.length !== (cfg.enabled || []).length) config.setAppshares({ enabled: kept });
-  if (!kept.length) {
-    appshares.stop(appsharesDeps);
-    return { ok: true, stopped: true };
-  }
-  const r = appshares.start(config.rawAppshares(), appsharesDeps);
-  if (!r.ok) {
-    appshares.stop(appsharesDeps); // never leave a half-started share behind
-    console.warn("[appshares] not started:", r.error);
-  } else {
-    console.log("[appshares] offering", r.shared.length, "folder(s) on :" + r.port);
-  }
-  return r;
-}
-
-// The box on the other side of the exchange, remembered - replaced rather than
-// appended, because a key is reissued each time and a stale entry would be tried
-// first. Two things it refuses: an address that is not on this box's own subnet
-// (the outbound half refuses the same, and for the same reason), and an id that
-// already names a DIFFERENT box - a peer id is a hostname, so it is guessable, and
-// a caller must not be able to repoint the room next door at itself.
-function rememberPeer(peer) {
-  if (!peers.onLocalSubnet(peer.host)) {
-    console.warn("[appshares] refused a peer from off the local subnet:", peer.host);
     return false;
   }
-  const known = config.rawAppshares().peers || [];
-  const clash = known.find((x) => x.id === peer.id && x.host !== peer.host);
-  if (clash) {
-    console.warn("[appshares] refused a peer claiming", peer.id, "- that name is", clash.host);
-    return false;
-  }
-  const kept = known.filter((x) => x.id !== peer.id);
-  config.setAppshares({ peers: [...kept, peer] });
-  console.log("[appshares] paired with", peer.name);
-  return true;
 }
 
-// The key this box hands another one, minted per box and recorded by its hash so
-// that forgetting the box is what revokes it. Answers null while nothing is being
-// offered: a box that shares nothing has no key to give, and pairing with it is
-// simply one-way.
-function issueShareKey(box) {
-  const cfg = config.rawAppshares();
-  // What is actually served, not what the list says: an id whose app has been
-  // uninstalled keeps the list non-empty while the server refuses to start on
-  // "nothing shared", and a peer would pair happily and be refused on its first
-  // pull. Same filter applyAppshares uses.
-  const known = new Set(appsharesDeps.entries().map((e) => e.id));
-  if (!(cfg.enabled || []).some((id) => known.has(id))) return null;
-  const cred = appshares.newCredential();
-  // The hostname is what makes a box itself here, the same source the MQTT device
-  // id is derived from - so a peer list names the rooms, not addresses.
-  // Until the answer names the box, the key is filed under its own user name -
-  // unique already, and adoptShareKey renames the row the moment the box says who
-  // it is.
-  const id = String((box && box.id) || "") || cred.user;
-  const kept = (cfg.issued || []).filter((x) => x.id !== id);
-  config.setAppshares({
-    issued: [
-      ...kept,
-      {
-        id,
-        name: String((box && box.name) || id).slice(0, 64),
-        user: cred.user,
-        hash: appshares.hashSecret(cred.secret),
-      },
-    ],
-  });
-  // The file rclone reads is written at start; the new line has to reach a server
-  // that is already running.
-  applyAppshares();
-  return {
-    id: identity.defaultDeviceId(),
-    name: identity.hostname(),
-    port: appshares.portOf(cfg.port),
-    user: cred.user,
-    token: cred.secret,
-  };
-}
-
-// A key is minted before the other box has said who it is (its credentials travel
-// in the same request), so the row starts under a placeholder id and is adopted
-// once the answer names the box. Adoption is what makes "forget this box" reach it.
-function adoptShareKey(key, peer) {
-  if (!key || !peer) return;
-  const cur = config.rawAppshares();
-  const rows = (cur.issued || []).filter((x) => x.id !== peer.id);
-  const mine = (cur.issued || []).find((x) => x.user === key.user);
-  if (!mine) return;
-  config.setAppshares({
-    issued: [...rows.filter((x) => x.user !== key.user), { ...mine, id: peer.id, name: peer.name }],
-  });
-  applyAppshares();
-}
-
-// A key nobody is named on. A pairing mints one under a placeholder id and adopts
-// it when the answer names the box, so a shell that exits between the two leaves a
-// working key that "forget this box" cannot reach - no peer row mentions it. Run at
-// startup, never during a pairing: the placeholder is legitimately unmatched while
-// the exchange is in flight.
-function pruneOrphanShareKeys() {
-  const cur = config.rawAppshares();
-  const named = new Set((cur.peers || []).map((x) => x.id));
-  const kept = (cur.issued || []).filter((x) => named.has(x.id));
-  if (kept.length === (cur.issued || []).length) return;
-  console.log("[appshares] dropping", (cur.issued || []).length - kept.length, "key(s) no box is named on");
-  config.setAppshares({ issued: kept });
-}
-
-// A key handed to something that turned out not to be a box, or to a pairing that
-// failed. It may already be in someone's hands, so it is removed rather than left
-// to expire - which for a credential with no expiry means never.
-function revokeShareKey(key) {
-  if (!key || !key.user) return;
-  const cur = config.rawAppshares();
-  config.setAppshares({ issued: (cur.issued || []).filter((x) => x.user !== key.user) });
-  applyAppshares();
-}
-
-// What a pull would actually do, before anyone presses it. Both sides listed with
-// the pull's own filters (an emulator rewrites its config on every exit - unfiltered,
-// the other box is always "newer" and the answer is worthless), and the credential
-// reaches rclone the same way it does for a copy.
-//
-// Answers per share, never a file list: the app needs to say "the other room is a
-// day ahead", not to be handed the contents of a folder it did not ask for.
-function compareAppshare(peerId, shareId) {
-  const cfg = config.rawAppshares();
-  const peer = (cfg.peers || []).find((x) => x.id === peerId);
-  if (!peer) return Promise.resolve({ ok: false, error: "unknown_peer" });
-  const entry = appsharesDeps.entries().find((x) => x.id === shareId);
-  if (!entry) return Promise.resolve({ ok: false, error: "unknown_share" });
-  if (!apps.onPath("rclone")) return Promise.resolve({ ok: false, error: "rclone_missing" });
-  let secret;
-  try {
-    secret = shares.obscure(peer.token);
-  } catch (e) {
-    return Promise.resolve({ ok: false, error: "compare_failed" });
-  }
-  const env = {
-    ...process.env,
-    RCLONE_WEBDAV_USER: String(peer.user || ""),
-    RCLONE_WEBDAV_PASS: secret,
-  };
-  const listing = (argv, useEnv) =>
-    new Promise((resolve) => {
-      const child = spawn(argv[0], argv.slice(1), {
-        env: useEnv ? env : process.env,
-        stdio: ["ignore", "pipe", "pipe"],
-      });
-      let out = "";
-      let err = "";
-      // A listing is small (names, sizes, times) but a share is someone else's
-      // folder: a cap keeps a hostile or broken peer from feeding us a stream.
-      child.stdout.on("data", (d) => {
-        if (out.length < 4_000_000) out += d;
-      });
-      child.stderr.on("data", (d) => {
-        if (err.length < 2000) err += d;
-      });
-      const kill = setTimeout(() => child.kill("SIGKILL"), 25000);
-      child.on("error", () => (clearTimeout(kill), resolve(null)));
-      child.on("exit", (code) => {
-        clearTimeout(kill);
-        if (code !== 0) {
-          console.warn("[appshares] listing failed:", code, err.slice(0, 200));
-          return resolve(null);
-        }
-        try {
-          resolve(JSON.parse(out || "[]"));
-        } catch (e) {
-          resolve(null);
-        }
-      });
-    });
-  // The local side is listed with rclone too, so both answers come from the same
-  // filter engine - a pattern that means one thing here and another there would
-  // make the comparison lie in exactly the cases it exists for.
-  return Promise.all([
-    entry.present ? listing(peers.lsArgv(entry.path, entry.exclude, null), false) : Promise.resolve([]),
-    listing(peers.lsArgv(":webdav:" + shareId, entry.exclude, peer), true),
-  ]).then(([here, there]) => {
-    if (!there) return { ok: false, error: "unreachable" };
-    // A local listing that FAILED is not an empty folder. Read as one it would
-    // report everything on the other box as worth bringing, which is the most
-    // dangerous answer this call can give - it is the one that invites the press.
-    if (!here) return { ok: false, error: "compare_failed" };
-    return { ok: true, ...peers.compareListings(here, there) };
-  });
-}
-
-// Pull one share from a paired box into the same app's folder here. Both ends are
-// resolved from what THIS box knows - the peer from its stored id, the destination
-// from the local manifest - so a caller names a share, never a path.
-// One pull at a time per app. Two rclones copying into the same folder race each
-// other's --backup-dir, and a renderer that calls this in a loop would fill the
-// disk with copies of what it replaced.
-const pullsInFlight = new Set();
-
-function pullAppshare(peerId, shareId, group) {
-  const cfg = config.rawAppshares();
-  const peer = (cfg.peers || []).find((x) => x.id === peerId);
-  if (!peer) return { ok: false, error: "unknown_peer" };
-  const entry = appsharesDeps.entries().find((x) => x.id === shareId);
-  if (!entry) return { ok: false, error: "unknown_share" };
-  // One emulator's folder instead of the whole share. The name came from a
-  // renderer, so it may hold no separator and no dot-name; where it lands is
-  // checked again below, against the app's own root, like every other destination.
-  if (group && !peers.groupNameOk(group)) return { ok: false, error: "unknown_group" };
-  // `present` is what says the folder exists AND still resolves inside the app's
-  // own root. Checked here rather than only in the UI: this destination is handed
-  // to rclone, and a direct call must not reach past a symlink the screen greys
-  // out. A folder the app has simply not created yet is made - a box that has
-  // never started the app is the one most likely to want a save brought to it.
-  if (!entry.present && !appshares.ensureDir(entry.root, entry.path)) {
-    return { ok: false, error: "unknown_share" };
-  }
-  // The destination is built here, never sent: a share's path plus at most one
-  // folder name, and it has to resolve inside the app's root once symlinks are
-  // followed - the same check the share itself passed.
-  const dest = group ? path.join(entry.path, group) : entry.path;
-  if (group && !appshares.ensureDir(entry.root, dest)) return { ok: false, error: "unknown_group" };
-  if (!apps.onPath("rclone")) return { ok: false, error: "rclone_missing" };
-  // A replaced file goes here rather than into the void, and the stamp is what
-  // makes two pulls of the same game distinguishable afterwards.
-  const backupDir = path.join(peers.REPLACED, new Date().toISOString().replace(/[:.]/g, "-"));
-  const argv = peers.pullArgv(peer, shareId, dest, backupDir, entry.exclude, group || "");
-  // rclone wants every credential in its own reversible encoding, whether it comes
-  // from a config file or the environment - a plain token answers 401. shares.js
-  // owns that encoding for the same reason it owns the mount arguments.
-  let secret;
-  try {
-    secret = shares.obscure(peer.token);
-  } catch (e) {
-    console.warn("[appshares] could not encode the peer's token:", e.message);
-    return { ok: false, error: "pull_failed" };
-  }
-  const child = spawn(argv[0], argv.slice(1), {
-    env: { ...process.env, RCLONE_WEBDAV_USER: String(peer.user || ""), RCLONE_WEBDAV_PASS: secret },
-    stdio: ["ignore", "ignore", "pipe"],
-  });
-  let err = "";
-  child.stderr.on("data", (d) => {
-    if (err.length < 4000) err += d;
-  });
-  return new Promise((resolve) => {
-    child.on("error", (e) => resolve({ ok: false, error: e.message }));
-    child.on("exit", (code) => {
-      if (code === 0) console.log("[appshares] pulled", shareId, "from", peer.name);
-      else console.warn("[appshares] pull failed:", code, err.slice(0, 400));
-      resolve({ ok: code === 0, error: code === 0 ? null : "pull_failed", detail: err.slice(0, 400) });
-    });
-  });
-}
-
-// rclone is a ~20MB download, so it runs out of process like every other no-root
-// binary install - the UI polls the status for `rclone`.
-function installRclone() {
-  if (rcloneInstalling || apps.onPath("rclone")) return false;
-  rcloneInstalling = true;
-  const child = spawn(process.execPath, [path.join(__dirname, "cli.js"), "fileserver-deps"], {
-    env: { ...process.env, ...WL_ENV, ELECTRON_RUN_AS_NODE: "1" },
-    stdio: "ignore",
-  });
-  const done = () => {
-    rcloneInstalling = false;
-    if (!apps.onPath("rclone")) return;
-    // Both features run on this one binary, so whichever asked for it, everything
-    // waiting on it can start now.
-    if (config.rawFileserver().enabled) applyFileserver();
-    if ((config.rawAppshares().enabled || []).length) applyAppshares();
-    if (config.rawShares().length) applyShares();
-  };
-  child.on("error", done);
-  child.on("exit", done);
-  return true;
-}
-
-// ---- app manifests + install (the install-recipe runner lives in install.js,
-// shared with the `tvbox` CLI; the shell just queries manifests + serves apps) ----
-
-// Launchable = belongs on HOME: ready status, binary deps present, configured, a
-// bundle app has its bundle, and not mid-install. HOME shows ONLY these, so a
-// still-installing or not-yet-provisioned app stays in the store (with progress)
-// instead of appearing greyed on HOME.
-//
-// One function, because two callers answer the same question and must not drift:
-// the tile list the launcher draws, and the source list the Home Assistant
-// media_player offers. A source that HOME would refuse to open must not be
-// offered there either.
-function appLaunchable(m) {
-  const { depsOk } = apps.appDeps(m);
-  const rt = m.runtime || {};
-  // A remote web-app whose URL comes from config (runtime.urlConfig) is only
-  // launchable once that URL is set (e.g. Home Assistant).
-  const configured = rt.serve === "remote" && rt.urlConfig ? !!(config.appConfig(rt.urlConfig) || {}).baseUrl : true;
-  const installable = !!(m.install && m.install.source);
-  return (
-    m.status === "ready" &&
-    depsOk &&
-    configured &&
-    !maintenance.isInstalling(m.id) &&
-    (!installable || apps.isInstalled(m.id))
-  );
-}
-
-// The value of one manifest-declared switch (`switches`): what the box has stored,
-// else the manifest's own default. An undeclared key is off, and so is a declared
-// one whose manifest does not ask for `default: true` - a switch that appears with
-// a release must never turn something on by appearing.
-function switchValue(m, key) {
-  const decl = (Array.isArray(m.switches) ? m.switches : []).find((s) => s && s.key === key);
-  if (!decl) return false;
-  const stored = config.appSwitches(m.id);
-  // Own property only: `in` walks the prototype chain, so a key that happens to
-  // name something every object has would read as stored - and truthy - whatever
-  // the box has actually saved.
-  return Object.prototype.hasOwnProperty.call(stored, key) ? !!stored[key] : decl.default === true;
-}
-
-function appTiles() {
-  // the subset the launcher needs to draw a tile (+ dependency status so it can
-  // grey out an app whose required binary isn't installed)
-  return apps.getManifests().map((m) => {
-    const { depsOk, missing, installable: depsInstallable } = apps.appDeps(m);
-    // installable = has a bundle install recipe (flatpak/url/git) that can be
-    // provisioned from the UI without root (e.g. Plex). installed = its bundle is
-    // present. A webclient with installable && !installed needs a one-tap install.
-    const installable = !!(m.install && m.install.source);
-    // A remote web-app whose URL comes from config (runtime.urlConfig) is only
-    // launchable once that URL is set (e.g. Home Assistant). Everything else is
-    // always "configured" so the launcher gates only what actually needs it.
-    const rt = m.runtime || {};
-    const configured = rt.serve === "remote" && rt.urlConfig ? !!(config.appConfig(rt.urlConfig) || {}).baseUrl : true;
-    return {
-      id: m.id,
-      name: m.name,
-      tagline: m.tagline,
-      type: m.type,
-      status: m.status,
-      accent: m.accent,
-      icon: m.icon,
-      // background apps: a live (possibly hidden) window exists; HOME shows a
-      // running badge + quit affordance, resume is instant via navTo. A native app
-      // has no window of ours, so its own process is what "running" means, and it
-      // is never backgrounded: it either owns the screen or it has exited.
-      running: m.type === "native" ? nativeapp.id() === m.id : !!appwins.get(m.id),
-      foreground: m.id === currentAppId,
-      // Phone-pairing affordances the app declares (Settings shows a row each).
-      // Only kind + label: the launcher starts the session and draws the QR, the
-      // app's own plugin owns everything that happens on the phone.
-      pairing: Array.isArray(m.pairing) ? m.pairing.map((p) => ({ kind: p.kind, label: p.label })) : undefined,
-      // On/off switches the app declares, with the value in force. Same reason as
-      // `pairing`: an app whose screen is not ours (a native app, or a remote site
-      // like YouTube's own TV page) has nowhere else to put a setting, and the
-      // launcher renders these knowing nothing about what they do.
-      //
-      // `available` is whether its PLUGIN is loaded, because the plugin is the thing
-      // that acts on a switch: with a missing dependency, no plugin.js, or a factory
-      // that threw, a press would write config and change nothing. Still LISTED
-      // though - hiding it leaves somebody following release notes with no trace of a
-      // setting that is supposed to exist; the launcher shows it as unavailable.
-      switches: Array.isArray(m.switches)
-        ? m.switches.map((s) => ({
-            key: s.key,
-            label: s.label,
-            hint: s.hint,
-            on: switchValue(m, s.key),
-            available: loadedPlugins.has(m.id),
-          }))
-        : undefined,
-      depsOk,
-      missing,
-      depsInstallable, // every missing binary is a no-root download dep -> UI-installable (no CLI)
-      installable,
-      installed: apps.isInstalled(m.id),
-      installing: maintenance.isInstalling(m.id),
-      configured,
-      ready: appLaunchable(m), // see appLaunchable: the one definition HOME and HA share
-      progress: maintenance.progressFor(m.id) || null,
-    };
-  });
-}
-function capsFor(id) {
-  // The launcher (id null) is the trusted first-party UI that hosts builtin apps,
-  // so it gets player + config too. An app gets exactly what its manifest declares
-  // and defaults to nav-only - a manifest that forgets `capabilities` must NOT
-  // silently inherit player/config (that boundary would fail open).
-  if (!id) return ["nav", "player", "config"];
-  const m = apps.manifestById(id);
-  return (m && m.runtime && m.runtime.capabilities) || ["nav"];
-}
-function rootWebApp() {
-  return apps
-    .getManifests()
-    .find((m) => m.type === "webclient" && m.runtime && m.runtime.mount === "root" && m.status === "ready");
-}
-
-// The app DOM element that must become transparent to reveal mpv (declared per
-// app in the manifest, e.g. Plex's "#media-container"). The shell has no
-// app-specific selector baked in.
-function transparentSelectorFor(id) {
-  const m = id && apps.manifestById(id);
-  return (m && m.runtime && m.runtime.transparentSelector) || null;
-}
+// ---- what the shell knows about an installed app ----
+// The install-recipe runner lives in install.js (shared with the `tvbox` CLI) and
+// the decisions taken about a manifest - is it launchable, what is a switch set
+// to, which capabilities it was granted, where its bridge adapter is - in
+// appinfo.js. What is here is the live state those read.
+appinfo.init({
+  apps,
+  config,
+  maintenance,
+  isPluginLoaded: (id) => plugins.isLoaded(id),
+  hasWindow: (id) => !!appwins.get(id),
+  nativeAppId: () => nativeapp.id(),
+  foregroundId: () => currentAppId,
+});
+const { appTiles, mediaSources, capsFor, rootWebApp, transparentSelectorFor, bridgePath } = appinfo;
 
 // One-time stylesheet per window (each app has its own window now; the flag
 // lives on the window and resets on navigation); switch between "video mode"
@@ -1074,7 +388,7 @@ function btBatteryTick() {
       if (btWarned.get(d.mac) === day) continue;
       btWarned.set(d.mac, day);
       console.log("[bt] low battery:", d.name, d.battery + "%");
-      handleTvNotify({ kind: "lowBattery", name: d.name, battery: d.battery });
+      notify.handleTvNotify({ kind: "lowBattery", name: d.name, battery: d.battery });
     }
   });
 }
@@ -1131,95 +445,22 @@ function watchDisplayMode() {
   screen.on("display-metrics-changed", recheck);
 }
 
-// Power menu actions from Home. sleep = display off over CEC (the box keeps
-// running; wake by turning the TV on).
-//
-// reboot/poweroff run as the session user, and the thing that makes that work is
-// a polkit rule provision.sh installs - NOT logind's own "an active local session
-// may shut down" default, which this comment used to claim. The shell is not such
-// a session: Electron moves its main process into its own systemd app scope, so
-// `loginctl` knows nothing about it and `subject.active` is false. Same trap the
-// udisks and miracast grants already document.
-//
-// `--no-ask-password` is what keeps a missing grant survivable, and it is
-// load-bearing rather than tidy. Without it systemctl answers polkit's
-// "interactive authentication required" by spawning **pkttyagent**, which reads a
-// controlling terminal; a background process group that reads a terminal is sent
-// SIGTTIN, and SIGTTIN stops THE WHOLE GROUP - Electron and session.sh, the
-// respawn loop, together. The box then looks bricked: the remote does nothing,
-// the HTTP port is dead, and `pkill` cannot fix it because the loop that would
-// respawn the shell is stopped too (recovery is `kill -CONT` on session.sh). With
-// the flag, systemctl simply fails and the sudo fallback below does the reboot.
-//
-// On reboot/poweroff the box goes down, so the JSON response may never reach the
-// client - that's fine.
-// User-set sleep timer ("turn the TV off in N minutes") - unconditional by
-// design (the user explicitly asked for it), unlike the screensaver auto-sleep.
-let sleepTimerAt = null;
-let sleepTimerId = null;
-function setSleepTimer(minutes) {
-  if (sleepTimerId) clearTimeout(sleepTimerId);
-  sleepTimerId = null;
-  sleepTimerAt = null;
-  const min = Number(minutes);
-  if (Number.isFinite(min) && min > 0 && min <= 24 * 60) {
-    sleepTimerAt = Date.now() + min * 60 * 1000;
-    sleepTimerId = setTimeout(
-      () => {
-        sleepTimerId = null;
-        sleepTimerAt = null;
-        console.log("[power] sleep timer fired");
-        showLauncher();
-        cecPower(false);
-      },
-      min * 60 * 1000,
-    );
-  }
-  return { ok: true, at: sleepTimerAt };
-}
-
-function handlePower(action, res) {
-  if (action === "sleep" || action === "sleep_if_idle") {
-    // sleep_if_idle = the screensaver's auto-sleep: refuse while anything plays
-    // (Spotify Connect streams with the launcher sitting idle on Home, so
-    // "screensaver is up" does NOT imply "nothing is playing"). The power
-    // menu's manual Sleep stays unconditional.
-    if (action === "sleep_if_idle" && !boxIdle()) return httpserver.jsonRes(res, { ok: true, slept: false });
-    showLauncher(); // leave any app, back to Home
-    // Sleep means sleep. `showLauncher` deliberately lets sound outlive a screen
-    // change, which is right for Home and wrong for this: measured, Power ->
-    // Sleep turned the television off and left the album playing into a dark
-    // room - inaudibly, since HDMI is this box's only sink - holding a server
-    // session open and the box out of idle for as long as the queue lasted.
+// Power menu actions from Home, and the sleep timer behind them. Why reboot works
+// without root, and why `--no-ask-password` is load-bearing, are in powermenu.js.
+powermenu.init({
+  jsonRes: httpserver.jsonRes,
+  boxIdle,
+  showLauncher,
+  // Sleep means sleep. `showLauncher` deliberately lets sound outlive a screen
+  // change, which is right for Home and wrong for this: measured, Power -> Sleep
+  // turned the television off and left the album playing into a dark room.
+  stopPlayback: () => {
     player.setPlaying(null);
     player.stop();
     setVideoMode(false);
-    cecPower(false); // TV off via CEC
-    return httpserver.jsonRes(res, { ok: true, slept: true });
-  }
-  const sub = action === "reboot" || action === "poweroff" ? action : null;
-  if (!sub) return httpserver.jsonRes(res, { ok: false, error: "bad action" });
-  console.log("[power]", sub);
-  execFile("systemctl", ["--no-ask-password", sub], { timeout: 8000 }, (e, _o, err) => {
-    if (!e) return httpserver.jsonRes(res, { ok: true });
-    // The flag rides along under sudo as well. It changes nothing while sudo
-    // succeeds (root never consults polkit), and it is the difference between a
-    // clean failure and a frozen session if it ever does not.
-    execFile("sudo", ["-n", "systemctl", "--no-ask-password", sub], { timeout: 8000 }, (e2, _o2, err2) => {
-      httpserver.jsonRes(
-        res,
-        e2
-          ? {
-              ok: false,
-              error: String(err2 || err || e.message || "")
-                .trim()
-                .slice(0, 120),
-            }
-          : { ok: true },
-      );
-    });
-  });
-}
+  },
+  cecPower: bridges.cecPower,
+});
 
 // Only our own pages may issue a state-changing request; httpserver.js says why a
 // request with no Origin at all is not one of them.
@@ -1237,12 +478,12 @@ function serve() {
   // of them can load this file.
   const routeCtx = {
     appIsRunning: (id) => !!appWindow(id),
-    applyAppshares,
-    adoptShareKey,
-    revokeShareKey,
-    appsharesStatus: () => appshares.status(config.rawAppshares(), appsharesDeps),
-    applyFileserver,
-    applyMqttConfig,
+    applyAppshares: sharing.applyAppshares,
+    adoptShareKey: sharing.adoptShareKey,
+    revokeShareKey: sharing.revokeShareKey,
+    appsharesStatus: () => appshares.status(config.rawAppshares(), sharing.appsharesDeps()),
+    applyFileserver: sharing.applyFileserver,
+    applyMqttConfig: mediapublish.applyConfig,
     audioSink: () => audioSink,
     childEnv: () => ({ ...process.env, ...WL_ENV }),
     destroyAppWindow,
@@ -1255,21 +496,21 @@ function serve() {
     // Uninstalling an app has to stop its plugin: only the plugin can release what
     // it holds (a daemon, a socket on the LAN), and the app's switch disappears from
     // Settings at the same moment - leaving no way to turn it off.
-    unloadPlugin,
+    unloadPlugin: plugins.unload,
     dmode,
-    emitConfigChange,
+    emitConfigChange: plugins.emitConfigChange,
     // The audio route re-runs the sink detection and answers with what it picked,
     // so it needs both halves.
     ensureAudio,
     exitApp,
-    fileserverStatus: () => fileserver.status(config.rawFileserver(), fileserverDeps),
-    applyShares,
-    sharesDeps,
-    sharesStatus: () => shares.status(config.rawShares(), sharesDeps),
+    fileserverStatus: () => fileserver.status(config.rawFileserver(), sharing.fileserverDeps()),
+    applyShares: sharing.applyShares,
+    sharesDeps: sharing.sharesDeps(),
+    sharesStatus: () => shares.status(config.rawShares(), sharing.sharesDeps()),
     mirroring,
     foregroundApp: () => currentAppId,
-    handlePower,
-    installRclone: () => installRclone() || rcloneInstalling,
+    handlePower: powermenu.handlePower,
+    installRclone: () => sharing.installRclone() || sharing.isInstallingRclone(),
     navTo,
     // The launcher's own navigation, for the destinations navTo does not own.
     // This path does not go through setForegroundApp (the launcher is already the
@@ -1278,25 +519,38 @@ function serve() {
     // then back into Spotify on the next key".
     navToLauncher: (dest) => {
       ambientReturnApp = null;
-      if (win && !win.isDestroyed()) win.webContents.send("tvbox-nav", { dest });
+      sendToLauncher("tvbox-nav", { dest });
     },
-    publishMediaState,
-    publishNowPlaying: (data) => {
-      if (mqttCtl) mqttCtl.publish("nowplaying", data, { retain: true });
-    },
-    remoteBridgeCmd,
+    publishMediaState: mediapublish.publish,
+    publishNowPlaying: mediapublish.publishNowPlaying,
+    remoteBridgeCmd: bridges.remoteBridgeCmd,
     setNowPlaying: (data) => {
       nowPlaying = data;
-      soundWidget(data);
+      cards.soundWidget(data);
     },
-    setSleepTimer,
-    setWidget,
+    setSleepTimer: powermenu.setSleepTimer,
+    setWidget: cards.setWidget,
     showLauncher,
     switchApp,
     // The same on-screen note MQTT can push, reachable locally: the voice
     // satellite is a separate process on this box and an answer belongs on the
     // TV, but a spoken one interrupts a film in a way a toast does not.
-    notify: handleTvNotify,
+    notify: notify.handleTvNotify,
+  };
+
+  // The same for the read API. Everything else a GET needs, getroutes.js requires
+  // directly - the split is the one routes.js already draws.
+  const getCtx = {
+    childEnv: () => ({ ...process.env, ...WL_ENV }),
+    dmode,
+    mirroring,
+    restoredAt: () => restoredAt,
+    readBridgeJson,
+    sleepTimer: powermenu.sleepTimer,
+    widgetList: cards.widgetList,
+    appTiles,
+    rootWebApp,
+    launcherDir: LAUNCHER,
   };
 
   // A handler that threw AFTER sending its headers cannot be answered again, and
@@ -1327,32 +581,15 @@ function serve() {
     }
     // Which plugin route, if any, this GET would reach. Resolved before the gate
     // because the gate consults it, and reused when dispatching.
-    const pluginGet = req.method === "GET" ? httpserver.resolvePluginRoute(pluginRoutes, "GET", p) : null;
+    const pluginGet = req.method === "GET" ? httpserver.resolvePluginRoute(plugins.routes(), "GET", p) : null;
     // Same-origin gate for everything state-changing: every non-GET (the POST
-    // API + plugin POST routes) plus the GETs that have side effects - tv/standby
-    // (stops playback) and the firetvir reads (they spawn a python subprocess /
-    // bluetoothctl and drive outbound GitHub fetches, so they aren't the
-    // side-effect-free reads the open-GET policy assumes). Other read-only GETs
-    // stay open - they leak nothing actionable and blocking them would break
-    // <img>/no-CORS uses.
-    // browse/* is on this list for the same reason firetvir is: both GETs fork a
-    // process (lsblk), so they are not the side-effect-free reads the open-GET
-    // policy assumes. The cache in removable.js is what actually bounds the cost -
-    // an <img> or <iframe> request carries no Origin header for this to catch.
-    // photoshare's reads are on the list for the ffmpeg half of the same reason:
-    // a thumbnail that is not in the cache yet forks a process to make one.
-    const guardedGet =
-      p === "/tvbox/api/tv/standby" ||
-      p.startsWith("/tvbox/api/firetvir/") ||
-      p.startsWith("/tvbox/api/browse/") ||
-      p.startsWith("/tvbox/api/photoshare") ||
-      // Same reason as firetvir: it forks a bluetoothctl per connected device.
-      p === "/tvbox/api/remote/finder/capable" ||
-      // …and whatever a plugin declared, for the same reason: only the plugin
-      // knows which of its own reads cost something. See registerRoutes below.
-      // ONE resolution, reused below to dispatch: asking twice would let the gate
-      // be decided against one route and the request served by another.
-      !!(pluginGet && pluginGet.guarded);
+    // API + plugin POST routes) plus the GETs that have side effects
+    // (getroutes.guardedGet says which, and why) - and whatever a plugin
+    // declared, for the same reason: only the plugin knows which of its own reads
+    // cost something. ONE resolution of the plugin route, reused below to
+    // dispatch: asking twice would let the gate be decided against one route and
+    // the request served by another.
+    const guardedGet = getroutes.guardedGet(p) || !!(pluginGet && pluginGet.guarded);
     if ((req.method !== "GET" || guardedGet) && httpserver.foreignOrigin(req, OWN_ORIGINS)) {
       // Both headers: the whole new class of refusals - a cross-site GET a page
       // made on our behalf - carries NO Origin at all, so logging only that told
@@ -1381,7 +618,7 @@ function serve() {
         try {
           d = JSON.parse(body || "{}");
         } catch (e) {}
-        const route = httpserver.matchPluginRoute(pluginRoutes, "POST", p);
+        const route = httpserver.matchPluginRoute(plugins.routes(), "POST", p);
         if (route) {
           try {
             route(req, res, { body: d });
@@ -1411,365 +648,16 @@ function serve() {
       }
       return;
     }
-    // secret-free config view for the launcher
-    if (p === "/tvbox/api/config") {
-      httpserver.jsonRes(res, config.publicConfig());
-      return;
+    // The read API, then the files. Same wrapper as the two dispatches above, and
+    // for the same reason: a GET that throws is reachable from any page the box
+    // loads.
+    try {
+      if (getroutes.get(p, req, res, getCtx)) return;
+      getroutes.serveFallback(p, res, getCtx);
+    } catch (e) {
+      console.warn("[api] read route failed:", p, redact(e.message));
+      endWith500(res);
     }
-    if (p === "/tvbox/api/pairing/status") {
-      httpserver.jsonRes(res, { phoneConnected: pairing.phoneConnected() });
-      return;
-    }
-    // IR blaster backend health for the settings card (connected/lastError)
-    if (p === "/tvbox/api/ir/status") {
-      httpserver.jsonRes(res, ir.status());
-      return;
-    }
-    if (p === "/tvbox/api/wifi/status") {
-      // The radio state comes from nmcli, not from the config: what the UI shows
-      // has to be what the box IS, so a radio something else turned back on does
-      // not read as off just because the setting says so.
-      system.wifiStatus((s) =>
-        system.ethernetStatus((eth) =>
-          wifiradio.state({ ...process.env, ...WL_ENV }, (radio) =>
-            httpserver.jsonRes(res, { ...s, ethernet: eth, radio: radio === null ? null : radio === "enabled" }),
-          ),
-        ),
-      );
-      return;
-    }
-    // The built-in radios as a lasting setting: what the boot config says, plus
-    // whether the root unit that can change it is installed at all. An OTA-only
-    // box has this screen and not the unit (root files are provision's), and the
-    // UI has to say so rather than offer a switch that cannot work.
-    if (p === "/tvbox/api/radios") {
-      builtinradio.readState((state) =>
-        system.ethernetStatus((eth) =>
-          httpserver.jsonRes(res, {
-            ...state,
-            helper: builtinradio.helperInstalled(),
-            ethernet: eth,
-          }),
-        ),
-      );
-      return;
-    }
-    if (p === "/tvbox/api/system/region") {
-      system.systemRegion((r) => httpserver.jsonRes(res, r));
-      return;
-    }
-    if (p === "/tvbox/api/wifi/list") {
-      system.wifiList((n) => httpserver.jsonRes(res, { networks: n }));
-      return;
-    }
-    if (p === "/tvbox/api/system/info") {
-      system.systemInfo((i) => httpserver.jsonRes(res, i));
-      return;
-    }
-    if (p === "/tvbox/api/update/status") {
-      httpserver.jsonRes(res, updater.status());
-      return;
-    }
-    if (p === "/tvbox/api/backup/status") {
-      httpserver.jsonRes(res, { restoredAt });
-      return;
-    }
-    if (p === "/tvbox/api/reconcile/status") {
-      httpserver.jsonRes(res, reconcile.state());
-      return;
-    }
-    if (p === "/tvbox/api/backup/pending-localstorage") {
-      httpserver.jsonRes(res, backup.pendingLocalStorage());
-      return;
-    }
-    if (p === "/tvbox/api/display/status") {
-      // Read-only: what the output is at now, what the UI mode should be, and who
-      // (if anyone) currently holds a video claim. Resolution is automatic, so
-      // there is nothing to pick - the only action is /display/refresh below.
-      display.list((info) => {
-        const cur = info && info.modes.find((m) => m.current);
-        httpserver.jsonRes(res, {
-          output: info ? info.output : "",
-          current: cur ? { key: cur.key, width: cur.width, height: cur.height, refresh: cur.refreshExact } : null,
-          ...dmode.state(),
-        });
-      });
-      return;
-    }
-    if (p === "/tvbox/api/audio/sinks") {
-      audio.listSinks({ ...process.env, ...WL_ENV }, (sinks) =>
-        httpserver.jsonRes(res, { sinks, override: (config.rawAudio() || {}).sink || null }),
-      );
-      return;
-    }
-    if (p === "/tvbox/api/bt/status") {
-      bluetooth.status({ ...process.env, ...WL_ENV }, (s) => httpserver.jsonRes(res, s));
-      return;
-    }
-    if (p === "/tvbox/api/bt/devices") {
-      bluetooth.list({ ...process.env, ...WL_ENV }, (d) => httpserver.jsonRes(res, { devices: d }));
-      return;
-    }
-    if (p === "/tvbox/api/remote/devices") {
-      // Currently-managed remotes (published by the bridge). Merge in the saved
-      // keymap per device so the UI shows what's already bound.
-      const list = (readBridgeJson("remote-devices.json", { devices: [] }).devices || []).slice(0, 20);
-      const saved = (config.rawRemote() || {}).devices || {};
-      httpserver.jsonRes(res, {
-        devices: list.map((d) => ({ ...d, keymap: (saved[d.id] && saved[d.id].keymap) || {} })),
-      });
-      return;
-    }
-    if (p === "/tvbox/api/remote/learned") {
-      httpserver.jsonRes(res, { learned: readBridgeJson("remote-learned.json", null) });
-      return;
-    }
-    if (p === "/tvbox/api/ambient/weather") {
-      ambient.weather((config.rawAmbient() || {}).city, (w) => httpserver.jsonRes(res, w || {}));
-      return;
-    }
-    if (p === "/tvbox/api/ambient/photos") {
-      httpserver.jsonRes(res, { photos: ambient.photos() });
-      return;
-    }
-    if (p === "/tvbox/api/ambient/photo") {
-      const name = (req.url || "").split("?")[1] ? new URLSearchParams(req.url.split("?")[1]).get("name") : "";
-      return httpserver.serveStatic(res, ambient.PHOTO_DIR, name || "", null); // serveStatic guards the root boundary (no traversal)
-    }
-    // TV powered off (from the CEC bridge) -> stop playback
-    if (p === "/tvbox/api/tv/standby") {
-      player.onTvStandby();
-      httpserver.jsonRes(res, { ok: true });
-      return;
-    }
-    // Fire TV remote IR programming (Settings → Peripherals; shell/firetvir.js)
-    if (p === "/tvbox/api/firetvir/status") {
-      firetvir.status((s) => httpserver.jsonRes(res, s));
-      return;
-    }
-    // Which connected remotes are Fire TV / Alexa remotes we can program (expose
-    // the keymap GATT service). The remap UI shows the IR feature ONLY for these.
-    if (p === "/tvbox/api/firetvir/programmable") {
-      firetvir.programmableRemotes((macs) => httpserver.jsonRes(res, { macs }));
-      return;
-    }
-    // Which connected remotes carry a buzzer we can ring (the finder GATT
-    // service). Same shape as the IR one above: the remap UI offers "find this
-    // remote" ONLY for these, so a remote without one never shows a dead row.
-    if (p === "/tvbox/api/remote/finder/capable") {
-      remotefinder.capableRemotes((macs) => httpserver.jsonRes(res, { macs, ringing: remotefinder.isRinging() }));
-      return;
-    }
-    // The brands the published index carries (shell/irindex.js), with the licence
-    // notice that has to travel with the data.
-    if (p === "/tvbox/api/firetvir/brands") {
-      firetvir.brands((err, r) =>
-        httpserver.jsonRes(
-          res,
-          err ? { ok: false, error: String(err.message || err).slice(0, 200) } : { ok: true, ...r },
-        ),
-      );
-      return;
-    }
-    // One brand's codesets merged into the devices they really are - one small file,
-    // built by scripts/ir-index/build.js rather than assembled here.
-    if (p === "/tvbox/api/firetvir/brand") {
-      const q = (req.url || "").split("?")[1];
-      const slug = q ? new URLSearchParams(q).get("slug") || "" : "";
-      firetvir.brandDevices(slug, (err, r) =>
-        httpserver.jsonRes(
-          res,
-          err ? { ok: false, error: String(err.message || err).slice(0, 200) } : { ok: true, ...r },
-        ),
-      );
-      return;
-    }
-    // What this remote was set up to drive. The remote's own keymap cannot be read
-    // back, so this file is the only record there is.
-    if (p === "/tvbox/api/firetvir/plan") {
-      const q = (req.url || "").split("?")[1];
-      const mac = q ? new URLSearchParams(q).get("mac") || "" : "";
-      const plan = firetvir.readPlan(mac);
-      // null covers both a bad MAC and a plan file that could not be read, and the
-      // screen treats either the same way: it must not offer a setup that would be
-      // written over the real one.
-      httpserver.jsonRes(res, plan ? { ok: true, plan } : { ok: false, error: "could not read the saved setup" });
-      return;
-    }
-    if (p === "/tvbox/api/fileserver") {
-      const st = fileserver.status(config.rawFileserver(), fileserverDeps);
-      return httpserver.jsonRes(res, { ...st, installing: rcloneInstalling });
-    }
-    if (p === "/tvbox/api/appshares") {
-      // Re-read the manifests, like /tvbox/api/apps does: an app installed since
-      // boot brings its shares with it, and without this they appear only after
-      // something else happened to refresh the cache.
-      apps.loadManifests();
-      const cfg = config.rawAppshares();
-      const st = appshares.status(cfg, appsharesDeps);
-      // Peers without their tokens: the launcher needs to name a box and nothing more.
-      const list = (cfg.peers || []).map((x) => ({ id: x.id, name: x.name, host: x.host }));
-      return httpserver.jsonRes(res, { ...st, peers: list, installing: rcloneInstalling });
-    }
-    // What there is to play on the box itself: the user's own folders and each
-    // partition of a plugged-in USB stick (browse.js). Read-only; the app that
-    // walks them is the registry's `files` package, and mounting is a POST.
-    if (p === "/tvbox/api/shares") {
-      return httpserver.jsonRes(res, {
-        ...shares.status(config.rawShares(), sharesDeps),
-        installing: rcloneInstalling,
-      });
-    }
-    // Screen mirroring. `available` is what greys the tile: a box whose radio is
-    // carrying its own network cannot do this at all, and saying so up front is
-    // better than a button that always fails.
-    if (p === "/tvbox/api/miracast") {
-      const st = mirroring.state();
-      return httpserver.jsonRes(res, {
-        armed: mirroring.isArmed(),
-        streaming: mirroring.isStreaming(),
-        name: st.name || "",
-        ssid: st.ssid || "",
-        channel: st.channel || "",
-      });
-    }
-    if (p === "/tvbox/api/browse/sources") {
-      browse.sources(browseDeps, (s) => httpserver.jsonRes(res, s));
-      return;
-    }
-    if (p === "/tvbox/api/browse/list") {
-      const q = (req.url || "").split("?")[1];
-      const target = q ? new URLSearchParams(q).get("path") || "" : "";
-      browse.list(browseDeps, target, (r) => httpserver.jsonRes(res, r));
-      return;
-    }
-    // A photo, at a size a TV can hold: `thumb` for a grid tile, `image` for the
-    // viewer. Neither ever returns the source file - images.js re-encodes, or
-    // hands back the thumbnail the camera itself wrote - so a path that gets past
-    // the containment check below still cannot spill the contents of a file that
-    // is not an image.
-    //
-    // The caller appends the entry's mtime as `v`, which nothing here reads: it is
-    // what makes each answer immutable for its URL, so a grid scrolling back over
-    // a tile takes it from Chromium's cache instead of asking again.
-    if (p === "/tvbox/api/browse/thumb" || p === "/tvbox/api/browse/image") {
-      const q = new URLSearchParams((req.url || "").split("?")[1] || "");
-      const wantView = p.endsWith("/image");
-      browse.file(browseDeps, q.get("path") || "", (r) => {
-        if (!r.ok) return imageError(res, r.error);
-        const done = (err, out) => (err ? imageError(res, err) : sendImage(res, out));
-        if (wantView) images.view(r.path, Number(q.get("w")) || 0, done);
-        else images.thumb(r.path, done);
-      });
-      return;
-    }
-    // The same two, for photos a phone cast at the viewer. A different containment
-    // rule - one flat directory, and a name pattern with no separator in it - so
-    // this does not need to be a browse root to be readable.
-    if (p === "/tvbox/api/phoneremote") {
-      // The paired phones live here rather than in publicConfig: their rows carry
-      // a token hash, and this list is names and times only.
-      return httpserver.jsonRes(res, {
-        enabled: !!config.rawPhoneRemote().enabled,
-        phones: phoneremote.list(),
-        port: phoneremote.PORT,
-        // When the screen share runs out, so Settings can count it down rather
-        // than just say "on".
-        screenUntil: phoneremote.screenUntil(),
-        // Where a phone goes. The same for every one of them - a token tells them
-        // apart, not the address - and deliberately NOT a pairing code: minting
-        // one for someone who just wanted the address would invalidate the code a
-        // phone is holding.
-        url: phoneremote.address(),
-      });
-    }
-    if (p === "/tvbox/api/photoshare") {
-      return httpserver.jsonRes(res, { names: photoshare.list(), max: photoshare.MAX_ITEMS });
-    }
-    if (p === "/tvbox/api/photoshare/thumb" || p === "/tvbox/api/photoshare/image") {
-      const q = new URLSearchParams((req.url || "").split("?")[1] || "");
-      const file = photoshare.pathFor(q.get("name") || "");
-      if (!file) return imageError(res, "not_found");
-      const done = (err, out) => (err ? imageError(res, err) : sendImage(res, out));
-      if (p.endsWith("/image")) images.view(file, Number(q.get("w")) || 0, done);
-      else images.thumb(file, done);
-      return;
-    }
-    // App-store registry (Settings → Store). ?refresh=1 bypasses the 5-min cache.
-    if (p === "/tvbox/api/store/list") {
-      const refresh = (req.url || "").includes("refresh=1");
-      store
-        .listForUi(config)(refresh)
-        // Merge in live install state so the store can show progress + poll it:
-        // each entry gains `installing` and a coarse `progress.phase`.
-        .then((d) => {
-          const apps2 = (d.apps || []).map((e) => ({
-            ...e,
-            installing: maintenance.isInstalling(e.id),
-            progress: maintenance.progressFor(e.id) || null,
-            flatpakStatus: maintenance.flatpakStatusFor(e.id), // result of the last manual flatpak update
-          }));
-          httpserver.jsonRes(res, { ...d, apps: apps2, installing: maintenance.installingIds() });
-        })
-        .catch((e) => httpserver.jsonRes(res, { apps: [], error: String(e.message || e).slice(0, 120) }));
-      return;
-    }
-    // launcher's app list. Manifests are re-read on every call (a handful of
-    // small JSON files) so a dropped-in ~/.tvbox/apps manifest appears as a
-    // tile live - no shell restart. Plugins/services still load at boot only.
-    if (p === "/tvbox/api/power/sleep-timer") {
-      httpserver.jsonRes(res, { at: sleepTimerAt });
-      return;
-    }
-    if (p === "/tvbox/api/widgets") {
-      httpserver.jsonRes(res, { widgets: widgetList() });
-      return;
-    }
-    if (p === "/tvbox/api/apps") {
-      apps.loadManifests();
-      res.writeHead(200, { "Content-Type": "application/json" });
-      res.end(JSON.stringify(appTiles()));
-      return;
-    }
-    // (Live TV data routes /tvbox/api/livetv/* are registered by the livetv plugin.)
-    // HOME launcher (our React app) under /tvbox/, relative assets
-    if (p === "/tvbox" || p === "/tvbox/") p = "/tvbox/index.html";
-    if (p.startsWith("/tvbox/")) {
-      httpserver.serveStatic(res, LAUNCHER, p.slice("/tvbox/".length), null);
-      return;
-    }
-    // An installed PACKAGE app serves its own web/ bundle at /<id>/... . Package
-    // apps live at ~/.tvbox/apps/<id>/ (dir-app: manifest.json + optional
-    // plugin.js + web/ UI); the manifest carries _dir. Served from the same
-    // origin as /tvbox/api, so the app reaches its own plugin routes with a
-    // plain same-origin fetch - no extra capability needed.
-    {
-      const seg = (p.split("/")[1] || "").toLowerCase();
-      const m = seg && /^[a-z0-9_-]+$/.test(seg) ? apps.manifestById(seg) : null;
-      // Only a package app that opts into local serving (serve:"local") is
-      // mounted at /<id>/; this keeps it from shadowing the root web app's
-      // (Plex's) top-level asset paths on an id collision.
-      if (m && m._dir && m.runtime && m.runtime.serve === "local") {
-        const webRoot = path.join(m._dir, "web");
-        if (fs.existsSync(webRoot)) {
-          const entry = path.join(webRoot, "index.html");
-          const sub = p.slice(1 + seg.length + 1) || "index.html"; // strip "/<seg>/"
-          httpserver.serveStatic(res, webRoot, sub, entry);
-          return;
-        }
-      }
-    }
-    // everything else: the root-mounted web-client app's SPA (index fallback)
-    const a = rootWebApp();
-    if (!a) {
-      res.writeHead(404, { "Content-Type": "text/plain" });
-      res.end("no root app");
-      return;
-    }
-    const root = apps.appDataDir(a.id);
-    const entry = (a.runtime && a.runtime.entry) || "index.html";
-    if (p === "/") p = "/" + entry;
-    httpserver.serveStatic(res, root, p, path.join(root, entry));
   });
   // A restart races the dying instance for the port (the session's respawn loop
   // restarts us within ~1s; the old process may not have released :PORT yet). Without a handler
@@ -1939,9 +827,9 @@ function appWindowGone(id) {
     player.setPlaying(null);
     player.stop();
   }
-  clearSoundWidget(id);
+  cards.clearSoundWidget(id);
   if (oursWasPlaying) clearNowPlayingFor(id);
-  appsChanged();
+  cards.appsChanged();
 }
 
 // The now-playing claim, dropped when the app that made it is QUIT.
@@ -1958,8 +846,8 @@ function appWindowGone(id) {
 function clearNowPlayingFor(id) {
   if (!nowPlaying || String(nowPlaying.app || "") !== String(id)) return;
   nowPlaying = null;
-  if (mqttCtl) mqttCtl.publish("nowplaying", { app: String(id), state: "idle" }, { retain: true });
-  publishMediaState({ force: true });
+  mediapublish.publishNowPlaying({ app: String(id), state: "idle" });
+  mediapublish.publish({ force: true });
 }
 
 const destroyAppWindow = (id) => {
@@ -2074,11 +962,10 @@ function launchNativeFor(id, extraArgs) {
 // preload (so the site can't reach window.tvbox / Node), navigation locked to the
 // manifest's declared `runtime.origins` (https only), and popups denied. Its own
 // persistent partition keeps the site's login across sessions.
-// A remote app's URL is either literal in the manifest (runtime.url, e.g.
-// youtube.com/tv) or config-driven (runtime.urlConfig names a config section
-// holding { baseUrl }, e.g. a user's Home Assistant). Returns "" when a
-// config-driven URL isn't set yet, so the caller can treat the app as
-// unconfigured instead of loading a blank window.
+// Where a remote app may go, what its URL resolves to and which cookies its
+// manifest may plant are remotepolicy.js's; this is the one part that needs a
+// window system.
+//
 // Push the current UI language onto an app's session. Called at launch AND on every
 // foreground, because the partition is persistent: a language change while the app sat
 // in the background would otherwise leave the server seeing the old header forever.
@@ -2086,7 +973,7 @@ function applyAppLanguage(id) {
   const m = apps.manifestById(id);
   if (!m || (m.runtime || {}).serve !== "remote") return null;
   const rt = m.runtime || {};
-  const wanted = lang.resolve(config.uiLocale(), app.getSystemLocale(), rt.language);
+  const wanted = remotepolicy.languageFor(rt);
   try {
     const ses = session.fromPartition("persist:remote-" + id);
     ses.setUserAgent(rt.userAgent || ses.getUserAgent(), wanted.accept);
@@ -2094,33 +981,6 @@ function applyAppLanguage(id) {
     console.warn("[remote] could not set Accept-Language:", e.message);
   }
   return wanted;
-}
-
-function resolveRemoteUrl(m) {
-  const rt = m.runtime || {};
-  if (rt.urlConfig) return (config.appConfig(rt.urlConfig) || {}).baseUrl || "";
-  // A {locale} placeholder in the URL is how a site that keeps its market in the
-  // PATH follows the box's language (xbox.com ignores Accept-Language and redirects
-  // by IP - measured - so /{locale}/play is the only lever that works there). It is
-  // a template, not a pinned market: change the UI language and the next launch
-  // follows it.
-  const tag = lang.resolve(config.uiLocale(), app.getSystemLocale(), rt.language).tag;
-  return lang.expand(rt.url || "", tag);
-}
-// Loopback / RFC1918 / link-local / mDNS - a self-hosted LAN service (Home
-// Assistant, Jellyfin, ...) can't be a public untrusted site, so plain http to
-// it is acceptable; public hosts must still be https.
-function remoteProtoOk(x) {
-  return x.protocol === "https:" || (x.protocol === "http:" && netguard.isLanHost(x.hostname));
-}
-function allowedRemoteHosts(rt, url) {
-  const declared = (rt.origins || []).map((s) => String(s).toLowerCase());
-  if (declared.length) return declared;
-  try {
-    return [new URL(url).hostname.toLowerCase()];
-  } catch (e) {
-    return [];
-  }
 }
 function openRemoteApp(m, url) {
   const rt = m.runtime || {};
@@ -2131,7 +991,7 @@ function openRemoteApp(m, url) {
   } catch (e) {
     start = null;
   }
-  if (!start || !remoteProtoOk(start)) {
+  if (!start || !remotepolicy.remoteProtoOk(start)) {
     console.warn("[nav] remote url not allowed:", url);
     return;
   }
@@ -2140,48 +1000,18 @@ function openRemoteApp(m, url) {
   // subresources and the sign-in popup - which share the partition - agree.
   const wanted = applyAppLanguage(m.id) || { tag: "", accept: "" };
   const ses = session.fromPartition("persist:remote-" + m.id);
-  const hosts = allowedRemoteHosts(rt, url);
-  // Cookies a manifest asks for (e.g. a site's own locale cookie), with the same
-  // {locale} templating as the URL. Restricted to the app's DECLARED origins: a
-  // registry manifest must not be able to plant a cookie for an unrelated domain,
-  // and the partition is the app's own anyway. Set before the first load, since the
-  // point is to influence the first response.
-  const cookieJobs = [];
-  for (const c of Array.isArray(rt.cookies) ? rt.cookies.slice(0, 8) : []) {
-    const cUrl = String((c && c.url) || "");
-    let host = "";
-    try {
-      host = new URL(cUrl).hostname.toLowerCase();
-    } catch (e) {
-      host = "";
-    }
-    const allowedHost = host && hosts.some((h) => host === h || host.endsWith("." + h));
-    if (!allowedHost || !c.name) {
-      console.warn("[remote] cookie skipped (host not in origins):", cUrl, c && c.name);
-      continue;
-    }
-    cookieJobs.push(
-      ses.cookies
-        .set({
-          url: cUrl,
-          name: String(c.name),
-          value: lang.expand(String(c.value == null ? "" : c.value), wanted.tag),
-          domain: c.domain ? String(c.domain) : undefined,
-          path: c.path ? String(c.path) : undefined,
-          secure: cUrl.startsWith("https:"),
-        })
-        .catch((e) => console.warn("[remote] cookie failed:", c.name, e.message)),
-    );
+  const hosts = remotepolicy.allowedRemoteHosts(rt, url);
+  // Cookies the manifest asks for, held to the app's declared origins by
+  // remotepolicy.js. Set before the first load, since the point is to influence
+  // the first response.
+  const wantedCookies = remotepolicy.cookiesFor(rt, hosts, wanted.tag);
+  for (const c of wantedCookies.skipped) {
+    console.warn("[remote] cookie skipped (host not in origins):", c.url, c.name);
   }
-  const allowed = (u) => {
-    try {
-      const x = new URL(u);
-      const n = x.hostname.toLowerCase();
-      return remoteProtoOk(x) && hosts.some((h) => n === h || n.endsWith("." + h));
-    } catch (e) {
-      return false;
-    }
-  };
+  const cookieJobs = wantedCookies.set.map((c) =>
+    ses.cookies.set(c).catch((e) => console.warn("[remote] cookie failed:", c.name, e.message)),
+  );
+  const allowed = (u) => remotepolicy.navigationAllowed(u, hosts);
   // Sound survives here too. Measured, and it was the one thing that made the
   // rule look arbitrary from the sofa: opening a LOCAL app left the music
   // playing (stopPrevPlayback asks), opening a REMOTE one killed it, because
@@ -2433,7 +1263,7 @@ function wakePanelForCast() {
     console.log("[cec] not waking for a cast: the TV was just put on standby");
     return;
   }
-  cecPower(true);
+  bridges.cecPower(true);
 }
 
 // Point an ALREADY OPEN remote app at its launch url. Only a cast needs this: the
@@ -2449,16 +1279,10 @@ function reloadRemoteApp(m, query) {
   if (m.type !== "webclient" || rt.serve !== "remote") return false;
   const w = appWindow(m.id);
   if (!w || w.isDestroyed()) return false;
-  const url = withLaunchQuery(resolveRemoteUrl(m), query);
-  let x;
-  try {
-    x = new URL(url);
-  } catch (e) {
-    return false;
-  }
-  const n = x.hostname.toLowerCase();
-  const hosts = allowedRemoteHosts(rt, url);
-  if (!remoteProtoOk(x) || !hosts.some((h) => n === h || n.endsWith("." + h))) {
+  const url = withLaunchQuery(remotepolicy.resolveRemoteUrl(m), query);
+  // Re-checked against the same protocol and host rules openRemoteApp applies -
+  // one that is not a URL at all fails the same test.
+  if (!remotepolicy.navigationAllowed(url, remotepolicy.allowedRemoteHosts(rt, url))) {
     console.warn("[nav] relaunch url not allowed:", url);
     return false;
   }
@@ -2546,378 +1370,6 @@ function openLocalApp(m) {
   if (win && !win.isDestroyed()) win.hide();
 }
 
-// ---- the note that appears over everything ----
-// A notification (MQTT, an app, a plugin, the voice satellite's answer) has to be
-// visible while an app is fullscreen, and the launcher's window is not: it is
-// BEHIND that app. Raising the launcher would show the note and cover the app,
-// which is the opposite of what a note is for.
-//
-// So the note gets a window of its own, and the compositor is told two things about
-// it (tvbox-wc >= 0.1.7): the title `tvbox-overlay` puts it in front of everything
-// including the rest of the shell, and a placement keeps it SMALL. Small matters -
-// every surface here is a scan-out candidate, so a strip at the bottom can take a
-// hardware plane, while a fullscreen translucent one over a 4K film is the
-// composited pass the whole compositor exists to avoid.
-const OVERLAY_TITLE = "tvbox-overlay";
-// How much of the screen the strip takes. Enough for two lines at the box's own
-// text size, and no more: what is not covered stays the film's.
-const OVERLAY_HEIGHT_FRACTION = 0.28;
-let overlayWin = null;
-let overlayHideTimer = null;
-// Whether this box's compositor understands a placement by title. A box on an
-// older one would map the note FULLSCREEN - a translucent surface over the whole
-// film, which is exactly the cost this design exists to avoid - so the note stays
-// in the launcher there instead. null until asked.
-let overlayPlaceable = null;
-
-function overlayRect() {
-  const display = screen.getPrimaryDisplay();
-  const { width, height } = display.size;
-  const h = Math.max(160, Math.round(height * OVERLAY_HEIGHT_FRACTION));
-  return { x: 0, y: Math.max(0, height - h), w: width, h };
-}
-
-// Ask for the strip once, and remember the answer. Placed BEFORE the window maps:
-// a window is positioned as it appears, so asking afterwards would show it
-// fullscreen for a frame first.
-function claimOverlayPlacement(done) {
-  if (overlayPlaceable !== null) return done(overlayPlaceable);
-  if (!compositor.available()) {
-    overlayPlaceable = false;
-    return done(false);
-  }
-  compositor.placeWindowByTitle(OVERLAY_TITLE, overlayRect(), (ok, err) => {
-    overlayPlaceable = !!ok;
-    if (!ok) console.warn("[notify] no overlay window (compositor: " + (err || "refused") + ")");
-    done(overlayPlaceable);
-  });
-}
-
-function ensureOverlayWindow() {
-  if (overlayWin && !overlayWin.isDestroyed()) return overlayWin;
-  const rect = overlayRect();
-  overlayWin = new BrowserWindow({
-    width: rect.w,
-    height: rect.h,
-    x: rect.x,
-    y: rect.y,
-    show: false,
-    frame: false,
-    transparent: true,
-    backgroundColor: "#00000000",
-    // Never takes the remote: the compositor keeps key events away from this
-    // window as well, but a focusable window would still steal them from the app
-    // on any box running an older compositor.
-    focusable: false,
-    skipTaskbar: true,
-    title: OVERLAY_TITLE,
-    webPreferences: {
-      preload: path.join(__dirname, "overlay", "preload.js"),
-      contextIsolation: true,
-      nodeIntegration: false,
-      backgroundThrottling: false, // a note must draw at once, not at the next tick
-    },
-  });
-  overlayWin.setIgnoreMouseEvents(true);
-  // Electron sets the Wayland title from the window title, and a page's <title>
-  // would otherwise win: set it again after load so the compositor's rule holds.
-  overlayWin.on("page-title-updated", (e) => e.preventDefault());
-  // The page sizes its text against the SCREEN, not against this strip: a strip is
-  // a fraction of the screen, so a size expressed in the window's own units comes
-  // out a fraction of a fraction - the first attempt drew a four-pixel letter.
-  overlayWin.loadFile(path.join(__dirname, "overlay", "toast.html"), {
-    query: { sh: String(screen.getPrimaryDisplay().size.height) },
-  });
-  overlayWin.on("closed", () => {
-    overlayWin = null;
-  });
-  // A renderer that died or never loaded is a window that will never show a note
-  // again, and one that may be sitting on screen while it fails. Drop it: the next
-  // note builds a fresh one, which is the whole cost of recovering here.
-  const scrap = (why) => {
-    console.warn("[notify] overlay renderer gone (" + why + ") - it will be rebuilt");
-    clearTimeout(overlayHideTimer);
-    overlayHideTimer = null;
-    const dying = overlayWin;
-    overlayWin = null;
-    try {
-      if (dying && !dying.isDestroyed()) dying.destroy();
-    } catch (e) {}
-  };
-  overlayWin.webContents.on("render-process-gone", (_e, details) => scrap((details && details.reason) || "crashed"));
-  overlayWin.webContents.on("did-fail-load", (_e, code, description) => scrap(description || String(code)));
-  return overlayWin;
-}
-
-function hideOverlay() {
-  clearTimeout(overlayHideTimer);
-  overlayHideTimer = null;
-  if (overlayWin && !overlayWin.isDestroyed() && overlayWin.isVisible()) overlayWin.hide();
-}
-
-// A notification arrived (MQTT `notify`, POST /tvbox/api/notify, host.notify).
-// Draw it in the overlay window so it is seen over whatever is running; `raise`
-// still brings the launcher forward, for the notes that are meant to interrupt.
-function handleTvNotify(payload) {
-  const note = payload || {};
-  // A note with no text of its own is one the LAUNCHER writes: `{kind:"lowBattery"}`
-  // carries a name and a percentage, and the sentence around them is a localized
-  // string that lives there, not here. Drawing it in the overlay would put an empty
-  // dark bar over the film - worse than the note staying where it can be read.
-  const hasText = !!(String(note.message || "").trim() || String(note.title || "").trim());
-  // The launcher draws it only when the strip will not: a compositor that cannot
-  // place the strip, or a note the launcher itself writes. Both at once would be
-  // two notes on one screen.
-  const toLauncher = () => {
-    if (win && !win.isDestroyed()) {
-      try {
-        win.webContents.send("tv-notify", note);
-      } catch (e) {}
-    }
-  };
-  claimOverlayPlacement((placeable) => {
-    if (!placeable || !hasText) return toLauncher();
-    try {
-      const w = ensureOverlayWindow();
-      const show = () => {
-        // Re-assert the title, and force it to CHANGE so it is actually sent.
-        // Hiding a window tears its xdg_toplevel down; showing it builds a new one,
-        // and Chromium does not repeat a title it believes is unchanged - so the
-        // second note of a session arrived on a nameless window, which the
-        // compositor rightly treated as an ordinary one. Measured: the note then
-        // sat in front of the app AND took the remote from it.
-        w.setTitle(OVERLAY_TITLE + " ");
-        w.setTitle(OVERLAY_TITLE);
-        w.showInactive(); // never takes focus, even for a moment
-        w.webContents.send("overlay-note", note);
-        clearTimeout(overlayHideTimer);
-        // A backstop only: the renderer says when it has finished fading out.
-        // Without it a renderer that died mid-note would leave a surface on screen.
-        const ms = Math.max(1500, Math.min(60000, Number(note.duration) || 6000));
-        overlayHideTimer = setTimeout(hideOverlay, ms + 2000);
-      };
-      if (w.webContents.isLoading()) w.webContents.once("did-finish-load", show);
-      else show();
-    } catch (e) {
-      console.warn("[notify] overlay:", e.message);
-    }
-  });
-  if (note.raise) raiseWindow();
-}
-
-function cecPower(on) {
-  if (fifoCmd(CEC_CMD_FIFO, on ? "on 0" : "standby 0", "cec")) console.log("[cec] power", on ? "on" : "off");
-}
-// Write a control line to a bridge FIFO. O_NONBLOCK so a bridge that isn't
-// running can never hang the shell.
-function fifoCmd(fifo, cmd, tag) {
-  let fd = null;
-  try {
-    fd = fs.openSync(fifo, fs.constants.O_WRONLY | fs.constants.O_NONBLOCK);
-    fs.writeSync(fd, cmd + "\n");
-    fifoQuiet.delete(fifo);
-    return true;
-  } catch (e) {
-    if (!fifoQuiet.has(fifo)) {
-      fifoQuiet.add(fifo);
-      console.warn("[" + tag + "] cmd failed (bridge running?):", e.message);
-    }
-    return false;
-  } finally {
-    // A throwing writeSync would otherwise leak the descriptor, once per attempt.
-    if (fd !== null) {
-      try {
-        fs.closeSync(fd);
-      } catch (e) {}
-    }
-  }
-}
-// Tell BOTH uinput bridges the same thing. Used for "native on"/"native off":
-// while a native app owns the screen it also owns keyboard focus, so the Home
-// button can't reach any renderer of ours. Each bridge then posts Home to
-// /tvbox/api/nav instead of emitting a key, which is the only escape hatch a
-// native app has (rule 7: never a dead end on a keyboardless TV). Both bridges
-// need it because Home arrives from either one: CEC synthesizes it from a
-// double-tap of Back, a BT/USB remote sends it directly.
-function bridgesCmd(cmd) {
-  fifoCmd(CEC_CMD_FIFO, cmd, "cec");
-  fifoCmd(REMOTE_CMD_FIFO, cmd, "remote");
-}
-// Which app is making the sound, or "" when nothing is. The rule itself lives in
-// mediastate.js, where it is unit-tested next to the state machine that already
-// asks the same question of the same field - main.js needs Electron, so nothing
-// written here can be tested at all.
-function soundingApp() {
-  return mediastate.soundingApp(nowPlaying);
-}
-
-function forwardCommand(cmd) {
-  const targets = new Set();
-  if (win && !win.isDestroyed()) targets.add(win.webContents);
-  // The active app runs in its own window now - it gets the transport too
-  // (remote/sandboxed windows deliberately have no tv-command listener).
-  const fg = currentAppId && appWindow(currentAppId);
-  if (fg) targets.add(fg.webContents);
-  // The app making the SOUND, which is often not the one on screen: music
-  // deliberately survives a return to the launcher (`soundOutlivesTheScreen`, and
-  // for an app whose plugin plays its own audio the plugin outlives the window's
-  // visibility), and showLauncher nulls currentAppId. So the commonest "pause the
-  // music" there is - asked minutes after the screen moved on - reached the
-  // launcher and nothing else, and the app that was playing never heard it.
-  //
-  // `nowPlaying.app` is the app's own claim. Two bounds on trusting it, both
-  // because it is a claim: the same two states the sound card requires
-  // (`playing`/`paused` - a payload with no state at all used to qualify), and a
-  // LIVE window, so the target is an app that is running here and now. A wrong
-  // claim can then at most send a pause to a local app that is not playing.
-  // Liveness-checked, and the VALUE is checked too, not just the target: an app
-  // whose window is gone can still be named by the claim (nothing else clears
-  // it), and broadcasting that id makes every live app stand down while the
-  // assistant reports the publish.
-  const claimed = soundingApp();
-  const sounding = claimed && (claimed === currentAppId || appWindow(claimed)) ? claimed : "";
-  const owner = sounding && sounding !== currentAppId ? appWindow(sounding) : null;
-  if (owner) targets.add(owner.webContents);
-  // Every target is told WHICH app the shell believes is sounding, because the
-  // command goes to more than one window: with a queue paused in the media client
-  // and Spotify playing, a spoken "next song" reached both and skipped Spotify
-  // while starting house music over it. Only the shell knows; an app cannot see
-  // past its own state. Empty means the shell does not know either, and then an
-  // app falls back to judging for itself.
-  const payload = { ...(cmd || {}), sounding };
-  for (const wc of targets) {
-    try {
-      wc.send("tv-command", payload);
-    } catch (e) {}
-  }
-}
-
-// The lyrics are the one forwarded command that needs a SCREEN, so the app
-// holding the words may have to be brought forward first - it is usually playing
-// in the background, where it can show nothing at all.
-//
-// The screen is only taken when it is FREE: the launcher, or the app itself.
-// Something else on screen is something somebody is watching, and navTo ends a
-// running native app outright (it takes the box's one video plane), so the lyrics
-// are never worth that. The command is forwarded either way: the app sets its own
-// state and has them up when its screen does come back.
-function showLyrics(cmd) {
-  const state = String((cmd && cmd.state) || "").toLowerCase();
-  const sounding = soundingApp();
-  const target = sounding || currentAppId || "";
-  // A RUNNING app only: navTo would otherwise launch one, and an app that is not
-  // running is not the one playing the song whose words were asked for. It is
-  // also what keeps a stale claim from opening an app nobody has used since the
-  // last boot.
-  const running = target ? appWindow(target) : null;
-  const screenFree = !nativeapp.running() && (!currentAppId || currentAppId === target);
-  // Hiding them needs no screen, so "off" never navigates.
-  if (running && state !== "off" && screenFree && currentAppId !== target) navTo(target);
-  // Nothing is playing and no app is up, so the only window this reaches is the
-  // launcher, which has no transport listener: the request cannot land anywhere.
-  // Said out loud rather than dropped in silence, because the assistant will have
-  // reported the publish and this log is the only place the difference shows.
-  else if (!running) console.warn("[mqtt] lyrics: nothing is playing here, nobody to show them");
-  forwardCommand(cmd);
-}
-
-/**
- * Open an app and hand it something to play.
- *
- * Two shapes, because the two kinds of app can be reached in two different ways:
- *
- * - A LOCAL app is ours and has the SDK, so it gets the request as an ordinary
- *   `tv-command` and answers it with its own code. It is delivered after the
- *   page has loaded, and the preload holds it until the page registers a
- *   listener - a window that was opened BY this command is still booting, and a
- *   send into a page that is not there yet is a command that never happened.
- * - A REMOTE app is a site we cannot script, so all there is to give it is its
- *   own url with the launch data on it - the same path, and the same bounds, a
- *   cast from a phone goes through (`withLaunchQuery`, at most a few short
- *   parameters).
- *
- * Nothing here decides WHAT to play. The caller names an app that is installed
- * and ready, or nothing happens: an id that is not one must not silently take
- * the television somewhere else.
- */
-/**
- * A play_media is a CLAIM on the room's audio, so whatever else is playing stops.
- *
- * `soundOutlivesTheScreen` deliberately keeps audio-only playback through a
- * screen change, which is right for pressing Home and wrong for this: measured
- * on the box, a song asked for by voice that fell through to Spotify started
- * over the media client's album and both played at once. This is the other half
- * of that rule as it is already written - what ends music is something else
- * claiming the player - said out loud for the one caller that means it.
- *
- * Not when the app being asked is the one already playing: it is about to be
- * handed a new song and stopping first would only add a gap.
- */
-function silenceForPlayMedia(id) {
-  if (!player.running() || player.owner() === id) return;
-  player.setPlaying(null);
-  player.stop();
-  setVideoMode(false);
-  // With a reason, so the app that owned it does not read the end of its file as
-  // "the track finished" and start the next one over what is about to play.
-  player.emit({ type: "finished", reason: "stopped" });
-}
-
-function playMediaIn(cmd) {
-  // Through the same cleaner as the words: an app id that is not one still
-  // reaches the log, and a newline in it forges a line in a file people read
-  // and `tvbox-diag.sh` quotes.
-  const id = playQuery(cmd && cmd.app).slice(0, 64);
-  const m = id && apps.manifestById(id);
-  if (!m || m.status !== "ready") return console.warn("[mqtt] play_media: no such app:", id);
-  const rt = m.runtime || {};
-  if (rt.serve === "remote") {
-    // `launch` is a url query string (e.g. "v=<id>"), not a phrase: a site we do
-    // not control has no other way in. withLaunchQuery is what keeps it to a few
-    // short, ordinary parameters on the app's OWN url.
-    //
-    // A caller that sent only `query` - the field the SDK type documents for this
-    // command - is asking a site we cannot script to search for something.
-    // Opening its front page after stopping the music is the worst answer
-    // available, so it is refused before anything is taken away.
-    // `hasUsableLaunch` rather than a non-empty test: withLaunchQuery drops what
-    // it cannot use and hands the base url back, so "   " or "a b" would open
-    // the app's front page and silence the room to do it.
-    const launch = String((cmd && cmd.launch) || "");
-    if (!hasUsableLaunch(launch))
-      return console.warn("[mqtt] play_media: " + id + " is a remote app and needs `launch`");
-    // Silenced AFTER, not before: navTo can refuse - an unconfigured remote app,
-    // or launch data past withLaunchQuery's caps - and the rule this shell
-    // already keeps is that a refusal must not cost the current stream.
-    if (!navTo(id, { query: launch })) return console.warn("[mqtt] play_media: not opened:", id);
-    silenceForPlayMedia(id);
-    return;
-  }
-  const query = playQuery(cmd && cmd.query);
-  if (!query) return console.warn("[mqtt] play_media: nothing to look for");
-  // Same order as the remote branch above, and for the same reason.
-  if (!navTo(id)) return console.warn("[mqtt] play_media: not opened:", id);
-  silenceForPlayMedia(id);
-  const w = appWindow(id);
-  if (!w || w.isDestroyed()) return console.warn("[mqtt] play_media: no window for", id);
-  // Only an app that LISTENS for `play_media` can answer it; one that does not
-  // simply comes forward on whatever screen it was left on. Nothing here can tell
-  // the two apart - `onCommand` is ungated and unannounced - so the sender is the
-  // one that has to know which apps implement it. Logged so a box where nothing
-  // happened says why.
-  console.log("[mqtt] play_media ->", id, JSON.stringify(query).slice(0, 80));
-  const send = () => {
-    try {
-      w.webContents.send("tv-command", { action: "play_media", app: id, query });
-    } catch (e) {}
-  };
-  if (w.webContents.isLoading()) w.webContents.once("did-finish-load", send);
-  else send();
-}
-
-function remoteBridgeCmd(cmd) {
-  fifoCmd(REMOTE_CMD_FIFO, cmd, "remote");
-}
 // The bridge publishes its state to small JSON files under ~/.tvbox: the list of
 // currently-managed remotes, and the last button captured in learn mode.
 function readBridgeJson(name, fallback) {
@@ -2929,327 +1381,53 @@ function readBridgeJson(name, fallback) {
 }
 
 // ---- the box as one media player (Home Assistant) ----
-//
 // Everything outside the box that wants to know "what is this TV doing" asks one
-// question, so there is one answer: a retained `state` topic composed from mpv,
-// the foreground app's now-playing report and the audio sink (mediastate.js owns
-// the merge rules). The nowplaying topic keeps its old shape beside it - the voice
-// assistant reads that one - so nothing that already works has to change.
-//
-// Every command the box answers, in one list, because it is also what the box
-// ADVERTISES: Home Assistant turns it into the entity's supported_features, so an
-// older box never shows a button that does nothing.
-const TV_COMMANDS = [
-  "launch",
-  "home",
-  "play",
-  "pause",
-  "stop",
-  "next",
-  "previous",
-  "shuffle",
-  "repeat",
-  "lyrics",
-  "seek",
-  "volume_set",
-  "volume_mute",
-  "volume_up",
-  "volume_down",
-  "mute",
-  "tv_on",
-  "tv_off",
-  "find_remote",
-  "find_remote_stop",
-];
-let sinkState = { volume: null, muted: false };
-let lastMediaState = null;
-let mediaPublishTimer = null;
-let mediaPublishForced = false;
+// question, so there is one answer (mediapublish.js), and a command that arrives
+// the other way is routed by tvcommand.js. Both are given the shell's own state
+// and its windows here; neither of them knows what a BrowserWindow is.
+mediapublish.init({
+  mqtt: mqttBridge,
+  mediastate,
+  audio,
+  diag,
+  identity,
+  config,
+  system,
+  updater,
+  player,
+  version: pkg.version || "",
+  childEnv: () => ({ ...process.env, ...WL_ENV }),
+  nowPlaying: () => nowPlaying,
+  currentApp: () => currentAppId,
+  sources: mediaSources,
+  soundWidget: cards.soundWidget,
+  onNotify: notify.handleTvNotify,
+  onCommand: (cmd) => tvcommand.handle(cmd),
+});
 
-// Coalesced: mpv reports a position every second and an app can push now-playing in
-// bursts, so publishes are batched to the next tick and then filtered by
-// worthPublishing (a position that moved less than a few seconds is not news).
-function publishMediaState(opts) {
-  // Re-decide the HOME card on the way past. This is called on every player
-  // event, which is what the card needs and the app's own reports do not
-  // provide: an app reports itself playing the instant it asks for a track, i.e.
-  // BEFORE mpv exists, so that first report cannot raise a card and the next one
-  // is ten seconds later - a card that takes ten seconds to appear after a cast.
-  soundWidget(nowPlaying);
-  if (!mqttCtl) return;
-  // A forced call that lands inside an already-queued window must not lose its
-  // force: re-seeding a fresh broker (applyMqttConfig) is exactly a forced publish,
-  // and lastMediaState still holds the previous broker's value, so being folded into
-  // a filtered publish would leave the new broker with no retained state at all.
-  if (opts && opts.force) mediaPublishForced = true;
-  if (mediaPublishTimer) return;
-  mediaPublishTimer = setTimeout(() => {
-    mediaPublishTimer = null;
-    const forced = mediaPublishForced;
-    mediaPublishForced = false;
-    if (!mqttCtl) return;
-    const next = mediastate.compose({
-      nowPlaying,
-      mpv: player.media,
-      volume: sinkState.volume,
-      muted: sinkState.muted,
-      currentApp: currentAppId,
-      sources: mediaSources(),
-    });
-    if (!forced && !mediastate.worthPublishing(lastMediaState, next)) return;
-    lastMediaState = next;
-    mqttCtl.publish("state", next, { retain: true });
-  }, 200);
-}
-
-// The apps a media_player can be switched TO: exactly what HOME would open
-// (appLaunchable), so the source list never offers a tile the box would refuse -
-// an app mid-install, missing a dep, or a remote app with no URL set yet.
-// Bounded, because this goes into a retained payload and then into a Home
-// Assistant state attribute.
-const MAX_MEDIA_SOURCES = 64;
-function mediaSources() {
-  return apps
-    .getManifests()
-    .filter(appLaunchable)
-    .map((m) => ({ id: m.id, name: typeof m.name === "string" ? m.name : m.name && (m.name.en || m.name.hu) }))
-    .filter((s) => s.name)
-    .slice(0, MAX_MEDIA_SOURCES);
-}
-
-// Which app is in front changes through half a dozen paths (launch, resume,
-// native app, HOME, the typing screen), so the state topic is re-composed on a
-// slow tick instead of at every one of them: composing is pure and in-memory, and
-// worthPublishing drops the result when nothing moved. Media events themselves
-// don't wait for this - they publish immediately.
-const MEDIA_TICK_MS = 5000;
-const SINK_TICK_MS = 20000; // wpctl is a process spawn; the volume is not urgent
-// Nothing in the fleet payload changes by the second (a version, a link rate, a
-// temperature), and it costs three spawns, so it is published slowly. The topic is
-// retained, so a subscriber never waits for the next one.
-const DIAG_TICK_MS = 5 * 60 * 1000;
-
-// The sink's volume/mute, refreshed on a timer rather than per publish: wpctl is a
-// process spawn, and nothing else on the box changes the volume between ticks
-// without going through us.
-// The box's own output volume, set from outside (MQTT / Home Assistant). Targets
-// the DEFAULT sink, because that is what "the box's volume" means; the caller
-// never has to know a wireplumber node id. `volume` is 0..1.
-function setBoxVolume(action, cmd) {
-  const env = { ...process.env, ...WL_ENV };
-  audio.defaultSink(env, (sink) => {
-    if (!sink) return console.warn("[mqtt]", action, "- no audio sink");
-    const done = (ok) => {
-      if (!ok) console.warn("[mqtt]", action, "failed on sink", sink.id);
-      refreshSinkState(); // report what it actually became, not what was asked for
-    };
-    if (action === "volume_set") audio.setVolume(env, sink.id, Number(cmd && cmd.volume), done);
-    else audio.setMuted(env, sink.id, cmd && cmd.mute !== undefined ? !!cmd.mute : "toggle", done);
-  });
-}
-
-function refreshSinkState() {
-  // Only while something is listening. listSinks is `wpctl status` plus two more
-  // spawns per sink, and a box that never touches Home Assistant has no reason to
-  // pay three processes a minute forever - least of all during a film or a game.
-  if (!mqttCtl) return;
-  audio.defaultSink({ ...process.env, ...WL_ENV }, (sink) => {
-    const next = {
-      volume: sink && typeof sink.volume === "number" ? sink.volume : null,
-      muted: !!(sink && sink.muted),
-    };
-    if (next.volume === sinkState.volume && next.muted === sinkState.muted) return;
-    sinkState = next;
-    publishMediaState();
-  });
-}
-
-// What this box looks like to whoever is watching all of them (docs/fleet-view.md).
-// Retained, so a dashboard that subscribes tomorrow still sees last night's
-// rollback; and only while MQTT is configured, for the same reason refreshSinkState
-// is gated - it spawns nmcli and gdbus, which a box nobody watches should not pay.
-function publishDiag() {
-  if (!mqttCtl) return;
-  // Guarded on both sides of the asynchronous hop: this catch only ever sees a
-  // synchronous failure, because collect answers through execFile callbacks, and an
-  // exception raised there would reach the Electron main process rather than here.
-  try {
-    diag.collect({ system, updater }, (payload) => {
-      try {
-        if (mqttCtl) mqttCtl.publish("diag", payload, { retain: true });
-      } catch (e) {
-        console.warn("[diag] publish:", e.message);
-      }
-    });
-  } catch (e) {
-    console.warn("[diag] collect:", e.message);
-  }
-}
-
-// (Re)start the MQTT bridge from the saved config. mqtt.js stop() publishes a
-// best-effort retained "offline" and force-ends the module-level client, so
-// calling it before init is safe (and a no-op when not started). rawMqtt() is
-// null unless host AND username are set - a cleared config turns the bridge off.
-function applyMqttConfig() {
-  mqttBridge.stop();
-  mqttCtl = null;
-  const mcfg = config.rawMqtt();
-  if (mcfg) mqttCtl = mqttBridge.init(mcfg, { onNotify: handleTvNotify, onCommand: handleTvCommand });
-  if (mqttCtl) {
-    mqttCtl.announce({
-      name: identity.hostname(),
-      hostname: identity.hostname(),
-      version: pkg.version || "",
-      // The command vocabulary the box answers. Home Assistant turns it into the
-      // entity's supported_features, so a box on an older release doesn't advertise
-      // a button that does nothing.
-      commands: TV_COMMANDS,
-    });
-    // Read the volume now rather than waiting out the 20 s tick: MQTT may have been
-    // configured minutes after boot, and a media_player whose slider starts blank
-    // reads as broken.
-    refreshSinkState();
-    publishMediaState({ force: true });
-    publishDiag(); // the fleet payload, now rather than at the first tick
-  }
-  // re-seed retained now-playing on the (possibly new) broker; the mqtt client
-  // queues QoS-0 publishes made before "connect", so this is safe immediately
-  if (mqttCtl && nowPlaying) mqttCtl.publish("nowplaying", nowPlaying, { retain: true });
-}
-
-// A control command arrived over MQTT (tvbox/<id>/cmd) - the assistant's
-// tv_control tool (voice) or a HA automation. Shell-native actions here; media
-// transport is also forwarded to the launcher so the active app (e.g. Spotify)
-// can drive its own player.
-function handleTvCommand(cmd) {
-  const action = String((cmd && cmd.action) || "").toLowerCase();
-  // The state is logged as well as the app: a state the box does not recognise is
-  // dropped in silence, and this log is where that is diagnosed.
-  console.log("[mqtt] command", action, (cmd && (cmd.app || cmd.state)) || "");
-  switch (action) {
-    case "launch":
-    case "open":
-      if (cmd && cmd.app) navTo(String(cmd.app));
-      break;
-    case "home":
-      showLauncher();
-      break;
-    case "pause":
-      player.cmd({ command: ["set_property", "pause", true] });
-      forwardCommand(cmd);
-      break;
-    case "play":
-    case "resume":
-      player.cmd({ command: ["set_property", "pause", false] });
-      forwardCommand(cmd);
-      break;
-    case "stop":
-      player.setPlaying(null);
-      player.stop();
-      setVideoMode(false);
-      // With a reason, because this is a stop and not the end of the item: an app
-      // that auto-advances on `finished` (Plex on-deck) would otherwise start the
-      // next episode for someone who just pressed stop on their phone.
-      player.emit({ type: "finished", reason: "stopped" });
-      forwardCommand(cmd);
-      break;
-    case "next":
-    case "previous":
-      forwardCommand(cmd);
-      break; // no mpv analogue; the app that owns the sound routes it
-    // Three the shell has no analogue of at all: what shuffle, repeat and the
-    // lyrics mean belongs to the app holding the queue, so they are only
-    // forwarded. `state` travels in the house's own vocabulary (on/off/toggle,
-    // and off/one/all for repeat) and each app translates it into its own -
-    // Spotify's API wants "context"/"track", the mediaclient's queue "all"/"one".
-    case "shuffle":
-    case "repeat":
-      forwardCommand(cmd);
-      break;
-    case "lyrics":
-      // The one of the three that needs a SCREEN. An app playing in the
-      // background has no way to show anything, so the command has to bring it
-      // forward first - and the forward must happen before the command, or the
-      // app answers it while still hidden and the screen never changes.
-      showLyrics(cmd);
-      break;
-    // Music asked for by voice. The assistant knows what to play but cannot
-    // reach what plays it: the Spotify account lives in that app's own plugin,
-    // behind an HTTP server bound to loopback, and YouTube's TV page is
-    // somebody else's site. So the box is told which APP and what to look for,
-    // and the app does the searching with the credentials it already has.
-    //
-    // THE RELEASE THIS SHIPS IN MUST BE 3.8.0 OR HIGHER. A publish to an action
-    // an older shell does not know succeeds - the broker accepts the topic and
-    // this switch logs "unknown command" - so the assistant refuses to send one
-    // to a box below `PLAY_MEDIA_SINCE` (assistant-stack tools/music.py), read
-    // from the box's own version sensor. Cutting a 3.7.x release with this in it
-    // would leave that gate refusing a box that can in fact hear it.
-    case "play_media":
-      playMediaIn(cmd);
-      break;
-    case "tv_on":
-      cecPower(true);
-      break;
-    case "tv_off":
-    case "standby":
-      cecPower(false);
-      break;
-    case "volume_up":
-    case "volume_down":
-    case "mute":
-      // TV volume over the IR blaster (ir.js) - CEC volume doesn't reach every
-      // TV. steps repeats the send ("volume up by 3"); ir.js clamps it.
-      ir.send(action, cmd && cmd.steps).catch((e) => console.warn("[ir]", action, "failed:", (e && e.message) || e));
-      break;
-    // The box's OWN output volume, deliberately separate from the three above:
-    // those drive the TV's amplifier over IR and have no absolute value to set,
-    // this is the sink the box plays through. A media_player entity's volume
-    // slider means this one.
-    case "volume_set":
-    case "volume_mute":
-      setBoxVolume(action, cmd);
-      break;
-    case "seek": {
-      // Absolute, in seconds - only meaningful while WE hold the clock (mpv);
-      // an app playing its own audio has no position for us to move. A non-numeric
-      // position would reach mpv as JSON `null` (NaN does not survive stringify),
-      // so it is rejected here rather than sent. A real number, not a coercion:
-      // Number(null) and Number("") are both 0, i.e. a silent seek to the start.
-      const pos = cmd && typeof cmd.position === "number" ? cmd.position : NaN;
-      if (player.media.active && Number.isFinite(pos) && pos >= 0) player.cmd({ command: ["seek", pos, "absolute"] });
-      else if (!Number.isFinite(pos)) console.warn("[mqtt] seek: bad position", cmd && cmd.position);
-      break;
-    }
-    case "find_remote":
-    case "find_remote_stop": {
-      // The one control that CANNOT sensibly live on the remote: you are asking
-      // because you cannot find it. A phone, Home Assistant or a voice command
-      // is the whole point, so it is here rather than only in Settings.
-      const warn = (err) => err && console.warn("[mqtt] find_remote:", err.message || err);
-      const ring = (mac) => remotefinder.ring(mac, true, warn);
-      // A stop needs no mac - it targets whatever the box believes is ringing,
-      // which is also why an unvalidated payload can never reach a write here.
-      if (action !== "find_remote") remotefinder.stop(warn);
-      else if (cmd && typeof cmd.mac === "string") ring(cmd.mac);
-      else
-        remotefinder.capableRemotes((macs) => {
-          if (macs.length) ring(macs[0]);
-          else console.warn("[mqtt] find_remote: no remote here can ring");
-        });
-      break;
-    }
-    default:
-      console.warn("[mqtt] unknown command:", action);
-  }
-}
+tvcommand.init({
+  player,
+  ir,
+  remotefinder,
+  mediastate,
+  apps,
+  launchurl,
+  nowPlaying: () => nowPlaying,
+  currentApp: () => currentAppId,
+  appWindow,
+  launcherWebContents: () => (win && !win.isDestroyed() ? win.webContents : null),
+  nativeRunning: () => nativeapp.running(),
+  navTo,
+  showLauncher,
+  cecPower: bridges.cecPower,
+  setVideoMode,
+  setBoxVolume: mediapublish.setBoxVolume,
+});
 
 ipcMain.on("plog", (_e, p, a) => console.log("[plog]", p, redact(a))); // debug: raw player.* calls from an app
 // The note has finished fading out. Hiding it is the shell's job, not the page's:
 // a window it cannot hide is a surface the compositor still has to deal with.
-ipcMain.on("overlay-done", (e) => {
-  if (overlayWin && !overlayWin.isDestroyed() && e.sender === overlayWin.webContents) hideOverlay();
-});
+ipcMain.on("overlay-done", (e) => notify.overlayDone(e.sender));
 
 // Which window a webContents belongs to: null = the launcher window, an app id
 // = that app's own window, undefined = unknown/stale sender (no identity, no
@@ -3297,21 +1475,6 @@ function windowAppId(sender) {
 function popupAppId(sender) {
   for (const [id] of appPopups) for (const w of popupsOf(id)) if (sender === w.webContents) return id;
   return undefined;
-}
-
-// Where the app's declared bridge adapter really lives, or null. A bridge always
-// ships INSIDE its app package ("./file.js" next to the manifest): the thing it
-// adapts is one client's host API, so it belongs to that client and updates from
-// the registry with it. The shell has no bridge of its own. Resolved here rather
-// than in the preload because this is the side that knows where a package is
-// installed, and the value reaches require(): it is pinned to the package dir,
-// no subdirectories and no traversal, and a manifest-only app (no dir of its
-// own) simply cannot have one.
-function bridgePath(m) {
-  const name = (m && m.runtime && m.runtime.bridge) || null;
-  if (!name || !m._dir || !/^\.\/[a-z0-9_-]+\.js$/.test(name)) return null;
-  const file = path.join(m._dir, name.slice(2));
-  return path.dirname(file) === path.resolve(m._dir) && fs.existsSync(file) ? file : null;
 }
 
 // Synchronous: the preload asks which app this is, which capabilities it was
@@ -3426,7 +1589,7 @@ function navTo(dest, opts) {
       // a Node-capable window. An unset config-driven URL means the app isn't
       // configured yet; the launcher gates that (tile.configured) so here we
       // just no-op rather than open a blank window.
-      const url = withLaunchQuery(resolveRemoteUrl(m), launchQuery);
+      const url = withLaunchQuery(remotepolicy.resolveRemoteUrl(m), launchQuery);
       if (url) {
         stopPrevPlayback();
         openRemoteApp(m, url);
@@ -3478,48 +1641,8 @@ function exitApp(id) {
   console.log("[nav] exit", id);
   if (currentAppId === id) showLauncher();
   destroyAppWindow(id);
-  pluginAppClosed(id);
+  plugins.appClosed(id);
   clearNowPlayingFor(id);
-}
-
-// Tell an app's plugin that its app was CLOSED, so it can stop sound the shell
-// cannot see. `appWindowGone` only ends the shared mpv, and a plugin's daemon is
-// not that: Spotify plays through librespot, which outlived the ✕ in the Running
-// row and kept the album going with no page left to reach it.
-//
-// Here rather than in the teardown hook, because that hook fires for every way a
-// window dies - the LRU cap, the memory guard, a crashed renderer - and the guard
-// that spares a sounding app from eviction asks the mpv player who owns it, so a
-// plugin's audio is invisible to it. Hung off the deliberate quit instead: the
-// Running row's ✕ and an app's own Exit both arrive here, and nothing else does.
-function pluginAppClosed(id) {
-  const plugin = loadedPlugins.get(id);
-  // `typeof`, not truthiness: a plugin is somebody's JavaScript object, and
-  // calling a truthy non-function throws out of here into the route that asked
-  // for the quit.
-  if (!plugin || typeof plugin.appClosed !== "function") return;
-  callPlugin(id, "appClosed", () => plugin.appClosed());
-}
-
-// Run one of a plugin's own methods without letting its failure reach us.
-//
-// Two ways it can, and a try/catch alone stops neither. A plugin may be ASYNC -
-// a rejected promise walks straight past a synchronous catch and lands as an
-// unhandled rejection in the main process - so a thenable return is caught too.
-// And `e` need not be an Error: `throw null` arrives here as well, and reading
-// `.message` off it would throw again, out of the catch and into whatever asked.
-// Returns whether it got through SYNCHRONOUSLY, which is all a caller can be told
-// at this point: an async plugin has only been started, not finished.
-function callPlugin(id, what, run) {
-  const failed = (e) => console.warn("[plugin]", what, id, "failed:", String((e && e.message) || e));
-  try {
-    const r = run();
-    if (r && typeof r.then === "function") r.then(undefined, failed);
-    return true;
-  } catch (e) {
-    failed(e);
-    return false;
-  }
 }
 
 // Cycle foreground through the running apps (the `appswitcher` remap action).
@@ -3705,43 +1828,10 @@ ipcMain.handle("app:storage", (e, action, key, value) => {
 // share; another app's is not in the list and is refused if named. The
 // destination is never sent - pullAppshare resolves it from the local manifest,
 // because a path from a renderer is a path somebody else chose.
-ipcMain.handle("app:shares", async (e, action, payload) => {
+ipcMain.handle("app:shares", (e, action, payload) => {
   const id = appIdForSender(e.sender);
   if (!id || !capsFor(id).includes("shares")) return { ok: false, error: "no shares capability" };
-  const cfg = config.rawAppshares();
-  const enabled = new Set(Array.isArray(cfg.enabled) ? cfg.enabled : []);
-  const mine = appsharesDeps.entries().filter((x) => x.appId === id);
-  if (action === "list") {
-    return {
-      ok: true,
-      // Never the token: an app has no use for one, and the peer list is the only
-      // thing here that could carry a credential out of the shell.
-      peers: (cfg.peers || []).map((p) => ({ id: p.id, name: p.name })),
-      shares: mine.map((x) => ({ id: x.id, name: x.name, present: x.present, on: enabled.has(x.id) })),
-    };
-  }
-  if (action === "compare") {
-    const p = payload || {};
-    const shareId = String(p.shareId || "");
-    if (!mine.some((x) => x.id === shareId)) return { ok: false, error: "unknown_share" };
-    return compareAppshare(String(p.peerId || ""), shareId);
-  }
-  if (action === "pull") {
-    const p = payload || {};
-    const shareId = String(p.shareId || "");
-    if (!mine.some((x) => x.id === shareId)) return { ok: false, error: "unknown_share" };
-    if (pullsInFlight.has(id)) return { ok: false, error: "busy" };
-    pullsInFlight.add(id);
-    try {
-      const r = await pullAppshare(String(p.peerId || ""), shareId, p.group ? String(p.group) : "");
-      // `detail` is rclone's own stderr, which names the peer's address and the
-      // local destination. The list above is careful to hand an app neither.
-      return { ok: !!(r && r.ok), error: (r && r.error) || null };
-    } finally {
-      pullsInFlight.delete(id);
-    }
-  }
-  return { ok: false, error: "unknown shares action" };
+  return sharing.appSharesCall(id, action, payload);
 });
 
 // ---- capability: adaptive display mode ----
@@ -3777,282 +1867,21 @@ ipcMain.handle("display", (e, action, payload) => {
   return { ok: false, error: "unknown display action" };
 });
 
-ipcMain.handle("player", (e, action, payload) => {
-  // Only the FOREGROUND window may drive the shared mpv, and only if its app
-  // holds the player capability. A backgrounded app must never start/seek
-  // playback - it would play behind an opaque foreground (invisible video +
-  // phantom audio) and keep the box from reporting idle. IPC is async, so a
-  // just-backgrounded app's late play() call arrives here after currentAppId
-  // already moved on, and is rejected.
-  //
-  // One exception, and it is sound: the app that OWNS what is loaded may keep
-  // driving it after it leaves the screen. A queue has to cross to its next
-  // track with nobody looking at the app, and pause/stop have to keep working
-  // from a phone or the house assistant - so the rule above would mean music
-  // that ends the moment somebody presses Home. What a background sender still
-  // may not do is start a PICTURE; that is checked at "play", where the kind of
-  // the thing being started is known.
-  const senderId = windowAppId(e.sender);
-  const background = senderId !== currentAppId;
-  // `!= null` on purpose: the launcher's id is null, and the launcher is never a
-  // background owner - it is the thing in front when it plays anything.
-  // Deliberately NOT gated on the player still running. The gap between two
-  // tracks is exactly the moment mpv is gone: the app hears the end, asks for
-  // the next one, and there is nothing loaded while it does - so requiring a
-  // live player refused every advance and an album in the background stopped
-  // after one track. Measured, twice.
-  //
-  // What that leaves is "the last app to have played keeps the exemption", and
-  // the bound on it is not time but KIND: everything a background sender may do
-  // with it is sound (`queue` and `play` both refuse anything else, `pip` is
-  // refused outright), and the app holding it is the one whose music the person
-  // was listening to. An app that has never played holds nothing.
-  const ownsPlayer = senderId != null && player.owner() === senderId;
-  if (senderId === undefined || (background && !ownsPlayer) || !capsFor(senderId).includes("player")) {
-    return { ok: false, error: "player not permitted (not the foreground app)" };
-  }
-  payload = payload || {};
-  // Where it plays FROM, never the URL. A slice of one looked safe because a Plex
-  // token sits late in the query string, but an IPTV URL carries its username and
-  // password as PATH segments - right after the host, inside any slice - and this
-  // log is what `tvbox-diag --logs` copies onto the boot partition, which any
-  // laptop can read. The origin is what a diagnosis actually needs.
-  console.log("[player] action", action, payload && payload.url ? httpserver.originOf(payload.url) : "");
-  if (action === "queue") {
-    // `queued` is one object shared by every app, so what a background sender
-    // writes here is what the FOREGROUND app's next play launches - including a
-    // plain resume, which does not re-queue. Sound is all a background sender
-    // may stage, for the same reason it is all one may start.
-    if (background && payload.kind !== "audio") {
-      return { ok: false, error: "player not permitted (a background app may only queue sound)" };
-    }
-    queued.url = payload.url;
-    queued.startPos = payload.startPos || 0;
-    queued.streams = payload.streams || null;
-    queued.kind = payload.kind === "audio" ? "audio" : null;
-  } else if (action === "enqueue") {
-    // Entries behind the one playing, so the player crosses to the next itself.
-    // Refused unless something is already playing: an empty player has nothing
-    // to append to, and starting one from a queue call would hide which entry
-    // the app actually asked for.
-    return player.enqueue(payload.urls);
-  } else if (action === "queueclear") {
-    return player.clearQueue();
-  } else if (action === "play") {
-    // The half of the background rule that needs to know WHAT is being started.
-    // Sound may begin off screen - the next track of a queue nobody is watching
-    // - but a picture may not: it would take the output mode and the reveal from
-    // whatever is actually in front, and play where nobody can see it.
-    if (background && queued.kind !== "audio") {
-      return { ok: false, error: "player not permitted (a background app may only play sound)" };
-    }
-    // remember whose window the video belongs to: the first-frame reveal
-    // (setVideoMode(true) in observeMpv) must hit THAT window, not the launcher
-    const previousOwner = player.running() ? player.owner() : null;
-    player.setOwner(appIdForSender(e.sender));
-    // Tell the app that just lost the player. Nothing used to: leaving an app
-    // sends `finished{reason}` because the shell stops the player, but one app
-    // TAKING it from another was silent - so a media client whose music had been
-    // replaced by Live TV went on reporting itself as playing, to the house and
-    // to a phone, with a position that never moved. Its own card on HOME went
-    // with it, since the app can no longer be the one to clear it.
-    if (previousOwner != null && previousOwner !== player.owner()) {
-      // Sent to THAT window rather than through the player's own emit, which
-      // reaches the launcher and the foreground app - and the app being told is
-      // by definition neither. It answers a `finished` WITH a reason by
-      // stopping rather than advancing, and its own stop is refused by the
-      // guard above (it is a background non-owner now), so it cannot take the
-      // player back from the app that just claimed it.
-      const prevWin = appWindow(previousOwner);
-      if (prevWin && !prevWin.isDestroyed()) {
-        try {
-          prevWin.webContents.send("player-event", { type: "finished", reason: "replaced" });
-        } catch (e) {}
-      }
-      clearSoundWidget(previousOwner);
-    }
-    // The KIND has to match as well as the URL. The same file asked for as
-    // sound after being played as a picture is a different launch - audio skips
-    // the mode handshake and the reveal - and resuming here would silently keep
-    // the mode the caller just said it did not want.
-    const sameKind = player.isAudioOnly() === (queued.kind === "audio");
-    if (player.running() && player.playing() === queued.url && sameKind && !player.isPip()) {
-      if (player.startPending()) {
-        // Still in the paused-start handshake: the mode switch starts it in a
-        // moment. Unpausing here would put the switch INSIDE playback.
-        console.log("[player] play during the start handshake - letting it finish");
-      } else {
-        console.log("[player] resume (already loaded)");
-        player.cmd({ command: ["set_property", "pause", false] });
-      }
-    } else if (queued.url) {
-      player.setPlaying(queued.url);
-      setVideoMode(false);
-      ensureAudio(() =>
-        player.launch(queued.url, queued.startPos, false, null, queued.streams, {
-          audioOnly: queued.kind === "audio",
-        }),
-      );
-    } // fullscreen (also un-PiPs)
-  } else if (action === "pause") player.cmd({ command: ["set_property", "pause", true] });
-  else if (action === "resume") player.cmd({ command: ["set_property", "pause", false] });
-  else if (action === "stop") {
-    player.setPlaying(null);
-    player.stop();
-    setVideoMode(false);
-  } else if (action === "seek") player.cmd({ command: ["seek", payload.posSec || 0, "absolute"] });
-  else if (action === "tracks") {
-    // audio/subtitle tracks of the playing stream, for an in-playback picker
-    return player.query(["get_property", "track-list"]).then((list) => ({
-      ok: Array.isArray(list),
-      tracks: (Array.isArray(list) ? list : [])
-        .filter((t) => t && (t.type === "audio" || t.type === "sub"))
-        .map((t) => ({
-          type: t.type,
-          id: t.id,
-          lang: t.lang || "",
-          title: t.title || "",
-          selected: !!t.selected,
-        })),
-    }));
-  } else if (action === "track") {
-    // { type: "audio"|"sub", id: <track id> | "no" | "auto" } - aid/sid switch
-    const prop = payload.type === "sub" ? "sid" : "aid";
-    const v = payload.id === "no" || payload.id === "auto" ? payload.id : Number(payload.id);
-    if (typeof v === "string" || Number.isFinite(v)) player.cmd({ command: ["set_property", prop, v] });
-  } else if (action === "select") {
-    // Mid-playback version of the queue's `streams`, in the SAME ordinal terms
-    // (`track` above speaks mpv track ids, which an app that never saw the track
-    // list can't produce). Remembered as well as applied: going to PiP and back
-    // RELAUNCHES mpv from `queued.streams`, so a selection only sent to the live
-    // player would be quietly undone by the next toggle. Merged per axis - a
-    // call that changes only the subtitle must not clear the audio choice.
-    for (const command of playeropts.streamCommands(payload)) player.cmd({ command });
-    queued.streams = playeropts.mergeStreams(queued.streams, payload);
-  } else if (action === "prop") {
-    // One allowlisted playback property (subtitle/audio sync, speed, volume,
-    // subtitle look). A refusal is reported, not swallowed: an app that gets
-    // "ok" for a setting that never landed has no way to notice.
-    const v = playeropts.propValue(payload.name, payload.value);
-    if (v === null) return { ok: false, error: "property not allowed or value out of range" };
-    player.cmd({ command: ["set_property", payload.name, v] });
-  } else if (action === "pip") {
-    // Toggle the current channel between a PiP (at the launcher-measured rect) and
-    // fullscreen. PiP needs the window transparent (so mpv behind shows through the
-    // hole); fullscreen starts opaque and observeMpv reveals on the first frame.
-    //
-    // Never from the background: this relaunches the stream WITH video and claims
-    // the video mode, which is the one thing the background exemption exists to
-    // withhold - the exemption is for sound.
-    if (background) return { ok: false, error: "player not permitted (not the foreground app)" };
-    if (player.playing()) {
-      setVideoMode(!!payload.on);
-      ensureAudio(() => player.launch(player.playing(), 0, !!payload.on, payload.rect, queued.streams));
-    }
-  }
-  return { ok: true };
+// Which window is asking decides everything (playerapi.js has the rules): the
+// SENDER's own app id, never the global foreground one.
+ipcMain.handle("player", (e, action, payload) => playerapi.handle(windowAppId(e.sender), action, payload));
+
+// ---- the cards on the HOME screen ----
+// A plugin's own card and the derived one an app gets while its sound plays are
+// both widgets.js's; what it needs from here is the launcher and the player.
+cards.init({
+  send: sendToLauncher,
+  playerRunning: () => player.running(),
+  playerIsAudioOnly: () => player.isAudioOnly(),
+  playerOwner: () => player.owner(),
 });
 
-// ---- home-screen widgets (plugin-driven) ----
-// A service plugin (the only sanctioned background code) can put ONE card on
-// the HOME screen - e.g. Spotify's now-playing while a cast is active. The
-// plugin pushes state, the launcher renders it, Enter opens the app; renderer
-// apps stay strictly foreground-only. Sanitized here; cleared on uninstall.
-const widgets = new Map(); // appId -> { title, subtitle }
-function setWidget(appId, w) {
-  const before = JSON.stringify(widgets.get(appId) || null);
-  if (!w || typeof w !== "object" || (!w.title && !w.subtitle)) widgets.delete(appId);
-  else
-    widgets.set(appId, {
-      title: String(w.title || "").slice(0, 120),
-      subtitle: String(w.subtitle || "").slice(0, 160),
-    });
-  // Only when it actually moved. The card is now decided on every player event,
-  // i.e. once a second while anything plays, and pushing an unchanged list makes
-  // the launcher rebuild HOME once a second behind a 4K film for nothing.
-  if (JSON.stringify(widgets.get(appId) || null) === before) return;
-  if (win && !win.isDestroyed()) {
-    try {
-      win.webContents.send("widgets", widgetList());
-    } catch (e) {}
-  }
-}
-/**
- * Tell HOME the set of running apps changed.
- *
- * It refetches on `visibilitychange`, which covers every way somebody STARTS an
- * app - they were looking at one when it happened. It does not cover an app that
- * goes on its own: the LRU cap and the memory guard drop a hidden window with
- * the launcher on screen the whole time, so HOME went on offering a Running row
- * for an app that had gone, and its ✕ did nothing.
- */
-function appsChanged() {
-  if (win && !win.isDestroyed()) {
-    try {
-      win.webContents.send("apps-changed");
-    } catch (e) {}
-  }
-}
-
-function widgetList() {
-  return [...widgets.entries()].map(([id, w]) => ({ id, ...w }));
-}
-
-/**
- * The card an app gets on HOME while its sound is playing.
- *
- * Music outlives leaving the app now, so an album can be playing with the
- * launcher on screen and nothing there naming it - which is the state Spotify's
- * plugin has always had a card for, and no other app could. This is the same
- * card, derived rather than pushed: the app already reports what it is playing
- * (that is what the house reads over MQTT), so nothing new is asked of it.
- *
- * The app id comes from the PLAYER, never from the payload. Every local app
- * shares one origin, so a posted `app` field is a claim any of them can make
- * about any other; `player.owner()` is the shell's own knowledge of who started
- * what is loaded.
- *
- * The launcher is deliberately excluded (its id is null): its own now-playing is
- * Live TV, and HOME is already where its card would point.
- *
- * Two things are load-bearing and were both wrong in the first cut:
- *
- * - **Who the card is about is remembered.** Every report that CLEARS a card
- *   arrives AFTER mpv has gone - stopping is what makes an app report itself
- *   idle - so asking the player at that moment answers nobody, and the card
- *   stayed on HOME for ever, naming something that had finished. A card is
- *   therefore addressed to the app it is already up for when the player has
- *   nothing to say.
- * - **Only sound gets one.** A film owns the screen; a card for it on the HOME
- *   behind it says nothing, and it was the commonest way to get a stale one.
- */
-let soundCardFor = null;
-
-function soundWidget(data) {
-  const state = data && data.state;
-  const sounding = (state === "playing" || state === "paused") && player.running() && player.isAudioOnly();
-  const owner = player.running() ? player.owner() : soundCardFor;
-  if (owner == null) return;
-  if (!sounding) {
-    setWidget(owner, null);
-    if (soundCardFor === owner) soundCardFor = null;
-    return;
-  }
-  soundCardFor = owner;
-  setWidget(owner, {
-    title: String((data && data.title) || ""),
-    subtitle: String((data && data.artist) || ""),
-  });
-}
-
-/** Take an app's card down, wherever the app went. */
-function clearSoundWidget(id) {
-  if (id == null) return;
-  setWidget(id, null);
-  if (soundCardFor === id) soundCardFor = null;
-}
-
-// ---- plugin host API + loader ----
+// ---- plugin host API ----
 // The scoped surface a plugin gets. Deliberately small: config + pairing + a
 // supervised-child runner + "bring the launcher forward" + a couple of helpers.
 // A plugin never sees `win`, `mpv`, or the manifest registry directly.
@@ -4075,40 +1904,20 @@ const host = {
   // Is that app alive, and is it the one on screen? A plugin that answers a
   // protocol on the LAN has to report its app's state - DIAL asks a receiver
   // whether the app is running before it launches it - and only the shell knows.
-  // "Alive" is per app KIND, the same distinction the launcher's tiles make: a
-  // native app has no window of ours, so its own process is what running means.
-  appState: (id) => {
-    const m = apps.manifestById(id);
-    const running = m && m.type === "native" ? nativeapp.id() === id : !!appwins.get(id);
-    return { running: !!running, foreground: id === currentAppId };
-  },
+  appState: (id) => ({ running: appinfo.appRunning(id), foreground: id === currentAppId }),
   // One note on screen, for anyone on the box: the same toast MQTT pushes and the
   // voice satellite uses for a spoken answer's text. A plugin gets it here; a
   // local app's page can POST /tvbox/api/notify, which is the same door.
-  notify: (n) =>
-    handleTvNotify({
-      title: String((n && n.title) || "").slice(0, 120),
-      message: String((n && n.message) || "").slice(0, 400),
-      duration: Math.max(0, Math.min(60000, Number(n && n.duration) || 0)),
-      raise: !!(n && n.raise),
-    }),
-  // Both of these are re-bound per app in loadOnePlugin, which is what lets an
-  // unload take the plugin's listeners and routes with it. Called on the bare host
-  // (no app), a registration belongs to nothing and is never removed.
-  onConfigChange: (cb) => {
-    if (typeof cb === "function") configListeners.push({ id: null, cb });
-  },
+  notify: (n) => notify.handleTvNotify(notify.sanitize(n)),
+  // Both of these are re-bound per app by the loader, which is what lets an unload
+  // take the plugin's listeners and routes with it. Called on the bare host (no
+  // app), a registration belongs to nothing and is never removed.
+  onConfigChange: plugins.onConfigChange,
   // Register a plugin's HTTP routes under a path prefix. `table` is keyed
   // "METHOD /subpath" (e.g. "GET /state"); the generic server tries these before
   // its own built-in routes. Called from a plugin factory (before serve()).
-  // `guard` names the GET routes in `table` (same "METHOD /subpath" keys) that
-  // the same-origin gate must cover. Every non-GET is gated already; an open GET
-  // is the policy for a side-effect-free read, so a read that spends something -
-  // an authenticated upstream request, a forked process - has to say so or any
-  // page the box loads can drive it through an <img> tag.
-  registerRoutes: (prefix, table, opts) => {
-    pluginRoutes.push({ id: null, prefix, table, guard: guardList(opts, table) });
-  },
+  // `guard` names the GET routes in `table` that the same-origin gate must cover.
+  registerRoutes: plugins.registerRoutes,
   spawnService: (name, spec) => supervisor.spawn(name, spec),
   stopService: (name) => supervisor.stop(name),
   restartService: (name, delay) => supervisor.restart(name, delay),
@@ -4122,136 +1931,42 @@ const host = {
   nativeRunning: () => (nativeapp.running() ? nativeapp.id() : null),
 };
 
-// Require each manifest-declared plugin whose deps resolve. Runs synchronously
-// (before serve()) so routes are registered (via host.registerRoutes in the
-// factory) before the launcher's first request; daemons start later in
-// startPlugins() (after audio).
-// Load ONE app's service plugin (require + run its factory so it registers its
-// routes via host.registerRoutes). Returns the plugin object, or null if it has
-// no valid service, ships no package plugin.js, its deps are missing, or it is
-// already loaded. Does NOT start the daemon - the caller decides when (boot:
-// startPlugins; runtime hot-load: right away).
-function loadOnePlugin(m) {
-  const name = m.service;
-  if (!name) return null;
-  if (loadedPlugins.has(m.id)) return null;
-  if (!/^[a-z0-9_-]+$/.test(name)) {
-    console.warn("[plugin] bad service name for", m.id, "->", name);
-    return null;
-  }
-  // A service plugin ships INSIDE the app package (~/.tvbox/apps/<id>/plugin.js);
-  // the shell has no first-party plugins anymore. A manifest with a service but
-  // no package dir is malformed - skip it.
-  if (!m._dir) {
-    console.warn("[plugin] skip", m.id, "- declares service", name, "but ships no package plugin.js");
-    return null;
-  }
-  const deps = apps.appDeps(m);
-  if (!deps.depsOk) {
-    console.warn("[plugin] skip", m.id, "- missing:", deps.missing.join(","));
-    return null;
-  }
-  try {
-    const plugin =
-      require(path.join(m._dir, "plugin.js"))({
-        ...host,
-        // per-app widget slot - a plugin can only ever write its OWN card
-        widget: { set: (w) => setWidget(m.id, w), clear: () => setWidget(m.id, null) },
-        // ...and its OWN manifest switches, by key. Scoped for the same reason: a
-        // plugin reading another app's settings is not a thing this API allows.
-        switchOn: (key) => switchValue(m, key),
-        // Tagged with this app, so unloading it really removes them. An untagged
-        // listener survives its plugin and is a way back in: it fires on the next
-        // config write and starts a daemon nothing is left to stop.
-        onConfigChange: (cb) => {
-          if (typeof cb === "function") configListeners.push({ id: m.id, cb });
-        },
-        registerRoutes: (prefix, table, opts) => {
-          pluginRoutes.push({ id: m.id, prefix, table, guard: guardList(opts, table) });
-        },
-      }) || {};
-    loadedPlugins.set(m.id, plugin);
-    console.log("[plugin] loaded", m.id, "(" + name + ")");
-    return plugin;
-  } catch (e) {
-    console.warn("[plugin]", m.id, "failed to load:", e.message);
-    return null;
-  }
-}
-function loadPlugins() {
-  for (const m of apps.getManifests()) loadOnePlugin(m);
-}
-// Hot-load a plugin whose app just became installable (deps + package present)
-// WITHOUT a shell restart: run its factory so its routes register on the live
-// server, then start its daemon now. Returns true if the plugin is running (or
-// already was). This is why a `service` app no longer needs a full restart to
-// activate after install.
-function hotLoadPlugin(id) {
-  const m = apps.manifestById(id);
-  if (!m || !m.service) return false;
-  // An UPDATE arrives through the same door as a first install, and the version on
-  // disk is already the new one - so a plugin that is still loaded is the OLD code,
-  // holding whatever it holds (a daemon, a LAN listener). Replacing it here is what
-  // makes a fix in a package take effect without a reboot.
-  if (loadedPlugins.has(id)) {
-    unloadPlugin(id);
-    console.log("[plugin] replacing", id, "with the version now on disk");
-  }
-  const plugin = loadOnePlugin(m);
-  if (!plugin) return false;
-  // Say which of the three actually happened. One line for all of them read
-  // "hot-started" even when there was no start to run, or when it threw and
-  // callPlugin had just logged the failure above it - which is the wrong thing
-  // to find in the log of a box whose app went in and did nothing.
-  if (typeof plugin.start !== "function") console.log("[plugin] hot-loaded", id, "(no start)");
-  else if (callPlugin(id, "start", () => plugin.start())) console.log("[plugin] hot-started", id);
-  return true;
-}
-// Stop ONE app's plugin and forget it: the app is going away (uninstall) or being
-// replaced (update). Its `stop` is what releases a daemon, a supervised child or a
-// listening socket - none of which the shell can see, let alone close for it.
-//
-// Three things go with it, and each one was a way for the plugin to come back or to
-// keep answering after it was gone:
-//
-//   • its config listeners - an untagged one fires on the next config write and
-//     starts the daemon again, with nothing left that could stop it (measured);
-//   • its HTTP routes - a route table is matched first-wins, so a dead instance's
-//     closures would keep serving and would shadow a replacement's;
-//   • the require cache for its WHOLE package dir, not just plugin.js - a package
-//     installs to the same path every time, so an update's new plugin.js would
-//     otherwise `require("./lib/…")` and get the previous version's module.
-function unloadPlugin(id) {
-  const plugin = loadedPlugins.get(id);
-  if (!plugin) return false;
-  // Its own `stop` FIRST, while the shell still holds the handle: dropping the entry
-  // before the call means a `stop` that throws leaves the plugin's socket open with
-  // nothing left that can reach it.
-  // A failure here leaves whatever the plugin held until a restart.
-  if (typeof plugin.stop === "function") callPlugin(id, "stop", () => plugin.stop());
-  loadedPlugins.delete(id);
-  for (let i = configListeners.length - 1; i >= 0; i--) if (configListeners[i].id === id) configListeners.splice(i, 1);
-  for (let i = pluginRoutes.length - 1; i >= 0; i--) if (pluginRoutes[i].id === id) pluginRoutes.splice(i, 1);
-  const m = apps.manifestById(id);
-  const dir = m && m._dir ? path.resolve(m._dir) + path.sep : null;
-  if (dir) {
-    for (const key of Object.keys(require.cache)) if (key.startsWith(dir)) delete require.cache[key];
-  }
-  console.log("[plugin] unloaded", id);
-  return true;
-}
-function startPlugins() {
-  for (const [id, p] of loadedPlugins) {
-    if (typeof p.start === "function") callPlugin(id, "start", () => p.start());
-  }
-}
+plugins.init({ apps, host, setWidget: cards.setWidget, switchValue: appinfo.switchValue });
+
+// The three that need a window system, or the shell state around one. Grouped
+// here, at the end of the module body, because every const and function they name
+// is initialized by this point - the temporal dead zone is what has killed this
+// file before.
+notify.init({
+  BrowserWindow,
+  screen,
+  compositor,
+  sendToLauncher,
+  raiseWindow,
+});
+
+remotepolicy.init({
+  config,
+  lang,
+  netguard,
+  systemLocale: () => app.getSystemLocale(),
+});
+
+playerapi.init({
+  player,
+  capsFor,
+  currentApp: () => currentAppId,
+  appWindow,
+  setVideoMode,
+  ensureAudio,
+  clearSoundWidget: cards.clearSoundWidget,
+});
+
+// Everything the shell holds on behalf of something else, on the way out. The
+// supervised children and the file server are the shell's own rather than a
+// plugin's, so they are stopped here rather than inside the plugin registry.
 function stopPlugins() {
-  for (const [id, p] of loadedPlugins) {
-    // Logged rather than swallowed: this runs on the way out, and a plugin that
-    // could not put its daemon down is the reason the next start finds the port
-    // taken.
-    if (typeof p.stop === "function") callPlugin(id, "stop", () => p.stop());
-  }
+  plugins.stopAll();
   supervisor.stopAll();
   fileserver.stop(null); // the symlinked view of the box's folders is not left behind
 }
@@ -4304,15 +2019,15 @@ app.whenReady().then(async () => {
   // place and a share turned off between the code appearing and the peer asking
   // takes the answer with it.
   peerPairing.init({
-    remember: rememberPeer,
-    issue: issueShareKey,
+    remember: sharing.rememberPeer,
+    issue: sharing.issueShareKey,
   });
   pairing.register("peer", peerPairing);
   // A phone acting as the remote. The FIFO write goes ONLY to the remote bridge:
   // the CEC one forwards what it does not recognise to cec-client's stdin, so a
   // key would arrive there as a CEC command.
   phoneremote.init({
-    press: (action) => fifoCmd(REMOTE_CMD_FIFO, "key " + action, "remote"),
+    press: bridges.remoteKey,
     lanIp: () => netguard.lanIp(),
     rawPhoneRemote: config.rawPhoneRemote,
     setPhoneRemote: config.setPhoneRemote,
@@ -4335,7 +2050,7 @@ app.whenReady().then(async () => {
   // Adding a share is the one form here where every field is somebody else's
   // string - an address, a share name, a password - so it gets a phone page too.
   const sharesPairing = require("./pairing/shares");
-  sharesPairing.init({ apply: applyShares, deps: () => sharesDeps });
+  sharesPairing.init({ apply: sharing.applyShares, deps: sharing.sharesDeps });
   pairing.register("shares", sharesPairing);
   // Typing for a keyboard-less app. The screen belongs to the launcher (it owns the
   // on-screen keyboard and can draw a QR), so the app is backgrounded for the
@@ -4427,7 +2142,7 @@ app.whenReady().then(async () => {
   // the nightly app auto-update runs in, whose download the `installing` set does
   // not cover.
   updater.init({ isIdle: boxFree, restart: () => restartShell("update applied") });
-  loadPlugins(); // require plugins + register their routes (deps-gated)
+  plugins.loadAll(); // require plugins + register their routes (deps-gated)
   apps.installAll((s) => console.log("[install]", s));
   serve();
   // The radio is a stored choice, and nmcli's state survives a reboot - but a box
@@ -4517,15 +2232,8 @@ app.whenReady().then(async () => {
   // as it mounts and a send at did-finish-load would arrive at nobody. The marker is
   // removed first: a note is worth less than a loop of them.
   function noticeCrash() {
-    let crashed = false;
-    try {
-      fs.unlinkSync(CRASH_NOTICE);
-      crashed = true;
-    } catch (e) {
-      /* not there: an ordinary start */
-    }
-    if (!crashed) return;
-    setTimeout(() => handleTvNotify({ kind: "crashRestart" }), CRASH_NOTICE_DELAY_MS);
+    if (!crashlog.takeNotice()) return;
+    setTimeout(() => notify.handleTvNotify({ kind: "crashRestart" }), crashlog.CRASH_NOTICE_DELAY_MS);
   }
 
   // Background-apps policy hooks (registry lives in appwindows.js).
@@ -4547,7 +2255,7 @@ app.whenReady().then(async () => {
   setInterval(() => appwins.ramGuardTick(), 60 * 1000); // evict hidden apps under memory pressure
   nativeapp.init({
     childEnv: () => ({ ...process.env, ...WL_ENV }), // the session's Wayland vars, same as mpv gets
-    bridgeCmd: bridgesCmd, // "native on" / "native off" to both uinput bridges
+    bridgeCmd: bridges.bridgesCmd, // "native on" / "native off" to both uinput bridges
     // The process is gone: its own Quit item, a crash, or our own stop(). Show the
     // launcher only if that app is still what the shell thinks is in front, or the
     // TV is left on a bare desktop with no way out. When we stopped it in order to
@@ -4576,10 +2284,10 @@ app.whenReady().then(async () => {
     },
   });
   updater.startSchedulers(); // boot check + 6h re-check + nightly idle auto-apply
-  if (config.rawFileserver().enabled) applyFileserver(); // the LAN share survives a restart
-  pruneOrphanShareKeys(); // before the server starts, so a stray key is never served
-  if ((config.rawAppshares().enabled || []).length) applyAppshares(); // and so do an app's
-  if (config.rawShares().length) applyShares(); // and so do the shares the box reads FROM
+  if (config.rawFileserver().enabled) sharing.applyFileserver(); // the LAN share survives a restart
+  sharing.pruneOrphanShareKeys(); // before the server starts, so a stray key is never served
+  if ((config.rawAppshares().enabled || []).length) sharing.applyAppshares(); // and so do an app's
+  if (config.rawShares().length) sharing.applyShares(); // and so do the shares the box reads FROM
   setInterval(maintenance.appsAutoTick, 30 * 60 * 1000); // nightly registry app auto-update (same window)
   // Not gated to the small hours like the registry check: a bundle whose flatpak
   // moved is BROKEN-ish now (the copy is older than the app it talks to), and the
@@ -4594,13 +2302,13 @@ app.whenReady().then(async () => {
   setTimeout(btBatteryTick, 5 * 60 * 1000); // early check after boot, then half-hourly
   setInterval(btBatteryTick, 30 * 60 * 1000);
   // Start plugin daemons once the HDMI sink is the default (librespot needs it).
-  ensureAudio(() => startPlugins());
+  ensureAudio(() => plugins.startAll());
   // MQTT bridge (now-playing publish + HA integration); no-op if not provisioned.
   // (The command handler is added by the voice-control work.)
-  applyMqttConfig();
+  mediapublish.applyConfig();
   // A rename changes which MQTT topics the box belongs on, so the bridge has to
   // reconnect with it.
-  system.init({ onHostnameChanged: applyMqttConfig });
+  system.init({ onHostnameChanged: mediapublish.applyConfig });
   // Say who owns the screen, before anything else can. The compositor outlives the
   // shell - the session's respawn loop restarts only this process - so it can still
   // be holding "an app is in front" from before the restart, and would go on
@@ -4635,8 +2343,8 @@ app.whenReady().then(async () => {
     },
     setVideoMode,
     raiseWindow,
-    cecPower,
-    publishMediaState,
+    cecPower: bridges.cecPower,
+    publishMediaState: mediapublish.publish,
     dmode,
     panelHdr: () => panelHdr,
     outputSize: () => outputSize,
@@ -4649,18 +2357,15 @@ app.whenReady().then(async () => {
     boxIdle,
     boxFree,
     restartShell,
-    hotLoadPlugin,
+    hotLoadPlugin: plugins.hotLoad,
     applyPendingAppFiles: (opts) => backup.applyPendingAppFiles(opts),
     jsonRes: httpserver.jsonRes,
     childEnv: () => ({ ...process.env, ...WL_ENV }),
   });
   ir.applyConfig(); // IR blaster hub; no-op if not configured
   // Keep the media state topic honest about which app is in front and how loud the
-  // box is; both are cheap and neither is urgent (see MEDIA_TICK_MS).
-  setInterval(() => publishMediaState(), MEDIA_TICK_MS);
-  refreshSinkState();
-  setInterval(refreshSinkState, SINK_TICK_MS);
-  setInterval(publishDiag, DIAG_TICK_MS);
+  // box is; both are cheap and neither is urgent (see mediapublish.js's ticks).
+  mediapublish.startTicks();
   console.log("[main] window up");
 });
 
@@ -4692,7 +2397,7 @@ function shutdown() {
   }, 150);
 }
 function finishShutdown() {
-  bridgesCmd("native off");
+  bridges.bridgesCmd("native off");
   stopPlugins();
   mqttBridge.stop();
   app.quit();
