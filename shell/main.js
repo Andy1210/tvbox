@@ -73,7 +73,7 @@ process.on("uncaughtException", (err) => {
   // String(): `stack` is whatever was thrown, and a native module or a Proxy can
   // make it a non-string - which would then throw on .slice() inside the writer,
   // losing the one record that survives the restart.
-  let stack = "";
+  let stack;
   try {
     stack = String((err && err.stack) || err);
   } catch (e) {
