@@ -186,6 +186,44 @@ function appWindow(id) {
 function foregroundWindow() {
   return (currentAppId && appWindow(currentAppId)) || (win && !win.isDestroyed() ? win : null);
 }
+// Electron takes a window's Wayland title from the page's own <title>, and the
+// compositor reads that title to decide which window is the note - the one drawn
+// over everything, including over the note itself, and left out of keyboard focus.
+// With an app fullscreen the launcher's own toplevel has been torn down, so a page
+// that took that name would leave nothing on screen for the remote to reach.
+//
+// Wired for every window this process creates rather than at each `new
+// BrowserWindow`, because the windows a PAGE opens are not created here: a remote
+// app's sign-in popup arrives through `did-create-window`, and `window.open` from
+// the launcher or a local app makes one with no call site of ours at all. Those are
+// exactly the windows this has to cover. The rule itself is notify.js's, which owns
+// the name; the note's own window sets its title deliberately rather than taking one
+// from a page, and refuses every update besides.
+app.on("browser-window-created", (_event, w) => {
+  // A window can be BORN holding the name as well as renamed into it, and only one
+  // of the two raises an event to refuse: `window.open`'s feature string reaches the
+  // BrowserWindow constructor unfiltered - `title=` included - and a page that never
+  // sets a document title never fires a title update at all.
+  w.on("page-title-updated", (e, title) => {
+    if (!notify.titleAllowed(title)) e.preventDefault();
+  });
+  // So the other door is shut where it is opened. A window a page opens is not
+  // constructed by us, and what a window-open handler returns outranks the feature
+  // string the page wrote - so this is the one place the name can be kept from ever
+  // being applied. Taking it off the window afterwards is not an alternative:
+  // measured, this event fires before the constructor's own title reaches the native
+  // window, so a strip here is written over, and one late enough to stick would also
+  // take the name off the note, which is the one window entitled to it. Every window
+  // the shell constructs is the shell's to name, so nothing else needs a rule.
+  //
+  // A window that gets a handler of its own later - a remote app's, which also
+  // decides which URLs a popup may go to - replaces this one, and names the option
+  // too.
+  w.webContents.setWindowOpenHandler(() => ({
+    action: "allow",
+    overrideBrowserWindowOptions: { title: app.getName() },
+  }));
+});
 let nowPlaying = null; // last launcher-reported now-playing (Spotify/Live TV) - gates auto-update idleness
 let restoredAt = null; // a backup restore just ran; the launcher polls this to show "restarting"
 // The box counts as idle for a self-initiated restart (nightly auto-update)
@@ -1089,6 +1127,7 @@ function openRemoteApp(m, url) {
       action: "allow",
       overrideBrowserWindowOptions: {
         fullscreen: true, // a 10-foot login screen, not a 400px desktop popup
+        title: app.getName(), // outranks a `title=` the page put in its feature string
         frame: false,
         backgroundColor: "#000000",
         autoHideMenuBar: true,

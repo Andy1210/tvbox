@@ -208,7 +208,10 @@ test("the title is re-asserted and forced to CHANGE, or the second note lands na
   });
   n.handleTvNotify({ message: "x" });
   const titles = log.filter((l) => l[0] === "title").map((l) => l[1]);
-  assert.deepEqual(titles, [n.OVERLAY_TITLE + " ", n.OVERLAY_TITLE]);
+  // The first of the three is the name being asked for at all: no window may be
+  // BORN with it, so this one takes it a moment after construction instead of
+  // through a constructor option. The pair after it is the forced change.
+  assert.deepEqual(titles, [n.OVERLAY_TITLE, n.OVERLAY_TITLE + " ", n.OVERLAY_TITLE]);
 });
 
 test("the window is placed before it maps, and asked for only once", () => {
@@ -245,4 +248,59 @@ test("a note with nothing in it sanitizes to empty rather than to `undefined`", 
 
 test("a negative duration is not a negative timeout", () => {
   assert.equal(notify.sanitize({ duration: -5 }).duration, 0);
+});
+
+// ---- the one window title that is not the page's to take ----
+
+test("a page may not name its window into the compositor's overlay slot", () => {
+  // Every Electron window here presents the same Wayland app id, so the title is
+  // the only thing that marks the note. A page taking that name is drawn over
+  // everything AND left out of keyboard focus - with an app fullscreen the
+  // launcher's window is gone, so nothing on screen would answer the remote.
+  assert.equal(notify.titleAllowed(notify.OVERLAY_TITLE), false);
+});
+
+test("every other title stays the page's own", () => {
+  assert.equal(notify.titleAllowed("RetroArch"), true);
+  assert.equal(notify.titleAllowed("tvbox"), true);
+  // Near misses are the page's too. The compositor compares the name exactly, and
+  // what reaches it is what reaches this function: Chromium canonicalises a title
+  // before it becomes the window's, so there is no spelling that arrives here as a
+  // near miss and lands there as the real thing. Refusing more than the reserved
+  // name would take an app's own name away for nothing.
+  assert.equal(notify.titleAllowed("tvbox-overlay "), true);
+  assert.equal(notify.titleAllowed("TVBOX-OVERLAY"), true);
+  assert.equal(notify.titleAllowed(""), true);
+  assert.equal(notify.titleAllowed(null), true);
+  assert.equal(notify.titleAllowed(undefined), true);
+});
+
+test("not even the note is BORN with the name - it asks for it after", () => {
+  // A window's title can arrive through the BrowserWindow constructor as well as
+  // from a page, and `window.open`'s feature string reaches that constructor
+  // unfiltered - so the reserved name is kept out of the options a window is built
+  // with. That leaves nothing able to repair a window that IS built with it, which
+  // is why the one window entitled to the name asks for it a moment later instead.
+  const n = fresh();
+  const log = [];
+  const options = [];
+  n.init({
+    BrowserWindow: function (opts) {
+      options.push(opts);
+      return fakeWindow(log);
+    },
+    screen: { getPrimaryDisplay: () => ({ size: { width: 1920, height: 1080 } }) },
+    compositor: { available: () => true, placeWindowByTitle: (t, r, cb) => cb(true, null) },
+    sendToLauncher: () => {},
+    raiseWindow: () => {},
+  });
+  n.handleTvNotify({ message: "x" });
+
+  assert.equal(options.length, 1);
+  assert.equal(options[0].title, undefined);
+  assert.equal(
+    log.filter((l) => l[0] === "title")[0][1],
+    n.OVERLAY_TITLE,
+    "the name goes on straight after construction, before the window is ever shown",
+  );
 });
