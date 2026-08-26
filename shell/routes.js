@@ -3,7 +3,7 @@
 // This is the surface that changes something - config, apps, power, pairing, the
 // remote's keymap - so it is also where the validation lives, and why it is worth
 // having on its own rather than spread through the shell's wiring. A route that
-// only reads is a GET and stays with the server in main.js.
+// only reads is a GET and lives in getroutes.js, its counterpart.
 //
 // Everything the shell can do that this needs arrives as `ctx`: windows, app
 // switching, the config-change fan-out, the MQTT bridge. Modules with no shell
