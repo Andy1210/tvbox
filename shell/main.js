@@ -308,10 +308,13 @@ function pushNav(dest) {
 // Everything the launcher hears goes through here: a send into a window that has
 // gone, or one whose renderer died between the check and the call, must never be
 // the thing that takes the shell down.
-function sendToLauncher(channel, payload) {
+function sendToLauncher(channel, ...args) {
   if (!win || win.isDestroyed()) return false;
   try {
-    win.webContents.send(channel, payload);
+    // Spread rather than one `payload`: `apps-changed` carries nothing, and
+    // forwarding an explicit `undefined` hands the renderer an argument its
+    // listener never used to be given.
+    win.webContents.send(channel, ...args);
     return true;
   } catch (e) {
     return false;

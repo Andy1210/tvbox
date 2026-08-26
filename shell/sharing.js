@@ -374,6 +374,11 @@ function pullAppshare(peerId, shareId, group) {
  * pull its OWN share; another app's is not in the list and is refused if named.
  * The destination is never sent - pullAppshare resolves it from the local
  * manifest, because a path from a renderer is a path somebody else chose.
+ *
+ * THE CAPABILITY CHECK IS THE CALLER'S: main.js refuses an app that does not hold
+ * `shares` before it gets here. That is the whole boundary - what this function
+ * does is scope an app that already passed it - so a second call site needs the
+ * same check, and `pullAppshare`/`compareAppshare` beside it have none at all.
  */
 async function appSharesCall(id, action, payload) {
   const cfg = deps.config.rawAppshares();

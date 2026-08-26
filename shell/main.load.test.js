@@ -139,7 +139,7 @@ test("every module main.js requires that has an init() is initialized by it", ()
   const missing = [];
   for (const name of SHELL_MODULES) {
     const src = fs.readFileSync(path.join(__dirname, name + ".js"), "utf8");
-    if (!/\n  init,|\n  init:|module\.exports = \{[^}]*\binit\b/s.test(src)) continue;
+    if (!/\n {2}init[,:]|module\.exports = \{[^}]*\binit\b/s.test(src)) continue;
     // The local name main.js gave it - the module is not always required under its
     // own file name (widgets.js is `cards`).
     const required = main.match(new RegExp('const (\\w+) = require\\("\\./' + name + '"\\)'));

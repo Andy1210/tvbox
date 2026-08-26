@@ -92,6 +92,19 @@ test("the screensaver's auto-sleep stands down while anything is playing", () =>
   assert.deepEqual(log.cec, [], "Spotify Connect streams with the launcher sitting idle on Home");
 });
 
+test("with no wiring at all, the auto-sleep stands down rather than sleeping", () => {
+  // The default has to DENY: if init were ever skipped, a fail-open one would turn
+  // the television off mid-film.
+  const answers = [];
+  const fresh = (() => {
+    delete require.cache[require.resolve("./powermenu")];
+    return require("./powermenu");
+  })();
+  fresh.init({ jsonRes: (_res, body) => answers.push(body) });
+  fresh.handlePower("sleep_if_idle", {});
+  assert.deepEqual(answers, [{ ok: true, slept: false }]);
+});
+
 test("...and does sleep when the box really is idle", () => {
   const log = boot({ idle: true });
   powermenu.handlePower("sleep_if_idle", {});

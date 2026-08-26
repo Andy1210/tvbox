@@ -27,7 +27,9 @@ const MAX_SLEEP_MINUTES = 24 * 60;
 let deps = {
   execFile: realExecFile,
   jsonRes: () => {},
-  boxIdle: () => true,
+  // Denies, like every other default here: with no wiring, the screensaver's
+  // auto-sleep stands down rather than turning the television off mid-film.
+  boxIdle: () => false,
   showLauncher: () => {},
   stopPlayback: () => {}, // player.setPlaying(null) + stop + setVideoMode(false)
   cecPower: () => {},
