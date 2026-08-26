@@ -45,6 +45,34 @@ let overlayHideTimer = null;
 // in the launcher there instead. null until asked.
 let overlayPlaceable = null;
 
+// May a window take this title from the page it is showing?
+//
+// The compositor recognises the note by its TITLE, and every window of one
+// Chromium process presents the same Wayland app id - the launcher, an app and a
+// note are all `tvbox-shell` - so the app id cannot tell them apart and the title
+// is all there is to go on. A page that titles its document `tvbox-overlay` is
+// therefore drawn in front of everything, the note included, AND left out of
+// keyboard focus. With an app fullscreen the launcher's own window has been torn
+// down, so nothing on screen is left that the remote can reach.
+//
+// The one reserved name is the shell's; every other title stays the page's, which
+// is what keeps an app's own name in the compositor's window list.
+//
+// The comparison is exact, and it can be: Chromium canonicalises a document title
+// (control characters to spaces, whitespace runs collapsed, ends trimmed) before a
+// page's title becomes the window's, so what arrives here through that path is byte
+// for byte what the compositor will compare.
+//
+// The name itself is a contract with the compositor, which takes an override from
+// its own environment while nothing here reads that. The two failures are not
+// symmetric, so they have to move together: with an override in place the note's own
+// window is no longer recognised - it is drawn behind the app and takes the remote,
+// loudly - while this function goes on refusing a name that means nothing and
+// permits the one that does. That half fails open and says nothing.
+function titleAllowed(title) {
+  return String(title == null ? "" : title) !== OVERLAY_TITLE;
+}
+
 function screenHeight() {
   return deps.screen.getPrimaryDisplay().size.height;
 }
@@ -88,7 +116,6 @@ function ensureOverlayWindow() {
     // on any box running an older compositor.
     focusable: false,
     skipTaskbar: true,
-    title: OVERLAY_TITLE,
     webPreferences: {
       preload: path.join(__dirname, "overlay", "preload.js"),
       contextIsolation: true,
@@ -97,6 +124,15 @@ function ensureOverlayWindow() {
     },
   });
   overlayWin.setIgnoreMouseEvents(true);
+  // The name goes on AFTER construction rather than as a constructor option, and
+  // that is a rule rather than a style: a window a page opens carries whatever
+  // `title=` its feature string asked for, so main.js names the option in the
+  // window-open handler to keep the reserved one out. Nothing takes a name off a
+  // window afterwards - measured, that cannot be made to work - so the one window
+  // entitled to the name has to ask for it here instead of being born with it.
+  // Synchronous, and well before the toplevel maps, which is when the compositor
+  // first reads a title.
+  overlayWin.setTitle(OVERLAY_TITLE);
   // Electron sets the Wayland title from the window title, and a page's <title>
   // would otherwise win: set it again after load so the compositor's rule holds.
   overlayWin.on("page-title-updated", (e) => e.preventDefault());
@@ -211,6 +247,7 @@ module.exports = {
   hideOverlay,
   overlayRect,
   sanitize,
+  titleAllowed,
   OVERLAY_TITLE,
   OVERLAY_HEIGHT_FRACTION,
   MIN_DURATION_MS,
