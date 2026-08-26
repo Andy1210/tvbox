@@ -60,7 +60,24 @@ sh "$AUDIO_SH" >/dev/null 2>&1 &
 # keeps the OTA rollback contract - run-shell.sh exec's Electron, so when Electron
 # exits run-shell.sh exits, we re-run it, and its own attempt counter and rollback
 # run again.
+# A shell that dies as fast as it starts is a loop nothing else here ends. The OTA
+# attempt counter in run-shell.sh only runs while an update is pending, and safe
+# mode counts BOOTS rather than shell starts, so a committed release that throws
+# before the launcher loads would strobe the television for ever - an uncaught
+# exception exits now instead of sitting on a dialog, which is what makes that
+# shape reachable. Back off to half a minute instead, and reset as soon as one run
+# lasted longer than a start: a box that works between crashes keeps restarting
+# promptly, and a box that cannot come up at all stays quiet enough to ssh into.
+delay=1
 while :; do
+	started=$(date +%s 2> /dev/null || echo 0)
 	"$HOME/.tvbox/run-shell.sh"
-	sleep 1
+	ended=$(date +%s 2> /dev/null || echo 0)
+	if [ "$((ended - started))" -ge 60 ]; then
+		delay=1
+	else
+		delay=$((delay * 3))
+		[ "$delay" -gt 30 ] && delay=30
+	fi
+	sleep "$delay"
 done

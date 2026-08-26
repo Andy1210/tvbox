@@ -118,9 +118,8 @@ test("a bluetooth action is looked up among own properties only", () => {
 });
 
 // The context is a seam between two files and nothing at runtime checks it: a
-// route that asks for something main.js does not provide throws TypeError inside
-// the request handler, which has no try/catch above it and no uncaughtException
-// handler behind it - the shell dies and the session respawns it. That is how
+// route that asks for something main.js does not provide throws TypeError, and
+// what the caller gets back is a 500 with the route's own work half done. That is how
 // POST /tvbox/api/audio/default shipped broken; the fake below had the same gap,
 // so the tests agreed with the bug.
 function ctxKeysFrom(source, marker) {

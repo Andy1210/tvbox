@@ -41,8 +41,8 @@ const browseDeps = { onPath: apps.onPath };
 function post(p, data, res, ctx) {
   // The body is whatever the caller sent, and a literal `null` is valid JSON. Every
   // route below reads a field off `data` straight away, so one such request would
-  // throw a TypeError with nothing above it to catch: no try/catch around the
-  // handler, no `uncaughtException` behind it, and the shell dies. Normalize once.
+  // throw a TypeError, and what is behind that is a restart of the television, not
+  // an error response. Normalize once.
   if (!data || typeof data !== "object") data = {};
   if (p === "/tvbox/api/config") {
     const changed = [];

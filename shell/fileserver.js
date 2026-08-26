@@ -183,6 +183,12 @@ function start(cfg, deps) {
     // The credentials go through the environment, never argv: anyone on the box can
     // read a command line.
     env: { ...deps.childEnv(), RCLONE_USER: user, RCLONE_PASS: String(c.pass) },
+    // What identifies an instance of THIS server across versions, the same way
+    // appshares.js names its own. The exact-argv fallback only clears a leftover
+    // from the same release; a shell that died without its teardown (a crash exits
+    // now, rather than sitting on a dialog) would otherwise leave the previous
+    // release's rclone holding the port, still serving on the OLD password.
+    reapPrefix: ["rclone", "serve", "webdav", root],
     argv: () => [
       "rclone",
       "serve",

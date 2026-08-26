@@ -1009,5 +1009,9 @@
     "failed": "Could not save it.",
     "needsProvision": "This box cannot change it yet - it needs to be set up again from a computer.",
     "confirmStrand": "Both radios would then be off and this box has no network cable, so nothing would be able to reach it - no Wi-Fi, no Bluetooth remote, no phone - and it stays that way after a restart. Press again to confirm."
+  },
+  "crash": {
+    "restarted": "The box restarted",
+    "restartedMsg": "Something went wrong and the box restarted itself. Anything that was playing has stopped."
   }
 }

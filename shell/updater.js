@@ -450,8 +450,8 @@ async function download(url, dest) {
   const ctl = new AbortController();
   const t = setTimeout(() => ctl.abort(), TARBALL_TIMEOUT_MS);
   const out = fs.createWriteStream(dest);
-  // A WriteStream 'error' with no listener is an uncaught exception - it would
-  // kill the whole shell (there is deliberately no uncaughtException handler).
+  // A WriteStream 'error' with no listener is an uncaught exception, which takes
+  // the whole shell down and restarts it.
   // freeBytes() is a single preflight check, so ENOSPC/EIO MID-download is a
   // real path; surface it into the await chain so it fails THIS update instead
   // of the process. The noop .catch marks the promise handled for the stretches

@@ -11,6 +11,179 @@ const http = require("http");
 const fs = require("fs");
 const path = require("path");
 const os = require("os");
+
+// The two uinput bridges' control FIFOs, and the log guard around writing to them.
+//
+// Declared HERE, above everything, because the crash handler below is the earliest
+// code in this file and it writes to both: a `const` further down is in its
+// temporal dead zone until the module has run that far, so a crash while the shell
+// is still loading would silently skip taking the bridges out of native mode - and
+// in that mode Home is POSTed to an API that is not listening yet, i.e. the one
+// escape hatch on a keyboardless TV.
+//
+// tvbox-cec owns the CEC adapter and its cec-client stdin, so we cannot open a
+// second one; a whitelisted command ("on 0" / "standby 0") goes into the FIFO it
+// forwards from. tvbox-remote takes "reload" (re-read the remap config), learn mode
+// and the native-mode flag. Every write is O_NONBLOCK, so a bridge that is not
+// running can never hang the shell.
+const CEC_CMD_FIFO = "/tmp/tvbox-cec-cmd";
+const REMOTE_CMD_FIFO = "/tmp/tvbox-remote-cmd";
+// FIFOs we have already complained about, so a bridge that simply is not there (a
+// box with no CEC is normal) does not fill the log: bridgesCmd runs on a timer for
+// the whole of a native-app session. Cleared by the next successful write.
+const fifoQuiet = new Set();
+
+// ---- an uncaught exception must not leave the box on a dialog ----
+// Electron's default handler draws an error box and keeps the process ALIVE, so
+// the session's respawn loop never runs: the television stays on a message no
+// remote can dismiss, only ssh gets the box back, and the wedged process does not
+// even take a SIGTERM. Exiting instead brings the launcher back in ten to twenty
+// seconds, and during an OTA it is what run-shell.sh's attempt counter and
+// rollback need to see - the boot watchdog that used to reach them only exists
+// while an update is pending. Note what that does NOT cover: a COMMITTED release
+// that throws before the launcher ever loads has no pending marker and no counter,
+// and safe mode counts boots rather than shell starts, so the only thing between
+// it and a permanent flicker is session.sh's backoff.
+//
+// Registered BEFORE the rest of the requires, because a module that throws while
+// it loads is the failure shape this repo has actually had (a value built at
+// module level out of a const declared further down, read in its temporal dead
+// zone). Everything it uses is therefore required lazily inside its own try:
+// require() is cached, and a module that is the one that failed must not take the
+// crash log down with it.
+const CRASH_LOG = path.join(os.homedir(), ".tvbox", "shell.crash.log");
+const CRASH_LOG_MAX = 32 * 1024; // a few stacks; a crash LOOP must not fill the card
+// How long the crash path waits for a native app to write its save and exit. Short:
+// the television is already black, and an app that ignores it is killed anyway.
+const NATIVE_CRASH_WAIT_MS = 800;
+// How much of one stack is kept. An Error's MESSAGE is whatever threw it - a
+// plugin can put a whole payload in one - and this file is copied onto the boot
+// partition, which any laptop can read.
+const CRASH_STACK_MAX = 8 * 1024;
+// A restart the viewer did not ask for looks exactly like the box deciding to stop
+// their film, so the launcher says one line about it. A marker rather than the
+// crash log itself, because it has to be CONSUMED: read from the log, every boot
+// for the rest of the box's life would carry a notice about a crash last March.
+const CRASH_NOTICE = path.join(os.homedir(), ".tvbox", "crash-notice");
+const CRASH_NOTICE_DELAY_MS = 2500; // the launcher has to be listening before it is told
+let crashing = false;
+process.on("uncaughtException", (err) => {
+  if (crashing) return; // a throw from the handling below must not recurse
+  crashing = true;
+  // String(): `stack` is whatever was thrown, and a native module or a Proxy can
+  // make it a non-string - which would then throw on .slice() inside the writer,
+  // losing the one record that survives the restart.
+  let stack;
+  try {
+    stack = String((err && err.stack) || err);
+  } catch (e) {
+    stack = "(an exception whose own stack could not be read)";
+  }
+  try {
+    // An error message carries whatever threw it: a URL with a token, an app's
+    // credentials. This goes to shell.log, which tvbox-diag copies onto the FAT
+    // boot partition, so it gets the same treatment as an app's console line.
+    stack = require("./redact").redact(stack);
+  } catch (e) {}
+  console.error("[shell] uncaught exception - restarting:", stack);
+  writeCrashLog(stack);
+  // The next launcher load says so, once. O_CREAT|O_EXCL never follows a symlink,
+  // which is what a planted one at this path would be - and an EEXIST here is a
+  // previous crash nobody has been told about yet, i.e. nothing to do.
+  try {
+    fs.closeSync(fs.openSync(CRASH_NOTICE, "wx", 0o600));
+  } catch (e) {}
+  // The three things an ordinary exit does that the television would otherwise be
+  // left holding. mpv first: it is a child that outlives us, so a film would play
+  // on with no shell able to stop it.
+  try {
+    require("./player").stop();
+  } catch (e) {}
+  // A native app owns the screen and reads the pad itself, so one left running
+  // would sit behind the new launcher with nothing in the UI able to end it, and
+  // the next launch would start a SECOND instance racing the first for the same
+  // save file. SIGTERM first, because that is what makes an emulator write that
+  // save; `forceStop` alone does nothing until `stop` has named the app's
+  // processes, and the escalation timers `stop` arms die with this process. The
+  // wait for it is synchronous for the same reason - no timer here will ever run -
+  // and a fraction of a second against a ten-second recovery is nothing next to a
+  // lost afternoon of a game.
+  let nativeGone = false;
+  try {
+    const nativeapp = require("./native");
+    if (!nativeapp.running()) {
+      nativeGone = true;
+    } else {
+      nativeapp.stop();
+      const idle = new Int32Array(new SharedArrayBuffer(4));
+      const until = Date.now() + NATIVE_CRASH_WAIT_MS;
+      while (!nativeapp.settled() && Date.now() < until) Atomics.wait(idle, 0, 0, 50);
+      nativeGone = nativeapp.settled();
+      if (!nativeGone) nativeapp.forceStop();
+    }
+  } catch (e) {}
+  // Only once the app is really gone. A SIGKILLed child is still in /proc as a
+  // zombie until we exit, so "gone" here means it left on the SIGTERM - and being
+  // wrong the other way is what costs the television: in native mode both uinput
+  // bridges post Home to the API instead of emitting a key, which is the one
+  // escape hatch that works whatever holds the screen. Leaving that mode on is
+  // harmless (the next launch or exit resets it); turning it off over a surface
+  // still in front is a box the remote cannot get out of.
+  if (nativeGone) {
+    try {
+      bridgesCmd("native off");
+    } catch (e) {}
+  }
+  // The supervised children (rclone serving the box's folders, librespot) are ours
+  // and outlive us: a crash skips stopPlugins, so without this one keeps serving the
+  // LAN on the credentials it started with, and the restarted shell finds its port
+  // held. Synchronous SIGTERMs, same cost as the player stop above.
+  try {
+    supervisor.stopAll();
+  } catch (e) {}
+  try {
+    app.exit(1);
+  } catch (e) {
+    process.exit(1);
+  }
+});
+
+// APPENDED, capped, and 0600 - the three things this file needs to be worth
+// having. Appended because a crash LOOP reads exactly like a single crash when
+// each one overwrites the last; capped so that loop cannot fill the card; and
+// created the way player.js creates mpv.log, with O_NOFOLLOW, because ~/.tvbox is
+// reachable through the file server and a symlink planted here would otherwise be
+// written through as the box user.
+function writeCrashLog(stack) {
+  let fd = null;
+  try {
+    fd = fs.openSync(
+      CRASH_LOG,
+      fs.constants.O_CREAT | fs.constants.O_WRONLY | fs.constants.O_APPEND | fs.constants.O_NOFOLLOW,
+      0o600,
+    );
+    const st = fs.fstatSync(fd);
+    if (!st.isFile()) return; // a fifo or a device would take the write somewhere of its own
+    fs.fchmodSync(fd, 0o600);
+    if (st.size > CRASH_LOG_MAX) fs.ftruncateSync(fd, 0);
+    const version = (() => {
+      try {
+        return require("./package.json").version;
+      } catch (e) {
+        return "?";
+      }
+    })();
+    fs.writeSync(fd, new Date().toISOString() + " v" + version + "\n" + stack.slice(0, CRASH_STACK_MAX) + "\n\n");
+  } catch (e) {
+    /* no crash log rather than a crash log we are not sure of */
+  } finally {
+    if (fd !== null) {
+      try {
+        fs.closeSync(fd);
+      } catch (e) {}
+    }
+  }
+}
 const config = require("./config");
 const pairing = require("./pairing");
 const playeropts = require("./playeropts"); // app stream terms -> mpv args/commands + the settable-property allowlist
@@ -1126,14 +1299,28 @@ function serve() {
     notify: handleTvNotify,
   };
 
+  // A handler that threw AFTER sending its headers cannot be answered again, and
+  // writeHead would throw a second time - inside a catch, where nothing is left to
+  // catch it, i.e. a route bug would restart the television. Ending the response is
+  // what matters either way: without it the caller waits out its own timeout.
+  const endWith500 = (res) => {
+    try {
+      if (!res.headersSent) res.writeHead(500);
+    } catch (e) {}
+    try {
+      res.end();
+    } catch (e) {}
+  };
+
   const server = http.createServer((req, res) => {
     let p;
     try {
       p = decodeURIComponent((req.url || "/").split("?")[0]);
     } catch (e) {
       // malformed percent-escape (e.g. "GET /%") throws URIError; without this
-      // guard - and with no uncaughtException handler - one bad URL from any
-      // local client would kill the whole shell process.
+      // guard one bad URL from any local client would take the shell down (into a
+      // restart now, rather than the frozen dialog it used to be - neither is an
+      // answer to a bad request).
       res.writeHead(400, { "Content-Type": "text/plain" });
       res.end("bad request");
       return;
@@ -1199,12 +1386,19 @@ function serve() {
           try {
             route(req, res, { body: d });
           } catch (e) {
-            res.writeHead(500);
-            res.end();
+            endWith500(res);
           }
           return;
         }
-        routes.post(p, d, res, routeCtx);
+        // Wrapped like the plugin dispatch above it: every local app shares this
+        // origin, so a route that throws is a "restart the television" primitive
+        // reachable from any page on the box. A 500 is the honest answer instead.
+        try {
+          routes.post(p, d, res, routeCtx);
+        } catch (e) {
+          console.warn("[api] route failed:", p, redact(e.message));
+          endWith500(res);
+        }
       });
       return;
     }
@@ -1213,10 +1407,7 @@ function serve() {
       try {
         pluginGet.fn(req, res, {});
       } catch (e) {
-        try {
-          res.writeHead(500);
-          res.end();
-        } catch (e2) {}
+        endWith500(res);
       }
       return;
     }
@@ -1582,8 +1773,8 @@ function serve() {
   });
   // A restart races the dying instance for the port (the session's respawn loop
   // restarts us within ~1s; the old process may not have released :PORT yet). Without a handler
-  // EADDRINUSE is an uncaught exception and the shell limps on WITHOUT its
-  // server (black launcher, dead API) - so retry until the port frees up.
+  // EADDRINUSE is an uncaught exception, which now restarts the shell into the
+  // same race - so retry until the port frees up instead.
   server.on("error", (e) => {
     if (e.code === "EADDRINUSE") {
       console.warn("[main] :" + PORT + " busy (old instance dying?) - retrying");
@@ -1680,7 +1871,7 @@ function showLauncher(hash) {
   }
   raiseWindow();
   if (leaving) backgroundApp(leaving); // after the launcher is up - no desktop flash
-  for (const [id, w] of appwins.all()) if (id !== leaving && w.isVisible()) backgroundApp(id);
+  for (const id of appwins.visibleIds()) if (id !== leaving) backgroundApp(id);
   // Popups belong to an app, but a popup of an app that is ALREADY hidden would
   // otherwise stay on screen over the launcher (backgroundApp only runs for the app
   // being left and for visible ones). Home is the universal escape hatch, so it must
@@ -1812,7 +2003,7 @@ function foregroundApp(id) {
       p.moveTop();
     } catch (e) {}
   }
-  for (const [oid, ow] of appwins.all()) if (oid !== id && ow.isVisible()) backgroundApp(oid);
+  for (const oid of appwins.visibleIds()) if (oid !== id) backgroundApp(oid);
   if (win && !win.isDestroyed()) win.hide(); // exactly one visible toplevel
   return true;
 }
@@ -1855,7 +2046,7 @@ function openNativeApp(m, extraArgs) {
   nativeForeground = true;
   setTimeout(() => {
     if (!nativeapp.running() || nativeapp.id() !== m.id) return; // exited (or replaced) already
-    for (const [id] of appwins.all()) backgroundApp(id);
+    for (const id of appwins.runningIds()) backgroundApp(id);
     if (win && !win.isDestroyed()) win.hide();
   }, NATIVE_HIDE_DELAY_MS);
   return true;
@@ -2215,7 +2406,7 @@ function openRemoteApp(m, url) {
   // app so there's exactly ONE visible toplevel - otherwise two same-level
   // always-on-top windows have compositor-dependent stacking and CEC keys could
   // route to the wrong one. showLauncher() re-shows the launcher on return.
-  for (const [oid, ow] of appwins.all()) if (oid !== m.id && ow.isVisible()) backgroundApp(oid);
+  for (const oid of appwins.visibleIds()) if (oid !== m.id) backgroundApp(oid);
   if (win && !win.isDestroyed()) win.hide();
 }
 
@@ -2351,7 +2542,7 @@ function openLocalApp(m) {
   w.loadURL(BASE + (atRoot ? "/" : "/" + m.id + "/"));
   w.focus();
   w.moveTop();
-  for (const [oid, ow] of appwins.all()) if (oid !== m.id && ow.isVisible()) backgroundApp(oid);
+  for (const oid of appwins.visibleIds()) if (oid !== m.id) backgroundApp(oid);
   if (win && !win.isDestroyed()) win.hide();
 }
 
@@ -2514,18 +2705,9 @@ function handleTvNotify(payload) {
   if (note.raise) raiseWindow();
 }
 
-// TV power over CEC. The CEC bridge (tvbox-cec user service) owns the adapter
-// and its cec-client stdin, so we can't open a second cec-client; instead we
-// drop a whitelisted command ("on 0" / "standby 0") into a FIFO the bridge
-// forwards to cec-client. O_NONBLOCK so we never hang if the bridge isn't running.
-const CEC_CMD_FIFO = "/tmp/tvbox-cec-cmd";
 function cecPower(on) {
   if (fifoCmd(CEC_CMD_FIFO, on ? "on 0" : "standby 0", "cec")) console.log("[cec] power", on ? "on" : "off");
 }
-// FIFOs we've already complained about, so a bridge that simply isn't there (a box
-// with no CEC is normal) doesn't fill the log: bridgesCmd runs on a timer for the
-// whole of a native-app session. Cleared by the next successful write.
-const fifoQuiet = new Set();
 // Write a control line to a bridge FIFO. O_NONBLOCK so a bridge that isn't
 // running can never hang the shell.
 function fifoCmd(fifo, cmd, tag) {
@@ -2733,10 +2915,6 @@ function playMediaIn(cmd) {
   else send();
 }
 
-// Remote input bridge (tvbox-remote user service) control FIFO: "reload" (re-read
-// the remap config) or drive learn mode ("learn <id>" / "learn-off"). O_NONBLOCK
-// so we never hang if the bridge isn't running.
-const REMOTE_CMD_FIFO = "/tmp/tvbox-remote-cmd";
 function remoteBridgeCmd(cmd) {
   fifoCmd(REMOTE_CMD_FIFO, cmd, "remote");
 }
@@ -4326,7 +4504,30 @@ app.whenReady().then(async () => {
     setVideoMode(false, win);
     updater.onLauncherLoaded();
     boothealth.markHealthy(pkg.version);
+    noticeCrash();
   });
+  // One line on the first launcher load after a crash, and then never again.
+  //
+  // Nothing else on the television says anything: the log is truncated at every
+  // start, the crash file needs ssh and the diagnostics report needs the card. So a
+  // crash during a film is indistinguishable from the box quitting films by itself,
+  // which is the reading a household would take from it.
+  //
+  // The note is sent a moment AFTER the load, because the renderer subscribes to it
+  // as it mounts and a send at did-finish-load would arrive at nobody. The marker is
+  // removed first: a note is worth less than a loop of them.
+  function noticeCrash() {
+    let crashed = false;
+    try {
+      fs.unlinkSync(CRASH_NOTICE);
+      crashed = true;
+    } catch (e) {
+      /* not there: an ordinary start */
+    }
+    if (!crashed) return;
+    setTimeout(() => handleTvNotify({ kind: "crashRestart" }), CRASH_NOTICE_DELAY_MS);
+  }
+
   // Background-apps policy hooks (registry lives in appwindows.js).
   appwins.init({
     enabled: () => {
