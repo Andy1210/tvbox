@@ -68,8 +68,10 @@ STAGE="$(mktemp -d)"
 trap 'rm -rf "$STAGE"' EXIT
 
 echo "==> staging release $VERSION"
-rsync -a --exclude node_modules --exclude apps-data --exclude '*.log' \
-  --exclude electron-web-client "$TVBOX/shell" "$STAGE/"
+# shell/ comes from the ONE shared exclude list (deploy/shell-exclude.list) via
+# copy-shell.sh, for the same reason infra/ comes from infra.list below: the four
+# copiers each carried their own list and had already drifted.
+"$HERE/copy-shell.sh" "$STAGE"
 # infra/ comes from the ONE shared list (deploy/infra.list) via copy-infra.sh,
 # so the OTA tarball can never drift from the SD image / dev deploy (this is how
 # remote_input_bridge.py + tvbox-remote.service + cursor_idle_hide.py finally

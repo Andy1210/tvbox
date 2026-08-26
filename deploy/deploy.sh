@@ -30,10 +30,25 @@ echo "==> building launcher (React/Vite) -> shell/launcher-dist"
 
 echo "==> syncing tvbox/shell -> $PI:~/.tvbox/shell"
 ssh "$PI" 'mkdir -p ~/.tvbox'
-# launcher-dist IS shipped (built above); node_modules / generated data are not.
-rsync -az --delete \
-  --exclude node_modules --exclude '*.log' --exclude apps-data --exclude electron-web-client \
-  "$TVBOX/shell" "$PI:.tvbox/"
+# launcher-dist IS shipped (built above); node_modules, generated data and the
+# tests are not. What is left out comes from the ONE shared list
+# (deploy/shell-exclude.list) via copy-shell.sh, so a dev box runs the same file
+# set an OTA box does - which is the whole point of deploying to one.
+"$TVBOX/scripts/copy-shell.sh" "$PI:.tvbox" -z --delete
+# `--delete` leaves EXCLUDED files alone on the receiver, so files that used to be
+# shipped and are excluded now sit in ~/.tvbox/shell forever. `--delete-excluded`
+# is NOT the answer on a box: node_modules (the ~700 MB Electron install the box
+# does for itself) and apps-data (every installed app's bundle) are excluded too,
+# and it would take both. Retire by name instead, the same way the flat infra
+# files are retired below - and prune those two directories, because a test file
+# inside an installed app is that app's business.
+# `-not -path`, not `-prune`: `-delete` turns on `-depth`, and find refuses the
+# combination outright ("-prune does nothing when -depth is in effect", exit 1).
+# Single-quoted so the pattern reaches the REMOTE find rather than being globbed
+# here. stderr is deliberately NOT hidden - a broken retire step that says nothing
+# is how this did nothing twice - while `|| true` keeps it from failing a deploy.
+ssh "$PI" 'find ~/.tvbox/shell -name "*.test.js" -type f -not -path "*/node_modules/*" -not -path "*/apps-data/*" -delete || true'
+
 # Infra files come from the ONE shared list (deploy/infra.list), so the dev
 # deploy can never drift from the OTA tarball / SD image (they read it too, via
 # scripts/copy-infra.sh). Basenames land flat in ~/.tvbox/, same as before.

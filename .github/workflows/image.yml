@@ -44,7 +44,10 @@ jobs:
           test -d image/stage-tvbox || { echo "image/stage-tvbox missing - see docs/sd-image.md"; exit 1; }
           F=image/stage-tvbox/01-tvbox/files
           mkdir -p "$F"
-          rsync -a --delete --exclude node_modules --exclude apps-data --exclude '*.log' shell "$F/"
+          # shell/ comes from the ONE shared exclude list
+          # (deploy/shell-exclude.list) via copy-shell.sh - byte-for-byte the
+          # same step build-image.sh runs.
+          scripts/copy-shell.sh "$F" --delete --delete-excluded
           # Infra files come from the ONE shared list (deploy/infra.list) via
           # copy-infra.sh - byte-for-byte the same step build-image.sh runs, so
           # a local image and this CI image ship an identical infra payload

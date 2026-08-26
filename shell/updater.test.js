@@ -61,6 +61,9 @@ test("every file in the infra source dirs is listed in infra.list or consciously
   const NOT_SHIPPED = new Set([
     "deploy.sh", // the dev-deploy driver itself
     "infra.list", // the list itself
+    // The other list, and the copier that reads it: what shell/ leaves BEHIND is
+    // a build-time question, so the answer is never sent to a box.
+    "shell-exclude.list",
     // What the root payload looked like at the current PROVISION_REVISION. A
     // build-time reminder (scripts/provision_revision_check.js) - the box learns
     // the revision from the provision.sh it is about to run, never from this.
