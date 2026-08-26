@@ -1,0 +1,25 @@
+# What is NOT copied when shell/ is shipped - the ONE list, read by every channel
+# through scripts/copy-shell.sh. One rsync exclude pattern per line; '#' comments
+# and blank lines ignored. A pattern with no '/' matches the basename at any depth
+# (so shell/pairing/*.test.js is covered by the last line).
+#
+# This list exists for the reason deploy/infra.list does: it was hand-written in
+# four places (make-release.sh, build-image.sh, image.yml, deploy.sh) and had
+# already drifted - two of them excluded electron-web-client and two did not.
+
+# Installed by the box, never shipped: ~700 MB of Electron, and it is per-arch.
+node_modules
+
+# The box's own state, not the release's: installed app bundles and their data.
+apps-data
+
+# Whatever the previous run wrote.
+*.log
+
+# A local experiment that never belonged in a release.
+electron-web-client
+
+# The tests are the dev host's and CI's. They are a third of the shell's
+# JavaScript by size (674 KB uncompressed, 68 files at 3.10.2), nothing on a box
+# requires one, and the box has no test runner to run them with.
+*.test.js

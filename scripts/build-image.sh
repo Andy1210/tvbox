@@ -100,7 +100,15 @@ mkdir -p "$F"
 # EVERYTHING flat in files/, so a file dropped from infra.list must not keep
 # shipping from a stale local assembly (CI always assembles into a clean tree)
 find "$F" -maxdepth 1 -type f -delete
-rsync -a --delete --exclude node_modules --exclude apps-data --exclude '*.log' "$TVBOX/shell" "$F/"
+# shell/ comes from the ONE shared exclude list (deploy/shell-exclude.list) via
+# copy-shell.sh - byte-for-byte the same set image.yml assembles. Before this the
+# image shipped electron-web-client, which the OTA tarball and the dev deploy
+# both left out.
+# --delete-excluded, not just --delete: this is a local staging directory that
+# survives between builds, so a file excluded since the last one would keep
+# shipping. Safe HERE and nowhere else - on a box the same flag would take
+# node_modules and apps-data with it (see deploy/deploy.sh).
+"$HERE/copy-shell.sh" "$F" --delete --delete-excluded
 # The infra files come from the ONE shared list (deploy/infra.list) via
 # copy-infra.sh - byte-for-byte the same set image.yml assembles, so a local
 # build and CI produce identical payloads (this is how remote_input_bridge.py,
