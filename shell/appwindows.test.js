@@ -5,7 +5,23 @@ const test = require("node:test");
 const assert = require("node:assert");
 const appwins = require("./appwindows");
 
+// A destroyed BrowserWindow does not answer politely: every method except
+// isDestroyed() throws "Object has been destroyed", and reading .webContents
+// throws too. The fake does the same, because that throw IS the bug this file
+// covers - with a fake that keeps answering, a caller holding a window across a
+// destroy passes the test and kills the shell on the box.
 function fakeWin() {
+  const gone = () => {
+    throw new TypeError("Object has been destroyed");
+  };
+  const contents = {
+    setAudioMuted(v) {
+      win.muted = v; // record on the window so a hidden-but-audible app fails the test
+    },
+    executeJavaScript() {
+      return Promise.resolve();
+    },
+  };
   const win = {
     destroyed: false,
     visible: true,
@@ -14,21 +30,19 @@ function fakeWin() {
       return this.destroyed;
     },
     isVisible() {
+      if (this.destroyed) gone();
       return this.visible;
     },
     hide() {
+      if (this.destroyed) gone();
       this.visible = false;
     },
     destroy() {
       this.destroyed = true;
     },
-    webContents: {
-      setAudioMuted(v) {
-        win.muted = v; // record on the window so a hidden-but-audible app fails the test
-      },
-      executeJavaScript() {
-        return Promise.resolve();
-      },
+    get webContents() {
+      if (this.destroyed) gone();
+      return contents;
     },
   };
   return win;
@@ -146,4 +160,56 @@ test("the app whose sound is playing is spared, hidden or not", () => {
   for (let i = 0; i < 8 && !wins.music.destroyed; i++) appwins.ramGuardTick();
   assert.equal(wins.music.destroyed, true);
   mem = was;
+});
+
+test("backgrounding one app can drop another, and the caller must survive it", () => {
+  // The crash this covers, seen on a box at 3.10.0: `background` runs the LRU
+  // cap, so it destroys OTHER windows. A caller looping over the window objects
+  // `all()` handed it then called isVisible() on one that had gone behind its
+  // back, and Electron throws "Object has been destroyed" for that - an uncaught
+  // main-process exception, i.e. a television frozen on a dialog no remote can
+  // dismiss. `visibleIds` hands out ids, which `background` re-resolves.
+  //
+  // The registry order is the point: the app being left is EARLY and the two the
+  // cap drops are registered after it, which is where a relaunched app lands.
+  // Eight apps against the 8GB box's cap of six (`mem` above), so hiding the one on
+  // screen leaves two to drop.
+  const order = ["youtube", "files", "xcloud", "spotify", "livetv", "photos", "mediaclient", "retroarch"];
+  const fixture = () => {
+    for (const id of appwins.runningIds()) appwins.destroy(id);
+    fg = null;
+    playing = null;
+    const wins = {};
+    for (const id of order) {
+      wins[id] = fakeWin();
+      appwins.register(id, wins[id]);
+      if (id !== "youtube") wins[id].visible = false; // only the one being left is on screen
+    }
+    // Least-recently-shown first, so the cap takes mediaclient and retroarch, both
+    // of them behind the loop's cursor.
+    let t = 1000;
+    for (const id of ["mediaclient", "retroarch", "xcloud", "spotify", "livetv", "photos", "files", "youtube"])
+      wins[id].tvboxLastShown = t++;
+    return wins;
+  };
+
+  // The shape main.js used to have, kept here so a future caller cannot quietly
+  // go back to it: the two windows the cap drops are still in the snapshot.
+  const before = fixture();
+  assert.throws(
+    () => {
+      for (const [id, w] of appwins.all()) if (w.isVisible()) appwins.background(id);
+    },
+    /destroyed/,
+    "iterating window objects across a destroy is the bug",
+  );
+  assert.equal(before.mediaclient.destroyed, true);
+
+  const wins = fixture();
+  for (const id of appwins.visibleIds()) appwins.background(id);
+  assert.equal(wins.youtube.visible, false, "the app being left was hidden");
+  assert.equal(wins.mediaclient.destroyed, true, "the cap still dropped the oldest hidden app");
+  assert.equal(wins.retroarch.destroyed, true);
+  assert.equal(wins.files.destroyed, false);
+  for (const id of appwins.runningIds()) appwins.destroy(id);
 });

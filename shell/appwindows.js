@@ -76,6 +76,17 @@ function all() {
 function runningIds() {
   return all().map(([id]) => id);
 }
+// The ids of the windows that are on screen. IDS, not windows: backgrounding one
+// app can destroy ANOTHER (the LRU cap and the memory guard both run inside
+// `background`), so a caller looping over the window objects `all()` handed it
+// would call into one that went while it looped, and Electron throws "Object has
+// been destroyed" for that. An id is re-resolved through `get`, which answers
+// null for a window that is no longer there.
+function visibleIds() {
+  return all()
+    .filter(([, w]) => w.isVisible())
+    .map(([id]) => id);
+}
 function touch(id) {
   const w = get(id);
   if (w) w.tvboxLastShown = Date.now();
@@ -148,4 +159,4 @@ function ramGuardTick() {
   destroy(hidden[0][0]);
 }
 
-module.exports = { init, register, get, all, runningIds, touch, background, destroy, ramGuardTick };
+module.exports = { init, register, get, all, runningIds, visibleIds, touch, background, destroy, ramGuardTick };

@@ -60,3 +60,40 @@ test("credentials in a URL PATH are why a log line gets an origin, not a slice",
   assert.ok(iptv.slice(0, 55).includes("mypassword"), "a slice of it leaks the password");
   assert.strictEqual(new URL(iptv).origin, "http://live.example.net:8080", "the origin carries none of it");
 });
+
+test("an exception carries its secrets in shapes a query string never had", () => {
+  // The three below all reached shell.log unredacted, which tvbox-diag copies onto
+  // the FAT boot partition. They matter more since the shell writes an uncaught
+  // exception's stack to a file of its own: that text is whatever threw, not a line
+  // this repo wrote, so it is the one log channel nobody here curates.
+  assert.strictEqual(redact("X-Plex-Token: abc123def"), "X-Plex-Token: REDACTED");
+  assert.strictEqual(redact("  Authorization: Bearer eyJhbGciOi"), "  Authorization: REDACTED");
+  assert.strictEqual(redact("Cookie: PHPSESSID=deadbeef"), "Cookie: REDACTED");
+  assert.strictEqual(
+    redact("connect mqtt://tvbox:hunter2@192.168.1.19:1884"),
+    "connect mqtt://tvbox:REDACTED@192.168.1.19:1884",
+    "the user is kept: it is what makes the line worth reading, and it is not the secret",
+  );
+  assert.strictEqual(
+    redact("Error: Command failed: nmcli device wifi connect Home password hunter2"),
+    "Error: Command failed: nmcli REDACTED",
+    "the program is the diagnostic part; its arguments carry the PSK",
+  );
+  // Only one line of a multi-line stack is the header.
+  const stack = "Error: boom\n    at f (/home/tv/.tvbox/shell/main.js:1:1)\nX-Plex-Token: abc";
+  assert.ok(stack.includes("at f ("));
+  assert.ok(redact(stack).includes("at f (/home/tv/.tvbox/shell/main.js:1:1)"), "the frames survive");
+  assert.ok(!redact(stack).includes("abc"));
+});
+
+test("the new shapes do not eat ordinary text", () => {
+  for (const s of [
+    "authorization is required for this endpoint",
+    "at Object.token (/home/tv/.tvbox/shell/main.js:12:3)",
+    "https://user@host/path",
+    "the Command failed: mid-sentence",
+    "a cookie: something sweet", // not at the start of a line
+  ]) {
+    assert.strictEqual(redact(s), s, JSON.stringify(s));
+  }
+});

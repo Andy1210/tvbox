@@ -442,6 +442,25 @@ test("--logs writes the log dump as a SEPARATE file", () => {
   assert.ok(logs.length <= 262144, "bounded");
 });
 
+test("the crash log is in the dump, and BEFORE what could crowd it out", () => {
+  // shell.log is truncated at every start, so after a restart the session that
+  // explains it is only in shell.crash.log. The dump is capped as a whole, and a
+  // box that keeps crashing is a box whose journal and shell.log are at their
+  // longest - so the section that carries the reason has to come first or it is
+  // the one that gets cut.
+  const box = fakeBox();
+  fs.writeFileSync(
+    p(box, "home", "tv", ".tvbox", "shell.crash.log"),
+    "2026-01-01T00:00:00Z v3.10.1\nTypeError: boom\n",
+  );
+  fs.writeFileSync(p(box, "home", "tv", ".tvbox", "shell.log"), "[shell] something went wrong\n");
+  fs.writeFileSync(path.join(box.bin, "journalctl"), '#!/bin/sh\necho "journal line"\n', { mode: 0o755 });
+  report(box, ["--logs"]);
+  const logs = fs.readFileSync(p(box, "boot", "firmware", "tvbox-diag-logs.txt"), "utf8");
+  assert.match(logs, /TypeError: boom/);
+  assert.ok(logs.indexOf("TypeError: boom") < logs.indexOf("journal line"), "the crash comes first");
+});
+
 test("the timer-driven unit can actually be retriggered", () => {
   // systemd will not restart a oneshot that is still "active", so RemainAfterExit
   // on a timer-driven unit freezes it after the first run: the report would stay at

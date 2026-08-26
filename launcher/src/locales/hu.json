@@ -1009,5 +1009,9 @@
     "failed": "Nem sikerült elmenteni.",
     "needsProvision": "Ez a doboz még nem tudja átállítani - számítógépről újra be kell állítani.",
     "confirmStrand": "Így mindkét rádió ki lenne kapcsolva, és ebben a dobozban nincs hálózati kábel - semmi nem érné el: se Wi-Fi, se Bluetooth-távirányító, se telefon -, és ez újraindítás után is így marad. Nyomd meg még egyszer a megerősítéshez."
+  },
+  "crash": {
+    "restarted": "A doboz újraindult",
+    "restartedMsg": "Hiba történt, és a doboz újraindította magát. Ami ment, az leállt."
   }
 }

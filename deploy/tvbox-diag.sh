@@ -459,6 +459,13 @@ fi
 {
   echo "tvbox logs, written $(date '+%Y-%m-%d %H:%M:%S %Z' 2> /dev/null)"
   echo
+  echo "===== $TVBOX_DIR/shell.crash.log ====="
+  # What the shell wrote on its way out, and FIRST because the whole dump is capped:
+  # a box that keeps crashing is a box whose other logs are at their longest, so this
+  # section is the one that would be cut. It exists at all because shell.log below is
+  # truncated at every start, which after a restart is the session that explains it.
+  tail -c 8192 "$TVBOX_DIR/shell.crash.log" 2> /dev/null || echo "(no crash since this box was set up)"
+  echo
   echo "===== previous boot, last 200 lines ====="
   journalctl -b -1 -n 200 --no-pager 2> /dev/null || echo "(no previous boot in the journal - it may be volatile)"
   echo
