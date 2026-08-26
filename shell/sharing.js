@@ -379,6 +379,11 @@ function pullAppshare(peerId, shareId, group) {
  * `shares` before it gets here. That is the whole boundary - what this function
  * does is scope an app that already passed it - so a second call site needs the
  * same check, and `pullAppshare`/`compareAppshare` beside it have none at all.
+ *
+ * The scoping is by OWNERSHIP, not by the owner's toggle: `compare` and `pull` ask
+ * whether the share is this app's, never whether Settings has it switched on, so an
+ * app can still pull into a share the owner turned off. `list` reports `on` and
+ * nothing enforces it.
  */
 async function appSharesCall(id, action, payload) {
   const cfg = deps.config.rawAppshares();

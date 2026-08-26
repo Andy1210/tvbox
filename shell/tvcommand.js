@@ -18,7 +18,9 @@ let deps = {
   currentApp: () => null,
   appWindow: () => null, // (id) -> BrowserWindow | null
   launcherWebContents: () => null,
-  nativeRunning: () => false,
+  // Denies: `showLyrics` reads this as "the screen is free", so an unwired module
+  // must not answer that a native app is absent.
+  nativeRunning: () => true,
   navTo: () => false,
   showLauncher: () => {},
   cecPower: () => {},

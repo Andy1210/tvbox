@@ -96,13 +96,17 @@ test("with no wiring at all, the auto-sleep stands down rather than sleeping", (
   // The default has to DENY: if init were ever skipped, a fail-open one would turn
   // the television off mid-film.
   const answers = [];
-  const fresh = (() => {
-    delete require.cache[require.resolve("./powermenu")];
-    return require("./powermenu");
-  })();
-  fresh.init({ jsonRes: (_res, body) => answers.push(body) });
+  const key = require.resolve("./powermenu");
+  const real = require.cache[key];
+  delete require.cache[key];
+  const fresh = require("./powermenu");
+  // `execFile` has no denying default - it IS the action - so a bare instance
+  // would reboot whatever machine runs this suite if a `reboot` case were ever
+  // added beside this one.
+  fresh.init({ execFile: () => {}, jsonRes: (_res, body) => answers.push(body) });
   fresh.handlePower("sleep_if_idle", {});
   assert.deepEqual(answers, [{ ok: true, slept: false }]);
+  require.cache[key] = real; // the rest of this file uses the original instance
 });
 
 test("...and does sleep when the box really is idle", () => {

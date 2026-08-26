@@ -125,6 +125,19 @@ for (const name of SHELL_MODULES) {
   });
 }
 
+// Comments do not count as code. A whole `X.init({…})` block commented out is the
+// realistic way an initialization goes missing while main.js still loads, and a
+// check that reads it as present is a check that has quietly stopped checking.
+// Whole-line only, and block comments: a `//` inside a string (there are URLs in
+// main.js) must not swallow the rest of its line.
+function withoutComments(src) {
+  return src
+    .replace(/\/\*[\s\S]*?\*\//g, "")
+    .split("\n")
+    .filter((l) => !/^\s*\/\//.test(l))
+    .join("\n");
+}
+
 // A module here is injected rather than reaching for the shell itself, so one that
 // is required and never initialized is a runtime failure with nothing before it:
 // it loads, it lints, its own tests pass against their fakes, and the first real
@@ -134,16 +147,21 @@ for (const name of SHELL_MODULES) {
 //
 // Static, on purpose: the initialization happens at module level or inside the
 // bootstrap, and the loader above deliberately never runs the bootstrap.
-test("every module main.js requires that has an init() is initialized by it", () => {
-  const main = fs.readFileSync(path.join(__dirname, "main.js"), "utf8");
+//
+// SHELL_MODULES, not every module main.js requires: the shell's older modules are
+// deliberately outside this. `mqtt` is initialized by mediapublish rather than by
+// main.js, and `diag.init` is a test-only seam production is right never to call -
+// so listing either would fail the check for being correct.
+test("every module this split added that has an init() is initialized by main.js", () => {
+  const main = withoutComments(fs.readFileSync(path.join(__dirname, "main.js"), "utf8"));
   const missing = [];
   for (const name of SHELL_MODULES) {
-    const src = fs.readFileSync(path.join(__dirname, name + ".js"), "utf8");
+    const src = withoutComments(fs.readFileSync(path.join(__dirname, name + ".js"), "utf8"));
     if (!/\n {2}init[,:]|module\.exports = \{[^}]*\binit\b/s.test(src)) continue;
     // The local name main.js gave it - the module is not always required under its
     // own file name (widgets.js is `cards`).
     const required = main.match(new RegExp('const (\\w+) = require\\("\\./' + name + '"\\)'));
-    if (!required) continue; // not required by main.js at all
+    assert.ok(required, name + ".js has an init() but main.js does not require it under a plain const");
     if (!new RegExp("\\b" + required[1] + "\\.init\\(").test(main)) missing.push(name);
   }
   assert.deepEqual(missing, [], "required but never initialized: " + missing.join(", "));

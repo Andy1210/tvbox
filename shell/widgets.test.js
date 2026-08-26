@@ -17,7 +17,10 @@ function boot(opts) {
     owner: o.owner === undefined ? "plex" : o.owner,
   };
   cards.init({
-    send: (channel, payload) => sent.push([channel, payload]),
+    // Every argument, not just the first: `apps-changed` is sent with NO payload,
+    // and an assertion that records a fixed arity cannot tell that apart from one
+    // sent with an explicit undefined.
+    send: (...args) => sent.push(args),
     playerRunning: () => state.running,
     playerIsAudioOnly: () => state.audioOnly,
     playerOwner: () => state.owner,
@@ -72,10 +75,10 @@ test("clearing a card that is not up sends nothing", () => {
   assert.equal(lists(sent).length, 0);
 });
 
-test("a running-apps change is its own message", () => {
+test("a running-apps change is its own message, with nothing on it", () => {
   const { sent } = boot();
   cards.appsChanged();
-  assert.deepEqual(sent[sent.length - 1], ["apps-changed", undefined]);
+  assert.deepEqual(sent[sent.length - 1], ["apps-changed"], "the launcher's listener takes no argument");
 });
 
 // ---- the derived sound card ----
