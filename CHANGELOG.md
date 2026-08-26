@@ -5,6 +5,26 @@ updates). `scripts/make-release.sh` lifts the current version's `hu`/`en`
 blocks into the OTA feed's `notes` - keep both languages, keep it short, and
 write for the person on the couch (what changes for THEM), not for developers.
 
+## 3.10.3
+
+### hu
+
+- **Egy alkalmazás weboldala nem tudja többé a doboz saját üzenetei elé tenni
+  magát.** Eddig egy weboldal el tudta takarni az értesítéseket, és olyan
+  állapotba tudta hozni a képernyőt, ahol a távirányító semmit nem ért el.
+- **A képernyőn megjelenő üzenet nem veszi el a távirányítót.** Ehhez a doboz
+  ablakkezelője is frissül, azt viszont a szokásos frissítés nem cseréli ki:
+  akkor kerül a helyére, amikor a dobozt legközelebb újratelepíted.
+
+### en
+
+- **An app's web page can no longer put itself in front of the box's own
+  notes.** A page could hide notifications, and leave the screen in a state
+  where the remote reached nothing at all.
+- **A note on screen no longer takes the remote.** That half needs the box's
+  window manager, which an ordinary update does not replace: it arrives the next
+  time the box is set up again.
+
 ## 3.10.2
 
 ### hu
