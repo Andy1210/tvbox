@@ -5,6 +5,29 @@ updates). `scripts/make-release.sh` lifts the current version's `hu`/`en`
 blocks into the OTA feed's `notes` - keep both languages, keep it short, and
 write for the person on the couch (what changes for THEM), not for developers.
 
+## 3.10.1
+
+### hu
+
+- **Nem áll meg a doboz, ha több app is nyitva van.** Amikor egy újabb appot
+  indítottál, és a háttérben már több futott, a doboz hibaüzenettel megállhatott:
+  a képernyőn ott maradt egy ablak, amit a távirányítóval nem lehetett eltüntetni,
+  és csak áramtalanítás segített. Ez elmúlt.
+- **Ha mégis hiba történik, a doboz újraindul magától.** Eddig egy hibaüzenetnél
+  megállt és ott is maradt. Most tíz-húsz másodperc alatt visszajön a főképernyő,
+  és egy rövid üzenet elmondja, hogy újraindult, hogy ne úgy tűnjön, mintha
+  magától hagyta volna abba a filmet.
+
+### en
+
+- **The box no longer stops when several apps are open.** Opening one more app
+  while others were already in the background could halt the box with an error
+  window the remote could not dismiss, and only unplugging it helped. Fixed.
+- **If something does go wrong, the box restarts itself.** It used to stop on an
+  error message and stay there. Now the home screen is back in ten to twenty
+  seconds, and a short note says it restarted, so it does not look as if the box
+  gave up on your film by itself.
+
 ## 3.10.0
 
 ### hu
