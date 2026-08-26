@@ -5,6 +5,26 @@ updates). `scripts/make-release.sh` lifts the current version's `hu`/`en`
 blocks into the OTA feed's `notes` - keep both languages, keep it short, and
 write for the person on the couch (what changes for THEM), not for developers.
 
+## 3.10.2
+
+### hu
+
+- **Ezúttal nincs új funkció.** A doboz belső felépítését rendeztük át, hogy a
+  következő változtatásokat ki lehessen próbálni, mielőtt a tévédre kerülnek.
+  Amit látsz, és amit a távirányító csinál, ugyanaz maradt.
+- **Egy hibás beállítás-képernyő nem indítja újra a dobozt.** Eddig, ha egy
+  Beállítások-kártya nem tudta lekérni az adatait, az egész doboz újraindult, és
+  a film félbeszakadt. Most a kártya marad üresen, minden más megy tovább.
+
+### en
+
+- **No new features this time.** The box's own code was reorganised so that
+  future changes can be tested before they reach your television. What you see,
+  and what the remote does, is unchanged.
+- **A settings screen that fails no longer restarts the box.** If a Settings card
+  could not fetch its data, the whole box used to restart and your film stopped.
+  Now the card stays empty and everything else carries on.
+
 ## 3.10.1
 
 ### hu
