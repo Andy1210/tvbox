@@ -248,6 +248,20 @@ test("another app's share is refused even when it is named", async () => {
   }
 });
 
+test("a share the owner switched OFF can still be pulled into - the toggle is outbound", async () => {
+  // Settings calls that group "what this box offers", so the switch governs what
+  // is SERVED. Gating a pull on it would break the one-way pairing the launcher
+  // has a sentence for: a box that offers nothing has no key to give, and could
+  // then no longer bring anything here either.
+  boot({ entries: [entry("saves", "retroarch")], onPath: ["rclone"], appshares: { enabled: [] } });
+  const listed = await sharing.appSharesCall("retroarch", "list");
+  assert.equal(listed.shares[0].on, false, "the app is told it is not being offered");
+  // …and the pull gets as far as the peer lookup rather than being refused for
+  // being switched off.
+  const r = await sharing.appSharesCall("retroarch", "pull", { shareId: "saves", peerId: "nobody" });
+  assert.deepEqual(r, { ok: false, error: "unknown_peer" });
+});
+
 test("an unknown action is refused", async () => {
   boot({ entries: [] });
   assert.deepEqual(await sharing.appSharesCall("x", "delete"), { ok: false, error: "unknown shares action" });

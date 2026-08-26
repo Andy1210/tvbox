@@ -380,10 +380,15 @@ function pullAppshare(peerId, shareId, group) {
  * does is scope an app that already passed it - so a second call site needs the
  * same check, and `pullAppshare`/`compareAppshare` beside it have none at all.
  *
- * The scoping is by OWNERSHIP, not by the owner's toggle: `compare` and `pull` ask
- * whether the share is this app's, never whether Settings has it switched on, so an
- * app can still pull into a share the owner turned off. `list` reports `on` and
- * nothing enforces it.
+ * The scoping is by OWNERSHIP, and deliberately not by the owner's toggle. That
+ * switch is OUTBOUND - Settings calls the group "what this box offers", and its
+ * hint says reading is all the other box can do - so it governs what is served,
+ * never what may be brought here. Making `pull` consult it would break the state
+ * the UI has a sentence for: `issueShareKey` answers null while nothing is
+ * enabled, which is what makes a pairing ONE-WAY, and the launcher then says
+ * "connected, one way: this box can read from it, but it offers nothing back
+ * yet". A box that offers nothing could no longer pull anything. `list` reports
+ * `on` so an app can show the offering state; it is not a permission on the pull.
  */
 async function appSharesCall(id, action, payload) {
   const cfg = deps.config.rawAppshares();
