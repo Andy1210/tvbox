@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { FocusContext, useFocusable, setFocus } from "@noriginmedia/norigin-spatial-navigation";
+import { FocusContext, doesFocusableExist, setFocus, useFocusable } from "@noriginmedia/norigin-spatial-navigation";
 import type { AppManifest } from "../lib/types";
 import { fetchApps, quitApp } from "../lib/api";
 import { launchApp } from "../lib/shell";
@@ -7,6 +7,7 @@ import { fetchWidgets, subscribeWidgets, type HomeWidget } from "../lib/widgets"
 import { Icon } from "./Icon";
 import { useI18n } from "../lib/i18n";
 import { useNavStore } from "../stores/nav";
+import { homeRowTarget } from "../lib/homeNav";
 import { useAppPrefsStore, orderIds } from "../stores/appPrefs";
 import { Clock } from "./Clock";
 import { Tile } from "./Tile";
@@ -88,6 +89,58 @@ export function Home() {
     ).map((id) => byId.get(id)!);
   }, [apps, order, hidden, loc, tag]);
 
+  /**
+   * The tile the app rail was last left on.
+   *
+   * Entering a row at its first key is what the running-app row wants, but the
+   * rail is the one row that scrolls: without this, going up to the running
+   * apps and back down again scrolled the rail all the way back to its first
+   * app, every time.
+   */
+  const lastTile = useRef<string | null>(null);
+  const rememberTile = useCallback((id: string) => {
+    lastTile.current = id;
+  }, []);
+
+  /**
+   * HOME as rows, top to bottom, each in the order it wants to be entered.
+   *
+   * Read at press time rather than memoised: the rail's remembered tile is a
+   * ref, and a stale row list aims a press at a chip whose app has quit.
+   */
+  const homeRows = useCallback((): string[][] => {
+    const tiles = [...sorted.map((a) => a.id), ...(getMoreHidden ? [] : [GET_MORE_ID])];
+    const held = lastTile.current;
+    return [
+      // The gear first: Up out of the rail should not arrive at a power menu,
+      // and the power button is one press Left from here.
+      ["home-settings", "home-power"],
+      widgets.map((w) => "widget-" + w.id),
+      // The chip before its quit button, which is the whole point: a quit
+      // button is reached by pressing Right onto it, never by arriving in the
+      // row.
+      apps.filter((a) => a.running).flatMap((a) => ["run-" + a.id, "runx-" + a.id]),
+      held && tiles.includes(held) ? [held, ...tiles.filter((id) => id !== held)] : tiles,
+    ];
+  }, [apps, sorted, widgets, getMoreHidden]);
+
+  /** Up and Down for one HOME focusable (see lib/homeNav.ts). */
+  const vertical = useCallback(
+    (from: string) =>
+      (dir: string): boolean => {
+        if (dir !== "up" && dir !== "down") return true;
+        const target = homeRowTarget(homeRows(), from, dir, doesFocusableExist);
+        // Nothing above or below: hand the press back rather than eat it.
+        if (!target) return true;
+        // Deferred by a macrotask, the way the store's source chips are: set
+        // from inside the library's own key handler, the focus does not
+        // survive the press being resolved.
+        setTimeout(() => setFocus(target), 0);
+        return false;
+      },
+    [homeRows],
+  );
+
   // Place focus ONCE, after the first app-list load: the first tile, else the
   // "Get more" tile, else the Settings gear. One-shot so a later setApps (the
   // quit handler, or the visibility refetch) can't overwrite an explicitly-set
@@ -159,6 +212,7 @@ export function Home() {
           <FocusButton
             focusKey="home-power"
             onEnter={() => setPowerOpen(true)}
+            onArrowPress={vertical("home-power")}
             className="shrink-0 w-[6vh] h-[6vh] rounded-full bg-white/5 flex items-center justify-center"
           >
             <svg
@@ -176,6 +230,7 @@ export function Home() {
           <FocusButton
             focusKey="home-settings"
             onEnter={() => open("settings")}
+            onArrowPress={vertical("home-settings")}
             className="shrink-0 w-[6vh] h-[6vh] rounded-full bg-white/5 flex items-center justify-center"
           >
             <svg
@@ -211,6 +266,7 @@ export function Home() {
                     key={w.id}
                     focusKey={"widget-" + w.id}
                     onEnter={() => onSelect(app)}
+                    onArrowPress={vertical("widget-" + w.id)}
                     className="px-[1.6vw] py-[1.4vh] rounded-[1.4vh] bg-white/5 flex items-center gap-[1.2vw] max-w-[34vw]"
                   >
                     <span
@@ -239,6 +295,7 @@ export function Home() {
                       <FocusButton
                         focusKey={"run-" + app.id}
                         onEnter={() => onSelect(app)}
+                        onArrowPress={vertical("run-" + app.id)}
                         className="px-[1.4vw] py-[1.2vh] rounded-l-[1.2vh] rounded-r-[0.3vh] bg-white/5 flex items-center gap-[0.9vw]"
                       >
                         <span
@@ -251,6 +308,7 @@ export function Home() {
                       </FocusButton>
                       <FocusButton
                         focusKey={"runx-" + app.id}
+                        onArrowPress={vertical("runx-" + app.id)}
                         onEnter={() =>
                           quitApp(app.id).then(() =>
                             fetchApps().then((list) => {
@@ -291,9 +349,23 @@ export function Home() {
               shift with the negative margins - otherwise they crop in a hard line */}
           <div className="flex gap-[2.4vw] overflow-x-auto py-[9vh] -my-[5vh] px-[3vw] -mx-[1.4vw] no-scrollbar">
             {sorted.map((app) => (
-              <Tile key={app.id} app={app} onSelect={onSelect} />
+              <Tile
+                key={app.id}
+                app={app}
+                onSelect={onSelect}
+                onArrowPress={vertical(app.id)}
+                onFocused={rememberTile}
+              />
             ))}
-            {!getMoreHidden && <Tile key={GET_MORE_ID} app={getMoreTile} onSelect={onSelect} />}
+            {!getMoreHidden && (
+              <Tile
+                key={GET_MORE_ID}
+                app={getMoreTile}
+                onSelect={onSelect}
+                onArrowPress={vertical(GET_MORE_ID)}
+                onFocused={rememberTile}
+              />
+            )}
           </div>
         </main>
 

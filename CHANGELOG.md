@@ -5,6 +5,29 @@ updates). `scripts/make-release.sh` lifts the current version's `hu`/`en`
 blocks into the OTA feed's `notes` - keep both languages, keep it short, and
 write for the person on the couch (what changes for THEM), not for developers.
 
+## 3.10.4
+
+### hu
+
+- **A főképernyőn a felfelé nyíl a futó alkalmazásokhoz visz, nem a bezáró
+  gombjukra.** A képernyő jobb széléről eddig a fogaskerékre ugrott a kijelölés,
+  középről pedig a futó alkalmazás X-ére. Mostantól a fel és a le mindig a
+  következő sorra lép: alkalmazások, futó alkalmazások, kártyák, fejléc. Egy
+  futó alkalmazást a jobbra nyíllal zársz be, ahogy eddig is.
+- **Az alkalmazások sora ott marad, ahol hagytad.** Ha felmész a futó
+  alkalmazásokhoz és visszajössz, ugyanaz az alkalmazás lesz kijelölve, nem
+  megint az első.
+
+### en
+
+- **Up on the home screen goes to the running apps, not to their close
+  button.** From the right of the screen the highlight used to jump to the
+  settings gear, and from the middle to a running app's X. Up and Down now step
+  one row at a time: apps, running apps, cards, the header. A running app is
+  still closed with Right and OK.
+- **The app row keeps its place.** Go up to the running apps and come back, and
+  the highlight is on the app you left rather than on the first one again.
+
 ## 3.10.3
 
 ### hu
