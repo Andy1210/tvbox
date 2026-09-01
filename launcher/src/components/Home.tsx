@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { FocusContext, useFocusable, setFocus } from "@noriginmedia/norigin-spatial-navigation";
+import { FocusContext, doesFocusableExist, setFocus, useFocusable } from "@noriginmedia/norigin-spatial-navigation";
 import type { AppManifest } from "../lib/types";
 import { fetchApps, quitApp } from "../lib/api";
 import { launchApp } from "../lib/shell";
@@ -7,6 +7,7 @@ import { fetchWidgets, subscribeWidgets, type HomeWidget } from "../lib/widgets"
 import { Icon } from "./Icon";
 import { useI18n } from "../lib/i18n";
 import { useNavStore } from "../stores/nav";
+import { enteredIn, homeRowEnd, homeRowTarget, rememberRow, type HomeRow } from "../lib/homeNav";
 import { useAppPrefsStore, orderIds } from "../stores/appPrefs";
 import { Clock } from "./Clock";
 import { Tile } from "./Tile";
@@ -16,6 +17,34 @@ import { PowerMenu } from "./PowerMenu";
 // A synthetic HOME tile that opens the app catalog ("Get more apps"). Not a real
 // app - onSelect routes its id to the catalog view. Hideable via Settings → Apps.
 const GET_MORE_ID = "__getmore";
+
+/**
+ * The focus keys HOME builds out of app ids, and the one thing they must not do.
+ *
+ * An app id is only constrained to `[a-z0-9_-]` and nothing is reserved, so
+ * `run-plex`, `home-settings` and `home-rail` are all legal ids - and a tile
+ * used to be keyed by the id alone, mounting last and overwriting whichever key
+ * it collided with. A press aimed BY NAME then acted on the wrong thing.
+ * The colon is what closes it: no id can contain one.
+ */
+const tileKey = (id: string): string => `tile:${id}`;
+/**
+ * The catalog tile's own key, which is NOT built from its id.
+ *
+ * `__getmore` is a legal app id, so a manifest calling itself that would give
+ * two tiles one key - the collision this whole naming exists to close, through
+ * the one door the id charset cannot shut. The second colon is what no derived
+ * key can produce.
+ */
+const GET_MORE_KEY = "tile::getmore";
+const runKey = (id: string): string => `run:${id}`;
+const quitKey = (id: string): string => `runx:${id}`;
+const widgetKey = (id: string): string => `widget:${id}`;
+
+// Where each row was last left lives in lib/homeNav.ts, outside the component:
+// HOME is unmounted while Settings or the catalog is up, and coming back to the
+// rail's first app is the same jump this stops inside one visit. Empty on a
+// fresh launcher start, so a box that has just booted opens on the first tile.
 
 export function Home() {
   const { t, loc, tag } = useI18n();
@@ -88,14 +117,76 @@ export function Home() {
     ).map((id) => byId.get(id)!);
   }, [apps, order, hidden, loc, tag]);
 
-  // Place focus ONCE, after the first app-list load: the first tile, else the
-  // "Get more" tile, else the Settings gear. One-shot so a later setApps (the
-  // quit handler, or the visibility refetch) can't overwrite an explicitly-set
-  // focus - e.g. the quit flow's run-*/first-tile target.
+  /** Where a row was left, recorded as the cursor lands on it. */
+  const rememberTile = useCallback((id: string) => rememberRow("rail", tileKey(id)), []);
+
+  /**
+   * HOME as rows, top to bottom and left to right.
+   *
+   * Read at press time rather than memoised: a row's remembered key lives
+   * outside React, and a stale row list aims a press at a chip whose app has
+   * quit.
+   */
+  const homeRows = useCallback((): HomeRow[] => {
+    const tiles = [...sorted.map((a) => tileKey(a.id)), ...(getMoreHidden ? [] : [GET_MORE_KEY])];
+    const running = apps.filter((a) => a.running);
+    const widgetKeys = widgets.map((w) => widgetKey(w.id));
+    return [
+      // No name, so no memory: arriving at the header is the settings gear, and
+      // the power button - a menu nobody wants to reach by accident - is one
+      // press away from it.
+      { name: "", keys: ["home-power", "home-settings"], entries: ["home-settings", "home-power"] },
+      { name: "widgets", keys: widgetKeys, entries: widgetKeys },
+      {
+        name: "running",
+        keys: running.flatMap((a) => [runKey(a.id), quitKey(a.id)]),
+        entries: running.map((a) => runKey(a.id)),
+      },
+      { name: "rail", keys: tiles, entries: tiles },
+    ];
+  }, [apps, sorted, widgets, getMoreHidden]);
+
+  /** One HOME focusable's arrows: the row above or below, and the ends of its own row. */
+  const arrows = useCallback(
+    (from: string) =>
+      (dir: string): boolean => {
+        if (dir === "left" || dir === "right") {
+          const round = homeRowEnd(homeRows(), from, dir, doesFocusableExist);
+          // Not an end: geometry moves inside the row, as it always has.
+          if (round === undefined) return true;
+          // An end with nowhere to go round to is still the row's own press.
+          if (round) setFocus(round);
+          return false;
+        }
+        if (dir !== "up" && dir !== "down") return true;
+        const target = homeRowTarget(homeRows(), from, dir, doesFocusableExist);
+        // Nothing above or below: hand the press back rather than eat it.
+        if (!target) return true;
+        // Set here, inside the press, rather than a macrotask later: deferring
+        // it meant two presses arriving together both resolved from the same
+        // row and moved one row between them - measured on a box, 7 times in 10
+        // at no gap - and left a window in which the target could unmount with
+        // the press already refused, which is a cursor nowhere and a dead
+        // remote.
+        setFocus(target);
+        return false;
+      },
+    [homeRows],
+  );
+
+  // Place focus ONCE, after the first app-list load: the tile the rail was left
+  // on, else the first tile, else the "Get more" tile, else the Settings gear.
+  // One-shot so a later setApps (the quit handler, or the visibility refetch)
+  // can't overwrite an explicitly-set focus - e.g. the quit flow's target.
+  // The remembered tile is what makes a trip to Settings and back land where it
+  // left rather than at the start of the rail; on a fresh start there is none.
   const didInitialFocus = useRef(false);
   useEffect(() => {
     if (didInitialFocus.current || !loaded) return;
-    const first = sorted.length ? sorted[0].id : !getMoreHidden ? GET_MORE_ID : "home-settings";
+    const rail = sorted.map((a) => tileKey(a.id));
+    const held = enteredIn("rail");
+    const first =
+      held && rail.includes(held) ? held : rail.length ? rail[0] : !getMoreHidden ? GET_MORE_KEY : "home-settings";
     const id = setTimeout(() => {
       setFocus(first);
       didInitialFocus.current = true; // mark done only after focus actually ran (a cleared timer must retry)
@@ -159,6 +250,7 @@ export function Home() {
           <FocusButton
             focusKey="home-power"
             onEnter={() => setPowerOpen(true)}
+            onArrowPress={arrows("home-power")}
             className="shrink-0 w-[6vh] h-[6vh] rounded-full bg-white/5 flex items-center justify-center"
           >
             <svg
@@ -176,6 +268,7 @@ export function Home() {
           <FocusButton
             focusKey="home-settings"
             onEnter={() => open("settings")}
+            onArrowPress={arrows("home-settings")}
             className="shrink-0 w-[6vh] h-[6vh] rounded-full bg-white/5 flex items-center justify-center"
           >
             <svg
@@ -209,8 +302,10 @@ export function Home() {
                 return (
                   <FocusButton
                     key={w.id}
-                    focusKey={"widget-" + w.id}
+                    focusKey={widgetKey(w.id)}
                     onEnter={() => onSelect(app)}
+                    onArrowPress={arrows(widgetKey(w.id))}
+                    onFocused={() => rememberRow("widgets", widgetKey(w.id))}
                     className="px-[1.6vw] py-[1.4vh] rounded-[1.4vh] bg-white/5 flex items-center gap-[1.2vw] max-w-[34vw]"
                   >
                     <span
@@ -231,14 +326,25 @@ export function Home() {
           {apps.some((a) => a.running) && (
             <div className="mb-[2.6vh]">
               <h1 className="text-[2vh] font-semibold text-fg-dim mb-[1.4vh] tracking-wide">{t("home.running")}</h1>
-              <div className="flex gap-[1.2vw] flex-wrap">
+              {/* One line that scrolls, not a wrapping block. The row model
+                  above declares these chips as ONE row, and a second visual
+                  line made that claim false: measured with eight apps running,
+                  no press reached it at all, because Down from line 1 goes to
+                  the rail and Up from line 2 to the header. A box with 8 GB of
+                  RAM keeps up to seven windows alive, so that is an ordinary
+                  state, not a corner. The focused chip scrolls itself into view
+                  the way every other focusable does; the padding pair is the
+                  focus ring's room, since overflow-x clips the other axis too. */}
+              <div className="flex gap-[1.2vw] flex-nowrap overflow-x-auto no-scrollbar -my-[1vh] py-[1vh] scroll-px-[4vw]">
                 {apps
                   .filter((a) => a.running)
                   .map((app) => (
                     <div key={app.id} className="flex items-center gap-[0.5vw]">
                       <FocusButton
-                        focusKey={"run-" + app.id}
+                        focusKey={runKey(app.id)}
                         onEnter={() => onSelect(app)}
+                        onArrowPress={arrows(runKey(app.id))}
+                        onFocused={() => rememberRow("running", runKey(app.id))}
                         className="px-[1.4vw] py-[1.2vh] rounded-l-[1.2vh] rounded-r-[0.3vh] bg-white/5 flex items-center gap-[0.9vw]"
                       >
                         <span
@@ -250,16 +356,32 @@ export function Home() {
                         <span className="text-[2vh] font-semibold truncate max-w-[16vw]">{loc(app.name)}</span>
                       </FocusButton>
                       <FocusButton
-                        focusKey={"runx-" + app.id}
+                        focusKey={quitKey(app.id)}
+                        onArrowPress={arrows(quitKey(app.id))}
+                        // The CHIP, not this button: a row is never entered at
+                        // the control that quits an app.
+                        onFocused={() => rememberRow("running", runKey(app.id))}
                         onEnter={() =>
                           quitApp(app.id).then(() =>
                             fetchApps().then((list) => {
                               setApps(list);
                               // the chip we sat on is gone - land somewhere sane
                               const still = list.filter((a) => a.running);
+                              const was = apps.filter((a) => a.running).findIndex((x) => x.id === app.id);
+                              const rail = sorted.map((a) => tileKey(a.id));
+                              const held = enteredIn("rail");
                               setTimeout(() => {
-                                if (still.length) setFocus("run-" + still[0].id);
-                                else if (sorted.length) setFocus(sorted[0].id);
+                                // The app that slid into this one's place, or
+                                // the one before it at the end of the row: the
+                                // cursor stays where the eye is. Aiming at the
+                                // FIRST chip snapped a scrolling row back to
+                                // its start on the one press this row exists
+                                // for. With nothing left running it is the tile
+                                // the rail was left on, for the same reason.
+                                const next = still[Math.min(Math.max(was, 0), still.length - 1)];
+                                if (next) setFocus(runKey(next.id));
+                                else if (held && rail.includes(held)) setFocus(held);
+                                else if (rail.length) setFocus(rail[0]);
                                 else setFocus("home-settings");
                               }, 0);
                             }),
@@ -291,9 +413,25 @@ export function Home() {
               shift with the negative margins - otherwise they crop in a hard line */}
           <div className="flex gap-[2.4vw] overflow-x-auto py-[9vh] -my-[5vh] px-[3vw] -mx-[1.4vw] no-scrollbar">
             {sorted.map((app) => (
-              <Tile key={app.id} app={app} onSelect={onSelect} />
+              <Tile
+                key={app.id}
+                app={app}
+                focusKey={tileKey(app.id)}
+                onSelect={onSelect}
+                onArrowPress={arrows(tileKey(app.id))}
+                onFocused={rememberTile}
+              />
             ))}
-            {!getMoreHidden && <Tile key={GET_MORE_ID} app={getMoreTile} onSelect={onSelect} />}
+            {!getMoreHidden && (
+              <Tile
+                key={GET_MORE_ID}
+                app={getMoreTile}
+                focusKey={GET_MORE_KEY}
+                onSelect={onSelect}
+                onArrowPress={arrows(GET_MORE_KEY)}
+                onFocused={rememberTile}
+              />
+            )}
           </div>
         </main>
 

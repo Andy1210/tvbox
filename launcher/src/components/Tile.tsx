@@ -1,17 +1,39 @@
+import { useEffect } from "react";
 import type { AppManifest } from "../lib/types";
 import { useI18n } from "../lib/i18n";
 import { useFocusableItem } from "../lib/useFocusableItem";
 import { Icon } from "./Icon";
 
-export function Tile({ app, onSelect }: { app: AppManifest; onSelect: (app: AppManifest) => void }) {
+export function Tile({
+  app,
+  focusKey,
+  onSelect,
+  onArrowPress,
+  onFocused,
+}: {
+  app: AppManifest;
+  /** Given rather than derived from the id: HOME owns its key namespace, because
+   *  an app id may legally read like one of the other rows' keys. */
+  focusKey: string;
+  onSelect: (app: AppManifest) => void;
+  /** Intercept an arrow before spatial navigation resolves it (see FocusButton). */
+  onArrowPress?: (direction: string) => boolean;
+  /** Called with this tile's id when it takes focus, so the rail can be
+   *  re-entered where it was left. */
+  onFocused?: (id: string) => void;
+}) {
   const { t, loc } = useI18n();
   const ready = app.status === "ready";
 
   // keep the focused tile centered in the horizontally-scrolling rail
   const { ref, focused } = useFocusableItem(
-    { focusKey: app.id, onEnterPress: () => onSelect(app) },
+    { focusKey, onEnterPress: () => onSelect(app), onArrowPress },
     { behavior: "smooth", inline: "center", block: "nearest" },
   );
+
+  useEffect(() => {
+    if (focused) onFocused?.(app.id);
+  }, [focused, onFocused, app.id]);
 
   return (
     <div
