@@ -6,11 +6,15 @@ import { Icon } from "./Icon";
 
 export function Tile({
   app,
+  focusKey,
   onSelect,
   onArrowPress,
   onFocused,
 }: {
   app: AppManifest;
+  /** Given rather than derived from the id: HOME owns its key namespace, because
+   *  an app id may legally read like one of the other rows' keys. */
+  focusKey: string;
   onSelect: (app: AppManifest) => void;
   /** Intercept an arrow before spatial navigation resolves it (see FocusButton). */
   onArrowPress?: (direction: string) => boolean;
@@ -23,7 +27,7 @@ export function Tile({
 
   // keep the focused tile centered in the horizontally-scrolling rail
   const { ref, focused } = useFocusableItem(
-    { focusKey: app.id, onEnterPress: () => onSelect(app), onArrowPress },
+    { focusKey, onEnterPress: () => onSelect(app), onArrowPress },
     { behavior: "smooth", inline: "center", block: "nearest" },
   );
 

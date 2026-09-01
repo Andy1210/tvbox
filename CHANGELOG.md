@@ -9,24 +9,30 @@ write for the person on the couch (what changes for THEM), not for developers.
 
 ### hu
 
-- **A főképernyőn a felfelé nyíl a futó alkalmazásokhoz visz, nem a bezáró
-  gombjukra.** A képernyő jobb széléről eddig a fogaskerékre ugrott a kijelölés,
+- **Ha fut valami, a felfelé nyíl a futó alkalmazásokhoz visz, nem a bezáró
+  gombjukra.** Eddig a képernyő jobb széléről a fogaskerékre ugrott a kijelölés,
   középről pedig a futó alkalmazás X-ére. Mostantól a fel és a le mindig a
-  következő sorra lép: alkalmazások, futó alkalmazások, kártyák, fejléc. Egy
-  futó alkalmazást a jobbra nyíllal zársz be, ahogy eddig is.
-- **Az alkalmazások sora ott marad, ahol hagytad.** Ha felmész a futó
+  szomszédos sorra lép. Egy futó alkalmazást úgy zársz be, hogy a jobbra nyíllal
+  ráállsz az X-ére, és megnyomod az OK-t.
+- **Minden sorban ott marad a kijelölés, ahol hagytad.** Ha felmész a futó
   alkalmazásokhoz és visszajössz, ugyanaz az alkalmazás lesz kijelölve, nem
-  megint az első.
+  megint az első, és ez a beállítások megnyitása után is így marad.
+- **A futó alkalmazások egy sorba kerültek, amit végig lehet görgetni.** Eddig,
+  ha sok alkalmazás futott, a második sorba került alkalmazásokat a
+  távirányítóval nem lehetett elérni.
 
 ### en
 
-- **Up on the home screen goes to the running apps, not to their close
-  button.** From the right of the screen the highlight used to jump to the
+- **When something is running, Up goes to the running apps rather than to their
+  close button.** From the right of the screen the highlight used to jump to the
   settings gear, and from the middle to a running app's X. Up and Down now step
-  one row at a time: apps, running apps, cards, the header. A running app is
-  still closed with Right and OK.
-- **The app row keeps its place.** Go up to the running apps and come back, and
-  the highlight is on the app you left rather than on the first one again.
+  to the next row along. A running app is closed by moving Right onto its X and
+  pressing OK.
+- **Every row keeps the highlight where you left it.** Go up to the running apps
+  and come back, and it is on the app you left rather than on the first one -
+  and it survives a trip to the settings.
+- **The running apps are one row that scrolls.** With enough apps running they
+  used to spill onto a second line that the remote could not reach at all.
 
 ## 3.10.3
 
