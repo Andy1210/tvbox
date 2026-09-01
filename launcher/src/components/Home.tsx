@@ -7,7 +7,7 @@ import { fetchWidgets, subscribeWidgets, type HomeWidget } from "../lib/widgets"
 import { Icon } from "./Icon";
 import { useI18n } from "../lib/i18n";
 import { useNavStore } from "../stores/nav";
-import { homeRowTarget } from "../lib/homeNav";
+import { enteredIn, homeRowEnd, homeRowTarget, rememberRow, type HomeRow } from "../lib/homeNav";
 import { useAppPrefsStore, orderIds } from "../stores/appPrefs";
 import { Clock } from "./Clock";
 import { Tile } from "./Tile";
@@ -32,15 +32,10 @@ const runKey = (id: string): string => `run:${id}`;
 const quitKey = (id: string): string => `runx:${id}`;
 const widgetKey = (id: string): string => `widget:${id}`;
 
-/**
- * Which key each HOME row was last left on.
- *
- * Module state, deliberately: HOME is unmounted while Settings or the catalog
- * is up, and coming back to the rail's first app is the same jump this stops
- * inside one visit. Empty on a fresh launcher start, so a box that has just
- * booted still opens on the first tile.
- */
-const lastIn = new Map<string, string>();
+// Where each row was last left lives in lib/homeNav.ts, outside the component:
+// HOME is unmounted while Settings or the catalog is up, and coming back to the
+// rail's first app is the same jump this stops inside one visit. Empty on a
+// fresh launcher start, so a box that has just booted opens on the first tile.
 
 export function Home() {
   const { t, loc, tag } = useI18n();
@@ -113,89 +108,47 @@ export function Home() {
     ).map((id) => byId.get(id)!);
   }, [apps, order, hidden, loc, tag]);
 
-  /**
-   * Remember where a row was left, so Up undoes Down.
-   *
-   * Every row but the header: coming back to a row at its first item is a
-   * highlight jumping two or three places for a reason nothing on screen
-   * explains. The RUNNING row remembers the chip even when the cursor is on the
-   * quit button beside it, because arriving on a quit button is the thing this
-   * whole change exists to stop.
-   */
-  const remember = useCallback((row: string, key: string) => {
-    lastIn.set(row, key);
-  }, []);
-  const rememberTile = useCallback((id: string) => lastIn.set("rail", tileKey(id)), []);
+  /** Where a row was left, recorded as the cursor lands on it. */
+  const rememberTile = useCallback((id: string) => rememberRow("rail", tileKey(id)), []);
 
   /**
-   * HOME as rows, top to bottom, each in the order it wants to be entered.
+   * HOME as rows, top to bottom and left to right.
    *
    * Read at press time rather than memoised: a row's remembered key lives
    * outside React, and a stale row list aims a press at a chip whose app has
    * quit.
    */
-  const homeRows = useCallback((): string[][] => {
-    const enter = (row: string, keys: string[]): string[] => {
-      const held = lastIn.get(row);
-      return held && keys.includes(held) ? [held, ...keys.filter((k) => k !== held)] : keys;
-    };
+  const homeRows = useCallback((): HomeRow[] => {
     const tiles = [...sorted.map((a) => tileKey(a.id)), ...(getMoreHidden ? [] : [tileKey(GET_MORE_ID)])];
+    const running = apps.filter((a) => a.running);
+    const widgetKeys = widgets.map((w) => widgetKey(w.id));
     return [
-      // The gear first, and no memory: Up out of the rail should not arrive at
-      // a power menu, and the power button is one press Left from here.
-      ["home-settings", "home-power"],
-      enter(
-        "widgets",
-        widgets.map((w) => widgetKey(w.id)),
-      ),
-      // The chip before its quit button, which is the whole point: a quit
-      // button is reached by pressing Right onto it, never by arriving in the
-      // row.
-      enter(
-        "running",
-        apps.filter((a) => a.running).flatMap((a) => [runKey(a.id), quitKey(a.id)]),
-      ),
-      enter("rail", tiles),
+      // No name, so no memory: arriving at the header is the settings gear, and
+      // the power button - a menu nobody wants to reach by accident - is one
+      // press away from it.
+      { name: "", keys: ["home-power", "home-settings"], entries: ["home-settings", "home-power"] },
+      { name: "widgets", keys: widgetKeys, entries: widgetKeys },
+      {
+        name: "running",
+        keys: running.flatMap((a) => [runKey(a.id), quitKey(a.id)]),
+        entries: running.map((a) => runKey(a.id)),
+      },
+      { name: "rail", keys: tiles, entries: tiles },
     ];
   }, [apps, sorted, widgets, getMoreHidden]);
 
-  /**
-   * The ends of the running row belong to the row.
-   *
-   * Spatial navigation needs no orthogonal overlap for a horizontal press, so
-   * the header - which sits above and to the right of everything - is a legal
-   * "right" from the last quit button. That was rare while the row could be
-   * skipped over; it is now the only way through it, so a person quitting the
-   * third app meets that end routinely, and the press that overshoots landed on
-   * the power button. A rail on a television is a ring (the same decision the
-   * poster rows make), and it wraps chip to chip: a wrap must not put the
-   * cursor on a quit button either.
-   */
-  const ring = useCallback(
-    (from: string, dir: string): boolean => {
-      const row = apps.filter((a) => a.running);
-      if (!row.length) return true;
-      const firstChip = runKey(row[0].id);
-      const lastChip = runKey(row[row.length - 1].id);
-      const lastQuit = quitKey(row[row.length - 1].id);
-      if (dir === "left" && from === firstChip) {
-        if (row.length > 1) setFocus(lastChip);
-        return false;
-      }
-      if (dir === "right" && from === lastQuit) {
-        if (row.length > 1) setFocus(firstChip);
-        return false;
-      }
-      return true;
-    },
-    [apps],
-  );
-
-  /** One HOME focusable's arrows: rows up and down, a ring across the running row. */
+  /** One HOME focusable's arrows: the row above or below, and the ends of its own row. */
   const arrows = useCallback(
     (from: string) =>
       (dir: string): boolean => {
-        if (dir === "left" || dir === "right") return from.startsWith("run") ? ring(from, dir) : true;
+        if (dir === "left" || dir === "right") {
+          const round = homeRowEnd(homeRows(), from, dir, doesFocusableExist);
+          // Not an end: geometry moves inside the row, as it always has.
+          if (round === undefined) return true;
+          // An end with nowhere to go round to is still the row's own press.
+          if (round) setFocus(round);
+          return false;
+        }
         if (dir !== "up" && dir !== "down") return true;
         const target = homeRowTarget(homeRows(), from, dir, doesFocusableExist);
         // Nothing above or below: hand the press back rather than eat it.
@@ -209,7 +162,7 @@ export function Home() {
         setFocus(target);
         return false;
       },
-    [homeRows, ring],
+    [homeRows],
   );
 
   // Place focus ONCE, after the first app-list load: the tile the rail was left
@@ -222,7 +175,7 @@ export function Home() {
   useEffect(() => {
     if (didInitialFocus.current || !loaded) return;
     const rail = sorted.map((a) => tileKey(a.id));
-    const held = lastIn.get("rail");
+    const held = enteredIn("rail");
     const first =
       held && rail.includes(held)
         ? held
@@ -349,7 +302,7 @@ export function Home() {
                     focusKey={widgetKey(w.id)}
                     onEnter={() => onSelect(app)}
                     onArrowPress={arrows(widgetKey(w.id))}
-                    onFocused={() => remember("widgets", widgetKey(w.id))}
+                    onFocused={() => rememberRow("widgets", widgetKey(w.id))}
                     className="px-[1.6vw] py-[1.4vh] rounded-[1.4vh] bg-white/5 flex items-center gap-[1.2vw] max-w-[34vw]"
                   >
                     <span
@@ -388,7 +341,7 @@ export function Home() {
                         focusKey={runKey(app.id)}
                         onEnter={() => onSelect(app)}
                         onArrowPress={arrows(runKey(app.id))}
-                        onFocused={() => remember("running", runKey(app.id))}
+                        onFocused={() => rememberRow("running", runKey(app.id))}
                         className="px-[1.4vw] py-[1.2vh] rounded-l-[1.2vh] rounded-r-[0.3vh] bg-white/5 flex items-center gap-[0.9vw]"
                       >
                         <span
@@ -404,22 +357,26 @@ export function Home() {
                         onArrowPress={arrows(quitKey(app.id))}
                         // The CHIP, not this button: a row is never entered at
                         // the control that quits an app.
-                        onFocused={() => remember("running", runKey(app.id))}
+                        onFocused={() => rememberRow("running", runKey(app.id))}
                         onEnter={() =>
                           quitApp(app.id).then(() =>
                             fetchApps().then((list) => {
                               setApps(list);
                               // the chip we sat on is gone - land somewhere sane
                               const still = list.filter((a) => a.running);
+                              const was = apps.filter((a) => a.running).findIndex((x) => x.id === app.id);
                               const rail = sorted.map((a) => tileKey(a.id));
-                              const held = lastIn.get("rail");
+                              const held = enteredIn("rail");
                               setTimeout(() => {
-                                // The tile the rail was left on, not its first
-                                // one: quitting an app is the press this row
-                                // exists for, and landing at the start of the
-                                // rail afterwards is the jump the rest of this
-                                // change removes.
-                                if (still.length) setFocus(runKey(still[0].id));
+                                // The app that slid into this one's place, or
+                                // the one before it at the end of the row: the
+                                // cursor stays where the eye is. Aiming at the
+                                // FIRST chip snapped a scrolling row back to
+                                // its start on the one press this row exists
+                                // for. With nothing left running it is the tile
+                                // the rail was left on, for the same reason.
+                                const next = still[Math.min(Math.max(was, 0), still.length - 1)];
+                                if (next) setFocus(runKey(next.id));
                                 else if (held && rail.includes(held)) setFocus(held);
                                 else if (rail.length) setFocus(rail[0]);
                                 else setFocus("home-settings");

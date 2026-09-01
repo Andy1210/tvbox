@@ -3,6 +3,7 @@ import { act, render } from "@testing-library/react";
 import { Home } from "./Home";
 import { setupRemote, place, remote, setFocus, getCurrentFocusKey, flushFocus } from "../test/remote";
 import { useAppPrefsStore } from "../stores/appPrefs";
+import { forgetRows } from "../lib/homeNav";
 import type { AppManifest } from "../lib/types";
 import type { HomeWidget } from "../lib/widgets";
 
@@ -81,11 +82,15 @@ async function draw(): Promise<HTMLElement> {
     at(`[data-sfocus="${quitBtn(a.id)}"]`, 370 + i * 360, 400, 60, 70);
   });
   APPS.filter((a) => a.ready !== false).forEach((a, i) => at(`[data-id="${a.id}"]`, 100 + i * 340, 700, 320, 200));
-  at('[data-id="__getmore"]', 100 + APPS.length * 340, 700, 320, 200);
+  const more = container.querySelector('[data-id="__getmore"]');
+  if (more) place(more, 100 + APPS.length * 340, 700, 320, 200);
   return container;
 }
 
 beforeEach(() => {
+  // Where each row was left is module state and outlives a render, so without
+  // this a test would assert whatever the test above it happened to leave.
+  forgetRows();
   useAppPrefsStore.setState({ order: [], hidden: [], getMoreHidden: false });
   APPS = [app("files"), app("mediaclient", { running: true }), app("spotify", { running: true }), app("xcloud")];
   WIDGETS = [];
@@ -203,10 +208,13 @@ describe("HOME vertical navigation", () => {
   it("keeps a single running app's row to itself", async () => {
     APPS = [app("files"), app("mediaclient", { running: true }), app("xcloud")];
     await draw();
+    // Right off its quit button goes round to the chip rather than to the
+    // header; Left from the chip has nowhere to land that is not a quit
+    // button, so the press stays in the row.
     await setFocus(quitBtn("mediaclient"));
     await remote.right();
     await settle();
-    expect(getCurrentFocusKey()).toBe(quitBtn("mediaclient"));
+    expect(getCurrentFocusKey()).toBe(run("mediaclient"));
     await setFocus(run("mediaclient"));
     await remote.left();
     await settle();
@@ -265,6 +273,74 @@ describe("HOME vertical navigation", () => {
     });
     await settle();
     expect(quit).toEqual(["mediaclient"]);
+    expect(getCurrentFocusKey()).toBe(tile("xcloud"));
+  });
+
+  it("lands on the app that took the place of the one quit, not on the first", async () => {
+    // The row scrolls now, so aiming at the first chip snapped it back to the
+    // start on the one press this row exists for.
+    APPS = [
+      app("files"),
+      app("jellyfin", { running: true }),
+      app("mediaclient", { running: true }),
+      app("spotify", { running: true }),
+    ];
+    const container = await draw();
+    await setFocus(quitBtn("mediaclient"));
+    await settle();
+    await act(async () => {
+      (container.querySelector(`[data-sfocus="${quitBtn("mediaclient")}"]`) as HTMLElement).click();
+      await new Promise((r) => setTimeout(r, 0));
+    });
+    await settle();
+    expect(getCurrentFocusKey()).toBe(run("spotify"));
+  });
+
+  it("keeps the running row on one line that scrolls", async () => {
+    // The row model declares these chips as ONE row; a second visual line made
+    // that claim false, and the line was unreachable by any press. There is no
+    // layout engine here, so this pins the classes that decide it.
+    const container = await draw();
+    const row = container.querySelector(`[data-sfocus="${run("mediaclient")}"]`)?.parentElement?.parentElement;
+    expect(row?.className).toContain("flex-nowrap");
+    expect(row?.className).toContain("overflow-x-auto");
+    expect(row?.className).not.toContain("flex-wrap");
+  });
+
+  it("moves the cursor inside the press, not a turn later", async () => {
+    // Deferring it collapsed two quick presses into one row on the box. The
+    // press helper drains microtasks but no timers, so a deferred setFocus
+    // would leave the cursor where it was here.
+    await draw();
+    await setFocus(tile("files"));
+    await remote.up();
+    expect(getCurrentFocusKey()).toBe(run("mediaclient"));
+  });
+
+  it("keeps what a row remembers when HOME is unmounted for another screen", async () => {
+    // Settings and the catalog replace HOME, so its own state goes; the rail's
+    // place must not, or coming back is the same jump to the first app.
+    const { unmount } = render(<Home />);
+    await settle();
+    await setFocus(tile("xcloud"));
+    await settle();
+    unmount();
+    await draw();
+    expect(getCurrentFocusKey()).toBe(tile("xcloud"));
+  });
+
+  it("goes round the ends of the app rail rather than off it", async () => {
+    // The header is a legal horizontal candidate from anywhere left of it, so
+    // Right off the last tile used to land on the power button.
+    APPS = [app("files"), app("xcloud")];
+    useAppPrefsStore.setState({ order: [], hidden: [], getMoreHidden: true });
+    await draw();
+    await setFocus(tile("xcloud"));
+    await remote.right();
+    await settle();
+    expect(getCurrentFocusKey()).toBe(tile("files"));
+    await remote.left();
+    await settle();
     expect(getCurrentFocusKey()).toBe(tile("xcloud"));
   });
 });
