@@ -48,6 +48,8 @@ const tile = (id: string): string => `tile:${id}`;
 const run = (id: string): string => `run:${id}`;
 const quitBtn = (id: string): string => `runx:${id}`;
 const widget = (id: string): string => `widget:${id}`;
+/** The catalog tile's key, which is deliberately not built from its id. */
+const GET_MORE_KEY = "tile::getmore";
 
 /**
  * Let the deferred setFocus (a macrotask) run, then the scheduler settle.
@@ -112,7 +114,7 @@ describe("HOME vertical navigation", () => {
     await draw();
     // The rightmost tile: this is the corner the complaint came from, where the
     // settings gear is the nearest thing above.
-    await setFocus(tile("__getmore"));
+    await setFocus(GET_MORE_KEY);
     await remote.up();
     await settle();
     expect(getCurrentFocusKey()).toBe(run("mediaclient"));

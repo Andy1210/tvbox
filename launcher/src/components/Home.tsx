@@ -28,6 +28,15 @@ const GET_MORE_ID = "__getmore";
  * The colon is what closes it: no id can contain one.
  */
 const tileKey = (id: string): string => `tile:${id}`;
+/**
+ * The catalog tile's own key, which is NOT built from its id.
+ *
+ * `__getmore` is a legal app id, so a manifest calling itself that would give
+ * two tiles one key - the collision this whole naming exists to close, through
+ * the one door the id charset cannot shut. The second colon is what no derived
+ * key can produce.
+ */
+const GET_MORE_KEY = "tile::getmore";
 const runKey = (id: string): string => `run:${id}`;
 const quitKey = (id: string): string => `runx:${id}`;
 const widgetKey = (id: string): string => `widget:${id}`;
@@ -119,7 +128,7 @@ export function Home() {
    * quit.
    */
   const homeRows = useCallback((): HomeRow[] => {
-    const tiles = [...sorted.map((a) => tileKey(a.id)), ...(getMoreHidden ? [] : [tileKey(GET_MORE_ID)])];
+    const tiles = [...sorted.map((a) => tileKey(a.id)), ...(getMoreHidden ? [] : [GET_MORE_KEY])];
     const running = apps.filter((a) => a.running);
     const widgetKeys = widgets.map((w) => widgetKey(w.id));
     return [
@@ -177,13 +186,7 @@ export function Home() {
     const rail = sorted.map((a) => tileKey(a.id));
     const held = enteredIn("rail");
     const first =
-      held && rail.includes(held)
-        ? held
-        : rail.length
-          ? rail[0]
-          : !getMoreHidden
-            ? tileKey(GET_MORE_ID)
-            : "home-settings";
+      held && rail.includes(held) ? held : rail.length ? rail[0] : !getMoreHidden ? GET_MORE_KEY : "home-settings";
     const id = setTimeout(() => {
       setFocus(first);
       didInitialFocus.current = true; // mark done only after focus actually ran (a cleared timer must retry)
@@ -423,9 +426,9 @@ export function Home() {
               <Tile
                 key={GET_MORE_ID}
                 app={getMoreTile}
-                focusKey={tileKey(GET_MORE_ID)}
+                focusKey={GET_MORE_KEY}
                 onSelect={onSelect}
-                onArrowPress={arrows(tileKey(GET_MORE_ID))}
+                onArrowPress={arrows(GET_MORE_KEY)}
                 onFocused={rememberTile}
               />
             )}
