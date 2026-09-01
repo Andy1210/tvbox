@@ -76,11 +76,16 @@ async function draw(): Promise<HTMLElement> {
   };
   at('[data-sfocus="home-power"]', 1500, 0, 60, 60);
   at('[data-sfocus="home-settings"]', 1600, 0, 60, 60);
-  // Only the cards that are drawn: a widget naming an app that is not
-  // installed renders nothing, which is the state one test is about.
-  WIDGETS.forEach((w, i) => {
+  // A widget card is drawn only when the app it names is installed, which is
+  // the state one test is about - so this asserts which ones should be there
+  // rather than skipping quietly, and lays out the ones that ARE, in the order
+  // they appear. An element left unplaced measures as a zero box at the origin,
+  // which is a geometry assertion silently deciding on nothing.
+  let drawn = 0;
+  WIDGETS.forEach((w) => {
     const el = container.querySelector(`[data-sfocus="${widget(w.id)}"]`);
-    if (el) place(el, 100 + i * 320, 200, 300, 80);
+    expect(Boolean(el), `widget card for ${w.id}`).toBe(APPS.some((a) => a.id === w.id));
+    if (el) place(el, 100 + drawn++ * 320, 200, 300, 80);
   });
   APPS.filter((a) => a.running).forEach((a, i) => {
     at(`[data-sfocus="${run(a.id)}"]`, 100 + i * 360, 400, 260, 70);

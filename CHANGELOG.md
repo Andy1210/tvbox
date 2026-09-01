@@ -31,8 +31,8 @@ write for the person on the couch (what changes for THEM), not for developers.
   to the next row along. A running app is closed by moving Right onto its X and
   pressing OK.
 - **The app rows keep the highlight where you left it.** Go up to the running
-  apps and come back, and it is on the app you left rather than on the first one
-  - and it survives a trip to the settings.
+  apps and come back, and it is on the app you left rather than on the first
+  one, and it stays that way after a trip to the settings.
 - **The highlight goes round at the end of a row.** Right from the last app
   reaches the first one instead of the buttons at the top of the screen.
 - **The running apps are one row that scrolls.** With enough apps running they
