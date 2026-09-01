@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { FocusContext, useFocusable, setFocus } from "@noriginmedia/norigin-spatial-navigation";
-import type { RemoteAction, RemoteDeviceConfig } from "@sdk/config";
+import type { RemoteAction, RemoteDeviceConfig, IrAction } from "@sdk/config";
 import { useI18n } from "../lib/i18n";
 import { useBackspace } from "../lib/useBackspace";
 import { useEntryAnim } from "../lib/useEntryAnim";
@@ -180,11 +180,29 @@ export function RemoteKeymapPage({ device }: { device: { id: string; name: strin
     );
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-  const allActions: RemoteAction[] = [...REMOTE_ACTIONS, ...apps.map((a) => `app:${a.id}` as RemoteAction)];
+  // ...and so do the IR actions the blaster has MAPPED. Dynamic for the same reason the
+  // apps are: offering all thirteen would bury the ordinary buttons under a list of
+  // things this box mostly cannot send, and an `ir:` binding to an unmapped action does
+  // nothing at all when pressed.
+  const irConfig = useConfigStore((c) => c.config?.ir);
+  const irActions = Object.keys(
+    (irConfig?.backend === "firetv"
+      ? irConfig?.firetv?.actions
+      : irConfig?.backend === "homeassistant"
+        ? irConfig?.homeassistant?.actions
+        : irConfig?.esphome?.actions) || {},
+  ) as IrAction[];
+  const allActions: RemoteAction[] = [
+    ...REMOTE_ACTIONS,
+    ...irActions.map((a) => `ir:${a}` as RemoteAction),
+    ...apps.map((a) => `app:${a.id}` as RemoteAction),
+  ];
   const actionLabel = (a: RemoteAction): string =>
     a.startsWith("app:")
       ? t("remote.action.app", { name: apps.find((x) => "app:" + x.id === a)?.name || a.slice(4) })
-      : t("remote.action." + a);
+      : a.startsWith("ir:")
+        ? t("remote.action.ir", { name: t("ir.action." + a.slice(3)) })
+        : t("remote.action." + a);
 
   const cloneSaved = (): Record<string, RemoteDeviceConfig> => {
     const out: Record<string, RemoteDeviceConfig> = {};

@@ -338,13 +338,25 @@ async def cmd_blast(args):
     else:
         key = args.key or next(iter(spec["keys"]))
     scan_id = DEFAULT_SCAN_ID
-    if args.dry_run:
+    # Built BEFORE the radio is touched. A blast binds to no key, so the scan-id map
+    # cannot change the result (every blast row is 0xFF), and a code this build cannot
+    # encode - an unknown protocol out of the code index - would otherwise raise only
+    # after a full BLE connect, and surface as the generic exit 1 that means "the remote
+    # did not fire". Exit 4 says the CODE is the problem, which no amount of pressing
+    # buttons on the remote will fix.
+    try:
         t = make_blast_table(spec, scan_id, key, args.uuid)
+    except KeyError:
+        # build_actions skips a key whose code it cannot encode and has already said
+        # why, so the KeyError that follows carries nothing but the name.
+        log(f"! no usable code for {key!r} (see above)"); sys.exit(4)
+    except Exception as ex:
+        log(f"! cannot build a blast for {key!r}: {ex}"); sys.exit(4)
+    if args.dry_run:
         _dump_table("blast", t, blast=True); return
-    c, scan_id, have = await connect(args.mac)
+    c, _scan_id, have = await connect(args.mac)  # the map is unused: a blast row is 0xFF
     try:
         if not have: log("! keymap service missing; aborting"); sys.exit(3)
-        t = make_blast_table(spec, scan_id, key, args.uuid)
         r = Remote(c); await r.open()
         ok = await r.blast(t)
         log(f"blast {key}: {'OK' if ok else 'FAILED'}")

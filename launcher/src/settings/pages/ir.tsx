@@ -23,7 +23,24 @@ import { invalidateSummary } from "../summary";
 // it would offer the three command names as if they were signal slots, and would
 // appear the moment the first mapping was saved, locking out the typing that is the
 // only way to enter a real slot name.
-const ACTIONS: IrAction[] = ["volume_up", "volume_down", "mute"];
+// Every action the blaster knows (shell/config.js IR_ACTIONS). The TV's own input and
+// a soundbar are here because HDMI-CEC cannot express either: a source device can only
+// make ITSELF the active source, and a soundbar is usually not on the bus at all.
+const ACTIONS: IrAction[] = [
+  "volume_up",
+  "volume_down",
+  "mute",
+  "tv_power",
+  "input_next",
+  "input_hdmi1",
+  "input_hdmi2",
+  "input_hdmi3",
+  "input_hdmi4",
+  "soundbar_power",
+  "soundbar_volume_up",
+  "soundbar_volume_down",
+  "soundbar_mute",
+];
 
 export function IrPage() {
   const { t } = useI18n();
@@ -38,7 +55,8 @@ export function IrPage() {
   const backend: IrBackend = ir?.backend || "esphome";
   const es = ir?.esphome;
   const ha = ir?.homeassistant;
-  const actions = (backend === "esphome" ? es?.actions : ha?.actions) || {};
+  const fv = ir?.firetv;
+  const actions = (backend === "esphome" ? es?.actions : backend === "firetv" ? fv?.actions : ha?.actions) || {};
 
   useEffect(() => {
     let alive = true;
@@ -77,15 +95,39 @@ export function IrPage() {
       setFailed(true);
     }
   };
+  // The Fire TV remote carries no secret of its own - the BlueZ bond is the whole
+  // credential - so this block is a MAC and the action map.
+  const saveFiretv = async (patch: Record<string, unknown>) => {
+    setFailed(false);
+    try {
+      // The MAC is only sent when we HAVE one: an empty string is how the block is
+      // cleared, and this function also runs for an action save that knows nothing
+      // about the address.
+      await setIr({ firetv: { ...(fv?.mac ? { mac: fv.mac } : {}), actions: fv?.actions || {}, ...patch } });
+    } catch {
+      setFailed(true);
+    }
+  };
   const saveAction = (a: IrAction, value: string) => {
     const next = { ...actions, [a]: value }; // "" is dropped by the shell = unmapped
-    return backend === "esphome" ? saveEs({ actions: next }) : saveHa({ actions: next });
+    if (backend === "esphome") return saveEs({ actions: next });
+    if (backend === "firetv") return saveFiretv({ actions: next });
+    return saveHa({ actions: next });
   };
 
+  // A blast through a Fire TV remote takes up to twelve seconds, so a press with no
+  // sign of life invites a second one - which queues a second blast behind the first.
+  const [testing, setTesting] = useState<IrAction | null>(null);
   const test = async (a: IrAction) => {
+    if (testing) return;
     setTested(null);
-    const r = await sendIr(a);
-    setTested({ action: a, ok: r.ok, error: r.error });
+    setTesting(a);
+    try {
+      const r = await sendIr(a);
+      setTested({ action: a, ok: r.ok, error: r.error });
+    } finally {
+      setTesting(null);
+    }
   };
 
   const pushBackendPicker = () =>
@@ -97,7 +139,10 @@ export function IrPage() {
           id="ir-backend"
           title={t("ir.backendTitle")}
           failLabel={t("ir.saveFailed")}
-          options={(["esphome", "homeassistant"] as IrBackend[]).map((b) => ({ id: b, label: t("ir.backend." + b) }))}
+          options={(["esphome", "homeassistant", "firetv"] as IrBackend[]).map((b) => ({
+            id: b,
+            label: t("ir.backend." + b),
+          }))}
           value={backend}
           // Deliberately not caught: the page below is unmounted while this is open, so
           // reporting a rejected write there would report it to nobody. ChoicePage
@@ -110,7 +155,7 @@ export function IrPage() {
   return (
     <SettingsPage id="ir" title={t("ir.title")} subtitle={t("ir.hint")} onBack={nav.pop} animate="push">
       {failed && <Note tone="warn">{t("ir.saveFailed")}</Note>}
-      {status?.configured && status.connected === false && status.lastError ? (
+      {status?.configured && status.connected !== true && status.lastError ? (
         <Note tone="warn">{t("ir.disconnected", { error: status.lastError })}</Note>
       ) : null}
       {tested ? (
@@ -177,6 +222,17 @@ export function IrPage() {
             onSubmit={(v) => void saveEs({ button: v.trim() })}
           />
         </Group>
+      ) : backend === "firetv" ? (
+        <Group title={t("ir.groupDevice")}>
+          <TextRow
+            id="mac"
+            label={t("ir.mac")}
+            title={t("ir.mac")}
+            value={fv?.mac}
+            emptyLabel={t("common.notSet")}
+            onSubmit={(v) => void saveFiretv({ mac: v.trim() })}
+          />
+        </Group>
       ) : (
         <Group title={t("ir.groupDevice")}>
           <TextRow
@@ -201,7 +257,13 @@ export function IrPage() {
 
       <Group
         title={t("ir.actionsTitle")}
-        hint={backend === "esphome" ? t("ir.actionsHintEsphome") : t("ir.actionsHintHa")}
+        hint={
+          backend === "esphome"
+            ? t("ir.actionsHintEsphome")
+            : backend === "firetv"
+              ? t("ir.actionsHintFiretv")
+              : t("ir.actionsHintHa")
+        }
       >
         {ACTIONS.map((a) => (
           <TextRow
@@ -221,9 +283,9 @@ export function IrPage() {
           <Row
             key={a}
             id={"test-" + a}
-            label={t("ir.test") + " · " + t("ir.action." + a)}
+            label={(testing === a ? t("ir.testing") : t("ir.test")) + " · " + t("ir.action." + a)}
             trailing="none"
-            disabled={!actions[a]}
+            disabled={!actions[a] || !!testing}
             onEnter={() => void test(a)}
           />
         ))}

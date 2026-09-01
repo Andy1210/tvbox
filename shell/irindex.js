@@ -121,7 +121,17 @@ function fetchIndex(cb) {
 }
 
 // ---- one brand's devices -----------------------------------------------------------
-const IR_KEYS = ["VolumeUp", "VolumeDown", "Mute", "Power"];
+// The keys a published device row may carry. This is a COPY of the generator's list
+// (scripts/ir-index/keys.js): the shell ships without scripts/, so it cannot require it,
+// and irindex.test.js asserts the two still agree - a key missing here is silently
+// dropped from every device the box reads, which looks like the index not having it.
+// The first four are what can be programmed onto a remote's own buttons; the rest exist
+// to be BLASTED, which needs no key to bind to.
+const IR_KEYS = ["VolumeUp", "VolumeDown", "Mute", "Power", "HDMI1", "HDMI2", "HDMI3", "HDMI4", "Input"];
+// The ones a remote's own keymap can hold - the firmware assigns a scan id only to
+// these. Everything after them in IR_KEYS is blast-only. Same four, and the same order,
+// as the generator's identity list (scripts/ir-index/keys.js IR_KEYS).
+const PROGRAMMABLE_KEYS = IR_KEYS.slice(0, 4);
 const KINDS = new Set(["tv", "audio", "settop", "player", "climate", "other"]);
 const MAX_DEVICES = 400;
 // Mirrors the generator's own ceiling (scripts/ir-index/flipper.js): a keymap action
@@ -238,6 +248,7 @@ function fetchBrand(slug, cb) {
 
 module.exports = {
   IR_KEYS,
+  PROGRAMMABLE_KEYS,
   fetchIndex,
   fetchBrand,
   sanitizeCode,

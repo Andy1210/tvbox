@@ -151,7 +151,12 @@ CEC_CMD_FIFO = "/tmp/tvbox-cec-cmd"
 # Only TV (logical addr 0) power; nothing else. "toggle 0" resolves to on/standby
 # from the tracked TV power state (the remote bridge's Power action uses it, so
 # one button both wakes and sleeps the TV - like a TV remote's own power key).
-CEC_CMD_ALLOW = {"on 0", "standby 0", "toggle 0"}
+# `as` = <Active Source>, i.e. "show ME". It is the ONE routing command a source device
+# may legitimately send, and it is the way back from an input switch: this TV forwards
+# remote keys only to the active source, so once the set is on another input the box's
+# own remote is dead and cannot ask for anything. The asserter below re-latches on it by
+# itself, because it learns the route from our own outgoing frame.
+CEC_CMD_ALLOW = {"on 0", "standby 0", "toggle 0", "as"}
 # Shell-only commands handled here instead of being forwarded to cec-client.
 NATIVE_CMDS = {"native on", "native off"}
 STDIN_LOCK = threading.Lock()          # keep_active_source + cmd_reader both write proc.stdin
@@ -393,6 +398,16 @@ def cmd_reader(proc: subprocess.Popen, tv: TVState, bridge: Bridge) -> None:
                     if cmd:
                         print(f"cec cmd ignored: {cmd!r}", flush=True)
                     continue
+                if cmd == "as":
+                    # The asserter sends `as` only while the TV is on and not just told
+                    # to go off, because asserting into a set that is shutting down
+                    # WAKES IT (that is the whole reason keep_active_source is guarded).
+                    # A command arriving over the FIFO has to respect the same rule, or
+                    # a mis-ordered automation - "turn the TV off, then bring the box
+                    # back" - turns it straight on again.
+                    if tv.cmd is False and time.monotonic() - tv.cmd_ts < CMD_GRACE_S:
+                        print("cec cmd ignored: as (the TV was just told to go off)", flush=True)
+                        continue
                 if cmd == "toggle 0":
                     now = time.monotonic()
                     if tv.cmd is not None and now - tv.cmd_ts < CMD_GRACE_S:
@@ -407,8 +422,16 @@ def cmd_reader(proc: subprocess.Popen, tv: TVState, bridge: Bridge) -> None:
                 # standby handler still fires notify_standby() (stop playback)
                 # when the TV actually goes off - setting it optimistically
                 # swallowed that signal.
-                tv.cmd = cmd == "on 0"
-                tv.cmd_ts = time.monotonic()
+                #
+                # POWER commands only. `as` says nothing about power, and recording it
+                # as a commanded standby is not harmless: for CMD_GRACE_S afterwards the
+                # Power button's "undo" reads that as "we just turned it off" and sends
+                # `on 0` to a TV that is already on, so the set cannot be switched off
+                # for 25 s after every input recovery - and genuine power reports are
+                # distrusted for the same window.
+                if cmd in ("on 0", "standby 0"):
+                    tv.cmd = cmd == "on 0"
+                    tv.cmd_ts = time.monotonic()
                 try:
                     with STDIN_LOCK:
                         proc.stdin.write(cmd + "\n")

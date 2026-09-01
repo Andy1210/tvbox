@@ -211,7 +211,9 @@
       "power": "TV power (on/off)",
       "settings": "Open Settings",
       "app": "Launch {name}",
-      "appswitcher": "Switch between running apps"
+      "appswitcher": "Switch between running apps",
+      "ir": "IR: {name}",
+      "back_to_box": "Back to the box (TV input)"
     },
     "test": "Button test",
     "testBadge": "what does each button send?",
@@ -606,16 +608,17 @@
     "portDefault": "1883"
   },
   "ir": {
-    "title": "IR blaster (TV volume)",
+    "title": "IR blaster (TV, soundbar)",
     "configured": "configured",
     "notConfigured": "not set up",
-    "hint": "Send volume and mute to the TV through a network IR blaster when the TV takes no CEC volume. The remotes' volume buttons and MQTT/voice commands all use it.",
+    "hint": "The TV's volume, its input, and a soundbar - for what HDMI-CEC cannot reach.",
     "offHint": "Leave the device host / URL empty to turn the integration off.",
     "saveFailed": "Couldn't save the settings.",
     "backendTitle": "Blaster type",
     "backend": {
       "esphome": "ESPHome device (XIAO Smart IR Mate, ...)",
-      "homeassistant": "Home Assistant script"
+      "homeassistant": "Home Assistant script",
+      "firetv": "Fire TV remote (its own IR LED)"
     },
     "host": "Device host",
     "port": "API port",
@@ -630,7 +633,17 @@
     "action": {
       "volume_up": "Volume up",
       "volume_down": "Volume down",
-      "mute": "Mute"
+      "mute": "Mute",
+      "tv_power": "TV power",
+      "input_next": "TV next input",
+      "input_hdmi1": "TV input HDMI 1",
+      "input_hdmi2": "TV input HDMI 2",
+      "input_hdmi3": "TV input HDMI 3",
+      "input_hdmi4": "TV input HDMI 4",
+      "soundbar_power": "Soundbar power",
+      "soundbar_volume_up": "Soundbar volume up",
+      "soundbar_volume_down": "Soundbar volume down",
+      "soundbar_mute": "Soundbar mute"
     },
     "notSet": "not set",
     "test": "Test",
@@ -639,7 +652,12 @@
     "disconnected": "Blaster not reachable: {error}",
     "groupDevice": "Blaster",
     "groupTest": "Try it",
-    "portDefault": "default"
+    "portDefault": "default",
+    "mac": "Remote's Bluetooth address",
+    "actionsHintFiretv": "Which entry of the remote's saved code plan each action sends, as kind:Key - for example tv:HDMI2 or audio:Power.",
+    "testing": "Sending…",
+    "failedTitle": "The infrared command did not go out",
+    "failedMsg": "If a Fire TV remote is the blaster, press a button on it to wake it and try again."
   },
   "firetvir": {
     "title": "TV IR (this remote's own blaster)",
@@ -650,7 +668,12 @@
       "VolumeUp": "Volume +",
       "VolumeDown": "Volume −",
       "Mute": "Mute",
-      "Power": "Power"
+      "Power": "Power",
+      "HDMI1": "HDMI 1",
+      "HDMI2": "HDMI 2",
+      "HDMI3": "HDMI 3",
+      "HDMI4": "HDMI 4",
+      "Input": "Input / source"
     },
     "kind": {
       "all": "All",

@@ -140,3 +140,45 @@ test("a row's label cannot contradict the kind the list files it under", () => {
   assert.equal(devices[0].label, "Speakers", "named from a set that agrees with the kind");
   assert.equal(bestLabel(sets, "player"), "Blu-Ray");
 });
+
+// ---- the extra keys ride along, outside the identity ------------------------------
+// A device's `id` is a hash of its signature and a saved plan is matched by it, so the
+// signature must not notice the extra keys at all - otherwise publishing input codes
+// renames every device in the index and orphans every plan already on a box.
+test("an extra key changes no signature and no device id", () => {
+  const plain = tvKeys();
+  const withInputs = { ...tvKeys(), HDMI2: row("f-h2", "NEC1", "NEC1 4"), Input: row("f-in", "NEC1", "NEC1 4") };
+  assert.equal(signature(withInputs), signature(plain), "the four keys alone decide identity");
+
+  const idOf = (keys) =>
+    groupSets([{ source: "irdb", path: "p", type: "TV", label: "TV", kind: "tv", keys }]).devices[0].id;
+  assert.equal(idOf(withInputs), idOf(plain));
+});
+
+test("a codeset carrying only extra keys is still dropped", () => {
+  // Nothing could ever be PROGRAMMED from it, which is what the list is for; carrying it
+  // would put a row in the picker that cannot fill a single button.
+  const r = groupSets([
+    { source: "irdb", path: "p", type: "TV", label: "TV", kind: "tv", keys: { HDMI1: row("f-h1", "NEC1", "NEC1 4") } },
+  ]);
+  assert.equal(r.devices.length, 0);
+  assert.equal(r.skipped, 1);
+});
+
+test("an extra key is carried on the merged device, and does not relabel it", () => {
+  const bare = { source: "irdb", path: "a", type: "TV", label: "TV", kind: "tv", keys: tvKeys() };
+  const rich = {
+    source: "Flipper-IRDB",
+    path: "b",
+    type: "TVs",
+    label: "TVs",
+    kind: "tv",
+    keys: { ...tvKeys(), HDMI2: row("f-h2", "NEC1", "NEC1 4") },
+  };
+  const { devices } = groupSets([bare, rich]);
+  assert.equal(devices.length, 1, "the extra key did not split the group");
+  assert.ok(devices[0].keys.HDMI2, "and it survived onto the merged row");
+  // The variant labels the row and must keep speaking for one of the four, whatever the
+  // key order is: an extra key sorting first would rename every device.
+  assert.equal(devices[0].variant, "NECx2 7,7");
+});

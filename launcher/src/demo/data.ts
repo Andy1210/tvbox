@@ -75,6 +75,7 @@ export const CONFIG: PublicConfig = {
       actions: { volume_up: "Signal0", volume_down: "Signal1", mute: "Signal2" },
     },
     homeassistant: { url: "", hasToken: false, actions: {} },
+    firetv: { mac: "", actions: {} },
   },
 };
 

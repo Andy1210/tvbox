@@ -13,10 +13,13 @@ const mediapublish = require("./mediapublish");
 
 function boot(opts) {
   const o = opts || {};
-  const log = { published: [], announced: [], stops: 0, cards: [], sinks: 0, diag: 0 };
+  const log = { published: [], announced: [], stops: 0, cards: [], sinks: 0, diag: 0, discovery: [] };
   const ctl = {
     publish: (topic, payload, opt) => log.published.push([topic, payload, opt]),
     announce: (a) => log.announced.push(a),
+    // Mirrors what mqtt.js's init really returns: the HA entity declarations, which
+    // include a button per mapped IR action.
+    publishDiscovery: (irActions) => log.discovery.push(irActions),
   };
   mediapublish.init({
     mqtt: {
@@ -49,6 +52,7 @@ function boot(opts) {
     soundWidget: (d) => log.cards.push(d),
     onNotify: () => {},
     onCommand: () => {},
+    irActions: o.irActions || (() => []),
   });
   return log;
 }
@@ -211,4 +215,30 @@ test("with no sink at all, nothing is set and nothing throws", async () => {
   await settle();
   mediapublish.setBoxVolume("volume_set", { volume: 0.3 });
   assert.equal(log.published.filter((p) => p[0] === "setVolume").length, 0);
+});
+
+// ---- the HA buttons for the IR blaster ---------------------------------------------
+test("connecting declares a button per mapped IR action", () => {
+  const log = boot({ irActions: () => ["input_hdmi2", "soundbar_power"] });
+  mediapublish.applyConfig();
+  assert.deepEqual(log.discovery, [["input_hdmi2", "soundbar_power"]]);
+});
+
+test("a blaster that cannot report leaves the buttons alone", () => {
+  // An empty list DELETES every button (mqtt.js diffs against what it published last),
+  // so a failing read must not be reported as "no actions" - that would silently strip
+  // a working set of buttons out of Home Assistant.
+  const log = boot({
+    irActions: () => {
+      throw new Error("config unreadable");
+    },
+  });
+  mediapublish.applyConfig();
+  assert.deepEqual(log.discovery, []);
+});
+
+test("no broker means nothing to declare", () => {
+  const log = boot({ mqtt: null, irActions: () => ["mute"] });
+  mediapublish.publishIrDiscovery();
+  assert.deepEqual(log.discovery, []);
 });

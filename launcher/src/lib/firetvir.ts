@@ -2,7 +2,14 @@
 // The flow in settings/pages/firetvir.tsx drives these. Codes come from the published
 // index the box reads (shell/irindex.js), built from the community irdb database and
 // Flipper-IRDB - both credited in About and in the flow's footer.
-export const IR_KEYS = ["VolumeUp", "VolumeDown", "Mute", "Power"] as const;
+// The four the remote's own BUTTONS can hold, plus the ones that exist only to be
+// blasted (a blast binds to no key, so it needs no scan id). Mirrors shell/irindex.js
+// IR_KEYS - a key missing here is dropped from the saved plan.
+export const IR_KEYS = ["VolumeUp", "VolumeDown", "Mute", "Power", "HDMI1", "HDMI2", "HDMI3", "HDMI4", "Input"];
+// The subset the firmware assigns a scan id to, i.e. what a keymap can hold. The shell
+// drops an assignment for any other key and its Test answers "invalid key", so the
+// screen that binds BUTTONS must offer only these.
+export const PROGRAMMABLE_KEYS = IR_KEYS.slice(0, 4);
 export type IrKey = (typeof IR_KEYS)[number];
 export type IrKind = "tv" | "audio" | "settop" | "player" | "climate" | "other";
 export type IrSource = "irdb" | "flipper";

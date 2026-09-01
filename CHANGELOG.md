@@ -5,6 +5,50 @@ updates). `scripts/make-release.sh` lifts the current version's `hu`/`en`
 blocks into the OTA feed's `notes` - keep both languages, keep it short, and
 write for the person on the couch (what changes for THEM), not for developers.
 
+## 3.11.0
+
+### hu
+
+- **Át tudod váltani a tévé bemenetét a dobozról.** HDMI 1-4 külön, vagy csak a
+  következőre léptetve - hanggal, a Home Assistantból, vagy a távirányító egy
+  szabad gombjára kötve. Eddig erre nem volt mód: a HDMI-CEC-en egy lejátszó csak
+  magára tudja váltani a tévét, máshova nem.
+- **A hangprojektort is be tudod kapcsolni**, ami eddig szintén kimaradt, mert
+  nincs a CEC-buszon. A hangerejét és a némítását a Home Assistantból vagy egy
+  gombra kötve éred el - hanggal a "halkítsd le" továbbra is a tévét halkítja,
+  mert ugyanaz a szó.
+- **Ehhez nem kell új eszköz, ha van a dobozhoz párosított Fire TV
+  távirányító**: az infra LED abban van, és a doboz meg tudja kérni, hogy lőjön
+  ki egy kódot. Egy alvó távirányítót előbb meg kell nyomni - a doboz ezt meg is
+  írja, ha nem sikerült.
+- **A távirányító bármelyik szabad gombjára rá lehet kötni ezeket** (Beállítások
+  → Távirányítók és kiegészítők), például a Remote Pro fejhallgató gombjára.
+- **És vissza is lehet váltani a dobozra.** Ez fontos: amíg a tévé más bemeneten
+  áll, a doboz távirányítója nem működik - a tévé csak annak küldi a
+  gombnyomásokat, ami éppen látszik. A visszaváltás nem infrán megy, hanem
+  HDMI-CEC-en, tehát kód nélkül, minden készüléken.
+
+### en
+
+- **The TV's input can be switched from the box.** HDMI 1-4 each on its own, or
+  just stepped to the next one - by voice, from Home Assistant, or bound to a
+  spare button on a remote. There was no way to do this before: over HDMI-CEC a
+  player can only bring the TV to itself, never move it elsewhere.
+- **A soundbar can be switched on too**, which was missing for the same kind of
+  reason: it is not on the CEC bus. Its volume and mute are there from Home
+  Assistant or on a bound button - by voice, "turn it down" still means the
+  television, because it is the same phrase.
+- **No new hardware is needed if a Fire TV remote is paired to the box**: the
+  infrared LED is in the remote, and the box can ask it to fire a code. A
+  sleeping remote has to be woken with a button press first - the box says so
+  when that is what went wrong.
+- **Any spare button on a remote can be bound to these** (Settings → Remotes &
+  accessories), a Remote Pro's headphone key included.
+- **And there is a way back to the box.** This matters: while the TV is on
+  another input the box's remote does nothing, because the set only forwards
+  button presses to whatever is on screen. Coming back is not infrared but
+  HDMI-CEC, so it needs no codes and works on every television.
+
 ## 3.10.4
 
 ### hu

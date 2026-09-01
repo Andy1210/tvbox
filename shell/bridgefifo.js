@@ -61,6 +61,13 @@ function cecPower(on) {
   if (fifoCmd(CEC_CMD_FIFO, on ? "on 0" : "standby 0", "cec")) console.log("[cec] power", on ? "on" : "off");
 }
 
+// Take the TV's input back to this box - <Active Source>, the one routing command a
+// source device may send. The recovery from an input switch, and the only one that
+// needs no IR codes and no blaster, so it works on every set.
+function cecActiveSource() {
+  if (fifoCmd(CEC_CMD_FIFO, "as", "cec")) console.log("[cec] active source");
+}
+
 function remoteBridgeCmd(cmd) {
   return fifoCmd(REMOTE_CMD_FIFO, cmd, "remote");
 }
@@ -73,6 +80,7 @@ function remoteKey(action) {
 }
 
 module.exports = {
+  cecActiveSource,
   CEC_CMD_FIFO,
   REMOTE_CMD_FIFO,
   fifoCmd,

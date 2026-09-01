@@ -61,6 +61,25 @@ const KEY_NAMES = {
     // toggle.
     loose: [/^(TV|AMP|SOUNDBAR)?POWER$/, /^POWER(ON|OFF)$/, /^(ON|OFF)$/],
   },
+  // The discrete inputs are tried before the cycling one, so a file carrying both
+  // `Input` and `HDMI1` binds each to itself. canon() keeps the hyphen, hence the
+  // second spelling in each list.
+  HDMI1: { exact: ["HDMI1", "HDMI-1"], loose: [/^(TV)?HDMI-?1$/, /^INPUTHDMI-?1$/] },
+  HDMI2: { exact: ["HDMI2", "HDMI-2"], loose: [/^(TV)?HDMI-?2$/, /^INPUTHDMI-?2$/] },
+  HDMI3: { exact: ["HDMI3", "HDMI-3"], loose: [/^(TV)?HDMI-?3$/, /^INPUTHDMI-?3$/] },
+  HDMI4: { exact: ["HDMI4", "HDMI-4"], loose: [/^(TV)?HDMI-?4$/, /^INPUTHDMI-?4$/] },
+  // A bare `HDMI` is deliberately on NO list. It is ambiguous across remotes - on some
+  // it steps through the HDMI sockets, on others it selects the first - and the two
+  // readings send the television to different places, so it is left unbound rather than
+  // guessed. The spellings below are the ones the curated captures actually use.
+  Input: {
+    // `AV` is safe HERE and not in the irdb reader: this one compares a WHOLE
+    // canonicalized name, while irdb matches by contains - where two letters are also
+    // inside SAVE, AV1 and AVMUTE. It is in the list because a quarter of the curated
+    // captures call the stepping button that.
+    exact: ["INPUT", "SOURCE", "INPUTSELECT", "SOURCESELECT", "TVAV", "INPUTS", "AV"],
+    loose: [/^(TV|AV)?INPUT(SELECT|TOGGLE|S)?$/, /^SOURCE(SELECT)?$/],
+  },
 };
 
 // name -> [key, score] or null. Score decides which of a file's buttons wins a key.

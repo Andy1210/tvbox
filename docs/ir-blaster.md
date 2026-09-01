@@ -1,9 +1,26 @@
-# IR blaster - TV volume from the box
+# IR blaster - the TV's volume, its input, and the soundbar
 
 Most TVs don't accept volume over HDMI-CEC from a source device, so the box's
 remotes (and MQTT/voice commands) have no way to change the TV's real volume.
 A cheap network IR blaster pointed at the TV fixes that: the box tells the
 blaster to replay the TV remote's learned volume codes.
+
+Two more things are IR-only, and for a stronger reason than volume:
+
+- **The TV's input.** CEC has no command with which a source device selects a
+  _foreign_ input. `<Active Source>` says "show ME", and that is all - so a box
+  can bring the television to its own socket and can never move it to the games
+  console on the next one. The `<Set Stream Path>` broadcast and a spoofed
+  `<Active Source>` are the usual tricks and neither is standard behaviour for a
+  source device to send. Real IR input codes are.
+- **A soundbar.** It is usually not on the CEC bus at all, and often on its own
+  power circuit, so the only thing that reaches it is its own remote's codes.
+
+One thing to know before wiring an input switch to anything: on a TV that only
+forwards remote keys to the ACTIVE source - LG's SIMPLINK does this - moving the
+television to another input makes the box's own CEC remote stop working until
+something moves it back. That is why the input actions ask which socket rather
+than stepping blind.
 
 What uses it once configured:
 
@@ -22,6 +39,100 @@ with pluggable backends behind a single `send(action)` surface. Adding a new
 vendor (e.g. Broadlink spoken natively, without Home Assistant) means adding
 one more backend factory there - the config plumbing, the remote-bridge hook
 and the MQTT actions don't change.
+
+## Actions
+
+The vocabulary is closed (`IR_ACTIONS` in [shell/config.js](../shell/config.js)),
+because an action nothing is mapped to is refused rather than sent, and because
+each one becomes a Home Assistant button with a stable entity id:
+
+| action                                                          | what it is                                                   |
+| --------------------------------------------------------------- | ------------------------------------------------------------ |
+| `volume_up` / `volume_down` / `mute`                            | the TV's own amplifier                                       |
+| `tv_power`                                                      | the TV's power code, for a set whose CEC power does not work |
+| `input_next`                                                    | step to the next source                                      |
+| `input_hdmi1` … `input_hdmi4`                                   | select that socket directly                                  |
+| `soundbar_power`                                                | the soundbar's power key                                     |
+| `soundbar_volume_up` / `soundbar_volume_down` / `soundbar_mute` | its volume                                                   |
+
+A power code is normally a TOGGLE - one key that switches whichever way the
+device was - and nothing here can read which way that is. Whatever sends the
+command owns that honesty; the box only reports that the code went out.
+
+`input_next` exists beside the four sockets because most TVs' own remotes carry
+only the stepping button, so it is the code most likely to be in a codeset at
+all. The discrete ones are worth trying first anyway: a step lands wherever the
+set's enabled-input list says, which is not something a command can aim at.
+
+## The `firetv` backend - no blaster hardware at all
+
+If the box already has a Fire TV / Alexa remote paired to it, that remote _is_ a
+blaster: the IR LED is in the remote, not in any Fire TV, and its keymap GATT
+service takes an "InstantFire" command - blast this code, now
+([docs/firetv-remote-ir.md](firetv-remote-ir.md)).
+
+The interesting part is that a blast is bound to no BUTTON. Programming the
+remote's keymap can only reach the handful of keys the firmware assigns a scan id
+to (Power, Volume ±, Mute); a blast needs no scan id, so it can send a code for a
+button the remote does not physically have - which is exactly what a TV input is.
+
+Configure it with the remote's MAC and, per action, which entry of the saved
+remote plan to send, as `<kind>:<Key>`:
+
+```json
+"ir": {
+  "backend": "firetv",
+  "firetv": {
+    "mac": "7C:ED:C6:12:E6:3C",
+    "actions": {
+      "input_next": "tv:Input",
+      "input_hdmi2": "tv:HDMI2",
+      "soundbar_power": "audio:Power"
+    }
+  }
+}
+```
+
+Addressing by device KIND rather than by device id is what keeps "the soundbar's
+power" and "the TV's power" apart - `assign` in the plan answers a different
+question (what does the Power BUTTON do), and it has one slot. A kind is also the
+stable half of a plan: a device id is a hash of the frames a published index
+grouped, and a rebuilt index can regroup them.
+
+Two costs, both from the hardware:
+
+- **The remote sleeps between presses, and a blast leaves its BLE link down.** So
+  a blast when nobody has touched the remote may find nothing to talk to. The
+  error says so ("press a button on it to wake it, then retry") rather than
+  reporting a failure that looks like a broken TV. A press-triggered blast is the
+  reliable direction, because the press itself wakes the remote.
+- **Each send is its own BLE connect**, a second or two, so a ten-step volume
+  ramp takes tens of seconds and holds the queue. Let the remote's own programmed
+  keys do volume (`irPassthrough`) and keep this for the one-shot actions.
+
+[remote/firetv_ir_plan.example.json](../remote/firetv_ir_plan.example.json) is a
+hand-written plan carrying real LG input codes and a Samsung soundbar's power
+capture, for a box whose published index predates the input keys.
+
+## A button on any remote
+
+`ir:<action>` is a remap action ([Settings → Remotes & accessories]), so any
+button the box can see can fire any configured IR action - including the buttons
+a Fire TV remote's own keymap cannot reach, like a Remote Pro's headphone key
+(consumer usage 0x0280). It fires once per press: a blast is a single command, a
+power toggle sent twice undoes itself, and on the `firetv` backend an autorepeat
+would queue seconds of BLE work per held second.
+
+## In Home Assistant
+
+Every configured action is published as a `button` entity over MQTT discovery, on
+the box's own HA device. Pressing one publishes the same `{"action":"…"}` object
+an automation or a voice assistant would put on `tvbox/<id>/cmd`, so there is one
+path into the box rather than a private second one.
+
+The entities follow the config: removing an action deletes its button (a
+discovery config topic is retained, so a button nobody deletes would stay in Home
+Assistant pressing into a box that no longer maps it).
 
 ## Backend: ESPHome device (`esphome`)
 

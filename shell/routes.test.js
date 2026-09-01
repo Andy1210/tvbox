@@ -53,6 +53,7 @@ function fakeCtx(over = {}) {
     appsharesStatus: () => ({ running: false, shares: [] }),
     applyFileserver: () => ({ ok: true }),
     applyMqttConfig: () => {},
+    publishIrDiscovery: () => {},
     notify: () => {},
     audioSink: () => null,
     childEnv: () => process.env,

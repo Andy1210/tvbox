@@ -525,6 +525,7 @@ function serve() {
     appsharesStatus: () => appshares.status(config.rawAppshares(), sharing.appsharesDeps()),
     applyFileserver: sharing.applyFileserver,
     applyMqttConfig: mediapublish.applyConfig,
+    publishIrDiscovery: mediapublish.publishIrDiscovery,
     audioSink: () => audioSink,
     childEnv: () => ({ ...process.env, ...WL_ENV }),
     destroyAppWindow,
@@ -1445,11 +1446,17 @@ mediapublish.init({
   soundWidget: cards.soundWidget,
   onNotify: notify.handleTvNotify,
   onCommand: (cmd) => tvcommand.handle(cmd),
+  // What the blaster can send becomes a Home Assistant button each, so anything there -
+  // a dashboard, an automation, a voice assistant - can reach a TV input or a soundbar
+  // without knowing this box's MQTT topics.
+  irActions: () => ir.status().actions,
 });
 
 tvcommand.init({
   player,
   ir,
+  cecActiveSource: bridges.cecActiveSource,
+  notify: notify.handleTvNotify,
   remotefinder,
   mediastate,
   apps,
@@ -2405,6 +2412,12 @@ app.whenReady().then(async () => {
     childEnv: () => ({ ...process.env, ...WL_ENV }),
   });
   ir.applyConfig(); // IR blaster hub; no-op if not configured
+  // The MQTT bridge came up above, before the blaster had read its config - so the
+  // discovery it published carried no IR buttons. Restate them now that there is
+  // something to say. (Only the retained topics from a previous run kept the buttons
+  // alive at all, which meant a box configured by hand never got them until somebody
+  // opened Settings and saved.)
+  mediapublish.publishIrDiscovery();
   // Keep the media state topic honest about which app is in front and how loud the
   // box is; both are cheap and neither is urgent (see mediapublish.js's ticks).
   mediapublish.startTicks();

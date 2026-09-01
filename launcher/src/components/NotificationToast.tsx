@@ -49,13 +49,21 @@ export function NotificationToast() {
   // shell-originated structured notes carry a `kind` instead of display strings
   // (the shell has no i18n); map them to localized copy here
   const kindTitle =
-    note?.kind === "lowBattery" ? t("bt.lowBattery") : note?.kind === "crashRestart" ? t("crash.restarted") : "";
-  const kindMessage =
     note?.kind === "lowBattery"
-      ? t("bt.lowBatteryMsg", { name: note.name || "?", pct: String(note.battery ?? 0) })
+      ? t("bt.lowBattery")
       : note?.kind === "crashRestart"
-        ? t("crash.restartedMsg")
-        : "";
+        ? t("crash.restarted")
+        : note?.kind === "irFailed"
+          ? t("ir.failedTitle")
+          : "";
+  const kindMessage =
+    note?.kind === "irFailed"
+      ? t("ir.failedMsg")
+      : note?.kind === "lowBattery"
+        ? t("bt.lowBatteryMsg", { name: note.name || "?", pct: String(note.battery ?? 0) })
+        : note?.kind === "crashRestart"
+          ? t("crash.restartedMsg")
+          : "";
   const title = note?.title || kindTitle;
   const message = note?.message || kindMessage;
   const hasContent = !!note && !!(title || message || note.image);

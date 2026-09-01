@@ -12,6 +12,15 @@ behaviours normally need a Fire TV to set up; this box does both without one.
    keylayouts. A stock Pi kernel doesn't, so they look dead - we remap them so
    they become ordinary buttons you can bind to any app or action.
 
+There is a third use of the same BLE service, and it is not a keymap at all. An
+"InstantFire" blast sends a code **bound to no button**, so it needs none of the
+scan ids a keymap entry does - which means it can send a code for a key the
+remote does not physically have. That is what makes the remote usable as a
+general blaster for the box: switching the TV's own input, or a soundbar's
+power, neither of which HDMI-CEC can express. It is wired up as the `firetv`
+backend of the IR hub - see [ir-blaster.md](ir-blaster.md) - and its one
+limitation is below: the remote sleeps, and a blast leaves its link down.
+
 Both were reverse-engineered from Fire OS 7.7.1.3 on a Fire TV Stick 4K Max
 (AFTKA). Those working notes are not part of this repo; what a reader needs is
 below and in the Python modules it names.

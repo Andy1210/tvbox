@@ -246,14 +246,19 @@ function codeSendable(code, supported) {
 }
 
 // The picker's list for one brand, with `usable` decided by this box. A device is
-// usable when every button it offers can be sent; `null` means the probe could not
+// usable when every button it can PROGRAM can be sent; `null` means the probe could not
 // run, and the UI offers those rather than hiding codes that may work.
+//
+// The programmable four only. A device row also carries input codes now, and judging
+// those too marked a TV whose Power and Volume are perfectly sendable as unusable
+// because one HDMI code used a protocol this build cannot encode - hiding a working
+// device over a key no button can hold anyway.
 function brandDevices(slug, cb) {
   irindex.fetchBrand(slug, (err, answer) => {
     if (err) return cb(err);
     supportedProtocols((supported) => {
       const devices = answer.devices.map((d) => {
-        const verdicts = Object.values(d.keys).map((c) => codeSendable(c, supported));
+        const verdicts = PROGRAMMABLE_KEYS.filter((k) => d.keys[k]).map((k) => codeSendable(d.keys[k], supported));
         return { ...d, usable: verdicts.some((v) => v === false) ? false : verdicts.includes(null) ? null : true };
       });
       cb(null, { brand: answer.brand, slug, devices, skipped: answer.skipped });
@@ -277,6 +282,13 @@ const PLAN_FILE = path.join(TVBOX, "firetv_ir_plan.json");
 const MAX_PLAN_BYTES = 256e3;
 const MAX_PLAN_DEVICES = 8;
 const IR_KEYS = irindex.IR_KEYS;
+// The subset that can be written onto the remote's own buttons. The rest of IR_KEYS
+// exists to be blasted, and a blast needs no scan id - but the keymap does, so the
+// firmware has one only for these four. Keeping the two apart matters in three places:
+// a device is `usable` if it can fill a BUTTON, only these may be assigned to one, and
+// `resolvePlan` must not build a spec whose every key the python side then skips -
+// which writes a zero-row table and reports a successful programming of nothing.
+const PROGRAMMABLE_KEYS = irindex.PROGRAMMABLE_KEYS;
 const KINDS = new Set(["tv", "audio", "settop", "player", "climate", "other"]);
 const str = (v, max) => String(v == null ? "" : v).slice(0, max);
 const num = (v) => (Number.isFinite(v) && v >= 0 ? v : 0);
@@ -319,7 +331,7 @@ function sanitizePlan(raw) {
   // is the authority on that, not the screen that assembled the plan.
   const canSend = (id, key) => devices.some((d) => d.id === id && d.keys[key]);
   const assign = {};
-  for (const key of IR_KEYS) {
+  for (const key of PROGRAMMABLE_KEYS) {
     const a = (raw && raw.assign && raw.assign[key]) || null;
     if (!a || !canSend(a.device, key)) continue;
     assign[key] = {
@@ -426,7 +438,7 @@ function resolvePlan(raw, label, onlyKey) {
   const plan = sanitizePlan(raw);
   const byId = new Map(plan.devices.map((d) => [d.id, d]));
   const spec = { name: label || "custom", source: planSource(plan), duty_cycle: 33, keys: {} };
-  for (const key of IR_KEYS) {
+  for (const key of PROGRAMMABLE_KEYS) {
     if (onlyKey && key !== onlyKey) continue;
     const a = plan.assign[key];
     const dev = a && byId.get(a.device);
@@ -440,6 +452,73 @@ function resolvePlan(raw, label, onlyKey) {
   }
   if (!Object.keys(spec.keys).length) return null;
   return spec;
+}
+
+// One code out of a remote's saved plan, addressed by device KIND plus key instead of by
+// the remote's own button assignment.
+//
+// That addressing is the point. `assign` answers "what does the Power BUTTON do", which
+// is one slot - so a TV's power and a soundbar's power cannot both live there - while an
+// InstantFire blast is bound to no button at all and needs no scan id, so any code in
+// the plan can be sent. A kind is also the stable half of a plan: a device id is a hash
+// of the frames a published index grouped, and a rebuilt index can regroup them.
+//
+// Where several devices of a kind carry the key, the one the button assignment already
+// points at wins - somebody chose it - and otherwise the first, so the answer is at
+// least deterministic. That preference only ever applies to the four programmable keys:
+// `assign` is a map of BUTTONS, and an input has no button, so a plan holding two
+// televisions blasts an input at whichever is listed first. Nothing in the UI can
+// express a choice there today; it is deterministic rather than right.
+function resolveBlast(raw, kind, key) {
+  const plan = sanitizePlan(raw);
+  const cands = plan.devices.filter((d) => d.kind === kind && d.keys[key]);
+  if (!cands.length) return null;
+  const a = plan.assign[key];
+  const dev = (a && cands.find((d) => d.id === a.device)) || cands[0];
+  // Power carries the two quirks Fire OS's own builder gives it (IROptional + a post
+  // delay); build_actions defaults them by key name, but resolvePlan states them and a
+  // blast has to send what a programmed key would.
+  const entry = { ...dev.keys[key].entry, ...(key === "Power" ? { optional: true, post_delay: 1000 } : {}) };
+  return { name: kind + " " + key, source: dev.label || kind, duty_cycle: 33, keys: { [key]: entry } };
+}
+
+// Blast one plan target ("<kind>:<Key>", validated in config.js) through a remote. The
+// spec goes to a file of its OWN, never the codes file the remote was programmed from:
+// a blast stores nothing on the remote, so it must not be able to change what
+// `status.configured` reports about it. The name is unique per call because two blasts
+// sharing one file would send each other's code.
+function blastAction(mac, target, cb) {
+  if (!MAC_RE.test(String(mac || ""))) return cb(new Error("invalid MAC"));
+  const m = /^([a-z]+):([A-Za-z0-9]+)$/.exec(String(target || ""));
+  if (!m) return cb(new Error("invalid IR target: " + target));
+  const [, kind, key] = m;
+  if (!IR_KEYS.includes(key)) return cb(new Error("invalid IR key: " + key));
+  const plan = readPlan(mac);
+  if (!plan) return cb(new Error("the remote plan could not be read"));
+  const spec = resolveBlast(plan, kind, key);
+  // A named target with nothing behind it is the commonest way this fails - the plan
+  // holds a TV but no soundbar - so it says which half is missing rather than "failed".
+  if (!spec) return cb(new Error("no " + kind + " device in the remote setup carries " + key));
+  const file = path.join(TVBOX, "firetv_ir_blast." + process.pid + "." + Date.now() + ".json");
+  try {
+    fs.writeFileSync(file, JSON.stringify(spec, null, 2), { mode: 0o600 });
+  } catch (e) {
+    return cb(e);
+  }
+  const done = (err, r) => {
+    try {
+      fs.unlinkSync(file);
+    } catch (e) {
+      /* best effort - the next boot's tmp sweep gets it */
+    }
+    cb(err, r);
+  };
+  // Tighter than the UI's 30 s key test on purpose. A blast to an AWAKE remote answers
+  // in about a second, and a sleeping one is not going to start answering - so the rest
+  // of a long budget is spent stalling the IR queue, which every other action and every
+  // Home Assistant button press waits behind. 12 s leaves room for a slow connect and
+  // bounds a pile-up at something a person will sit through.
+  runTool(["blast", mac, "--config", file, "--key", key], 12000, done);
 }
 
 // What the codes file says about where its codes came from, so a later look at
@@ -491,7 +570,7 @@ const MAC_RE = /^([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}$/;
 // nothing on the remote at all, must not be able to claim that.
 function testKey(mac, plan, key, cb) {
   if (!MAC_RE.test(mac)) return cb(new Error("invalid MAC"));
-  if (!IR_KEYS.includes(key)) return cb(new Error("invalid key"));
+  if (!PROGRAMMABLE_KEYS.includes(key)) return cb(new Error("invalid key"));
   const spec = resolvePlan(plan, null, key);
   if (!spec) return cb(new Error("nothing is assigned to " + key));
   try {
@@ -569,5 +648,6 @@ module.exports = {
   testKey,
   program,
   erase,
-  _test: { sanitizePlan, updatePlan, resolvePlan, planSource, codeSendable, makeToBrand },
+  blastAction,
+  _test: { sanitizePlan, updatePlan, resolvePlan, resolveBlast, planSource, codeSendable, makeToBrand },
 };

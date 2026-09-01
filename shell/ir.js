@@ -11,6 +11,10 @@
 //   homeassistant - HA REST: each action runs an HA script. Covers ANY IR
 //                   device HA can drive (Broadlink RM4, SmartIR, Tuya...)
 //                   without tvbox speaking the vendor protocol itself.
+//   firetv        - the Fire TV remote's own IR LED, over the BLE keymap service
+//                   (firetvir.js). Needs no hardware beyond the remote already
+//                   paired to the box, and can send codes for buttons the remote
+//                   does not have - a TV input among them.
 //
 // A new vendor (e.g. Broadlink without HA) = one more make*Backend() returning
 // { name, send(value), connected(), close() } - nothing else changes.
@@ -18,6 +22,10 @@ const config = require("./config");
 const netguard = require("./netguard");
 
 const MAX_STEPS = 10; // cap on "volume up by N" repeats (MQTT can ask for them)
+// Steps are sequential sends, and on the `firetv` backend each one is its own BLE
+// connect - so a ten-step ramp there takes tens of seconds and holds the queue. That is
+// the hardware's pace, not a bug; a box that ramps volume often should let the remote's
+// own programmed keys do it (config.remote.devices[<mac>].irPassthrough).
 const STEP_GAP_MS = 250; // pause between repeated sends - IR receivers need a beat
 const SELECT_SETTLE_MS = 150; // esphome: let the select apply on-device before "send"
 const READY_TIMEOUT_MS = 6000; // give a (re)connecting esphome client this long to surface entities
@@ -95,6 +103,51 @@ function makeEsphomeBackend(cfg) {
   };
 }
 
+// ---- Fire TV remote backend (the remote's own IR LED, over its BLE keymap) ----
+// The remote, not the box, carries the LED - so an "InstantFire" blast hands it a code
+// and it fires. Unlike the other two backends there is no appliance here: the link is
+// built per blast, because a blast leaves it down (measured) and the remote sleeps
+// between presses, so nothing persistent could be held open anyway.
+//
+// The interesting property is that a blast is bound to no BUTTON. Programming the
+// remote's keymap can only reach the four keys the remote physically has, while this can
+// send any code in the saved plan - which is the only way to select a TV input, a
+// command CEC has no equivalent of.
+function makeFiretvBackend(cfg, mod) {
+  // Lazy, like the esphome client: firetvir pulls in the index reader and the EDID
+  // probe, and a box on another backend should pay for neither. Injectable so the
+  // failure mapping below can be tested without a remote in the room.
+  const firetvir = mod || require("./firetvir");
+  return {
+    name: "firetv",
+    // Honestly unknown: the remote is reachable exactly while it is awake, and the only
+    // way to find out is to blast.
+    connected: () => null,
+    send: (value) =>
+      new Promise((resolve, reject) => {
+        firetvir.blastAction(cfg.mac, value, (err, r) => {
+          if (err) return reject(err);
+          if (r && r.ok) return resolve();
+          // The three ways this fails are worth telling apart: a remote that cannot do
+          // it at all, one that is merely asleep, and anything else (which gets to
+          // speak for itself). A press wakes the remote, so the middle one is the
+          // failure a person can actually fix from the sofa.
+          if (r && r.code === 3) return reject(new Error("this remote has no IR keymap service"));
+          if (r && r.code === 4)
+            return reject(new Error("this code cannot be sent by this remote - pick another codeset"));
+          // A kill leaves no exit code at all, and it is the one failure where the
+          // budget itself is the news: saying "no output" sends someone looking for a
+          // crash that did not happen.
+          if (r && r.code === null) return reject(new Error("the remote did not answer in time"));
+          if (r && r.code === 1)
+            return reject(new Error("the remote did not fire - press a button on it to wake it, then retry"));
+          reject(new Error("blast failed: " + ((r && r.output) || "no output")));
+        });
+      }),
+    close() {},
+  };
+}
+
 // ---- Home Assistant backend (stateless REST, one script per action) ----
 function haScriptCall(base, token, entityId) {
   return new Promise((resolve, reject) => {
@@ -157,6 +210,9 @@ function applyConfig() {
     if (raw.backend === "homeassistant") {
       backend = makeHaBackend(raw.homeassistant);
       actions = raw.homeassistant.actions;
+    } else if (raw.backend === "firetv") {
+      backend = makeFiretvBackend(raw.firetv);
+      actions = raw.firetv.actions;
     } else {
       backend = makeEsphomeBackend(raw.esphome);
       actions = raw.esphome.actions;
@@ -189,6 +245,10 @@ function send(action, steps) {
       if (i) await sleep(STEP_GAP_MS);
       await b.send(value);
     }
+    // A send that worked retires the last failure. Without this the settings page shows
+    // "the blaster is not reachable" from an earlier attempt for as long as the config
+    // is not saved again - directly above the green "Sent." of the retry that worked.
+    lastError = "";
     return { ok: true, action, steps: n };
   });
   queue = job.then(
@@ -217,4 +277,9 @@ function setBackendForTest(b, a) {
   actions = a || {};
 }
 
-module.exports = { applyConfig, send, status, _test: { clampSteps, haScriptCall, setBackendForTest } };
+module.exports = {
+  applyConfig,
+  send,
+  status,
+  _test: { clampSteps, haScriptCall, setBackendForTest, makeFiretvBackend },
+};

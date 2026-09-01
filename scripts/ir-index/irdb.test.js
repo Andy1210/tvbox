@@ -92,3 +92,47 @@ test("a normalized row carries what the box needs and nothing else", () => {
   assert.equal(normalizeRow({ protocol: "NEC1", device: 4, subdevice: 5, function: 8 }).variant, "NEC1 4,5");
   assert.match(r.sig, /^irdb:NEC1:4:-1:8$/);
 });
+
+// ---- the input keys ----------------------------------------------------------------
+// The real LG rows, which is what makes this worth a test: both databases agree on
+// address 4 with these functions, and they are the only way to aim a TV at a socket -
+// CEC has no command for it.
+test("LG's input rows land on the discrete keys and the cycling one", () => {
+  const csv = [
+    "functionname,protocol,device,subdevice,function",
+    "POWER,NEC1,4,-1,8",
+    "TV/AV,NEC1,4,-1,11",
+    "HDMI 1,NEC1,4,-1,206",
+    "HDMI 2,NEC1,4,-1,204",
+    "HDMI 3,NEC1,4,-1,233",
+    "HDMI 4,NEC1,4,-1,218",
+  ].join("\n");
+  const keys = codesFromText(csv);
+  assert.equal(keys.HDMI1.entry.irdb.function, 206);
+  assert.equal(keys.HDMI2.entry.irdb.function, 204);
+  assert.equal(keys.HDMI3.entry.irdb.function, 233);
+  assert.equal(keys.HDMI4.entry.irdb.function, 218);
+  assert.equal(keys.Input.entry.irdb.function, 11, "TV/AV is the stepping button");
+});
+
+test("a name that picks one socket never becomes the cycling Input", () => {
+  // The whole reason the discrete keys exist is to AIM; answering "which input?" with
+  // "the next one" would switch to whatever happens to be adjacent.
+  for (const name of ["HDMI 2", "COMPONENT 1", "VIDEO 1", "RGB - PC", "ANTENNA"]) {
+    const keys = codesFromText(`functionname,protocol,device,subdevice,function\n${name},NEC1,4,-1,99`);
+    assert.ok(!keys.Input, name + " must not bind Input");
+  }
+});
+
+test("a word that merely contains an input name is not an input", () => {
+  // These are matched by CONTAINS, which is what made a bare `AV` unusable as a synonym:
+  // it is inside SAVE and AVMUTE. The regression is that any of these silently becomes
+  // "switch the television's input".
+  const csv = [
+    "functionname,protocol,device,subdevice,function",
+    "SAVE,NEC1,4,-1,77",
+    "A/V MUTE,NEC1,4,-1,80",
+    "AV1,NEC1,4,-1,90",
+  ].join("\n");
+  assert.ok(!codesFromText(csv).Input);
+});

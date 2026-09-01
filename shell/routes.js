@@ -101,6 +101,9 @@ function post(p, data, res, ctx) {
       config.setIr(data.ir); // IR blaster backend + action map (sanitized in config.js)
       ir.applyConfig(); // reconnect the backend right away
       ctx.remoteBridgeCmd("reload"); // the bridge re-reads whether volume keys go to IR
+      // The HA buttons mirror the action map, and their config topics are retained - so
+      // an action just removed has to be deleted from the broker, not merely left out.
+      ctx.publishIrDiscovery();
       changed.push("ir");
     }
     if (data.apps) {

@@ -17,7 +17,7 @@ const path = require("path");
 const crypto = require("crypto");
 const irdb = require("./irdb");
 const flipper = require("./flipper");
-const { IR_KEYS, groupSets } = require("./group");
+const { ALL_IR_KEYS, groupSets } = require("./group");
 
 // irdb LICENSE.md clause 2 requires this verbatim wherever the database is used. The
 // launcher shows the same string on the About screen (`about.irdbNotice`); it travels
@@ -119,7 +119,7 @@ function main() {
 
   // Every key row of every set, so the frame hashes are computed once for all of them.
   const rows = [];
-  for (const s of sets) for (const k of IR_KEYS) if (s.keys[k]) rows.push(s.keys[k]);
+  for (const s of sets) for (const k of ALL_IR_KEYS) if (s.keys[k]) rows.push(s.keys[k]);
   frameHashes(rows);
 
   // Merge the two spellings of a brand, then merge each brand's codesets into devices.

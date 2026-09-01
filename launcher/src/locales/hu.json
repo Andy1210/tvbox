@@ -211,7 +211,9 @@
       "power": "TV ki/be kapcsolás",
       "settings": "Beállítások megnyitása",
       "app": "{name} indítása",
-      "appswitcher": "Váltás a futó appok között"
+      "appswitcher": "Váltás a futó appok között",
+      "ir": "Infra: {name}",
+      "back_to_box": "Vissza a dobozra (TV bemenet)"
     },
     "test": "Gombteszt",
     "testBadge": "mit küldenek a gombok?",
@@ -606,16 +608,17 @@
     "portDefault": "1883"
   },
   "ir": {
-    "title": "IR jeladó (TV hangerő)",
+    "title": "IR jeladó (TV, hangprojektor)",
     "configured": "beállítva",
     "notConfigured": "nincs beállítva",
-    "hint": "Hangerő és némítás küldése a TV-nek hálózati IR jeladón át, ha a TV nem kezeli a CEC hangerőt. A távirányítók hangerő gombjai és az MQTT/hang parancsok is ezt használják.",
+    "hint": "A tévé hangereje, bemenete és a hangprojektor - amit a HDMI-CEC nem ér el.",
     "offHint": "Hagyd üresen az eszköz címét / URL-jét az integráció kikapcsolásához.",
     "saveFailed": "A beállítások mentése nem sikerült.",
     "backendTitle": "Jeladó típusa",
     "backend": {
       "esphome": "ESPHome eszköz (XIAO Smart IR Mate, ...)",
-      "homeassistant": "Home Assistant script"
+      "homeassistant": "Home Assistant script",
+      "firetv": "Fire TV távirányító (a saját infra LED-je)"
     },
     "host": "Eszköz címe",
     "port": "API port",
@@ -630,7 +633,17 @@
     "action": {
       "volume_up": "Hangerő fel",
       "volume_down": "Hangerő le",
-      "mute": "Némítás"
+      "mute": "Némítás",
+      "tv_power": "TV be/ki",
+      "input_next": "TV következő bemenet",
+      "input_hdmi1": "TV bemenet: HDMI 1",
+      "input_hdmi2": "TV bemenet: HDMI 2",
+      "input_hdmi3": "TV bemenet: HDMI 3",
+      "input_hdmi4": "TV bemenet: HDMI 4",
+      "soundbar_power": "Hangprojektor be/ki",
+      "soundbar_volume_up": "Hangprojektor hangosítás",
+      "soundbar_volume_down": "Hangprojektor halkítás",
+      "soundbar_mute": "Hangprojektor némítás"
     },
     "notSet": "nincs beállítva",
     "test": "Teszt",
@@ -639,7 +652,12 @@
     "disconnected": "A jeladó nem elérhető: {error}",
     "groupDevice": "Adó",
     "groupTest": "Kipróbálás",
-    "portDefault": "alapértelmezett"
+    "portDefault": "alapértelmezett",
+    "mac": "A távirányító Bluetooth-címe",
+    "actionsHintFiretv": "Melyik akció a mentett kódterv melyik bejegyzését küldje, fajta:Gomb alakban - például tv:HDMI2 vagy audio:Power.",
+    "testing": "Küldés…",
+    "failedTitle": "Az infra parancs nem ment ki",
+    "failedMsg": "Ha a jeladó egy Fire TV távirányító, nyomj meg rajta egy gombot, hogy felébredjen, aztán próbáld újra."
   },
   "firetvir": {
     "title": "TV IR (a távirányító saját jeladója)",
@@ -650,7 +668,12 @@
       "VolumeUp": "Hangerő +",
       "VolumeDown": "Hangerő −",
       "Mute": "Némítás",
-      "Power": "Bekapcsolás"
+      "Power": "Bekapcsolás",
+      "HDMI1": "HDMI 1",
+      "HDMI2": "HDMI 2",
+      "HDMI3": "HDMI 3",
+      "HDMI4": "HDMI 4",
+      "Input": "Bemenet / forrás"
     },
     "kind": {
       "all": "Mind",

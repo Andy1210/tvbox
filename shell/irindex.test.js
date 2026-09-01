@@ -273,3 +273,48 @@ test("a brand answer is cached per index revision, and the old generation is swe
   assert.ok(cache.includes("ir-brand-abc123abc123-samsung-1a2b3c.json"), cache.join(","));
   assert.ok(!cache.includes(path.basename(stale)), "the previous revision's copy is gone");
 });
+
+// ---- the key list is a copy, and a copy drifts -------------------------------------
+test("the box accepts exactly the keys the generator publishes", () => {
+  // The shell ships without scripts/, so it cannot require the generator's list and
+  // keeps its own. A key the generator adds and this one lacks is dropped from every
+  // device the box reads - which looks like the index not carrying it, and there is
+  // nothing anywhere to say otherwise. Hence this assertion rather than a comment.
+  const generator = require("../scripts/ir-index/keys").ALL_IR_KEYS;
+  assert.deepEqual([...irindex.IR_KEYS].sort(), [...generator].sort());
+});
+
+test("a device row keeps its input codes", () => {
+  // The four programmable keys were never the problem; these are the ones a remote has
+  // no button for, so they can only ever be blasted.
+  const dev = sanitizeDevice({
+    id: "0ecd67cc2a8e",
+    label: "TV (NEC1 4)",
+    kind: "tv",
+    keys: {
+      Power: { protocol: "NEC1", entry: { irdb: { protocol: "NEC1", device: 4, subdevice: -1, function: 8 } } },
+      HDMI2: { protocol: "NEC1", entry: { irdb: { protocol: "NEC1", device: 4, subdevice: -1, function: 204 } } },
+      Input: { protocol: "NEC1", entry: { irdb: { protocol: "NEC1", device: 4, subdevice: -1, function: 11 } } },
+    },
+  });
+  assert.equal(dev.keys.HDMI2.entry.irdb.function, 204);
+  assert.equal(dev.keys.Input.entry.irdb.function, 11);
+});
+
+test("an input code is checked like any other", () => {
+  // Same sanitizer, so a published index cannot smuggle anything into the arguments the
+  // python keymap builder is handed.
+  const dev = sanitizeDevice({
+    id: "0ecd67cc2a8e",
+    kind: "tv",
+    keys: {
+      Power: { protocol: "NEC1", entry: { irdb: { protocol: "NEC1", device: 4, subdevice: -1, function: 8 } } },
+      HDMI1: {
+        protocol: "NEC1",
+        entry: { irdb: { protocol: "NEC1;rm -rf /", device: 4, subdevice: -1, function: 206 } },
+      },
+    },
+  });
+  assert.ok(!dev.keys.HDMI1, "a protocol name outside the charset is not a code");
+  assert.ok(dev.keys.Power);
+});

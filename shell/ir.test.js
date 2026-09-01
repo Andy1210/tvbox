@@ -45,3 +45,66 @@ test("haScriptCall refuses plain http off the LAN (token must not leak)", async 
 test("haScriptCall refuses junk URLs", async () => {
   await assert.rejects(() => ir._test.haScriptCall("not a url", "tok", "script.x"), /invalid Home Assistant URL/);
 });
+
+// ---- the firetv backend: what a failed blast is allowed to say ----------------------
+// The three failures are told apart because only one of them is something a person can
+// fix, and the message reaches a voice assistant's answer. The blaster is the remote
+// itself, so "asleep" is the normal state between presses, not an error condition.
+test("firetv: a blast that fires resolves", async () => {
+  const calls = [];
+  const b = ir._test.makeFiretvBackend(
+    { mac: "7C:ED:C6:12:E6:3C" },
+    {
+      blastAction: (mac, target, cb) => {
+        calls.push([mac, target]);
+        cb(null, { ok: true, code: 0 });
+      },
+    },
+  );
+  await b.send("tv:HDMI2");
+  assert.deepEqual(calls, [["7C:ED:C6:12:E6:3C", "tv:HDMI2"]]);
+  assert.equal(b.name, "firetv");
+  assert.equal(b.connected(), null, "reachability is unknowable without blasting");
+});
+
+test("firetv: a sleeping remote says what to do about it", async () => {
+  const b = ir._test.makeFiretvBackend(
+    { mac: "7C:ED:C6:12:E6:3C" },
+    { blastAction: (m, t, cb) => cb(null, { ok: false, code: 1 }) },
+  );
+  await assert.rejects(() => b.send("tv:HDMI2"), /press a button on it/);
+});
+
+test("firetv: a remote that cannot blast at all says THAT instead", async () => {
+  // Exit 3 is the python tool finding no keymap service - an older or different remote.
+  // Telling someone to wake it would send them to press buttons forever.
+  const b = ir._test.makeFiretvBackend(
+    { mac: "7C:ED:C6:12:E6:3C" },
+    { blastAction: (m, t, cb) => cb(null, { ok: false, code: 3 }) },
+  );
+  await assert.rejects(() => b.send("tv:HDMI2"), /no IR keymap service/);
+});
+
+test("firetv: anything else speaks for itself", async () => {
+  const b = ir._test.makeFiretvBackend(
+    { mac: "7C:ED:C6:12:E6:3C" },
+    { blastAction: (m, t, cb) => cb(null, { ok: false, code: 2, output: "config not found" }) },
+  );
+  await assert.rejects(() => b.send("tv:HDMI2"), /config not found/);
+  const err = ir._test.makeFiretvBackend({ mac: "x" }, { blastAction: (m, t, cb) => cb(new Error("invalid MAC")) });
+  await assert.rejects(() => err.send("tv:HDMI2"), /invalid MAC/);
+});
+
+test("an action nothing is mapped to is refused, not guessed", async () => {
+  // The vocabulary is closed and the mapping is per-box: a box that never mapped an
+  // input must not send some other code instead.
+  ir._test.setBackendForTest(
+    { name: "firetv", send: async () => {}, connected: () => null, close() {} },
+    {
+      input_hdmi2: "tv:HDMI2",
+    },
+  );
+  await ir.send("input_hdmi2");
+  await assert.rejects(() => ir.send("soundbar_power"), /unknown IR action/);
+  assert.deepEqual(ir.status().actions, ["input_hdmi2"]);
+});

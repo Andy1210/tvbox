@@ -1,0 +1,133 @@
+{
+  "_readme": [
+    "An example ~/.tvbox/firetv_ir_plan.json, keyed by the remote's MAC (lowercase).",
+    "The UI normally writes this file from the published code index; this hand-written",
+    "form exists because the index carries a device's four PROGRAMMABLE keys plus the",
+    "input keys, and a box may be running against an index built before the input keys",
+    "were published. Every code below is quoted from irdb and Flipper-IRDB.",
+    "",
+    "`assign` is deliberately empty: it says what the remote's own BUTTONS do, and this",
+    "file is here for BLASTS - codes sent bound to no button at all, which is the only",
+    "way to reach a TV input (CEC has no command that selects a foreign input) or a",
+    "soundbar that is not on the CEC bus. Set config.ir.backend to \"firetv\" and point",
+    "each action at a `<kind>:<Key>` target from below.",
+    "",
+    "The LG discrete socket codes are double-sourced (irdb LG/TV/4,-1.csv and the",
+    "Flipper LG_MKJ39170828_Service.ir capture agree byte for byte at address 4, which",
+    "is the address this TV's measured Power/Volume/Mute already sit on) - but their",
+    "provenance is a service remote plus a crowd-sourced CSV, NOT a capture from a",
+    "retail 2019 remote. Real LG consumer remotes carry only the stepping Input button",
+    "(0x0B), so `Input` is the code most likely to work and the discrete ones are the",
+    "prize. Try Input first, then HDMI2."
+  ],
+  "aa:bb:cc:dd:ee:ff": {
+    "devices": [
+      {
+        "id": "0ecd67cc2a8e",
+        "brand": "LG",
+        "label": "TV (NEC1 4)",
+        "kind": "tv",
+        "count": 44,
+        "sources": ["irdb", "flipper"],
+        "keys": {
+          "Power": {
+            "protocol": "NEC1",
+            "entry": { "irdb": { "protocol": "NEC1", "device": 4, "subdevice": -1, "function": 8 } }
+          },
+          "VolumeUp": {
+            "protocol": "NEC1",
+            "entry": { "irdb": { "protocol": "NEC1", "device": 4, "subdevice": -1, "function": 2 } }
+          },
+          "VolumeDown": {
+            "protocol": "NEC1",
+            "entry": { "irdb": { "protocol": "NEC1", "device": 4, "subdevice": -1, "function": 3 } }
+          },
+          "Mute": {
+            "protocol": "NEC1",
+            "entry": { "irdb": { "protocol": "NEC1", "device": 4, "subdevice": -1, "function": 9 } }
+          },
+          "Input": {
+            "protocol": "NEC1",
+            "entry": { "irdb": { "protocol": "NEC1", "device": 4, "subdevice": -1, "function": 11 } }
+          },
+          "HDMI1": {
+            "protocol": "NEC1",
+            "entry": { "irdb": { "protocol": "NEC1", "device": 4, "subdevice": -1, "function": 206 } }
+          },
+          "HDMI2": {
+            "protocol": "NEC1",
+            "entry": { "irdb": { "protocol": "NEC1", "device": 4, "subdevice": -1, "function": 204 } }
+          },
+          "HDMI3": {
+            "protocol": "NEC1",
+            "entry": { "irdb": { "protocol": "NEC1", "device": 4, "subdevice": -1, "function": 233 } }
+          },
+          "HDMI4": {
+            "protocol": "NEC1",
+            "entry": { "irdb": { "protocol": "NEC1", "device": 4, "subdevice": -1, "function": 218 } }
+          }
+        }
+      },
+      {
+        "id": "c853fb071464",
+        "brand": "Samsung",
+        "label": "Sound Bars (raw 38 kHz) · AH59-02767C",
+        "kind": "audio",
+        "count": 1,
+        "sources": ["flipper"],
+        "keys": {
+          "Power": {
+            "protocol": "raw",
+            "entry": {
+              "frequency": 38000,
+              "raw": [
+                449, 452, 47, 53, 47, 53, 47, 53, 47, 53, 47, 153, 47, 153, 47, 53, 47, 53, 47, 154, 47, 153, 47, 154,
+                47, 153, 47, 53, 47, 53, 47, 53, 47, 53, 47, 454, 47, 53, 47, 53, 47, 53, 47, 53, 47, 53, 47, 53, 47,
+                53, 47, 53, 47, 154, 47, 153, 47, 154, 47, 53, 47, 154, 47, 154, 47, 154, 47, 153, 47, 53, 47, 53, 47,
+                53, 47, 154, 47
+              ]
+            }
+          },
+          "VolumeUp": {
+            "protocol": "raw",
+            "entry": {
+              "frequency": 38000,
+              "raw": [
+                452, 449, 50, 50, 50, 50, 50, 50, 50, 50, 50, 151, 50, 151, 50, 50, 50, 50, 50, 151, 50, 151, 50, 151,
+                50, 151, 50, 50, 50, 50, 50, 51, 50, 50, 50, 452, 50, 50, 50, 50, 50, 50, 50, 50, 50, 151, 50, 151, 50,
+                151, 50, 50, 50, 151, 50, 151, 50, 151, 50, 50, 50, 50, 50, 50, 50, 50, 50, 151, 50, 50, 50, 50, 50, 50,
+                50, 151, 50
+              ]
+            }
+          },
+          "VolumeDown": {
+            "protocol": "raw",
+            "entry": {
+              "frequency": 38000,
+              "raw": [
+                449, 451, 47, 53, 47, 53, 47, 53, 47, 53, 47, 154, 47, 153, 47, 53, 47, 53, 47, 153, 47, 153, 47, 154,
+                47, 153, 47, 53, 47, 53, 47, 53, 47, 53, 47, 454, 47, 53, 47, 53, 47, 53, 47, 53, 47, 53, 47, 53, 47,
+                53, 47, 153, 47, 154, 47, 153, 47, 154, 47, 56, 44, 153, 47, 154, 47, 154, 47, 53, 47, 53, 47, 53, 47,
+                53, 47, 153, 47
+              ]
+            }
+          },
+          "Mute": {
+            "protocol": "raw",
+            "entry": {
+              "frequency": 38000,
+              "raw": [
+                449, 451, 47, 53, 47, 53, 47, 53, 47, 53, 47, 154, 47, 153, 47, 53, 47, 53, 47, 153, 47, 154, 47, 154,
+                47, 153, 47, 53, 47, 53, 47, 53, 47, 53, 47, 454, 47, 53, 47, 53, 47, 53, 47, 53, 47, 53, 47, 53, 47,
+                154, 47, 53, 47, 53, 47, 53, 47, 154, 47, 154, 47, 154, 47, 53, 47, 53, 47, 153, 47, 154, 47, 154, 47,
+                53, 47, 53, 47, 53, 47, 154, 47
+              ]
+            }
+          }
+        }
+      }
+    ],
+    "assign": {},
+    "ts": 0
+  }
+}
