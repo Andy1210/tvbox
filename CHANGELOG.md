@@ -14,9 +14,11 @@ write for the person on the couch (what changes for THEM), not for developers.
   középről pedig a futó alkalmazás X-ére. Mostantól a fel és a le mindig a
   szomszédos sorra lép. Egy futó alkalmazást úgy zársz be, hogy a jobbra nyíllal
   ráállsz az X-ére, és megnyomod az OK-t.
-- **Minden sorban ott marad a kijelölés, ahol hagytad.** Ha felmész a futó
-  alkalmazásokhoz és visszajössz, ugyanaz az alkalmazás lesz kijelölve, nem
-  megint az első, és ez a beállítások megnyitása után is így marad.
+- **Az alkalmazások sorai megjegyzik, hol hagytad a kijelölést.** Ha felmész a
+  futó alkalmazásokhoz és visszajössz, ugyanaz lesz kijelölve, nem megint az
+  első, és ez a beállítások megnyitása után is így marad.
+- **A sorok végén a kijelölés körbefordul.** Az utolsó alkalmazásról jobbra az
+  elsőre lépsz, nem a képernyő tetején lévő gombokra.
 - **A futó alkalmazások egy sorba kerültek, amit végig lehet görgetni.** Eddig,
   ha sok alkalmazás futott, a második sorba került alkalmazásokat a
   távirányítóval nem lehetett elérni.
@@ -28,9 +30,11 @@ write for the person on the couch (what changes for THEM), not for developers.
   settings gear, and from the middle to a running app's X. Up and Down now step
   to the next row along. A running app is closed by moving Right onto its X and
   pressing OK.
-- **Every row keeps the highlight where you left it.** Go up to the running apps
-  and come back, and it is on the app you left rather than on the first one -
-  and it survives a trip to the settings.
+- **The app rows keep the highlight where you left it.** Go up to the running
+  apps and come back, and it is on the app you left rather than on the first one
+  - and it survives a trip to the settings.
+- **The highlight goes round at the end of a row.** Right from the last app
+  reaches the first one instead of the buttons at the top of the screen.
 - **The running apps are one row that scrolls.** With enough apps running they
   used to spill onto a second line that the remote could not reach at all.
 

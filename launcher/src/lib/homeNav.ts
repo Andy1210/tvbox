@@ -113,9 +113,16 @@ export function homeRowEnd(
 ): string | null | undefined {
   const row = rows.find((r) => r.keys.includes(from));
   if (!row) return undefined;
-  const at = row.keys.indexOf(from);
-  if (dir === "left" ? at !== 0 : at !== row.keys.length - 1) return undefined;
-  const targets = row.keys.filter((key) => row.entries.includes(key) && exists(key));
+  // What is on the SCREEN decides where the end is, not what the row lists: a
+  // widget whose app has been uninstalled is still in the widget list until the
+  // next fetch answers, and judging the end against it left the rendered card
+  // beside it looking like the middle of the row - so the press fell through to
+  // geometry and out of the row, which is the leak this exists to stop.
+  const live = row.keys.filter(exists);
+  const at = live.indexOf(from);
+  if (at < 0) return undefined;
+  if (dir === "left" ? at !== 0 : at !== live.length - 1) return undefined;
+  const targets = live.filter((key) => row.entries.includes(key));
   const to = dir === "left" ? targets[targets.length - 1] : targets[0];
   return to && to !== from ? to : null;
 }

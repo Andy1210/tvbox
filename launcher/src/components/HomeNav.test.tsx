@@ -76,7 +76,12 @@ async function draw(): Promise<HTMLElement> {
   };
   at('[data-sfocus="home-power"]', 1500, 0, 60, 60);
   at('[data-sfocus="home-settings"]', 1600, 0, 60, 60);
-  WIDGETS.forEach((w, i) => at(`[data-sfocus="${widget(w.id)}"]`, 100 + i * 320, 200, 300, 80));
+  // Only the cards that are drawn: a widget naming an app that is not
+  // installed renders nothing, which is the state one test is about.
+  WIDGETS.forEach((w, i) => {
+    const el = container.querySelector(`[data-sfocus="${widget(w.id)}"]`);
+    if (el) place(el, 100 + i * 320, 200, 300, 80);
+  });
   APPS.filter((a) => a.running).forEach((a, i) => {
     at(`[data-sfocus="${run(a.id)}"]`, 100 + i * 360, 400, 260, 70);
     at(`[data-sfocus="${quitBtn(a.id)}"]`, 370 + i * 360, 400, 60, 70);
@@ -327,6 +332,44 @@ describe("HOME vertical navigation", () => {
     unmount();
     await draw();
     expect(getCurrentFocusKey()).toBe(tile("xcloud"));
+  });
+
+  it("counts only the widget cards that are on the screen", async () => {
+    // A widget names an app, and the card is only drawn when that app is in the
+    // list: an uninstalled one leaves a key in the row with nothing behind it.
+    // Judging the end of the row by the raw list made the real card look like
+    // the middle of it, and the press left the row.
+    WIDGETS = [
+      { id: "gone", title: "Uninstalled", subtitle: "" },
+      { id: "files", title: "One", subtitle: "" },
+    ];
+    await draw();
+    await setFocus(widget("files"));
+    await settle();
+    await remote.right();
+    await settle();
+    expect(getCurrentFocusKey()).toBe(widget("files"));
+    await remote.left();
+    await settle();
+    expect(getCurrentFocusKey()).toBe(widget("files"));
+    // The row is still a row: Down reaches the running apps below it.
+    await remote.down();
+    await settle();
+    expect(getCurrentFocusKey()).toBe(run("mediaclient"));
+  });
+
+  it("arrives at the header on the gear, whichever button was pressed last", async () => {
+    // The header is the one row with no memory: arriving at a power menu
+    // because it was the last thing touched is not what anyone wants.
+    await draw();
+    await setFocus("home-power");
+    await settle();
+    await remote.down();
+    await settle();
+    expect(getCurrentFocusKey()).toBe(run("mediaclient"));
+    await remote.up();
+    await settle();
+    expect(getCurrentFocusKey()).toBe("home-settings");
   });
 
   it("goes round the ends of the app rail rather than off it", async () => {

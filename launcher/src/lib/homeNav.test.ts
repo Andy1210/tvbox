@@ -132,4 +132,21 @@ describe("homeRowEnd", () => {
     const gone = (key: string) => key !== "tile:__getmore";
     expect(homeRowEnd(ALL, "tile:plex", "left", gone)).toBe("tile:files");
   });
+
+  it("judges the end of a row by what is on the screen", () => {
+    // A widget whose app has been uninstalled is still in the list until the
+    // next fetch answers. Counting it made the card beside it look like the
+    // middle of the row, so the press fell through to geometry and left the
+    // row - which is the leak this function exists to stop.
+    const widgets: HomeRow = {
+      name: "widgets",
+      keys: ["widget:gone", "widget:files", "widget:also-gone"],
+      entries: ["widget:gone", "widget:files", "widget:also-gone"],
+    };
+    const only = (key: string) => key === "widget:files";
+    expect(homeRowEnd([widgets], "widget:files", "right", only)).toBeNull();
+    expect(homeRowEnd([widgets], "widget:files", "left", only)).toBeNull();
+    // ...and a key that is in the list but not on the screen is nobody's end.
+    expect(homeRowEnd([widgets], "widget:gone", "left", only)).toBeUndefined();
+  });
 });
