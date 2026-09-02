@@ -320,12 +320,15 @@ test("resolveBlast returns nothing rather than the wrong device", () => {
 test("resolveBlast prefers the device the button assignment already names", () => {
   // Two TVs of the same kind both carrying Power is a real state - a replacement device
   // added beside the old one - and somebody chose one of them for the button.
-  const a = tvWithInputs("aaaaaaaaaaaa");
-  const b = tvWithInputs("bbbbbbbbbbbb");
+  // Distinguishable, or the assertion cannot fail: both carry Power, and the LABEL is
+  // what resolveBlast reports as the source, so with two "TV"s the wrong choice reads
+  // as the right one.
+  const a = { ...tvWithInputs("aaaaaaaaaaaa"), label: "TV (old)" };
+  const b = { ...tvWithInputs("bbbbbbbbbbbb"), label: "TV (new)" };
   const plan = { devices: [a, b], assign: { Power: { device: b.id } } };
-  assert.equal(resolveBlast(plan, "tv", "Power").source, "TV");
+  assert.equal(resolveBlast(plan, "tv", "Power").source, "TV (new)");
   // Deterministic either way: with no assignment it is the first, never a coin toss.
-  assert.ok(resolveBlast({ devices: [a, b], assign: {} }, "tv", "Power"));
+  assert.equal(resolveBlast({ devices: [a, b], assign: {} }, "tv", "Power").source, "TV (old)");
 });
 
 test("resolveBlast gives Power the two quirks a programmed Power gets", () => {

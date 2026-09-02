@@ -654,7 +654,7 @@
     "actionsHintFiretv": "Which device's which button the box should send. The choices come from the remote's saved code plan.",
     "testing": "Sending…",
     "failedTitle": "The infrared command did not go out",
-    "noPlanHint": "Build the remote's code plan first, under TV IR on the remote's own page.",
+    "noPlanHint": "Build the remote's code plan first, under “The remote's own IR buttons” on the remote's page.",
     "planUnreadable": "The box could not read the remote's code plan just now.",
     "noSuitableTarget": "The code plan has no key for this - add the device that has it first.",
     "failed": {

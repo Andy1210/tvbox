@@ -18,6 +18,7 @@ connect() - which is replaced here, so the import never runs.
 import asyncio
 import json
 import os
+import stat
 import sys
 import tempfile
 
@@ -454,10 +455,17 @@ try:
                               "connect_timeout": 8.0, "blast_uuid": kc.BLAST_TABLE_UUID,
                               "no_pad": False, "read_retries": 9})()
         task = asyncio.ensure_future(f.cmd_serve(args))
+        # A SOCKET, not merely a file of size zero: the stale file planted above is
+        # also zero bytes, so waiting on that would pass against a server that never
+        # bound at all - and then every assertion below would be about the stale file.
         for _ in range(200):
             await asyncio.sleep(0.01)
-            if os.path.exists(sock) and os.path.getsize(sock) == 0:
-                break
+            try:
+                if stat.S_ISSOCK(os.stat(sock).st_mode):
+                    break
+            except OSError:
+                pass
+        assert stat.S_ISSOCK(os.stat(sock).st_mode), "the server never bound its socket"
 
         async def ask(obj):
             reader, writer = await asyncio.open_unix_connection(sock)

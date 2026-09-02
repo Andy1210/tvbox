@@ -31,7 +31,7 @@ write for the person on the couch (what changes for THEM), not for developers.
 - **És vissza is lehet váltani a dobozra.** Ez fontos: amíg a tévé más bemeneten
   áll, a doboz távirányítója nem működik - a tévé csak annak küldi a
   gombnyomásokat, ami éppen látszik. A visszaváltás nem infrán megy, hanem
-  HDMI-CEC-en, tehát kód nélkül, minden készüléken.
+  HDMI-CEC-en, tehát nem kell hozzá kód - ha a tévé a CEC-parancsot elfogadja.
 
 ### en
 
@@ -57,7 +57,7 @@ write for the person on the couch (what changes for THEM), not for developers.
 - **And there is a way back to the box.** This matters: while the TV is on
   another input the box's remote does nothing, because the set only forwards
   button presses to whatever is on screen. Coming back is not infrared but
-  HDMI-CEC, so it needs no codes and works on every television.
+  HDMI-CEC, so it needs no codes - as long as the set acts on the CEC command.
 
 ## 3.10.4
 

@@ -654,7 +654,7 @@
     "actionsHintFiretv": "Melyik készülék melyik gombját küldje a doboz. A választék a távirányító mentett kódtervéből jön.",
     "testing": "Küldés…",
     "failedTitle": "Az infra parancs nem ment ki",
-    "noPlanHint": "Előbb a távirányító kódtervét kell összeállítani: a táv saját lapján, a TV IR pont alatt.",
+    "noPlanHint": "Előbb a távirányító kódtervét kell összeállítani: a táv saját lapján, a „A távirányító IR gombjai” alatt.",
     "planUnreadable": "A doboz most nem tudta beolvasni a távirányító kódtervét.",
     "noSuitableTarget": "A kódtervben nincs ehhez való gomb - előbb vedd fel azt a készüléket.",
     "failed": {

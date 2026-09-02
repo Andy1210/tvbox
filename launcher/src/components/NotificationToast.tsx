@@ -6,6 +6,30 @@ import type { TvNotification } from "../lib/shell";
 // camera snapshot, …). A top-center card above everything (including app views
 // and the ambient screen); auto-dismisses after `duration` (default 8s, 0 =
 // sticky), and Back/Home dismisses it (swallowed so it doesn't also navigate).
+// Every cause shell/ir.js can classify. A value outside it is not a cause this build
+// can say anything about, so it reads as the generic one.
+const IR_CAUSES = new Set([
+  "noBlaster",
+  "unmapped",
+  "noService",
+  "badCode",
+  "badSpec",
+  "held",
+  "busy",
+  "linkLost",
+  "notFired",
+  "serviceSlow",
+  "timeout",
+  "blasterUnreachable",
+  "blasterKey",
+  "blasterEntities",
+  "haUrl",
+  "haCall",
+  "asleep",
+  "other",
+]);
+const irCause = (c: unknown) => (typeof c === "string" && IR_CAUSES.has(c) ? c : "other");
+
 // Causes whose body would be contradicted by "the command did not go out".
 const IR_TITLE: Record<string, string> = {
   linkLost: "ir.failedTitleUnknown",
@@ -65,13 +89,16 @@ export function NotificationToast() {
           ? // The generic title asserts the command did not go out, which two of the
             // causes deliberately do not claim: a link lost mid-send may have fired,
             // and a remote that took the code and did not fire is a different fault.
-            t(IR_TITLE[String(note.cause)] || "ir.failedTitle")
+            t(IR_TITLE[irCause(note.cause)] || "ir.failedTitle")
           : "";
   const kindMessage =
     note?.kind === "irFailed"
       ? // Per cause: telling somebody to wake the remote when nothing is mapped to the
         // action sends them to press buttons forever.
-        t("ir.failed." + (typeof note.cause === "string" ? note.cause : "other"))
+        // Held to the known set, not just to "is a string": a cause this build does
+        // not know (a newer shell, a squatted socket) would otherwise render its own
+        // key - "ir.failed.somethingelse" - on the television.
+        t("ir.failed." + irCause(note.cause))
       : note?.kind === "lowBattery"
         ? t("bt.lowBatteryMsg", { name: note.name || "?", pct: String(note.battery ?? 0) })
         : note?.kind === "crashRestart"
