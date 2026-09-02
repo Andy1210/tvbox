@@ -121,7 +121,7 @@ availability-gated on the status topic. No HA YAML needed for that.
   back from an input switch, and the only one that needs no IR codes: on a TV
   that forwards remote keys to the active source only, the box's own remote
   cannot ask for anything while the set is showing something else.
-- `tv_power`, `input_next`, `input_hdmi1`..`input_hdmi4`, `soundbar_power`,
+- `tv_power`, `input_hdmi1`..`input_hdmi4`, `soundbar_power`,
   `soundbar_volume_up`, `soundbar_volume_down`, `soundbar_mute` - the rest of the
   IR vocabulary, over the configured blaster ([ir-blaster.md](ir-blaster.md)).
   CEC can express none of them: a source device can only make ITSELF the active

@@ -19,6 +19,8 @@ const DYNAMIC = [
   "remote.power.",
   "keymap.",
   "ir.action.",
+  // t("ir.failed." + cause) - one sentence per IR failure, chosen by the shell
+  "ir.failed.",
   "ir.backend.",
   "firetvir.key.",
   "firetvir.kind.",

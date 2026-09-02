@@ -222,11 +222,34 @@ function playMediaIn(cmd) {
 }
 
 // The launcher localizes a note it is given a `kind` for, so the reason travels as a
-// code rather than as an English sentence on a Hungarian television.
+// CODE rather than as an English sentence on a Hungarian television. Which code matters:
+// ir.js tells six failures apart and "press a button on the remote to wake it" is wrong
+// advice for five of them - an action nothing is mapped to, a blaster that is not
+// configured, a remote with no keymap service, a code this build cannot encode, a
+// timeout.
+function irCause(message) {
+  if (/no IR blaster configured/.test(message)) return "noBlaster";
+  if (/unknown IR action/.test(message)) return "unmapped";
+  if (/no IR keymap service/.test(message)) return "noService";
+  if (/cannot be sent by this remote/.test(message)) return "badCode";
+  if (/did not answer in time/.test(message)) return "timeout";
+  if (/press a button on it to wake it/.test(message)) return "asleep";
+  return "other";
+}
+
+// One note per half minute. The card takes Back and Home for as long as it is up, and
+// an IR send can be failed on demand by anything that can publish a command - so
+// without a floor here a stream of them keeps the launcher un-navigable.
+const IR_NOTE_GAP_MS = 30000;
+let irNotedAt = 0;
+
 function irFailed(action, e) {
   const message = String((e && e.message) || e);
   console.warn("[ir]", action, "failed:", message);
-  deps.notify({ kind: "irFailed", reason: message });
+  const now = Date.now();
+  if (now - irNotedAt < IR_NOTE_GAP_MS) return;
+  irNotedAt = now;
+  deps.notify({ kind: "irFailed", cause: irCause(message), reason: message });
 }
 
 function handle(cmd) {
@@ -379,4 +402,16 @@ function handle(cmd) {
   }
 }
 
-module.exports = { init, handle, forwardCommand, showLyrics, playMediaIn, silenceForPlayMedia, soundingApp };
+module.exports = {
+  init,
+  handle,
+  forwardCommand,
+  showLyrics,
+  playMediaIn,
+  silenceForPlayMedia,
+  soundingApp,
+  // Shared with the HTTP route: a blast fired from a REMOTE BUTTON fails the same
+  // way and deserves the same note - and that is the path a person is told to use,
+  // because the press is what wakes the remote.
+  irFailed,
+};

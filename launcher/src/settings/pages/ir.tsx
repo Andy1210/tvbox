@@ -62,11 +62,14 @@ export function IrPage() {
   // plan. A free-text `<kind>:<Key>` was the first cut and it is the wrong question to
   // ask in front of a television - the value is a machine token, case-sensitive on both
   // halves, and a typo is dropped by the save with nothing on screen to say so.
-  const [setup, setSetup] = useState<IrSetup | null>(null);
+  // `undefined` = not asked yet, `null` = the box could not be asked, a plan = asked.
+  // The three are different sentences on screen, and conflating them told somebody to
+  // go and build a plan they already had.
+  const [setup, setSetup] = useState<IrSetup | null | undefined>(undefined);
   useEffect(() => {
     let alive = true;
+    setSetup(undefined);
     if (backend === "firetv" && fv?.mac) void fetchIrSetup(fv.mac).then((s) => alive && setSetup(s));
-    else setSetup(null);
     return () => {
       alive = false;
     };
@@ -74,16 +77,53 @@ export function IrPage() {
 
   // One entry per (device kind, key) the plan carries, labelled in the reader's own
   // language. Deduplicated by target, first device winning - which is the same rule the
-  // box itself applies when two devices of a kind carry the key.
-  const targets: { id: string; label: string }[] = [];
+  // box itself applies when two devices of a kind carry the key. The KEY comes first
+  // because the value is truncated from the right, and which button it is matters more
+  // than which kind of device - "Egyéb (távirányító-cikkszám)" alone fills the width.
+  const allTargets: { id: string; label: string; kind: string; key: IrKey }[] = [];
   for (const dev of setup?.devices || []) {
     for (const key of deviceKeys(dev) as IrKey[]) {
       const id = `${dev.kind}:${key}`;
-      if (targets.some((x) => x.id === id)) continue;
-      targets.push({ id, label: `${t("firetvir.kind." + dev.kind)} · ${t("firetvir.key." + key)}` });
+      if (allTargets.some((x) => x.id === id)) continue;
+      allTargets.push({
+        id,
+        kind: dev.kind,
+        key,
+        label: `${t("firetvir.key." + key)} · ${t("firetvir.kind." + dev.kind)}`,
+      });
     }
   }
-  const targetLabel = (v?: string) => targets.find((x) => x.id === v)?.label || v || "";
+  // An action only offers targets that could possibly BE it. Without this the four
+  // "TV input HDMI n" rows offered the television's Power key as readily as anything
+  // else - bind that and the input action turns the set off while the assistant reports
+  // the input switched.
+  // A key set per action, and the mirror cases matter as much as the obvious one: with
+  // no filter at all, `volume_up` offered the television's Power key just as readily,
+  // so "hangosítsd fel a tévét" would switch the set off. `Input` is deliberately NOT
+  // an input target - it is the TV's own Source key, which opens a menu no remote the
+  // box owns can drive, which is why there is no action for it any more.
+  const KEYS_FOR = (a: IrAction): string[] | null => {
+    if (a.startsWith("input_")) return ["HDMI1", "HDMI2", "HDMI3", "HDMI4"];
+    if (a.endsWith("_power") || a === "tv_power") return ["Power"];
+    if (a.endsWith("mute")) return ["Mute"];
+    if (a.endsWith("volume_up")) return ["VolumeUp"];
+    if (a.endsWith("volume_down")) return ["VolumeDown"];
+    return null;
+  };
+  const targetsFor = (a: IrAction) => {
+    const keys = KEYS_FOR(a);
+    return allTargets.filter(
+      (x) => (!keys || keys.includes(x.key)) && (a.startsWith("soundbar_") ? x.kind !== "tv" : true),
+    );
+  };
+  const targetLabel = (v?: string) => allTargets.find((x) => x.id === v)?.label || v || "";
+  // Which sentence the row gets when it has nothing to offer.
+  const emptyHint = (a: IrAction) => {
+    if (setup === undefined) return undefined; // still loading; say nothing yet
+    if (setup === null) return t("ir.planUnreadable");
+    if (!allTargets.length) return t("ir.noPlanHint");
+    return targetsFor(a).length ? undefined : t("ir.noSuitableTarget");
+  };
 
   useEffect(() => {
     let alive = true;
@@ -140,6 +180,14 @@ export function IrPage() {
     if (backend === "esphome") return saveEs({ actions: next });
     if (backend === "firetv") return saveFiretv({ actions: next });
     return saveHa({ actions: next });
+  };
+  // The picker's contract is that a rejected write THROWS, so it stays open and shows
+  // its own failure line. Going through saveAction would swallow it into `failed` on
+  // this page - which the nav has unmounted while the picker is up, so nothing would be
+  // reported anywhere.
+  const pickAction = async (a: IrAction, value: string) => {
+    const next = { ...actions, [a]: value };
+    await setIr({ firetv: { ...(fv?.mac ? { mac: fv.mac } : {}), actions: next } });
   };
 
   // A blast through a Fire TV remote takes up to twelve seconds, so a press with no
@@ -301,9 +349,12 @@ export function IrPage() {
               value={actions[a] ? targetLabel(actions[a]) : t("ir.notSet")}
               // Nothing to pick from means the remote has no saved code plan yet, and
               // the row says where that is built rather than opening an empty list.
-              hint={targets.length ? undefined : t("ir.noPlanHint")}
+              hint={emptyHint(a)}
               onEnter={() =>
-                targets.length &&
+                // Openable when there is something to pick, and also when there is
+                // something to CLEAR - a mapping left behind by an erased plan shows as
+                // a raw token, and a row that cannot be opened can never lose it.
+                (targetsFor(a).length || actions[a]) &&
                 nav.push({
                   id: "ir-target-" + a,
                   title: t("ir.action." + a),
@@ -312,9 +363,9 @@ export function IrPage() {
                       id={"ir-target-" + a}
                       title={t("ir.action." + a)}
                       failLabel={t("ir.saveFailed")}
-                      options={[{ id: "", label: t("ir.notSet") }, ...targets]}
+                      options={[{ id: "", label: t("ir.notSet") }, ...targetsFor(a)]}
                       value={actions[a] || ""}
-                      onPick={(v) => saveAction(a, v).then(() => undefined)}
+                      onPick={(v) => pickAction(a, v)}
                     />
                   ),
                 })
@@ -335,7 +386,7 @@ export function IrPage() {
       </Group>
 
       <Group title={t("ir.groupTest")}>
-        {ACTIONS.map((a) => (
+        {ACTIONS.filter((a) => actions[a]).map((a) => (
           <Row
             key={a}
             id={"test-" + a}

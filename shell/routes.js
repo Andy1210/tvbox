@@ -145,12 +145,20 @@ function post(p, data, res, ctx) {
     );
   }
   if (p === "/tvbox/api/ir/send") {
-    // IR blaster: abstract TV command (volume_up/volume_down/mute), optionally
-    // repeated (steps). Callers: the remote bridge (BT volume keys) + the
-    // settings UI test buttons. A dead blaster answers ok:false, never a 500.
+    // IR blaster: any action in the house vocabulary (shell/config.js IR_ACTIONS),
+    // optionally repeated (steps - volume only in practice). Callers: the remote bridge
+    // (its volume keys, and any button bound to `ir:<action>`), the phone remote, and
+    // the settings UI test rows. A dead blaster answers ok:false, never a 500.
     return ir.send(String(data.action || ""), data.steps).then(
       (r) => httpserver.jsonRes(res, r),
-      (e) => httpserver.jsonRes(res, { ok: false, error: String((e && e.message) || e) }),
+      (e) => {
+        // The bridge logs this into its own journal and nothing reaches the room, so a
+        // button press failed in silence - on the very path the release notes call the
+        // reliable one. `test` is the settings row, which shows its own result on the
+        // screen the person is already looking at.
+        if (!data.test) ctx.irFailed(String(data.action || ""), e);
+        httpserver.jsonRes(res, { ok: false, error: String((e && e.message) || e) });
+      },
     );
   }
   // Screen mirroring, armed and disarmed by hand. There is no "leave it on"

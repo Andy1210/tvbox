@@ -14,7 +14,10 @@ export async function sendIr(action: string): Promise<IrSendResult> {
     const res = await fetch("/tvbox/api/ir/send", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ action }),
+      // `test: true` opts out of the box's on-screen failure note: this row shows its
+      // own result on the screen the person is already looking at, and two reports of
+      // one press is one too many.
+      body: JSON.stringify({ action, test: true }),
     });
     return (await res.json()) as IrSendResult;
   } catch {

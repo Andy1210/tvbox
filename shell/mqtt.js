@@ -137,6 +137,12 @@ const IR_BUTTON_ICONS = {
   soundbar_mute: "mdi:volume-off",
 };
 
+// Actions this box once published and no longer has. The delete sweep below iterates
+// the CURRENT vocabulary, so an action removed from it in a release would leave its
+// retained discovery config on the broker forever - available in Home Assistant,
+// pressing into `unknown command`. Removing an action means adding it here.
+const IR_RETIRED_ACTIONS = ["input_next"];
+
 function irButtonTopic(sid, action) {
   return "homeassistant/button/tvbox_" + sid + "/ir_" + action + "/config";
 }
@@ -155,7 +161,7 @@ function publishIrButtons(actions, sid, device) {
   // left behind by an OTA rollback to a shell that never heard of the action, stayed in
   // Home Assistant looking available and pressed into `unknown command`. The cost of
   // being thorough is a handful of empty publishes on a topic that already has nothing.
-  for (const gone of Object.keys(IR_BUTTON_NAMES)) {
+  for (const gone of [...Object.keys(IR_BUTTON_NAMES), ...IR_RETIRED_ACTIONS]) {
     if (want.includes(gone)) continue;
     try {
       client.publish(irButtonTopic(sid, gone), "", { retain: true });
@@ -238,5 +244,12 @@ function setStateForTest(st) {
 module.exports = {
   init,
   stop,
-  _test: { IR_BUTTON_NAMES, irButtonTopic, publishDiscovery, setStateForTest, published: () => irPublished },
+  _test: {
+    IR_BUTTON_NAMES,
+    IR_RETIRED_ACTIONS,
+    irButtonTopic,
+    publishDiscovery,
+    setStateForTest,
+    published: () => irPublished,
+  },
 };

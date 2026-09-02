@@ -96,8 +96,9 @@ test("a button left behind by an EARLIER run is deleted too", () => {
     "an action this run never published is still cleared",
   );
   assert.ok(!deleted.includes(irButtonTopic("livingroom", "input_hdmi2")), "the wanted one is not");
-  // Every name in the vocabulary is accounted for: kept or cleared, none forgotten.
-  assert.equal(deleted.length, Object.keys(IR_BUTTON_NAMES).length - 1);
+  // Every name is accounted for: kept or cleared, none forgotten - the live vocabulary
+  // plus whatever earlier releases published and no longer have.
+  assert.equal(deleted.length, Object.keys(IR_BUTTON_NAMES).length - 1 + mqtt._test.IR_RETIRED_ACTIONS.length);
 });
 
 test("no IR configured deletes every button it had published", () => {
@@ -167,4 +168,27 @@ test("every action the blaster knows has a button name", () => {
   const known = Object.keys(IR_BUTTON_NAMES);
   for (const a of config._test.IR_ACTIONS) assert.ok(known.includes(a), a + " has no button name");
   for (const a of known) assert.ok(config._test.IR_ACTIONS.includes(a), a + " is not an action");
+});
+
+test("an action the release RETIRED loses its button too", () => {
+  // The sweep iterates the CURRENT vocabulary, so an action removed in a release would
+  // otherwise keep its retained config topic forever - available in Home Assistant,
+  // pressing into "unknown command" on a box that has never heard of it. Removing an
+  // action means adding it to IR_RETIRED_ACTIONS.
+  const rec = arm([]);
+  publishDiscovery(["soundbar_power"]);
+  const { IR_RETIRED_ACTIONS } = mqtt._test;
+  assert.ok(IR_RETIRED_ACTIONS.length, "something has been retired, or this test proves nothing");
+  for (const gone of IR_RETIRED_ACTIONS) {
+    const msg = rec.sent.find((m) => m.topic === irButtonTopic("livingroom", gone));
+    assert.ok(msg, gone + " was never addressed");
+    assert.equal(msg.payload, "", gone + " was not cleared");
+  }
+  // ...and a retired name is never PUBLISHED, whatever a config asks for.
+  const rec2 = arm([]);
+  publishDiscovery([...IR_RETIRED_ACTIONS]);
+  assert.deepEqual(
+    rec2.sent.filter((m) => m.topic.startsWith("homeassistant/button/") && m.payload !== ""),
+    [],
+  );
 });

@@ -653,15 +653,25 @@
     "groupTest": "Kipróbálás",
     "portDefault": "alapértelmezett",
     "mac": "A távirányító Bluetooth-címe",
-    "actionsHintFiretv": "Melyik akció a mentett kódterv melyik bejegyzését küldje, fajta:Gomb alakban - például tv:HDMI2 vagy audio:Power.",
+    "actionsHintFiretv": "Melyik készülék melyik gombját küldje a doboz. A választék a távirányító mentett kódtervéből jön.",
     "testing": "Küldés…",
     "failedTitle": "Az infra parancs nem ment ki",
-    "failedMsg": "Ha a jeladó egy Fire TV távirányító, nyomj meg rajta egy gombot, hogy felébredjen, aztán próbáld újra.",
-    "noPlanHint": "Előbb a távirányító kódtervét kell összeállítani: a táv saját lapján, a TV IR pont alatt."
+    "noPlanHint": "Előbb a távirányító kódtervét kell összeállítani: a táv saját lapján, a TV IR pont alatt.",
+    "planUnreadable": "A doboz most nem tudta beolvasni a távirányító kódtervét.",
+    "noSuitableTarget": "A kódtervben nincs ehhez való gomb - előbb vedd fel azt a készüléket.",
+    "failed": {
+      "asleep": "Nyomj meg egy gombot a távirányítón, hogy felébredjen, aztán próbáld újra.",
+      "unmapped": "Ehhez a művelethez nincs kód beállítva a jeladónál.",
+      "noBlaster": "Nincs beállítva infra jeladó.",
+      "noService": "Ez a távirányító nem tud infra kódot kilőni.",
+      "badCode": "Ezt a kódot ez a távirányító nem tudja kiküldeni.",
+      "timeout": "A távirányító nem válaszolt időben.",
+      "other": "Az infra parancs nem ment ki."
+    }
   },
   "firetvir": {
     "title": "A távirányító IR gombjai",
-    "entry": "TV IR (a távirányító saját jeladója)",
+    "entry": "A távirányító IR gombjai",
     "hint": "Ebben a távirányítóban van infra jeladó, és a saját négy gombja (hangerő, némítás, bekapcsolás) vezérelheti a szobában lévő készülékeket - Fire TV doboz nem kell hozzá. Amit a DOBOZ küld IR-en - bemenetváltás, hangprojektor, hangra vagy egy szabad gombra kötve -, az az „IR jeladó” lap.",
     "credit": "A kódok a közösségi irdb adatbázisból és a Flipper-IRDB-ből származnak, egy indexbe fűzve, amit a box letölt. Lásd a Névjegy menüt.",
     "key": {

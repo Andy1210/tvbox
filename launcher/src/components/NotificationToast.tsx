@@ -58,7 +58,9 @@ export function NotificationToast() {
           : "";
   const kindMessage =
     note?.kind === "irFailed"
-      ? t("ir.failedMsg")
+      ? // Per cause: telling somebody to wake the remote when nothing is mapped to the
+        // action sends them to press buttons forever.
+        t("ir.failed." + (typeof note.cause === "string" ? note.cause : "other"))
       : note?.kind === "lowBattery"
         ? t("bt.lowBatteryMsg", { name: note.name || "?", pct: String(note.battery ?? 0) })
         : note?.kind === "crashRestart"

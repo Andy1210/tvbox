@@ -894,7 +894,9 @@ function setIr(ir) {
     // reads the MAC from `publicIr`, which shows "" for a stored value it cannot
     // validate - so with "absent" and "empty" meaning the same thing, saving an action
     // wiped the remote's address and the backend with it.
-    const macGiven = !!(p && p.mac !== undefined);
+    // A STRING, not merely a present field: null / 0 / [] / {} all took the
+    // clearing branch and wiped the action map with the address.
+    const macGiven = typeof (p && p.mac) === "string";
     if (macGiven && !mac) firetv = null;
     else if (mac && !IR_MAC_RE.test(mac)) console.warn("[config] ignoring an unusable IR remote MAC");
     else

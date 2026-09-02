@@ -140,7 +140,7 @@ capture, for a box whose published index predates the input keys.
 
 ## A button on any remote
 
-`ir:<action>` is a remap action ([Settings → Remotes & accessories]), so any
+`ir:<action>` is a remap action (Settings → Remotes & accessories → Remote buttons), so any
 button the box can see can fire any configured IR action - including the buttons
 a Fire TV remote's own keymap cannot reach, like a Remote Pro's headphone key
 (consumer usage 0x0280). It fires once per press: a blast is a single command, a

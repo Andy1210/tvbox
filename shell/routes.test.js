@@ -54,6 +54,7 @@ function fakeCtx(over = {}) {
     applyFileserver: () => ({ ok: true }),
     applyMqttConfig: () => {},
     publishIrDiscovery: () => {},
+    irFailed: () => {},
     notify: () => {},
     audioSink: () => null,
     childEnv: () => process.env,

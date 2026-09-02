@@ -653,15 +653,25 @@
     "groupTest": "Try it",
     "portDefault": "default",
     "mac": "Remote's Bluetooth address",
-    "actionsHintFiretv": "Which entry of the remote's saved code plan each action sends, as kind:Key - for example tv:HDMI2 or audio:Power.",
+    "actionsHintFiretv": "Which device's which button the box should send. The choices come from the remote's saved code plan.",
     "testing": "Sending…",
     "failedTitle": "The infrared command did not go out",
-    "failedMsg": "If a Fire TV remote is the blaster, press a button on it to wake it and try again.",
-    "noPlanHint": "Build the remote's code plan first, under TV IR on the remote's own page."
+    "noPlanHint": "Build the remote's code plan first, under TV IR on the remote's own page.",
+    "planUnreadable": "The box could not read the remote's code plan just now.",
+    "noSuitableTarget": "The code plan has no key for this - add the device that has it first.",
+    "failed": {
+      "asleep": "Press a button on the remote to wake it, then try again.",
+      "unmapped": "No code is mapped to this action on the blaster.",
+      "noBlaster": "No IR blaster is set up.",
+      "noService": "This remote cannot fire an IR code.",
+      "badCode": "This remote cannot send that code.",
+      "timeout": "The remote did not answer in time.",
+      "other": "The infrared command did not go out."
+    }
   },
   "firetvir": {
     "title": "The remote's own IR buttons",
-    "entry": "TV IR (this remote's own blaster)",
+    "entry": "The remote's own IR buttons",
     "hint": "This remote has an infrared blaster, and its own four buttons (volume, mute, power) can drive the devices in the room - no Fire TV needed. What the BOX sends over infrared - input switching, a soundbar, by voice or on a spare button - is the “IR blaster” page.",
     "credit": "Codes from the community irdb database and Flipper-IRDB, merged into an index this box downloads. See About for credits.",
     "key": {

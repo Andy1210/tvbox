@@ -526,6 +526,7 @@ function serve() {
     applyFileserver: sharing.applyFileserver,
     applyMqttConfig: mediapublish.applyConfig,
     publishIrDiscovery: mediapublish.publishIrDiscovery,
+    irFailed: tvcommand.irFailed,
     audioSink: () => audioSink,
     childEnv: () => ({ ...process.env, ...WL_ENV }),
     destroyAppWindow,
