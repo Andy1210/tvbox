@@ -114,16 +114,31 @@ Two costs, both from the hardware:
   next blast. For a voice-driven input switch use a mains-powered blaster
   (`esphome`); it can be TAUGHT these codes by putting it in learn mode and
   blasting each one at it from the remote.
-- **The box cannot WAKE it, and this was measured four ways** - it is the first
-  idea everybody has, so here is why it does not work. A 20 s LE scan sees the
-  sleeping remote advertise nothing. A single patient `Connect()` is abandoned by
-  BlueZ itself after ~41 s (`le-connection-abort-by-local`) - the peripheral is
-  simply not connectable. Watched for **12 minutes untouched, it connected zero
-  times**, so waiting for a spontaneous reconnect is not a strategy either. And
-  the remote-finder - which does reach the remote in daily use - fails on a
-  sleeping one with `Call failed: Not connected`, which explains itself: when
-  somebody rings a lost remote they have just been using it, so it is still
-  connected. Only a button press brings it back.
+- **The box cannot wake it, and the reason is not the one it looks like.** This is
+  the first idea everybody has, so it is worth the paragraph. A sleeping remote is
+  _silent_: 95 s of LE scanning finds a dozen other devices in the room, including
+  the television, and never the remote - no advertisement of any kind and no
+  find-my beacon. Twelve minutes untouched: zero reconnects. A patient `Connect()`
+  is abandoned by BlueZ after ~41 s, and the remote-finder fails with `Not
+connected`. Only a button press brings it back.
+
+  It is silent because **its find-my beacon has to be provisioned, and only a Fire
+  TV has ever done that**. From the Fire OS firmware: the host writes `01` plus two
+  16-byte IRKs to `cfbfb001` (the same characteristic the ring's `03 01` goes to),
+  then `02 01`; the ring path itself is gated on `cfg_state == 1` and otherwise
+  logs _"device is not configured, cannot ring"_. So the finder is not magic and a
+  Fire TV cannot reach an unreachable remote either - it has user-visible
+  `Ring operation timeout in 30 seconds` and `Tracking device connect timeout`
+  errors. What Fire OS does have is a **standing intent to connect that is never
+  withdrawn**: it suppresses connection-parameter updates for Amazon remotes,
+  never removes one from the background connection list (upstream AOSP does), and
+  adds it even when the first connect fails. A Pi can copy that with the kernel's
+  LE accept list (`btmgmt add-device`), which removes the 41 s cap - but with an
+  unprovisioned remote there is nothing on air to accept.
+
+  So the honest state: a button press is the only wake, **unless** somebody
+  provisions the beacon. That is a bench experiment, not a setting.
+
 - **And a blast goes wherever the remote is LYING.** Measured on the same soundbar,
   minutes apart, with byte-identical codes: once nothing happened, once it switched.
   Nothing had changed but where the remote was. A television is a large target and

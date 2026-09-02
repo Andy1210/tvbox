@@ -21,12 +21,19 @@ power, neither of which HDMI-CEC can express. It is wired up as the `firetv`
 backend of the IR hub - see [ir-blaster.md](ir-blaster.md) - and its one
 limitation is below: the remote sleeps, and a blast leaves its link down.
 
-That limitation cannot be engineered around from this end, which is worth knowing
-before trying: a sleeping remote advertises nothing, BlueZ abandons a connect to
-it after about 41 seconds, twelve minutes of watching an untouched one shows zero
-reconnects, and the remote-finder fails on it too (`Not connected`). The finder
-works in daily use only because a remote somebody is looking for was in use a
-moment ago. A press is the only way back.
+A sleeping remote is silent - 95 s of LE scanning sees a dozen other devices in the
+room and never it - so a press is the only way back, and BlueZ abandons a connect
+after ~41 s. The reason is worth knowing rather than re-deriving: **the find-my
+beacon does not exist until a host provisions it.** Fire OS writes `01` plus two
+16-byte IRKs to `cfbfb001` and then `02 01`, and its own ring path refuses with
+_"device is not configured, cannot ring"_ when that has not happened - which is why
+the finder appears to work there and not here, and why a Fire TV cannot reach an
+unreachable remote either (`Ring operation timeout in 30 seconds`). Fire OS also
+keeps a standing intent to connect that it never withdraws: it suppresses
+connection-parameter updates for Amazon remotes and never removes one from the
+background connection list, which upstream AOSP does. `btmgmt add-device` is the
+Pi's equivalent. Provisioning the beacon from this end is a bench experiment
+nobody has run.
 
 Both were reverse-engineered from Fire OS 7.7.1.3 on a Fire TV Stick 4K Max
 (AFTKA). Those working notes are not part of this repo; what a reader needs is
