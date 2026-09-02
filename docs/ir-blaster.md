@@ -139,7 +139,7 @@ connected`. Only a button press brings it back.
   next press.
 
   The kernel's LE accept list with auto-connect (`btmgmt add-device -a 2 -t 1
-  <mac>`) has NOT been shown to rescue that, and two earlier notes here claiming it
+<mac>`) has NOT been shown to rescue that, and two earlier notes here claiming it
   did were misread measurements rather than results: this `btmgmt` has no command
   that lists the accept list at all (its usage error was read as an empty list),
   and `bluetoothctl devices Connected` sampled straight after a blast still reports
