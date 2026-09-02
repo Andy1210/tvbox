@@ -19,12 +19,47 @@ remote does not physically have. That is what makes the remote usable as a
 general blaster for the box: switching the TV's own input, or a soundbar's
 power, neither of which HDMI-CEC can express. It is wired up as the `firetv`
 backend of the IR hub - see [ir-blaster.md](ir-blaster.md) - and its one
-limitation is below: the remote sleeps between presses, and a blast both needs a
-wake and ends with the link closed.
+limitation is below: the remote sleeps between presses, so a blast needs it awake.
 
 A sleeping remote is silent - 95 s of LE scanning sees a dozen other devices in the
 room and never it - so a press is the only way back, and BlueZ abandons a connect
-after ~41 s. The reason is worth knowing rather than re-deriving: **the find-my
+after ~41 s (the blast path cuts that to 8 s: a remote that is not there will not
+start being there, and every caller has a shorter budget than 41 s anyway).
+
+**So the link is held rather than re-made, and that is what `serve` is for.**
+`firetv_remote_ir.py serve <mac> --socket <path>` keeps one BLE connection and
+blasts on request - one JSON object per line, one request per connection, the code
+spec travelling in the request so no file is written per blast. The shell starts one
+per configured remote and falls back to a process per blast when it cannot
+([shell/ir.js](../shell/ir.js), [shell/firetvir.js](../shell/firetvir.js)). The
+numbers are the whole argument, measured on a Remote Pro (PID 0x0425):
+
+|                                                        | cost                  |
+| ------------------------------------------------------ | --------------------- |
+| blast over a held link                                 | ~0.9 s                |
+| blast from a fresh process, remote awake               | 2.6 s                 |
+| the same, ~2 s after the previous process disconnected | 8.2 s, and it fails   |
+| 20 blasts over 20 min through one held link            | all OK, link still up |
+| a blast after 180 s of complete silence on a held link | OK in 1.1 s           |
+
+Two things follow. `release` exists because the remote takes ONE connection, so the
+resident holder has to step aside for `program`, `test` and `info` - the shell sends
+it before each of those. And a blast that fires leaves the link up while a lost link
+is forgotten, so the next request opens a new one rather than writing into a dead
+client.
+
+The four things a blast has to get right, from `BleKeyMapDeviceProxyV2.blastCommand`
+rather than from guesswork: it is staged under the **null table id** (a blast table
+is throwaway - `buildBlastTables` never sets one, so our own persistent table's id
+has no business there), written in fixed 200-byte chunks with the **tail
+zero-padded**, committed with CONTROL 5, and - since this remote **never notifies** -
+decided by READING the characteristic up to nine times with a growing sleep. That
+last one is not a detail: the first read routinely answers `00` ("not done") and the
+second `02`, so deciding on one read reports a blast that fired as a failure. The
+burst ends with CONTROL 32 (`ENABLE_SDS`), which Fire OS writes only after the
+_terminal_ blast of a burst - `RemoteBlasterExecutor` keeps it off between the LED,
+the IR code and the LED again, which is also proof that several blasts over one
+connection are the firmware's normal path rather than an edge case. The reason is worth knowing rather than re-deriving: **the find-my
 beacon does not exist until a host provisions it.** Fire OS writes `01` plus two
 16-byte IRKs to `cfbfb001` and then `02 01`, and its own ring path refuses with
 _"device is not configured, cannot ring"_ when that has not happened - which is why

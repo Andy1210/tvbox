@@ -113,38 +113,67 @@ function makeEsphomeBackend(cfg) {
 // remote's keymap can only reach the four keys the remote physically has, while this can
 // send any code in the saved plan - which is the only way to select a TV input, a
 // command CEC has no equivalent of.
+// The service answers with a code NAME per failure; the per-blast tool answers with an
+// exit code. Both mean the same four things, and the sentences must not drift apart -
+// the middle one is the only failure a person can fix from the sofa.
+const FIRETV_SEND_ERRORS = {
+  nokeymap: "this remote has no IR keymap service",
+  badcode: "this code cannot be sent by this remote - pick another codeset",
+  asleep: "the remote did not fire - press a button on it to wake it, then retry",
+  notfired: "the remote did not fire - press a button on it to wake it, then retry",
+};
+
 function makeFiretvBackend(cfg, mod) {
   // Lazy, like the esphome client: firetvir pulls in the index reader and the EDID
   // probe, and a box on another backend should pay for neither. Injectable so the
   // failure mapping below can be tested without a remote in the room.
   const firetvir = mod || require("./firetvir");
+  // One resident process holds the BLE link, the way this backend's esphome sibling
+  // holds one connection to its device. Measured on a Remote Pro: ~0.9 s per blast over
+  // a held link and 20 of them over 20 minutes, against a fresh connect per blast and a
+  // remote that is unreachable after that process disconnects - which is what made the
+  // second of two blasts fail.
+  firetvir.startService(cfg.mac);
   return {
     name: "firetv",
-    // Honestly unknown: the remote is reachable exactly while it is awake, and the only
-    // way to find out is to blast.
-    connected: () => null,
+    // What the resident link last reported. `null` means nobody has asked yet or there
+    // is no service - not "down", which would show a working remote as broken.
+    connected: () => firetvir.serviceLinkState(),
     send: (value) =>
       new Promise((resolve, reject) => {
-        firetvir.blastAction(cfg.mac, value, (err, r) => {
-          if (err) return reject(err);
-          if (r && r.ok) return resolve();
-          // The three ways this fails are worth telling apart: a remote that cannot do
-          // it at all, one that is merely asleep, and anything else (which gets to
-          // speak for itself). A press wakes the remote, so the middle one is the
-          // failure a person can actually fix from the sofa.
-          if (r && r.code === 3) return reject(new Error("this remote has no IR keymap service"));
-          if (r && r.code === 4)
-            return reject(new Error("this code cannot be sent by this remote - pick another codeset"));
-          // A kill leaves no exit code at all, and it is the one failure where the
-          // budget itself is the news: saying "no output" sends someone looking for a
-          // crash that did not happen.
-          if (r && r.code === null) return reject(new Error("the remote did not answer in time"));
-          if (r && r.code === 1)
-            return reject(new Error("the remote did not fire - press a button on it to wake it, then retry"));
-          reject(new Error("blast failed: " + ((r && r.output) || "no output")));
+        // The per-blast process, which is what this backend did before the service and
+        // is still the path on a box where the service cannot run.
+        const oneShot = () =>
+          firetvir.blastAction(cfg.mac, value, (err, r) => {
+            if (err) return reject(err);
+            if (r && r.ok) return resolve();
+            // The three ways this fails are worth telling apart: a remote that cannot do
+            // it at all, one that is merely asleep, and anything else (which gets to
+            // speak for itself). A press wakes the remote, so the middle one is the
+            // failure a person can actually fix from the sofa.
+            if (r && r.code === 3) return reject(new Error(FIRETV_SEND_ERRORS.nokeymap));
+            if (r && r.code === 4) return reject(new Error(FIRETV_SEND_ERRORS.badcode));
+            // A kill leaves no exit code at all, and it is the one failure where the
+            // budget itself is the news: saying "no output" sends someone looking for a
+            // crash that did not happen.
+            if (r && r.code === null) return reject(new Error("the remote did not answer in time"));
+            if (r && r.code === 1) return reject(new Error(FIRETV_SEND_ERRORS.notfired));
+            reject(new Error("blast failed: " + ((r && r.output) || "no output")));
+          });
+        firetvir.blastViaService(cfg.mac, value, (err, resp) => {
+          // A service that is not RUNNING is not a failed blast, so fall back. A service
+          // that ran and did not answer is a different thing: retrying through a second
+          // process would spend another budget on a remote that has already had one, and
+          // the queue behind it waits for both.
+          if (err) return err.absent ? oneShot() : reject(err);
+          if (resp && resp.ok) return resolve();
+          const known = resp && FIRETV_SEND_ERRORS[resp.code];
+          reject(new Error(known || (resp && resp.error) || "blast failed"));
         });
       }),
-    close() {},
+    close() {
+      firetvir.stopService();
+    },
   };
 }
 

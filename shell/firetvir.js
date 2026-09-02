@@ -17,6 +17,7 @@
 const { execFile, spawn } = require("child_process");
 const fs = require("fs");
 const path = require("path");
+const net = require("net");
 const os = require("os");
 const edid = require("./edid");
 const irindex = require("./irindex");
@@ -487,18 +488,33 @@ function resolveBlast(raw, kind, key) {
 // a blast stores nothing on the remote, so it must not be able to change what
 // `status.configured` reports about it. The name is unique per call because two blasts
 // sharing one file would send each other's code.
+// `<kind>:<Key>` -> the codes to send. Shared by the resident-link path and the one-shot
+// below, so a target can never resolve to two different things depending on which one
+// ran; every message here names the half that is missing, because a plan with a TV and
+// no soundbar is the commonest way this fails.
+function parseBlastTarget(target) {
+  const m = /^([a-z]+):([A-Za-z0-9]+)$/.exec(String(target || ""));
+  if (!m) return { error: "invalid IR target: " + target };
+  const [, kind, key] = m;
+  if (!IR_KEYS.includes(key)) return { error: "invalid IR key: " + key };
+  return { kind, key };
+}
+
+function resolveBlastTarget(mac, target) {
+  const parsed = parseBlastTarget(target);
+  if (parsed.error) return parsed;
+  const plan = readPlan(mac);
+  if (!plan) return { error: "the remote plan could not be read" };
+  const spec = resolveBlast(plan, parsed.kind, parsed.key);
+  if (!spec) return { error: "no " + parsed.kind + " device in the remote setup carries " + parsed.key };
+  return { kind: parsed.kind, key: parsed.key, spec };
+}
+
 function blastAction(mac, target, cb) {
   if (!MAC_RE.test(String(mac || ""))) return cb(new Error("invalid MAC"));
-  const m = /^([a-z]+):([A-Za-z0-9]+)$/.exec(String(target || ""));
-  if (!m) return cb(new Error("invalid IR target: " + target));
-  const [, kind, key] = m;
-  if (!IR_KEYS.includes(key)) return cb(new Error("invalid IR key: " + key));
-  const plan = readPlan(mac);
-  if (!plan) return cb(new Error("the remote plan could not be read"));
-  const spec = resolveBlast(plan, kind, key);
-  // A named target with nothing behind it is the commonest way this fails - the plan
-  // holds a TV but no soundbar - so it says which half is missing rather than "failed".
-  if (!spec) return cb(new Error("no " + kind + " device in the remote setup carries " + key));
+  const parsed = resolveBlastTarget(mac, target);
+  if (parsed.error) return cb(new Error(parsed.error));
+  const { key, spec } = parsed;
   const file = path.join(TVBOX, "firetv_ir_blast." + process.pid + "." + Date.now() + ".json");
   try {
     fs.writeFileSync(file, JSON.stringify(spec, null, 2), { mode: 0o600 });
@@ -513,12 +529,173 @@ function blastAction(mac, target, cb) {
     }
     cb(err, r);
   };
-  // Tighter than the UI's 30 s key test on purpose. A blast to an AWAKE remote answers
-  // in about a second, and a sleeping one is not going to start answering - so the rest
-  // of a long budget is spent stalling the IR queue, which every other action and every
-  // Home Assistant button press waits behind. 12 s leaves room for a slow connect and
-  // bounds a pile-up at something a person will sit through.
+  // Tighter than the UI's 30 s key test on purpose, and sized from measurements rather
+  // than from hope: a fresh process pays a BLE connect (~2.6 s to an awake remote) plus
+  // the blast, and the tool gives up on a sleeping one after 8 s - so 12 s covers a
+  // working blast and bounds a hopeless one. The rest of a longer budget would be spent
+  // stalling the IR queue, which every other action and every Home Assistant button
+  // press waits behind. The resident-link path above needs none of this: ~0.9 s.
   runTool(["blast", mac, "--config", file, "--key", key], 12000, done);
+}
+
+// ---- the resident blast link --------------------------------------------------------
+// A blast over an already open BLE link costs about a second; a fresh process pays a
+// connect on top, and after ITS disconnect the remote is unreachable until somebody
+// presses a button on it. Measured on a Remote Pro: 20 blasts over 20 minutes through
+// one held link, all fine, against 8 s of failed reconnect for the second of two
+// per-blast runs. So the link is held by one resident `serve` process, exactly as the
+// esphome backend holds one connection to its device - and one-shot spawns stay as the
+// fallback, so a box where the service will not start behaves as it did before.
+const SERVICE_SOCK = path.join(TVBOX, "firetv-ir.sock");
+const SERVICE_RESTART_MS = 5000;
+let service = null; // { mac, child, stopping, linkUp, timer }
+
+function serviceRequest(req, timeoutMs, cb) {
+  let done = false;
+  const finish = (err, resp) => {
+    if (done) return;
+    done = true;
+    cb(err, resp);
+  };
+  let sock;
+  try {
+    sock = net.createConnection(SERVICE_SOCK);
+  } catch (e) {
+    return finish(e);
+  }
+  let out = "";
+  const to = setTimeout(() => {
+    try {
+      sock.destroy();
+    } catch (e) {}
+    finish(new Error("the IR link service did not answer in time"));
+  }, timeoutMs);
+  sock.on("connect", () => sock.write(JSON.stringify(req) + "\n"));
+  sock.on("data", (d) => {
+    out += d.toString();
+    const nl = out.indexOf("\n");
+    if (nl < 0) {
+      // A reply is one line; a peer that streams without ever ending it is bounded by
+      // the timeout above, but not by memory unless this is.
+      if (out.length > 64000) {
+        try {
+          sock.destroy();
+        } catch (e) {}
+        finish(new Error("the IR link service sent a reply that never ended"));
+      }
+      return;
+    }
+    clearTimeout(to);
+    try {
+      sock.end();
+    } catch (e) {}
+    let resp;
+    try {
+      resp = JSON.parse(out.slice(0, nl));
+    } catch (e) {
+      return finish(new Error("the IR link service sent nonsense"));
+    }
+    if (service && typeof resp.connected === "boolean") service.linkUp = resp.connected;
+    finish(null, resp);
+  });
+  sock.on("error", (e) => {
+    clearTimeout(to);
+    finish(e);
+  });
+  sock.on("close", () => {
+    clearTimeout(to);
+    finish(new Error("the IR link service closed the connection"));
+  });
+}
+
+function startService(mac) {
+  if (!MAC_RE.test(mac || "")) return;
+  if (service && service.mac === mac && service.child) return;
+  stopService();
+  if (!fs.existsSync(PY) || !fs.existsSync(TOOL)) return; // deps not installed yet
+  const st = { mac, child: null, stopping: false, linkUp: null, timer: null };
+  service = st;
+  const spawnOne = () => {
+    if (st.stopping || service !== st) return;
+    const child = spawn(PY, [TOOL, "serve", mac, "--socket", SERVICE_SOCK], {
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    st.child = child;
+    // Its stderr is the only place a bleak or dbus failure says anything, and a pipe
+    // nobody drains eventually blocks the child - so it is read and logged.
+    const say = (d) => {
+      const t = d.toString().trim();
+      if (t) console.log("[firetv-ir]", t.split("\n").slice(-4).join(" | "));
+    };
+    child.stdout.on("data", say);
+    child.stderr.on("data", say);
+    child.on("error", (e) => console.log("[firetv-ir] failed to start:", e.message));
+    child.on("close", (code) => {
+      if (st.child === child) st.child = null;
+      st.linkUp = null;
+      if (st.stopping || service !== st) return;
+      console.log("[firetv-ir] link service exited (" + code + "), restarting in 5 s");
+      st.timer = setTimeout(spawnOne, SERVICE_RESTART_MS);
+    });
+  };
+  spawnOne();
+}
+
+function stopService() {
+  const st = service;
+  service = null;
+  if (!st) return;
+  st.stopping = true;
+  if (st.timer) clearTimeout(st.timer);
+  if (st.child) {
+    try {
+      st.child.kill("SIGTERM");
+    } catch (e) {}
+  }
+  try {
+    fs.unlinkSync(SERVICE_SOCK);
+  } catch (e) {
+    /* the server removes it on a clean exit; this covers a kill */
+  }
+}
+
+// Whether the resident link is up, as far as anything here knows: true/false from the
+// service's own last answer, null when there is no service or it has not said yet.
+// `null` is not "down" - the backend's contract distinguishes them, because "we do not
+// know" must not be shown as a broken remote.
+function serviceLinkState() {
+  return service ? service.linkUp : null;
+}
+
+// A one-shot command (program, test, info) opens its own link, and the remote takes ONE
+// connection - so the resident holder has to let go first, and a failure to reach the
+// service is not a reason to refuse: there may be no service at all.
+function releaseService(cb) {
+  if (!service || !service.child) return cb();
+  serviceRequest({ cmd: "release" }, 6000, () => cb());
+}
+
+// The blast the button and Home Assistant paths take. Same target resolution as the
+// one-shot below - the spec travels IN the request, so no temp file per blast.
+function blastViaService(mac, target, cb) {
+  const absent = (msg) => {
+    const e = new Error(msg);
+    e.absent = true; // the caller may fall back to a per-blast process
+    return e;
+  };
+  if (!service || !service.child) return cb(absent("no IR link service"));
+  if (service.mac !== mac) return cb(absent("the IR link service holds another remote"));
+  if (!MAC_RE.test(String(mac || ""))) return cb(new Error("invalid MAC"));
+  const parsed = resolveBlastTarget(mac, target);
+  if (parsed.error) return cb(new Error(parsed.error));
+  serviceRequest({ cmd: "blast", spec: parsed.spec, key: parsed.key }, 12000, (err, resp) => {
+    // A socket that is gone or refusing means the server died between the check above
+    // and now - the same case as having none, so it is worth another process.
+    if (err && (err.code === "ENOENT" || err.code === "ECONNREFUSED")) {
+      err.absent = true;
+    }
+    cb(err, resp);
+  });
 }
 
 // What the codes file says about where its codes came from, so a later look at
@@ -578,7 +755,7 @@ function testKey(mac, plan, key, cb) {
   } catch (e) {
     return cb(e);
   }
-  runTool(["blast", mac, "--config", TEST_CODES_FILE, "--key", key], 30000, cb);
+  releaseService(() => runTool(["blast", mac, "--config", TEST_CODES_FILE, "--key", key], 30000, cb));
 }
 
 function program(mac, plan, label, cb) {
@@ -590,28 +767,32 @@ function program(mac, plan, label, cb) {
   } catch (e) {
     return cb(e);
   }
-  runTool(["program", mac, "--config", CODES_FILE], 60000, (err, r) => {
-    // Recorded against the MAC that was actually written, so a second remote's screen
-    // never reports this one's codes.
-    if (!err && r && r.ok) updatePlan(mac, (p) => ({ ...p, programmed: { label: str(label, 60), ts: Date.now() } }));
-    cb(err, r);
-  });
+  releaseService(() =>
+    runTool(["program", mac, "--config", CODES_FILE], 60000, (err, r) => {
+      // Recorded against the MAC that was actually written, so a second remote's screen
+      // never reports this one's codes.
+      if (!err && r && r.ok) updatePlan(mac, (p) => ({ ...p, programmed: { label: str(label, 60), ts: Date.now() } }));
+      cb(err, r);
+    }),
+  );
 }
 
 function erase(mac, cb) {
   if (!MAC_RE.test(mac)) return cb(new Error("invalid MAC"));
-  runTool(["erase", mac], 30000, (err, r) => {
-    // The devices stay - you erase to stop the remote blasting, not to throw away the
-    // setup, and re-programming should not mean building it again. What goes is the
-    // record that anything IS on the remote, for this remote only.
-    if (!err && r && r.ok) {
-      updatePlan(mac, (p) => ({ ...p, programmed: null }));
-      try {
-        fs.unlinkSync(CODES_FILE);
-      } catch (e) {}
-    }
-    cb(err, r);
-  });
+  releaseService(() =>
+    runTool(["erase", mac], 30000, (err, r) => {
+      // The devices stay - you erase to stop the remote blasting, not to throw away the
+      // setup, and re-programming should not mean building it again. What goes is the
+      // record that anything IS on the remote, for this remote only.
+      if (!err && r && r.ok) {
+        updatePlan(mac, (p) => ({ ...p, programmed: null }));
+        try {
+          fs.unlinkSync(CODES_FILE);
+        } catch (e) {}
+      }
+      cb(err, r);
+    }),
+  );
 }
 
 function status(cb) {
@@ -649,5 +830,21 @@ module.exports = {
   program,
   erase,
   blastAction,
-  _test: { sanitizePlan, updatePlan, resolvePlan, resolveBlast, planSource, codeSendable, makeToBrand },
+  blastViaService,
+  startService,
+  stopService,
+  releaseService,
+  serviceLinkState,
+  _test: {
+    sanitizePlan,
+    updatePlan,
+    resolvePlan,
+    resolveBlast,
+    resolveBlastTarget,
+    planSource,
+    codeSendable,
+    makeToBrand,
+    serviceRequest,
+    SERVICE_SOCK,
+  },
 };

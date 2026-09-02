@@ -13,16 +13,17 @@ write for the person on the couch (what changes for THEM), not for developers.
   a Home Assistantból, vagy a távirányító egy szabad gombjára kötve. Eddig erre nem
   volt mód: a HDMI-CEC-en egy lejátszó csak magára tudja váltani a tévét, máshova
   nem. Egy Fire TV távirányítót használva a doboz a táv saját infra LED-jével lő -
-  ahhoz viszont a táv legyen ébren, tehát az inkább gombra kötve jó, mint hanggal;
-  hanghoz egy hálózatról járó jeladó (pl. ESPHome) a jobb.
+  ahhoz a táv legyen ébren, tehát a legbiztosabb egy gombra kötve; hanggal addig
+  megy, amíg a doboz tartja a kapcsolatot a távirányítóval.
 - **A hangprojektort is be tudod kapcsolni**, ami eddig szintén kimaradt, mert
   nincs a CEC-buszon. A hangerejét és a némítását a Home Assistantból vagy egy
   gombra kötve éred el - hanggal a "halkítsd le" továbbra is a tévét halkítja,
   mert ugyanaz a szó.
 - **Ehhez nem kell új eszköz, ha van a dobozhoz párosított Fire TV
   távirányító**: az infra LED abban van, és a doboz meg tudja kérni, hogy lőjön
-  ki egy kódot. Egy alvó távirányítót előbb meg kell nyomni - a doboz ezt meg is
-  írja, ha nem sikerült.
+  ki egy kódot. A doboz mostantól nyitva tartja hozzá a kapcsolatot, így egy
+  kilövés fél másodperc és sorozatban is megy. Egy alvó távirányítót előbb meg
+  kell nyomni - a doboz ezt meg is írja, ha nem sikerült.
 - **A távirányító bármelyik szabad gombjára rá lehet kötni ezeket** (Beállítások
   → Távirányítók és kiegészítők), például a Remote Pro fejhallgató gombjára.
 - **És vissza is lehet váltani a dobozra.** Ez fontos: amíg a tévé más bemeneten
@@ -36,17 +37,18 @@ write for the person on the couch (what changes for THEM), not for developers.
   from Home Assistant, or bound to a spare button on a remote. There was no way to
   do this before: over HDMI-CEC a player can only bring the TV to itself, never
   move it elsewhere. With a Fire TV remote as the blaster the box fires the
-  remote's own infrared LED - but the remote has to be awake for that, so it suits
-  a bound button better than voice; for voice, a mains-powered blaster (ESPHome)
-  is the better one.
+  remote's own infrared LED - the remote has to be awake for that, so a bound
+  button is the surest way; by voice it works for as long as the box is holding
+  the connection to the remote.
 - **A soundbar can be switched on too**, which was missing for the same kind of
   reason: it is not on the CEC bus. Its volume and mute are there from Home
   Assistant or on a bound button - by voice, "turn it down" still means the
   television, because it is the same phrase.
 - **No new hardware is needed if a Fire TV remote is paired to the box**: the
-  infrared LED is in the remote, and the box can ask it to fire a code. A
-  sleeping remote has to be woken with a button press first - the box says so
-  when that is what went wrong.
+  infrared LED is in the remote, and the box can ask it to fire a code. The box
+  now keeps the connection to it open, so a shot takes about half a second and
+  several in a row work. A sleeping remote has to be woken with a button press
+  first - the box says so when that is what went wrong.
 - **Any spare button on a remote can be bound to these** (Settings → Remotes &
   accessories), a Remote Pro's headphone key included.
 - **And there is a way back to the box.** This matters: while the TV is on

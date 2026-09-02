@@ -102,24 +102,28 @@ grouped, and a rebuilt index can regroup them.
 
 Two costs, both from the hardware:
 
-- **The remote sleeps between presses.** So a blast when nobody has touched it may
-  find nothing to talk to, and the error says so ("press a button on it to wake it,
-  then retry") rather than reporting a failure that looks like a broken TV.
+- **The remote sleeps between presses, and the link is what has to be kept.** A
+  blast when nobody has touched it may find nothing to talk to, and the error says
+  so ("press a button on it to wake it, then retry") rather than reporting a
+  failure that looks like a broken TV.
 
-  A blast also takes the link down, and that part IS this tool's own doing:
-  `cmd_blast` closes the connection in a `finally`. Leaving a link somebody else
-  opened up was tried and measured worse - the first blast then returns with the
-  link still up and the NEXT one hangs until the 12 s budget kills it, so the link
-  goes anyway and the failure is slower. The remote appears to accept **one
-  InstantFire per wake**, which no link management on this side changes.
-  **This makes the backend a poor fit for VOICE and a good one for a BUTTON.** A
-  press wakes the remote, so a bound button always works; asking by voice when the
-  remote has been on the sofa for an hour usually does not - and if somebody is
-  holding the remote already, they are not going to ask out loud. Measured on a
-  Remote Pro: connected and blasting one second after a press, gone again by the
-  next blast. For a voice-driven input switch use a mains-powered blaster
-  (`esphome`); it can be TAUGHT these codes by putting it in learn mode and
-  blasting each one at it from the remote.
+  What made this look far worse than it is was our own process model. One process
+  per blast disconnects at the end - and about two seconds later the remote is
+  unreachable, so the NEXT blast spends its whole budget failing to connect.
+  Measured: 2.6 s for a blast to an awake remote from a cold process, then 8.2 s of
+  nothing for the same blast right after it. Held instead, by one resident process,
+  **a blast costs ~0.9 s and 20 of them over 20 minutes all worked**, the link
+  still up at the end - including one after three minutes of complete silence. So
+  `serve` holds the link (see [firetv-remote-ir.md](firetv-remote-ir.md)) and the
+  shell keeps one of those per configured remote, the way the esphome backend keeps
+  one connection to its device.
+  **A BUTTON is still the sure path, and voice works exactly as long as the link
+  does.** A press wakes the remote, so a bound button always works. Voice depends on
+  whether the resident link is up: while it is, a spoken blast is as good as a
+  pressed one, and once it is gone only a press brings the remote back. For a voice
+  path that does not depend on that, use a mains-powered blaster (`esphome`) - it
+  can be TAUGHT these codes by putting it in learn mode and blasting each one at it
+  from the remote.
 
 - **The box cannot wake it, and the reason is not the one it looks like.** This is
   the first idea everybody has, so it is worth the paragraph. A sleeping remote is
@@ -175,9 +179,9 @@ connected`. Only a button press brings it back.
   forgiving; a soundbar's receiver is small and low. This is the second and less
   obvious reason the backend suits a button - the hand that presses it is also the
   hand that aims it.
-- **Each send is its own BLE connect**, a second or two, so a ten-step volume
-  ramp takes tens of seconds and holds the queue. Let the remote's own programmed
-  keys do volume (`irPassthrough`) and keep this for the one-shot actions.
+- **A send over the held link is ~0.9 s**, so a ten-step volume ramp is still about
+  nine seconds of queue. Let the remote's own programmed keys do volume
+  (`irPassthrough`) and keep this for the one-shot actions.
 
 [remote/firetv_ir_plan.example.json](../remote/firetv_ir_plan.example.json) is a
 hand-written plan carrying real LG input codes and a Samsung soundbar's power
