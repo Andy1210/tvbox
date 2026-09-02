@@ -22,7 +22,12 @@ export type RemoteAction =
   | "power"
   | "settings"
   | "appswitcher"
-  | `app:${string}`;
+  | "back_to_box"
+  | `app:${string}`
+  // one configured IR action through the blaster - reaches buttons no key stands for
+  // (a TV input, a soundbar's power), including on remotes whose own keymap cannot
+  // hold them
+  | `ir:${IrAction}`;
 export type RemoteKeymap = Partial<Record<RemoteAction, number[]>>;
 export interface RemoteDeviceConfig {
   name: string;
@@ -87,11 +92,29 @@ export interface PublicConfig {
       actions: IrActionMap;
     };
     homeassistant: { url: string; hasToken: boolean; actions: IrActionMap };
+    // No secret of its own: the Fire TV remote is reached over its existing BlueZ
+    // bond, so the MAC is the whole of it.
+    firetv: { mac: string; actions: IrActionMap };
   };
 }
 
-export type IrBackend = "esphome" | "homeassistant";
-export type IrAction = "volume_up" | "volume_down" | "mute";
+export type IrBackend = "esphome" | "homeassistant" | "firetv";
+// Mirrors IR_ACTIONS in shell/config.js. Closed, because an action nothing is mapped
+// to is refused rather than sent, and because each one is a Home Assistant button with
+// a stable entity id.
+export type IrAction =
+  | "volume_up"
+  | "volume_down"
+  | "mute"
+  | "tv_power"
+  | "input_hdmi1"
+  | "input_hdmi2"
+  | "input_hdmi3"
+  | "input_hdmi4"
+  | "soundbar_power"
+  | "soundbar_volume_up"
+  | "soundbar_volume_down"
+  | "soundbar_mute";
 export type IrActionMap = Partial<Record<IrAction, string>>;
 
 // null = the shell is unreachable - NOT the same as an unconfigured box. The
@@ -207,6 +230,7 @@ export type IrInput = Partial<{
     actions: IrActionMap;
   }>;
   homeassistant: Partial<{ url: string; token: string; actions: IrActionMap }>;
+  firetv: Partial<{ mac: string; actions: IrActionMap }>;
 }>;
 export async function saveIr(ir: IrInput): Promise<PublicConfig> {
   return postConfig({ ir });

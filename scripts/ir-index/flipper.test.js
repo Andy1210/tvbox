@@ -170,3 +170,37 @@ test("a category says what the thing is, and what kind of thing it is", () => {
   assert.equal(setName("LG_AKB73495301.ir", "LG"), "AKB73495301");
   assert.equal(setName("Samsung.ir", "Samsung"), "Samsung", "a file named after the brand keeps a name");
 });
+
+// ---- the input keys ----------------------------------------------------------------
+// Spellings taken off the real LG service-remote file, which is the only capture in the
+// tree that carries discrete sockets - every consumer remote has one stepping button.
+test("the service remote's socket buttons bind their own keys", () => {
+  const key = (n) => (matchKey(n) || [])[0];
+  assert.equal(key("Hdmi1"), "HDMI1");
+  assert.equal(key("Hdmi2"), "HDMI2");
+  assert.equal(key("HDMI 3"), "HDMI3");
+  assert.equal(key("hdmi-4"), "HDMI4");
+  assert.equal(key("Input"), "Input");
+  assert.equal(key("Source"), "Input");
+  assert.equal(key("Av"), "Input", "what most contributors call the stepping button");
+});
+
+test("a bare HDMI binds nothing at all", () => {
+  // It means different things on different remotes - stepping through the HDMI sockets
+  // on some, selecting the first on others - and the two readings put the television on
+  // different inputs. An unbound key shows as "this device has no input code", which is
+  // recoverable; a wrong one is a command that reports success and switches elsewhere.
+  assert.equal(matchKey("HDMI"), null);
+});
+
+test("a socket name never binds the stepping key", () => {
+  for (const n of ["Hdmi2", "Comp1", "Av1", "Rgb", "Usb"]) {
+    assert.notEqual((matchKey(n) || [])[0], "Input", n);
+  }
+});
+
+test("an exact socket spelling outranks a loose one", () => {
+  // Score decides which of a file's buttons wins a key, and a file carrying both
+  // `HDMI1` and `Input HDMI 1` must take the plain one.
+  assert.ok(matchKey("HDMI1")[1] > matchKey("Input HDMI 1")[1]);
+});

@@ -11,6 +11,7 @@ export interface PlayerEvent {
 
 export interface TvNotification {
   kind?: string; // shell-originated structured notes the launcher localizes (e.g. "lowBattery")
+  cause?: string; // which failure, for the kinds that have more than one (irFailed)
   name?: string; // lowBattery: device name
   battery?: number; // lowBattery: %
   title?: string;

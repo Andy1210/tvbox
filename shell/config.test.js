@@ -135,3 +135,93 @@ test.after(() => {
   if (REAL_HOME === undefined) delete process.env.HOME;
   else process.env.HOME = REAL_HOME;
 });
+
+// ---- the firetv IR backend ---------------------------------------------------------
+// A third blaster whose "device" is the Fire TV remote already paired to the box. It
+// carries no secret - the BlueZ bond is the credential - so the block is a MAC plus
+// which plan entry each action points at.
+test("a firetv blaster round-trips, and only with a real MAC", () => {
+  config.setIr({
+    backend: "firetv",
+    firetv: { mac: "7c:ed:c6:12:e6:3c", actions: { input_hdmi2: "tv:HDMI2", soundbar_power: "audio:Power" } },
+  });
+  const pub = config.publicConfig().ir;
+  assert.equal(pub.backend, "firetv");
+  assert.equal(pub.firetv.mac, "7C:ED:C6:12:E6:3C", "stored uppercase, however it was typed");
+  assert.deepEqual(pub.firetv.actions, { input_hdmi2: "tv:HDMI2", soundbar_power: "audio:Power" });
+  assert.equal(pub.configured, true);
+
+  const raw = config.rawIr();
+  assert.equal(raw.backend, "firetv");
+  assert.equal(raw.firetv.mac, "7C:ED:C6:12:E6:3C");
+
+  // A typo does NOT throw the action map away. This config is hand-edited, and losing a
+  // whole mapping over one bad field is the kind of silence nobody notices until a
+  // button stops working; an EMPTY mac is the deliberate way to clear it.
+  config.setIr({ firetv: { mac: "not-a-mac", actions: { input_hdmi2: "tv:HDMI2" } } });
+  assert.equal(config.publicConfig().ir.firetv.mac, "7C:ED:C6:12:E6:3C", "the stored MAC survives a typo");
+  assert.deepEqual(config.publicConfig().ir.firetv.actions, {
+    input_hdmi2: "tv:HDMI2",
+    soundbar_power: "audio:Power",
+  });
+
+  config.setIr({ firetv: { mac: "" } });
+  assert.equal(config.publicConfig().ir.firetv.mac, "", "an empty MAC clears the block");
+});
+
+test("an action pointing nowhere real is dropped, not stored", () => {
+  // The value becomes a lookup into the saved remote plan. A malformed one would fail
+  // per-press with nothing on any screen having said so, which is the failure this
+  // whole area keeps producing - so it is refused at the save.
+  config.setIr({
+    backend: "firetv",
+    firetv: {
+      mac: "7C:ED:C6:12:E6:3C",
+      actions: {
+        input_hdmi2: "tv:HDMI2", // good
+        input_hdmi3: "tv:hdmi3", // wrong case - not a key name
+        soundbar_power: "speaker:Power", // not a device kind
+        soundbar_mute: "audio:Volume", // not a key
+        mute: "audio:Mute; rm -rf /", // not a target at all
+      },
+    },
+  });
+  assert.deepEqual(config.publicConfig().ir.firetv.actions, { input_hdmi2: "tv:HDMI2" });
+});
+
+test("every action in the vocabulary can be mapped", () => {
+  // The list is closed, and a name that silently would not store is a feature that
+  // looks configured and never fires.
+  const actions = {};
+  for (const a of [
+    "volume_up",
+    "volume_down",
+    "mute",
+    "tv_power",
+    "input_hdmi1",
+    "input_hdmi2",
+    "input_hdmi3",
+    "input_hdmi4",
+    "soundbar_power",
+    "soundbar_volume_up",
+    "soundbar_volume_down",
+    "soundbar_mute",
+  ])
+    actions[a] = "tv:Power";
+  config.setIr({ backend: "firetv", firetv: { mac: "7C:ED:C6:12:E6:3C", actions } });
+  assert.deepEqual(Object.keys(config.publicConfig().ir.firetv.actions).sort(), Object.keys(actions).sort());
+});
+
+test("a button can be bound to an IR action", () => {
+  // The remap is what puts a TV input on a button the remote has no key for. The NAME
+  // is not checked against the blaster's mapping here on purpose: the two are edited on
+  // different screens, and dropping the binding would lose it silently.
+  config.setRemote({
+    devices: {
+      "7C:ED:C6:12:E6:3C": { name: "Remote Pro", keymap: { "ir:soundbar_power": [640], "ir:nope!": [641] } },
+    },
+  });
+  const km = config.publicConfig().remote.devices["7C:ED:C6:12:E6:3C"].keymap;
+  assert.deepEqual(km["ir:soundbar_power"], [640], "the headphone button's usage, 0x0280");
+  assert.ok(!("ir:nope!" in km), "but the charset is still the charset");
+});

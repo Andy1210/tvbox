@@ -27,6 +27,7 @@ export const REMOTE_ACTIONS: RemoteAction[] = [
   "power",
   "settings",
   "appswitcher",
+  "back_to_box",
 ];
 
 export interface ConnectedRemote {

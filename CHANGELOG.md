@@ -5,6 +5,60 @@ updates). `scripts/make-release.sh` lifts the current version's `hu`/`en`
 blocks into the OTA feed's `notes` - keep both languages, keep it short, and
 write for the person on the couch (what changes for THEM), not for developers.
 
+## 3.11.0
+
+### hu
+
+- **Át tudod váltani a tévé bemenetét a dobozról.** HDMI 1, 2, 3 vagy 4 - hanggal,
+  a Home Assistantból, vagy a távirányító egy szabad gombjára kötve. Eddig erre nem
+  volt mód: a HDMI-CEC-en egy lejátszó csak magára tudja váltani a tévét, máshova
+  nem. Egy Fire TV távirányítót használva a doboz a táv saját infra LED-jével lő -
+  ahhoz a táv legyen ébren, és a gombra kötés pont ezért a legbiztosabb: ugyanaz a
+  nyomás ébreszti fel, ami a parancsot kiküldi. Hanghoz egy konnektorból működő
+  jeladó a megbízhatóbb.
+- **A hangprojektort is be tudod kapcsolni**, ami eddig szintén kimaradt, mert
+  nincs a CEC-buszon. A hangerejét és a némítását a Home Assistantból vagy egy
+  gombra kötve éred el - hanggal a "halkítsd le" továbbra is a tévét halkítja,
+  mert ugyanaz a szó.
+- **Ehhez nem kell új eszköz, ha van a dobozhoz párosított Fire TV
+  távirányító**: az infra LED abban van, és a doboz meg tudja kérni, hogy lőjön
+  ki egy kódot. A doboz mostantól nyitva tartja hozzá a kapcsolatot, így egy
+  parancs kb. egy másodperc alatt kimegy, és egymás után többet is lehet küldeni.
+  Egy alvó távirányító viszont nem elérhető: ilyenkor egyszer meg kell nyomni, és
+  onnantól a doboz tartja a kapcsolatot. A doboz meg is írja, ha ez volt a baj.
+- **A távirányító bármelyik szabad gombjára rá lehet kötni ezeket** (Beállítások
+  → Távirányítók és kiegészítők), például a Remote Pro fejhallgató gombjára.
+- **És vissza is lehet váltani a dobozra.** Ez fontos: amíg a tévé más bemeneten
+  áll, a doboz távirányítója nem működik - a tévé csak annak küldi a
+  gombnyomásokat, ami éppen látszik. A visszaváltás nem infrán megy, hanem
+  HDMI-CEC-en, tehát nem kell hozzá kód - ha a tévé a CEC-parancsot elfogadja.
+
+### en
+
+- **The TV's input can be switched from the box.** HDMI 1, 2, 3 or 4 - by voice,
+  from Home Assistant, or bound to a spare button on a remote. There was no way to
+  do this before: over HDMI-CEC a player can only bring the TV to itself, never
+  move it elsewhere. With a Fire TV remote as the blaster the box fires the
+  remote's own infrared LED - the remote has to be awake for that, which is exactly
+  why a bound button is the surest way: the press that sends the command is the press
+  that wakes it. For voice, a mains-powered blaster is the more dependable one.
+- **A soundbar can be switched on too**, which was missing for the same kind of
+  reason: it is not on the CEC bus. Its volume and mute are there from Home
+  Assistant or on a bound button - by voice, "turn it down" still means the
+  television, because it is the same phrase.
+- **No new hardware is needed if a Fire TV remote is paired to the box**: the
+  infrared LED is in the remote, and the box can ask it to fire a code. The box
+  now keeps the connection to it open, so a command goes out in about a second and
+  several in a row work. A sleeping remote cannot be reached at all: press it once and
+  the box holds the connection from then on. The box says so when that was the
+  problem.
+- **Any spare button on a remote can be bound to these** (Settings → Remotes &
+  accessories), a Remote Pro's headphone key included.
+- **And there is a way back to the box.** This matters: while the TV is on
+  another input the box's remote does nothing, because the set only forwards
+  button presses to whatever is on screen. Coming back is not infrared but
+  HDMI-CEC, so it needs no codes - as long as the set acts on the CEC command.
+
 ## 3.10.4
 
 ### hu

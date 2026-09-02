@@ -101,10 +101,26 @@ def frame_switch_table(table_uuid, toggle_state=0):
     return _u8(CTRL_CONTEXT_SWITCH) + _uuid_be(table_uuid) + _u8(toggle_state)
 
 def frame_commit_blast(): return _u8(CTRL_COMMIT_BLAST)
+def frame_enable_sds():   return _u8(CTRL_ENABLE_SDS)
+
+# A blast table is staging-only, and Fire OS gives it the NULL id: KeyMapTableFactory
+# .buildBlastTables never calls setId, so KeyMapTable's default all-zero UUID is what
+# reaches requestStartNewTable. A persistent table's own id (our --uuid) is a different
+# thing, and staging under it asks the remote to reset the staging area for an id it
+# already holds in NVM.
+BLAST_TABLE_UUID = "00000000-0000-0000-0000-000000000000"
 def frame_delete_all():   return _u8(CTRL_DELETE)
 
-def chunks(data, n=200):
-    return [data[i:i+n] for i in range(0, len(data), n)]
+# The Fire OS writer (BleKeyMapDeviceProxyV2.writeBinary) allocates a fixed
+# CHUNK_SIZE buffer and writes all of it, so its LAST chunk is zero-padded to 200
+# bytes rather than short. The declared length in the start-table frame is what
+# bounds the table, so the padding carries no data - it is here to make our ATT
+# writes byte-identical to the client the remote firmware was written against.
+def chunks(data, n=200, pad=False):
+    out = [data[i:i+n] for i in range(0, len(data), n)]
+    if pad and out:
+        out[-1] = out[-1] + bytes(n - len(out[-1]))
+    return out
 
 # ---- Pronto/CCF -> IRCode (exact port of Fire OS IrCodeConverter.convertToRaw) --
 # code1/code2 in the Fire OS IR DB are Pronto hex codes. The remote consumes raw

@@ -211,7 +211,9 @@
       "power": "TV power (on/off)",
       "settings": "Open Settings",
       "app": "Launch {name}",
-      "appswitcher": "Switch between running apps"
+      "appswitcher": "Switch between running apps",
+      "ir": "IR: {name}",
+      "back_to_box": "Back to the box (TV input)"
     },
     "test": "Button test",
     "testBadge": "what does each button send?",
@@ -606,16 +608,17 @@
     "portDefault": "1883"
   },
   "ir": {
-    "title": "IR blaster (TV volume)",
+    "title": "IR blaster (TV, soundbar)",
     "configured": "configured",
     "notConfigured": "not set up",
-    "hint": "Send volume and mute to the TV through a network IR blaster when the TV takes no CEC volume. The remotes' volume buttons and MQTT/voice commands all use it.",
+    "hint": "What the BOX sends over infrared: the TV's volume and input, and a soundbar - what HDMI-CEC cannot reach. The remote's own four buttons are on their own page (“The remote's own IR buttons”).",
     "offHint": "Leave the device host / URL empty to turn the integration off.",
     "saveFailed": "Couldn't save the settings.",
     "backendTitle": "Blaster type",
     "backend": {
       "esphome": "ESPHome device (XIAO Smart IR Mate, ...)",
-      "homeassistant": "Home Assistant script"
+      "homeassistant": "Home Assistant script",
+      "firetv": "Fire TV remote (its own IR LED)"
     },
     "host": "Device host",
     "port": "API port",
@@ -630,27 +633,74 @@
     "action": {
       "volume_up": "Volume up",
       "volume_down": "Volume down",
-      "mute": "Mute"
+      "mute": "Mute",
+      "tv_power": "TV power",
+      "input_hdmi1": "TV input HDMI 1",
+      "input_hdmi2": "TV input HDMI 2",
+      "input_hdmi3": "TV input HDMI 3",
+      "input_hdmi4": "TV input HDMI 4",
+      "soundbar_power": "Soundbar power",
+      "soundbar_volume_up": "Soundbar volume up",
+      "soundbar_volume_down": "Soundbar volume down",
+      "soundbar_mute": "Soundbar mute"
     },
     "notSet": "not set",
     "test": "Test",
     "testOk": "Sent.",
-    "testFailed": "Send failed: {error}",
-    "disconnected": "Blaster not reachable: {error}",
     "groupDevice": "Blaster",
     "groupTest": "Try it",
-    "portDefault": "default"
+    "portDefault": "default",
+    "mac": "Remote's Bluetooth address",
+    "actionsHintFiretv": "Which device's which button the box should send. The choices come from the remote's saved code plan.",
+    "testing": "Sending…",
+    "failedTitle": "The infrared command did not go out",
+    "noPlanHint": "Build the remote's code plan first, under “The remote's own IR buttons” on the remote's page.",
+    "planUnreadable": "The box could not read the remote's code plan just now.",
+    "noSuitableTarget": "The code plan has no key for this - add the device that has it first.",
+    "failed": {
+      "asleep": "Press a button on the remote to wake it, then try again.",
+      "unmapped": "No code is mapped to this action on the blaster.",
+      "noBlaster": "No IR blaster is set up.",
+      "noService": "This remote cannot fire an IR code.",
+      "badCode": "This remote cannot send that code.",
+      "timeout": "The remote did not answer in time.",
+      "other": "The infrared command did not go out.",
+      "notFired": "The remote took the code but did not fire it. Check its batteries and aim it at the device.",
+      "linkLost": "The link dropped while sending - the command may have gone out. Check before trying again.",
+      "badSpec": "The box built an IR command this remote will not accept. That is a bug in the box.",
+      "busy": "The remote is busy with another IR command. Try again in a moment.",
+      "held": "The remote is being set up in the settings right now. Try again when that is done.",
+      "serviceSlow": "The box's IR service did not answer in time.",
+      "blasterUnreachable": "The blaster cannot be reached on the network. Check that it is plugged in and that its address is right.",
+      "blasterKey": "The blaster's API key does not match. Enter it again in the settings.",
+      "blasterEntities": "The blaster does not have the two configured entities (signal select and send button).",
+      "haUrl": "The Home Assistant address is wrong, or it points outside the house without encryption.",
+      "haCall": "Home Assistant refused the call. Check the script and the token."
+    },
+    "awakeHintFiretv": "If the remote has gone to sleep, one button press wakes it.",
+    "offHintFiretv": "Clear the remote's Bluetooth address to turn it off.",
+    "lastFailure": "Last failure: {reason}",
+    "testRunning": "A test is already running.",
+    "serviceFailed": "The IR service will not start. Check the box's log.",
+    "failedTitleUnknown": "Not sure it went out",
+    "failedTitleRemote": "The remote did not fire",
+    "failedTitleWait": "The remote is not free right now"
   },
   "firetvir": {
-    "title": "TV IR (this remote's own blaster)",
-    "entry": "TV IR (this remote's own blaster)",
-    "hint": "This remote has an infrared LED. Add the devices in the room, then say which button drives which - no Fire TV box needed.",
+    "title": "The remote's own IR buttons",
+    "entry": "The remote's own IR buttons",
+    "hint": "This remote has an infrared blaster, and its own four buttons (volume, mute, power) can drive the devices in the room - no Fire TV needed. What the BOX sends over infrared - input switching, a soundbar, by voice or on a spare button - is the “IR blaster” page.",
     "credit": "Codes from the community irdb database and Flipper-IRDB, merged into an index this box downloads. See About for credits.",
     "key": {
       "VolumeUp": "Volume +",
       "VolumeDown": "Volume −",
       "Mute": "Mute",
-      "Power": "Power"
+      "Power": "Power",
+      "HDMI1": "HDMI 1",
+      "HDMI2": "HDMI 2",
+      "HDMI3": "HDMI 3",
+      "HDMI4": "HDMI 4",
+      "Input": "Input / source"
     },
     "kind": {
       "all": "All",
@@ -868,7 +918,7 @@
   "peripherals": {
     "btHint": "Speakers, remotes, controllers",
     "remoteHint": "Teach a remote one of its other buttons",
-    "irHint": "TV volume for a TV that takes none over CEC",
+    "irHint": "What the box sends: volume, input switching, soundbar",
     "phoneRemoteHint": "Press the buttons from your phone"
   },
   "apps": {

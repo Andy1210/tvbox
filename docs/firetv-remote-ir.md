@@ -12,6 +12,102 @@ behaviours normally need a Fire TV to set up; this box does both without one.
    keylayouts. A stock Pi kernel doesn't, so they look dead - we remap them so
    they become ordinary buttons you can bind to any app or action.
 
+There is a third use of the same BLE service, and it is not a keymap at all. An
+"InstantFire" blast sends a code **bound to no button**, so it needs none of the
+scan ids a keymap entry does - which means it can send a code for a key the
+remote does not physically have. That is what makes the remote usable as a
+general blaster for the box: switching the TV's own input, or a soundbar's
+power, neither of which HDMI-CEC can express. It is wired up as the `firetv`
+backend of the IR hub - see [ir-blaster.md](ir-blaster.md) - and its one
+limitation is below: the remote sleeps between presses, so a blast needs it awake.
+
+A sleeping remote is silent - 95 s of LE scanning sees a dozen other devices in the
+room and never it - so a press is the only way back, and BlueZ abandons a connect
+after ~41 s (the blast path cuts that to 8 s: a remote that is not there will not
+start being there, and every caller has a shorter budget than 41 s anyway).
+
+**So the link is held rather than re-made, and that is what `serve` is for.**
+`firetv_remote_ir.py serve <mac> --socket <path>` keeps one BLE connection and
+blasts on request - one JSON object per line, one request per connection, the code
+spec travelling in the request so no file is written per blast. The shell starts one
+for the configured remote (there is one IR backend, so one service) and falls back to
+a process per blast when it cannot
+([shell/ir.js](../shell/ir.js), [shell/firetvir.js](../shell/firetvir.js)). The
+numbers are the whole argument, measured on a Remote Pro (PID 0x0425):
+
+|                                                        | cost                  |
+| ------------------------------------------------------ | --------------------- |
+| blast over a held link                                 | ~0.9 s                |
+| blast from a fresh process, remote awake               | 2.6 s                 |
+| the same, ~2 s after the previous process disconnected | 8.2 s, and it fails   |
+| 20 blasts over 20 min through one held link            | all OK, link still up |
+| a blast after 180 s of complete silence on a held link | OK in 1.1 s           |
+
+Two things follow. `release` exists because the remote takes ONE connection, so the
+resident holder has to step aside for `program`, `test` and `info` - the shell sends
+it before each of those. And a blast that fires leaves the link up while a lost link
+is forgotten, so the next request opens a new one rather than writing into a dead
+client.
+
+The four things a blast has to get right, from `BleKeyMapDeviceProxyV2.blastCommand`
+rather than from guesswork: it is staged under the **null table id** (a blast table
+is throwaway - `buildBlastTables` never sets one, so our own persistent table's id
+has no business there), written in fixed 200-byte chunks with the **tail
+zero-padded**, committed with CONTROL 5, and - since this remote **never notifies** -
+decided by READING the characteristic up to nine times with a growing sleep. That
+last one is not a detail: the first read routinely answers `00` ("not done") and the
+second `02`, so deciding on one read reports a blast that fired as a failure. The
+burst ends with CONTROL 32 (`ENABLE_SDS`), which Fire OS writes only after the
+_terminal_ blast of a burst - `RemoteBlasterExecutor` keeps it off between the LED,
+the IR code and the LED again, which is also proof that several blasts over one
+connection are the firmware's normal path rather than an edge case.
+
+The service is bounded on purpose in three ways, each because of something measured
+rather than imagined. A request may only carry the code-spec shape the box's own plan
+produces (`check_blast_request`), because the socket is reachable by everything running
+as the box user and the compiler behind it would otherwise accept 20,000 raw timings. At
+most a handful of blasts queue behind the one in flight, since each is seconds of radio
+and the button and Home Assistant paths wait on the same queue. And `release` takes a
+hold window: a blast arriving right after a release spent its whole connect budget taking
+the link back, which during a 60 s programming run is the remote being pulled away
+mid-write.
+
+**Why a sleeping remote cannot be reached at all, rather than slowly: the find-my
+beacon does not exist until a host provisions it.** Fire OS writes `01` plus two
+16-byte IRKs to `cfbfb001` and then `02 01`, and its own ring path refuses with
+_"device is not configured, cannot ring"_ when that has not happened - which is why
+the finder appears to work there and not here, and why a Fire TV cannot reach an
+unreachable remote either (`Ring operation timeout in 30 seconds`). Fire OS also
+keeps a standing intent to connect that it never withdraws: it suppresses
+connection-parameter updates for Amazon remotes and never removes one from the
+background connection list, which upstream AOSP does. `btmgmt add-device` is the
+Pi's equivalent.
+
+**Provisioning the beacon from this end was tried, and it did not work.** Worth
+recording so nobody repeats it blindly. With the remote awake, both writes went to
+`cfbfb001` **under the finder service** and were accepted with no ATT error - the
+33-byte `01` + two random 16-byte IRKs as a long write, then `02 01`. The remote
+then advertised nothing: 65 s of LE scanning with the link down found seven other
+devices and neither the remote's address nor any `0171` manufacturer data. Nothing
+broke either - the IR blast still works.
+
+Two reasons it may have failed, both of them things the firmware read did NOT
+settle: `02 01` being the enable is an inference (it is simply the only other
+two-byte constant beside the ring's `03 01`, with no semantic name anywhere), and
+the host also mints a `peerIdentityBDA` that is **not** part of the 33-byte write
+while `addIrkPairNative` takes both the real address and that invented identity -
+so the sequence may be missing its resolving-list half. The characteristic is
+write-only (`Read not permitted`), so there is no way to read a config state back
+and check. Settling it needs a rooted Fire TV to watch a real provisioning, not
+more guessing at this end.
+
+**Address the characteristic by PATH, not by UUID.** Demonstrated live on this
+remote: `serviceff02` is the finder service (`cfbfb000`) and its child
+`serviceff02/charff03` is the command characteristic - but `servicefe02/charfe0e`
+carries the **same** `cfbfb001` UUID under the DFU service, and writing there is a
+firmware update. Match the service first, then a char directly under it, exactly as
+`shell/remotefinder.js` does.
+
 Both were reverse-engineered from Fire OS 7.7.1.3 on a Fire TV Stick 4K Max
 (AFTKA). Those working notes are not part of this repo; what a reader needs is
 below and in the Python modules it names.

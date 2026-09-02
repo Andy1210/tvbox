@@ -142,5 +142,6 @@ jobs:
           python3 remote/ir_protocols_test.py
           python3 remote/flipper_protocols_test.py
           python3 remote/remote_input_bridge_test.py
+          python3 remote/firetv_remote_ir_test.py
           python3 gamepad/gamepad_shim_test.py
           python3 voice/voice_satellite_test.py

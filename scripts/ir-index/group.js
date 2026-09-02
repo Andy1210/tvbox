@@ -20,7 +20,7 @@
 // between two identical rows.
 const crypto = require("crypto");
 
-const IR_KEYS = ["VolumeUp", "VolumeDown", "Mute", "Power"];
+const { IR_KEYS, ALL_IR_KEYS } = require("./keys");
 const KIND_ORDER = ["tv", "audio", "settop", "player", "climate", "other"];
 
 // Which form of a code to keep when several describe the same frame. A decoded row is
@@ -81,8 +81,11 @@ function groupSets(sets) {
     if (!g) groups.set(sig, (g = { sig, sets: [], keys: {} }));
     g.sets.push(s);
     // Keep the cheapest form of every key. All sets in a group send the same frames,
-    // so this is a size choice, not a behaviour one.
-    for (const k of IR_KEYS) {
+    // so this is a size choice, not a behaviour one. The extra keys ride along here but
+    // NOT in the signature above: a group is identified by the four, and two sets that
+    // agree on those are the same device whether or not one of them also knows the
+    // input codes.
+    for (const k of ALL_IR_KEYS) {
       const row = (s.keys || {})[k];
       if (!row) continue;
       const have = g.keys[k];
@@ -102,8 +105,10 @@ function groupSets(sets) {
   };
 
   const devices = [...groups.values()].map((g) => {
-    const keys = IR_KEYS.filter((k) => g.keys[k]);
-    const first = g.keys[keys[0]];
+    const keys = ALL_IR_KEYS.filter((k) => g.keys[k]);
+    // The variant labels the row, and it has to keep speaking for the same key it
+    // always did: an extra key sorted first would relabel every device a build later.
+    const first = g.keys[IR_KEYS.filter((k) => g.keys[k])[0]];
     const sources = [...new Set(g.sets.map((s) => s.source))].sort();
     const kind = commonKind(g.sets);
     return {
@@ -162,4 +167,4 @@ function groupSets(sets) {
   return { devices, skipped };
 }
 
-module.exports = { IR_KEYS, KIND_ORDER, signature, bestLabel, groupSets };
+module.exports = { IR_KEYS, ALL_IR_KEYS, KIND_ORDER, signature, bestLabel, groupSets };

@@ -71,6 +71,9 @@ let deps = {
   soundWidget: () => {},
   onNotify: () => {},
   onCommand: () => {},
+  // Which IR actions the blaster has mapped (ir.js status). Home Assistant gets a
+  // button per action, so this list decides which buttons exist.
+  irActions: () => [],
 };
 
 function init(d) {
@@ -209,11 +212,36 @@ function applyConfig() {
     refreshSinkState();
     publish({ force: true });
     publishDiag(); // the fleet payload, now rather than at the first tick
+    publishIrDiscovery();
   }
   // re-seed retained now-playing on the (possibly new) broker; the mqtt client
   // queues QoS-0 publishes made before "connect", so this is safe immediately
   const np = deps.nowPlaying();
   if (ctl && np) ctl.publish("nowplaying", np, { retain: true });
+}
+
+// Restate the HA button entities from what the blaster currently has mapped. Called
+// when the bridge (re)connects and after an IR config save - the set is retained on the
+// broker, so a button whose action was removed has to be actively deleted, which
+// mqtt.js does by diffing against what it published last.
+function publishIrDiscovery() {
+  if (!ctl) return;
+  let actions;
+  try {
+    actions = deps.irActions();
+    if (actions === null || actions === undefined) {
+      // The hub has not applied its config yet (this runs from applyConfig, which the
+      // shell calls before ir.applyConfig). Publishing an empty set here deleted every
+      // retained IR button on every boot; they came back only after an IR settings save.
+      return;
+    }
+  } catch (e) {
+    // A blaster that cannot report is not a reason to drop the buttons that exist: an
+    // empty list would delete every one of them.
+    console.warn("[mqtt] ir actions unavailable:", (e && e.message) || e);
+    return;
+  }
+  ctl.publishDiscovery(actions);
 }
 
 // The slow ticks. Started once, from the shell's bootstrap.
@@ -232,6 +260,7 @@ module.exports = {
   setBoxVolume,
   refreshSinkState,
   applyConfig,
+  publishIrDiscovery,
   startTicks,
   control,
   TV_COMMANDS,

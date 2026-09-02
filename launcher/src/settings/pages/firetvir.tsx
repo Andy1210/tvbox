@@ -3,7 +3,7 @@ import type { RemoteDeviceConfig } from "@sdk/config";
 import { useI18n } from "../../lib/i18n";
 import { useConfigStore } from "../../stores/config";
 import {
-  IR_KEYS,
+  PROGRAMMABLE_KEYS,
   deviceKeys,
   deviceSupported,
   eraseIr,
@@ -49,7 +49,10 @@ import { useSettingsNav } from "../nav";
 // scale on focus - and the layout adapter measures the SCALED box, so a focused
 // button overlaps its neighbours and spatial navigation drops them from its
 // candidate list. Rows in a Group touch by design and never transform.
-const KEY_ORDER: IrKey[] = [...IR_KEYS];
+// The buttons this screen ASSIGNS, which is the programmable four - the input keys a
+// device row also carries cannot be written to a remote's keymap at all, so offering
+// them here is a row whose Test fails and whose assignment the shell discards.
+const KEY_ORDER: IrKey[] = [...PROGRAMMABLE_KEYS];
 const DEPS_POLL_MS = 2000;
 const MAX_LISTED_BRANDS = 60; // a search that matches more than this asks for another letter
 // Mirrors shell/firetvir.js: MAX_PLAN_DEVICES bounds what one remote may carry, and

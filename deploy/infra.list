@@ -17,6 +17,7 @@ remote/ir_protocols.py
 remote/flipper_protocols.py
 remote/firetv_hid_probe.py
 remote/firetv_tv_codes.example.json
+remote/firetv_ir_plan.example.json
 deploy/run-shell.sh
 deploy/tvbox-diag.sh
 deploy/tvbox-safemode.sh

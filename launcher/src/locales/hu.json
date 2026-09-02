@@ -211,7 +211,9 @@
       "power": "TV ki/be kapcsolás",
       "settings": "Beállítások megnyitása",
       "app": "{name} indítása",
-      "appswitcher": "Váltás a futó appok között"
+      "appswitcher": "Váltás a futó appok között",
+      "ir": "Infra: {name}",
+      "back_to_box": "Vissza a dobozra (TV bemenet)"
     },
     "test": "Gombteszt",
     "testBadge": "mit küldenek a gombok?",
@@ -606,16 +608,17 @@
     "portDefault": "1883"
   },
   "ir": {
-    "title": "IR jeladó (TV hangerő)",
+    "title": "IR jeladó (TV, hangprojektor)",
     "configured": "beállítva",
     "notConfigured": "nincs beállítva",
-    "hint": "Hangerő és némítás küldése a TV-nek hálózati IR jeladón át, ha a TV nem kezeli a CEC hangerőt. A távirányítók hangerő gombjai és az MQTT/hang parancsok is ezt használják.",
+    "hint": "Amit a DOBOZ küld infrán: a tévé hangereje és bemenete, meg a hangprojektor - amit a HDMI-CEC nem ér el. A távirányító saját négy gombja külön lapon van („A távirányító IR gombjai”).",
     "offHint": "Hagyd üresen az eszköz címét / URL-jét az integráció kikapcsolásához.",
     "saveFailed": "A beállítások mentése nem sikerült.",
     "backendTitle": "Jeladó típusa",
     "backend": {
       "esphome": "ESPHome eszköz (XIAO Smart IR Mate, ...)",
-      "homeassistant": "Home Assistant script"
+      "homeassistant": "Home Assistant script",
+      "firetv": "Fire TV távirányító (a saját infra LED-je)"
     },
     "host": "Eszköz címe",
     "port": "API port",
@@ -630,27 +633,74 @@
     "action": {
       "volume_up": "Hangerő fel",
       "volume_down": "Hangerő le",
-      "mute": "Némítás"
+      "mute": "Némítás",
+      "tv_power": "TV be/ki",
+      "input_hdmi1": "TV bemenet: HDMI 1",
+      "input_hdmi2": "TV bemenet: HDMI 2",
+      "input_hdmi3": "TV bemenet: HDMI 3",
+      "input_hdmi4": "TV bemenet: HDMI 4",
+      "soundbar_power": "Hangprojektor be/ki",
+      "soundbar_volume_up": "Hangprojektor hangosítás",
+      "soundbar_volume_down": "Hangprojektor halkítás",
+      "soundbar_mute": "Hangprojektor némítás"
     },
     "notSet": "nincs beállítva",
     "test": "Teszt",
     "testOk": "Elküldve.",
-    "testFailed": "Küldés sikertelen: {error}",
-    "disconnected": "A jeladó nem elérhető: {error}",
     "groupDevice": "Adó",
     "groupTest": "Kipróbálás",
-    "portDefault": "alapértelmezett"
+    "portDefault": "alapértelmezett",
+    "mac": "A távirányító Bluetooth-címe",
+    "actionsHintFiretv": "Melyik készülék melyik gombját küldje a doboz. A választék a távirányító mentett kódtervéből jön.",
+    "testing": "Küldés…",
+    "failedTitle": "Az infra parancs nem ment ki",
+    "noPlanHint": "Előbb a távirányító kódtervét kell összeállítani: a táv saját lapján, a „A távirányító IR gombjai” alatt.",
+    "planUnreadable": "A doboz most nem tudta beolvasni a távirányító kódtervét.",
+    "noSuitableTarget": "A kódtervben nincs ehhez való gomb - előbb vedd fel azt a készüléket.",
+    "failed": {
+      "asleep": "Nyomj meg egy gombot a távirányítón, hogy felébredjen, aztán próbáld újra.",
+      "unmapped": "Ehhez a művelethez nincs kód beállítva a jeladónál.",
+      "noBlaster": "Nincs beállítva infra jeladó.",
+      "noService": "Ez a távirányító nem tud infra kódot kilőni.",
+      "badCode": "Ezt a kódot ez a távirányító nem tudja kiküldeni.",
+      "timeout": "A távirányító nem válaszolt időben.",
+      "other": "Az infra parancs nem ment ki.",
+      "notFired": "A távirányító megkapta a kódot, de nem lőtte ki. Nézd meg az elemeket, és fordítsd a készülék felé.",
+      "linkLost": "A kapcsolat megszakadt küldés közben - lehet, hogy a parancs kiment. Nézd meg, mielőtt újra próbálod.",
+      "badSpec": "A doboz olyan infra parancsot állított össze, amit ez a távirányító nem fogad el. Ez hiba a dobozban.",
+      "busy": "A távirányító épp más infra parancson dolgozik. Próbáld újra egy pillanat múlva.",
+      "held": "A távirányítót épp beállítják a beállításokban. Próbáld újra, ha az kész.",
+      "serviceSlow": "A doboz infra szolgáltatása nem válaszolt időben.",
+      "blasterUnreachable": "A jeladó nem érhető el a hálózaton. Nézd meg, hogy be van-e dugva, és jó-e a címe.",
+      "blasterKey": "A jeladó API-kulcsa nem egyezik. Írd be újra a beállításokban.",
+      "blasterEntities": "A jeladón nincs meg a beállított két elem (jelválasztó és küldés gomb).",
+      "haUrl": "A Home Assistant címe nem jó, vagy titkosítás nélkül a házon kívülre mutat.",
+      "haCall": "A Home Assistant elutasította a hívást. Nézd meg a szkriptet és a tokent."
+    },
+    "awakeHintFiretv": "Ha a távirányító elaludt, egy gombnyomás felébreszti.",
+    "offHintFiretv": "Töröld a távirányító Bluetooth-címét a kikapcsoláshoz.",
+    "lastFailure": "Legutóbb nem sikerült: {reason}",
+    "testRunning": "Egy teszt már fut.",
+    "serviceFailed": "Az infra szolgáltatás nem indul el. Nézd meg a doboz naplóját.",
+    "failedTitleUnknown": "Nem tudjuk, kiment-e",
+    "failedTitleRemote": "A távirányító nem lőtt",
+    "failedTitleWait": "A távirányító most nem szabad"
   },
   "firetvir": {
-    "title": "TV IR (a távirányító saját jeladója)",
-    "entry": "TV IR (a távirányító saját jeladója)",
-    "hint": "Ebben a távirányítóban van infra jeladó. Vedd fel a szobában lévő készülékeket, aztán add meg, melyik gomb melyiket vezérelje - Fire TV doboz nem kell hozzá.",
+    "title": "A távirányító IR gombjai",
+    "entry": "A távirányító IR gombjai",
+    "hint": "Ebben a távirányítóban van infra jeladó, és a saját négy gombja (hangerő, némítás, bekapcsolás) vezérelheti a szobában lévő készülékeket - Fire TV doboz nem kell hozzá. Amit a DOBOZ küld IR-en - bemenetváltás, hangprojektor, hangra vagy egy szabad gombra kötve -, az az „IR jeladó” lap.",
     "credit": "A kódok a közösségi irdb adatbázisból és a Flipper-IRDB-ből származnak, egy indexbe fűzve, amit a box letölt. Lásd a Névjegy menüt.",
     "key": {
       "VolumeUp": "Hangerő +",
       "VolumeDown": "Hangerő −",
       "Mute": "Némítás",
-      "Power": "Bekapcsolás"
+      "Power": "Bekapcsolás",
+      "HDMI1": "HDMI 1",
+      "HDMI2": "HDMI 2",
+      "HDMI3": "HDMI 3",
+      "HDMI4": "HDMI 4",
+      "Input": "Bemenet / forrás"
     },
     "kind": {
       "all": "Mind",
@@ -868,7 +918,7 @@
   "peripherals": {
     "btHint": "Hangszórók, távirányítók, kontrollerek",
     "remoteHint": "Taníts be egy másik gombot a távirányítón",
-    "irHint": "TV-hangerő, ha a tv CEC-en nem fogadja",
+    "irHint": "Amit a doboz küld: hangerő, bemenetváltás, hangprojektor",
     "phoneRemoteHint": "Gombok nyomása a telefonodról"
   },
   "apps": {

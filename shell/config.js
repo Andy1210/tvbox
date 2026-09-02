@@ -192,10 +192,17 @@ const REMOTE_ACTIONS = [
   "power",
   "settings",
   "appswitcher",
+  "back_to_box",
 ];
 // Dynamic app-launch remap actions ("app:<id>" - launch that app). The id
 // charset mirrors the bridge's APP_ACTION_RE and the nav endpoint's guard.
 const REMOTE_APP_ACTION = /^app:[a-z0-9_-]{1,32}$/;
+// One IR action through the blaster ("ir:<name>", IR_ACTIONS below). Mirrors the
+// bridge's IR_ACTION_RE. The NAME is deliberately not checked against IR_ACTIONS here:
+// the button binding and the blaster's action mapping are edited on different screens,
+// and dropping the binding because the mapping is not there yet would lose it silently -
+// the bridge reports an unmapped action at press time instead.
+const REMOTE_IR_ACTION = /^ir:[a-z0-9_]{1,32}$/;
 function sanitizeDevices(devices) {
   const out = {};
   if (!devices || typeof devices !== "object") return out;
@@ -204,7 +211,7 @@ function sanitizeDevices(devices) {
     const rawkm = entry.keymap && typeof entry.keymap === "object" ? entry.keymap : {};
     const keymap = {};
     for (const a of Object.keys(rawkm)) {
-      if (!REMOTE_ACTIONS.includes(a) && !REMOTE_APP_ACTION.test(a)) continue;
+      if (!REMOTE_ACTIONS.includes(a) && !REMOTE_APP_ACTION.test(a) && !REMOTE_IR_ACTION.test(a)) continue;
       if (!Array.isArray(rawkm[a])) continue;
       // 2048 covers real evdev codes (< 0x300) AND the bridge's virtual hidraw
       // bands (0x300 app buttons, 0x400 consumer-report buttons)
@@ -718,19 +725,58 @@ function rawRemote() {
 // e.g. the Seeed XIAO Smart IR Mate) and "homeassistant" (each action runs an
 // HA script - covers Broadlink & friends without a vendor protocol here).
 // Actions live per-backend so switching backends keeps both mappings.
-const IR_ACTIONS = ["volume_up", "volume_down", "mute"];
-const IR_BACKENDS = ["esphome", "homeassistant"];
+// The house vocabulary of IR actions. The three volume ones are what a remote's volume
+// keys are diverted to; the rest exist because a source device cannot reach them any
+// other way - CEC has no command that selects a foreign TV input, and a soundbar on its
+// own power circuit is not on the CEC bus at all.
+//
+// It is a CLOSED list on purpose. A publish to an action nothing is mapped to is
+// refused rather than sent (ir.js `send`), and a fixed vocabulary is what lets the HA
+// buttons carry stable entity ids.
+const IR_ACTIONS = [
+  "volume_up",
+  "volume_down",
+  "mute",
+  "tv_power",
+  // Discrete sockets only. The TV's own Source code (irdb calls it `Input`, and the
+  // index still carries it) is deliberately NOT an action here: measured on the
+  // living-room LG, it opens the set's input LIST rather than stepping - and that list
+  // cannot be driven by any remote the box owns, because those are paired to the BOX,
+  // not to the television. So it leaves the screen in a menu somebody has to escape
+  // with the TV's own remote, which is worse than offering nothing.
+  "input_hdmi1",
+  "input_hdmi2",
+  "input_hdmi3",
+  "input_hdmi4",
+  "soundbar_power",
+  "soundbar_volume_up",
+  "soundbar_volume_down",
+  "soundbar_mute",
+];
+const IR_BACKENDS = ["esphome", "homeassistant", "firetv"];
 const ESPHOME_DEFAULT_PORT = 6053;
 
-function sanitizeIrActions(a) {
+// What a `firetv` action points at: a device KIND in the saved remote plan plus one of
+// its keys. Addressing by kind rather than by device id is what keeps "the soundbar's
+// power" and "the TV's power" apart while the plan stays editable in the UI - a saved
+// plan's device ids change when the published index regroups, a kind does not.
+const IR_PLAN_TARGET_RE =
+  /^(tv|audio|settop|player|climate|other):(VolumeUp|VolumeDown|Mute|Power|HDMI1|HDMI2|HDMI3|HDMI4|Input)$/;
+
+function sanitizeIrActions(a, valid) {
   const out = {};
   if (!a || typeof a !== "object") return out;
   for (const k of IR_ACTIONS) {
     const v = typeof a[k] === "string" ? a[k].trim().slice(0, 100) : "";
-    if (v) out[k] = v;
+    if (v && (!valid || valid(v))) out[k] = v;
   }
   return out;
 }
+// A firetv action's value is checked, not just trimmed: it becomes a lookup into the
+// remote plan, and an unparseable one would fail per-press with nothing on screen
+// having said so.
+const sanitizeFiretvActions = (a) => sanitizeIrActions(a, (v) => IR_PLAN_TARGET_RE.test(v));
+const IR_MAC_RE = /^([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}$/;
 // esphome entity object_ids ("signal_select"); junk falls back to the default.
 function objectId(v, dflt) {
   return typeof v === "string" && /^[a-z0-9_]{1,64}$/.test(v.trim()) ? v.trim() : dflt;
@@ -743,6 +789,10 @@ function irConfigured(ir) {
     const e = ir.esphome;
     return !!(e && e.host && Object.keys(sanitizeIrActions(e.actions)).length);
   }
+  if (backend === "firetv") {
+    const f = ir.firetv;
+    return !!(f && IR_MAC_RE.test(String(f.mac || "")) && Object.keys(sanitizeFiretvActions(f.actions)).length);
+  }
   const h = ir.homeassistant;
   return !!(h && h.url && h.token && Object.keys(sanitizeIrActions(h.actions)).length);
 }
@@ -752,6 +802,7 @@ function publicIr(ir) {
   const c = ir && typeof ir === "object" ? ir : {};
   const e = c.esphome && typeof c.esphome === "object" ? c.esphome : {};
   const h = c.homeassistant && typeof c.homeassistant === "object" ? c.homeassistant : {};
+  const f = c.firetv && typeof c.firetv === "object" ? c.firetv : {};
   return {
     configured: irConfigured(c),
     backend: IR_BACKENDS.includes(c.backend) ? c.backend : "esphome",
@@ -767,6 +818,12 @@ function publicIr(ir) {
       url: h.url || "",
       hasToken: !!h.token,
       actions: sanitizeIrActions(h.actions),
+    },
+    // No secret of its own: the remote is reached over its existing BlueZ bond, so a MAC
+    // is the whole credential and it is already visible on the peripherals screen.
+    firetv: {
+      mac: IR_MAC_RE.test(String(f.mac || "")) ? String(f.mac).toUpperCase() : "",
+      actions: sanitizeFiretvActions(f.actions),
     },
   };
 }
@@ -828,7 +885,37 @@ function setIr(ir) {
   }
   if (ha) next.homeassistant = ha;
 
-  if (!next.esphome && !next.homeassistant) delete c.ir;
+  let firetv = cur.firetv && typeof cur.firetv === "object" ? cur.firetv : null;
+  if (ir && ir.firetv !== undefined) {
+    const p = ir.firetv;
+    const mac = str(p && p.mac, 17).toUpperCase();
+    // An OMITTED mac keeps the stored one; only an explicit empty string clears the
+    // block. The launcher echoes the whole block back on every action save, and it
+    // reads the MAC from `publicIr`, which shows "" for a stored value it cannot
+    // validate - so with "absent" and "empty" meaning the same thing, saving an action
+    // wiped the remote's address and the backend with it.
+    // A STRING, not merely a present field: null / 0 / [] / {} all took the
+    // clearing branch and wiped the action map with the address.
+    const macGiven = typeof (p && p.mac) === "string";
+    if (macGiven && !mac) firetv = null;
+    else if (mac && !IR_MAC_RE.test(mac)) console.warn("[config] ignoring an unusable IR remote MAC");
+    else
+      firetv = {
+        mac: mac || (firetv || {}).mac || "",
+        actions: sanitizeFiretvActions((p && p.actions) || (firetv || {}).actions),
+      };
+  }
+  if (firetv) next.firetv = firetv;
+
+  // A backend the caller EXPLICITLY chose keeps the section alive even with nothing
+  // configured under it yet. Without this the choice is deleted along with the empty
+  // section, and since each backend's fields are only rendered once it is selected, a
+  // box with no IR set up at all could never reach them - measured: picking `firetv`
+  // on a fresh box left the backend on `esphome`, every time. The same trap has always
+  // applied to `homeassistant`; the new backend is what made it load-bearing, because
+  // it is the one that needs no hardware and so is the first thing a fresh box picks.
+  const chosen = !!(ir && IR_BACKENDS.includes(ir.backend));
+  if (!next.esphome && !next.homeassistant && !next.firetv && !chosen) delete c.ir;
   else c.ir = next;
   save(c);
 }
@@ -860,6 +947,10 @@ function rawIr() {
         actions: sanitizeIrActions(e.actions),
       },
     };
+  }
+  if (backend === "firetv") {
+    const f = c.firetv;
+    return { backend, firetv: { mac: String(f.mac).toUpperCase(), actions: sanitizeFiretvActions(f.actions) } };
   }
   const h = c.homeassistant;
   return { backend, homeassistant: { url: h.url, token: h.token, actions: sanitizeIrActions(h.actions) } };
@@ -928,6 +1019,8 @@ module.exports = {
   rawRemote,
   setIr,
   rawIr,
+  // for the drift test in shell/irbuttons.test.js
+  _test: { IR_ACTIONS },
   rawFiretvir,
   setApps,
   rawApps,

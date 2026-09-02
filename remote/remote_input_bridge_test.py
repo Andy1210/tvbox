@@ -13,8 +13,10 @@ are HID ARRAY reports whose usages are 16 bits wide on the consumer page - the
 Remote Pro puts its two customizable buttons and its headphone button above
 0xFF, where a byte-wide read cannot see them at all.
 """
+import json
 import os
 import sys
+import tempfile
 import types
 
 # ---- evdev stub -------------------------------------------------------------
@@ -249,6 +251,180 @@ with Remote() as rem:
 # ---- names shown in the button test -----------------------------------------
 check("consumer usage name", rib.key_name(0x400 + 0x27E), "CC_027E")
 check("app button name", rib.key_name(0x300 + 0xA2), "APP_A2")
+
+# ---- ir:<action>: a blast on a button the remote has no key of its own for ----
+# The Remote Pro's headphone button is consumer usage 0x0280, i.e. virtual code
+# 0x480 here - a button the remote's own IR keymap cannot reach, because the
+# keymap binds SCAN IDS and only the four keys Fire OS programs have one. A blast
+# is bound to no key at all, so the box can fire any code the plan carries when it
+# sees the press.
+
+
+def keymaps_with(keymap):
+    """load_keymaps() reads the box config; point it at a temp file."""
+    d = tempfile.mkdtemp()
+    path = os.path.join(d, "config.json")
+    with open(path, "w") as f:
+        json.dump({"remote": {"devices": {MAC: {"keymap": keymap}}}}, f)
+    old = rib.CONFIG
+    rib.CONFIG = path
+    try:
+        return rib.load_keymaps().get(MAC, {})
+    finally:
+        rib.CONFIG = old
+
+
+check(
+    "an ir: binding survives the keymap loader",
+    keymaps_with({"ir:soundbar_power": [0x480], "settings": [643]}),
+    {0x480: "ir:soundbar_power", 643: "settings"},
+)
+# The charset is the charset: these would each reach the shell as an action name.
+check(
+    "a malformed ir: binding is dropped",
+    keymaps_with({"ir:BAD NAME": [1], "ir:": [2], "ir:x/../y": [3], "ir:" + "a" * 33: [4]}),
+    {},
+)
+
+
+def ir_actions_for(ir):
+    """load_ir_actions() against a real config file - which is the point.
+
+    The first cut of these tests built FakeIr with the action set passed in, and so
+    stubbed out the one function that was broken: `ready` had no arm for the firetv
+    backend, and the set was filtered through IR_KEY_ACTION, so it could only ever
+    hold the three volume actions however the box was configured. Every `ir:<name>`
+    binding was refused at press time and nothing said why.
+    """
+    d = tempfile.mkdtemp()
+    path = os.path.join(d, "config.json")
+    with open(path, "w") as f:
+        json.dump({"ir": ir}, f)
+    old = rib.CONFIG
+    rib.CONFIG = path
+    try:
+        return rib.load_ir_actions()
+    finally:
+        rib.CONFIG = old
+
+
+ALL = {"volume_up": "Signal0", "input_hdmi2": "tv:HDMI2", "soundbar_power": "audio:Power"}
+check(
+    "esphome offers every mapped action, not just volume",
+    ir_actions_for({"backend": "esphome", "esphome": {"host": "ir.local", "actions": ALL}}),
+    {"volume_up", "input_hdmi2", "soundbar_power"},
+)
+# A MAC that is not one reads as "the blaster is configured" and diverts the remote's
+# own volume keys to something that can never answer. The shell holds this to MAC_RE on
+# save AND on read, so a restored or hand-edited config.json is how one arrives here.
+for mac, name in (
+    ("not-a-mac", "a hand-edited MAC leaves IR off"),
+    ("7C:ED:C6:12:E6", "so does a truncated one"),
+    ("7C-ED-C6-12-E6-3C", "so does the wrong separator"),
+    ("", "and so does an empty one"),
+):
+    check(name, ir_actions_for({"backend": "firetv", "firetv": {"mac": mac, "actions": ALL}}), set())
+
+check(
+    "firetv is a MAC, not a url and a token",
+    ir_actions_for({"backend": "firetv", "firetv": {"mac": "7C:ED:C6:12:E6:3C", "actions": ALL}}),
+    {"volume_up", "input_hdmi2", "soundbar_power"},
+)
+check(
+    "home assistant still needs both halves",
+    ir_actions_for({"backend": "homeassistant", "homeassistant": {"url": "http://ha", "actions": ALL}}),
+    set(),
+)
+check(
+    "a backend with nothing behind it is IR off",
+    ir_actions_for({"backend": "firetv", "firetv": {"actions": ALL}}),
+    set(),
+)
+check("no ir section at all", ir_actions_for(None), set())
+# The shell owns the real vocabulary and refuses an action it does not know; what is
+# held here is only the charset, so a mangled config cannot put anything else on a wire.
+check(
+    "a name outside the charset is dropped",
+    ir_actions_for({"backend": "esphome", "esphome": {"host": "h", "actions": {"in put": "x", "OK": "y", "": "z"}}}),
+    set(),
+)
+
+
+class FakeIr:
+    """Just enough of Bridge for do_special / press_action."""
+
+    def __init__(self, actions):
+        self.ir_actions = set(actions)
+        self.blasts = []
+        self.posts = []
+
+    def ir_press(self, action, value):
+        self.blasts.append((action, value))
+
+    def shell_post(self, url, payload):
+        self.posts.append((url, payload))
+
+    def do_power(self):
+        self.posts.append(("power", None))
+
+    # The real one, so press_action's route through it is exercised rather than stubbed.
+    def do_special(self, action):
+        rib.Bridge.do_special(self, action)
+
+
+fb = FakeIr(["soundbar_power"])
+rib.Bridge.do_special(fb, "ir:soundbar_power")
+# value 1 = one press. A blast is a single command - a power toggle sent twice undoes
+# itself - and on the firetv backend each one is its own BLE connect, so an autorepeat
+# would queue seconds of work per held second. handle() sends only value==1 here, the
+# same branch the other box behaviours take.
+check("a mapped ir action blasts once", fb.blasts, [("soundbar_power", 1)])
+check("and nothing else is posted", fb.posts, [])
+
+fb = FakeIr([])
+logged = []
+real_log = rib.log
+rib.log = lambda *a: logged.append(" ".join(str(x) for x in a))
+try:
+    rib.Bridge.do_special(fb, "ir:soundbar_power")
+finally:
+    rib.log = real_log
+# The blaster's action map and the button binding are edited on different screens, so
+# this state is reachable. Emitting some key instead would act on the BOX when the user
+# asked for the television, so it does nothing - and says so, or the press leaves no
+# trace anywhere.
+check("an unmapped ir action does nothing", fb.blasts, [])
+check("and is logged", [l for l in logged if "soundbar_power" in l] != [], True)
+
+fb = FakeIr(["input_hdmi2"])
+check("the phone remote can send one too", rib.Bridge.press_action(fb, "ir:input_hdmi2"), True)
+check("and it is the same single blast", fb.blasts, [("input_hdmi2", 1)])
+
+# Hammering an ir: button must not wipe the remote's keymap. Stepping the TV's input
+# means pressing until the right one appears, and a blast that fails is silent from the
+# sofa - so pressing again is exactly what a person does, and the gesture would delete a
+# binding no screen can recreate.
+km = {"ir:input_next": [0x480], "back": [158]}
+fb = FakeIr([])
+fb.keymaps = {MAC: {0x480: "ir:input_next", 158: "back"}}
+fb.learning = None
+fb._panic = {}
+fired = [rib.Bridge.panic_tap(fb, MAC, 0x480) for _ in range(rib.PANIC_TAPS + 2)]
+check("hammering an ir: button never panics", any(fired), False)
+# ...while an ordinary remapped button still can, or the recovery gesture is gone.
+fb._panic = {}
+fired = [rib.Bridge.panic_tap(fb, MAC, 158) for _ in range(rib.PANIC_TAPS)]
+check("hammering a remapped key still panics", fired[-1], True)
+
+# A remote whose config names an action the blaster does not have is not a reason to
+# treat the binding as a KEY: press_action must not fall through to emitting one.
+fb = FakeIr([])
+real_log = rib.log
+rib.log = lambda *a: None
+try:
+    check("an unmapped one is still handled, not emitted as a key", rib.Bridge.press_action(fb, "ir:nope"), True)
+finally:
+    rib.log = real_log
 
 if FAILED:
     print("\n%d FAILED: %s" % (len(FAILED), ", ".join(FAILED)))

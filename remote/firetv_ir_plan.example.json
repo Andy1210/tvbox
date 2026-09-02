@@ -1,0 +1,138 @@
+{
+  "_readme": [
+    "An example ~/.tvbox/firetv_ir_plan.json, keyed by the remote's MAC (lowercase).",
+    "The UI normally writes this file from the published code index; this hand-written",
+    "form exists because the index carries a device's four PROGRAMMABLE keys plus the",
+    "input keys, and a box may be running against an index built before the input keys",
+    "were published. Every code below is quoted from irdb and Flipper-IRDB.",
+    "",
+    "`assign` is deliberately empty: it says what the remote's own BUTTONS do, and this",
+    "file is here for BLASTS - codes sent bound to no button at all, which is the only",
+    "way to reach a TV input (CEC has no command that selects a foreign input) or a",
+    "soundbar that is not on the CEC bus. Set config.ir.backend to \"firetv\" and point",
+    "each action at a `<kind>:<Key>` target from below.",
+    "",
+    "MEASURED on a 2019 LG (2026-09-02): HDMI1 (0xCE) and HDMI2 (0xCC) both switch the",
+    "set, confirmed by the box's own CEC bridge seeing the route leave and come back.",
+    "The Samsung soundbar Power capture works too, and is byte-identical to the one",
+    "that box had already been programmed with by hand - so this index entry is good.",
+    "",
+    "`Input` (0x0B) reacts but is NOT a stepping code on this set: it opens the TV's",
+    "input LIST, which no remote paired to the BOX can drive. That is why there is no",
+    "`input_next` action - a menu nobody can navigate is worse than nothing. Bind it",
+    "yourself if your television steps on it.",
+    "",
+    "HDMI3 (0xE9) and HDMI4 (0xDA) are still unmeasured; they come from the same two",
+    "agreeing sources as the two that work."
+  ],
+  "aa:bb:cc:dd:ee:ff": {
+    "devices": [
+      {
+        "id": "0ecd67cc2a8e",
+        "brand": "LG",
+        "label": "TV (NEC1 4)",
+        "kind": "tv",
+        "count": 44,
+        "sources": ["irdb", "flipper"],
+        "keys": {
+          "Power": {
+            "protocol": "NEC1",
+            "entry": { "irdb": { "protocol": "NEC1", "device": 4, "subdevice": -1, "function": 8 } }
+          },
+          "VolumeUp": {
+            "protocol": "NEC1",
+            "entry": { "irdb": { "protocol": "NEC1", "device": 4, "subdevice": -1, "function": 2 } }
+          },
+          "VolumeDown": {
+            "protocol": "NEC1",
+            "entry": { "irdb": { "protocol": "NEC1", "device": 4, "subdevice": -1, "function": 3 } }
+          },
+          "Mute": {
+            "protocol": "NEC1",
+            "entry": { "irdb": { "protocol": "NEC1", "device": 4, "subdevice": -1, "function": 9 } }
+          },
+          "Input": {
+            "protocol": "NEC1",
+            "entry": { "irdb": { "protocol": "NEC1", "device": 4, "subdevice": -1, "function": 11 } }
+          },
+          "HDMI1": {
+            "protocol": "NEC1",
+            "entry": { "irdb": { "protocol": "NEC1", "device": 4, "subdevice": -1, "function": 206 } }
+          },
+          "HDMI2": {
+            "protocol": "NEC1",
+            "entry": { "irdb": { "protocol": "NEC1", "device": 4, "subdevice": -1, "function": 204 } }
+          },
+          "HDMI3": {
+            "protocol": "NEC1",
+            "entry": { "irdb": { "protocol": "NEC1", "device": 4, "subdevice": -1, "function": 233 } }
+          },
+          "HDMI4": {
+            "protocol": "NEC1",
+            "entry": { "irdb": { "protocol": "NEC1", "device": 4, "subdevice": -1, "function": 218 } }
+          }
+        }
+      },
+      {
+        "id": "c853fb071464",
+        "brand": "Samsung",
+        "label": "Sound Bars (raw 38 kHz) · AH59-02767C",
+        "kind": "audio",
+        "count": 1,
+        "sources": ["flipper"],
+        "keys": {
+          "Power": {
+            "protocol": "raw",
+            "entry": {
+              "frequency": 38000,
+              "raw": [
+                449, 452, 47, 53, 47, 53, 47, 53, 47, 53, 47, 153, 47, 153, 47, 53, 47, 53, 47, 154, 47, 153, 47, 154,
+                47, 153, 47, 53, 47, 53, 47, 53, 47, 53, 47, 454, 47, 53, 47, 53, 47, 53, 47, 53, 47, 53, 47, 53, 47,
+                53, 47, 53, 47, 154, 47, 153, 47, 154, 47, 53, 47, 154, 47, 154, 47, 154, 47, 153, 47, 53, 47, 53, 47,
+                53, 47, 154, 47
+              ]
+            }
+          },
+          "VolumeUp": {
+            "protocol": "raw",
+            "entry": {
+              "frequency": 38000,
+              "raw": [
+                452, 449, 50, 50, 50, 50, 50, 50, 50, 50, 50, 151, 50, 151, 50, 50, 50, 50, 50, 151, 50, 151, 50, 151,
+                50, 151, 50, 50, 50, 50, 50, 51, 50, 50, 50, 452, 50, 50, 50, 50, 50, 50, 50, 50, 50, 151, 50, 151, 50,
+                151, 50, 50, 50, 151, 50, 151, 50, 151, 50, 50, 50, 50, 50, 50, 50, 50, 50, 151, 50, 50, 50, 50, 50, 50,
+                50, 151, 50
+              ]
+            }
+          },
+          "VolumeDown": {
+            "protocol": "raw",
+            "entry": {
+              "frequency": 38000,
+              "raw": [
+                449, 451, 47, 53, 47, 53, 47, 53, 47, 53, 47, 154, 47, 153, 47, 53, 47, 53, 47, 153, 47, 153, 47, 154,
+                47, 153, 47, 53, 47, 53, 47, 53, 47, 53, 47, 454, 47, 53, 47, 53, 47, 53, 47, 53, 47, 53, 47, 53, 47,
+                53, 47, 153, 47, 154, 47, 153, 47, 154, 47, 56, 44, 153, 47, 154, 47, 154, 47, 53, 47, 53, 47, 53, 47,
+                53, 47, 153, 47
+              ]
+            }
+          },
+          "Mute": {
+            "protocol": "raw",
+            "entry": {
+              "frequency": 38000,
+              "raw": [
+                449, 451, 47, 53, 47, 53, 47, 53, 47, 53, 47, 154, 47, 153, 47, 53, 47, 53, 47, 153, 47, 154, 47, 154,
+                47, 153, 47, 53, 47, 53, 47, 53, 47, 53, 47, 454, 47, 53, 47, 53, 47, 53, 47, 53, 47, 53, 47, 53, 47,
+                154, 47, 53, 47, 53, 47, 53, 47, 154, 47, 154, 47, 154, 47, 53, 47, 53, 47, 153, 47, 154, 47, 154, 47,
+                53, 47, 53, 47, 53, 47, 154, 47
+              ]
+            }
+          }
+        }
+      }
+    ],
+    "assign": {},
+    "ts": 0
+  }
+}

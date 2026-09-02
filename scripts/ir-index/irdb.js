@@ -18,6 +18,17 @@ const KEY_SYNONYMS = {
   VolumeDown: ["VOLUME -", "VOLUME DOWN", "VOL-", "VOL -", "VOL DOWN", "VOLUME-"],
   Mute: ["MUTE TOGGLE", "MUTE", "MUTING"],
   Power: ["POWER TOGGLE", "POWER", "POWER ON/OFF", "STANDBY"],
+  // The discrete inputs come before the cycling one so a contains-match on `INPUT`
+  // cannot claim `INPUT HDMI 1`. Both a spaced and a hyphenated spelling are listed
+  // because canon() keeps the hyphen: `HDMI 1` and `HDMI-1` do NOT collapse together.
+  HDMI1: ["HDMI1", "HDMI 1", "HDMI-1"],
+  HDMI2: ["HDMI2", "HDMI 2", "HDMI-2"],
+  HDMI3: ["HDMI3", "HDMI 3", "HDMI-3"],
+  HDMI4: ["HDMI4", "HDMI 4", "HDMI-4"],
+  // A bare `AV` is deliberately NOT a synonym: these are matched by CONTAINS, and two
+  // letters are inside SAVE, AV1 and AVMUTE - one of which is a different button and two
+  // of which are a different input.
+  Input: ["INPUT SELECT", "INPUT TOGGLE", "INPUT", "SOURCE", "TV/AV"],
 };
 
 // A contains-match is what makes `KEY_VOLUMEUP` work - without it a KEY_* codeset

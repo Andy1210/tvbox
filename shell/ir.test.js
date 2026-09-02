@@ -45,3 +45,269 @@ test("haScriptCall refuses plain http off the LAN (token must not leak)", async 
 test("haScriptCall refuses junk URLs", async () => {
   await assert.rejects(() => ir._test.haScriptCall("not a url", "tok", "script.x"), /invalid Home Assistant URL/);
 });
+
+// ---- the firetv backend: what a failed blast is allowed to say ----------------------
+// The failures are told apart because only one of them is something a person can fix,
+// and the message reaches a voice assistant's answer. The blaster is the remote itself,
+// so "asleep" is the normal state between presses, not an error condition.
+//
+// Two paths reach the remote and both are exercised below: the resident link service
+// (which holds the BLE connection - a blast over it costs ~0.9 s) and, when no service
+// is running, one process per blast. `firetvStub` builds a module stand-in; pass
+// `viaService` to answer on the service path, `blastAction` for the one-shot.
+function firetvStub({ blastAction, viaService, linkUp = null, calls = [] } = {}) {
+  return {
+    calls,
+    startService: (mac) => calls.push(["startService", mac]),
+    stopService: () => calls.push(["stopService"]),
+    serviceLinkState: () => linkUp,
+    blastViaService:
+      viaService ||
+      ((mac, target, cb) => {
+        // No service: the error the real one gives, which is what makes the backend
+        // fall back instead of reporting a failed blast.
+        const e = new Error("no IR link service");
+        e.absent = true;
+        cb(e);
+      }),
+    blastAction: blastAction || ((m, t, cb) => cb(new Error("no blastAction in this stub"))),
+  };
+}
+
+test("firetv: a blast over the resident link resolves, and no process is spawned", async () => {
+  const seen = [];
+  const b = ir._test.makeFiretvBackend(
+    { mac: "7C:ED:C6:12:E6:3C" },
+    firetvStub({
+      linkUp: true,
+      viaService: (mac, target, cb) => {
+        seen.push([mac, target]);
+        cb(null, { ok: true, ms: 912 });
+      },
+      blastAction: () => assert.fail("the one-shot must not run while a service answers"),
+    }),
+  );
+  await b.send("tv:HDMI2");
+  assert.deepEqual(seen, [["7C:ED:C6:12:E6:3C", "tv:HDMI2"]]);
+  assert.equal(b.name, "firetv");
+  assert.equal(b.connected(), true, "the service's own view of the link");
+});
+
+test("firetv: the link service is started for the configured remote, and stopped on close", () => {
+  const calls = [];
+  const b = ir._test.makeFiretvBackend({ mac: "7C:ED:C6:12:E6:3C" }, firetvStub({ calls }));
+  assert.deepEqual(calls, [["startService", "7C:ED:C6:12:E6:3C"]]);
+  b.close();
+  assert.deepEqual(calls, [["startService", "7C:ED:C6:12:E6:3C"], ["stopService"]]);
+});
+
+test("firetv: an unknown link state is not reported as a down remote", () => {
+  const b = ir._test.makeFiretvBackend({ mac: "7C:ED:C6:12:E6:3C" }, firetvStub({ linkUp: null }));
+  assert.equal(b.connected(), null);
+});
+
+test("firetv: with no service running, a blast falls back to one process per blast", async () => {
+  const seen = [];
+  const b = ir._test.makeFiretvBackend(
+    { mac: "7C:ED:C6:12:E6:3C" },
+    firetvStub({
+      blastAction: (mac, target, cb) => {
+        seen.push([mac, target]);
+        cb(null, { ok: true, code: 0 });
+      },
+    }),
+  );
+  await b.send("tv:HDMI2");
+  assert.deepEqual(seen, [["7C:ED:C6:12:E6:3C", "tv:HDMI2"]]);
+});
+
+test("firetv: a service that ran and did not answer is NOT retried in a second process", async () => {
+  // Both paths cost a budget the IR queue waits behind, and the remote has already had
+  // one. Only an ABSENT service is worth another process.
+  const b = ir._test.makeFiretvBackend(
+    { mac: "7C:ED:C6:12:E6:3C" },
+    firetvStub({
+      viaService: (m, t, cb) => cb(new Error("the IR link service did not answer in time")),
+      blastAction: () => assert.fail("must not fall back on a timeout"),
+    }),
+  );
+  await assert.rejects(() => b.send("tv:HDMI2"), /did not answer in time/);
+});
+
+test("firetv: a remote that could not be reached says press a button, on either path", async () => {
+  const viaSvc = ir._test.makeFiretvBackend(
+    { mac: "7C:ED:C6:12:E6:3C" },
+    firetvStub({ viaService: (m, t, cb) => cb(null, { ok: false, code: "asleep", error: "..." }) }),
+  );
+  await assert.rejects(() => viaSvc.send("tv:HDMI2"), /press a button on it/);
+  // The one-shot tool exits 5 for a remote it could not reach, which is why exit 1 can
+  // mean the narrower thing below.
+  const oneShot = ir._test.makeFiretvBackend(
+    { mac: "7C:ED:C6:12:E6:3C" },
+    firetvStub({ blastAction: (m, t, cb) => cb(null, { ok: false, code: 5 }) }),
+  );
+  await assert.rejects(() => oneShot.send("tv:HDMI2"), /press a button on it/);
+});
+
+test("firetv: a remote that took the code and did not fire is NOT told to press a button", async () => {
+  // It was reached a second ago, so pressing is not the fix - and on a power toggle a
+  // retry would undo whatever did happen.
+  for (const stub of [
+    firetvStub({ viaService: (m, t, cb) => cb(null, { ok: false, code: "notfired" }) }),
+    firetvStub({ blastAction: (m, t, cb) => cb(null, { ok: false, code: 1 }) }),
+  ]) {
+    const b = ir._test.makeFiretvBackend({ mac: "7C:ED:C6:12:E6:3C" }, stub);
+    await assert.rejects(() => b.send("tv:HDMI2"), /did not fire it/);
+    await assert.rejects(
+      () => b.send("tv:HDMI2"),
+      (e) => !/press a button/.test(e.message),
+    );
+  }
+});
+
+test("firetv: a link lost mid-send never invites a retry", async () => {
+  // The code may have gone out; a repeated power toggle undoes itself.
+  const b = ir._test.makeFiretvBackend(
+    { mac: "7C:ED:C6:12:E6:3C" },
+    firetvStub({ viaService: (m, t, cb) => cb(null, { ok: false, code: "linklost" }) }),
+  );
+  await assert.rejects(() => b.send("tv:HDMI2"), /check whether it worked/);
+  await assert.rejects(
+    () => b.send("tv:HDMI2"),
+    (e) => !/press a button|retry/.test(e.message),
+  );
+});
+
+test("firetv: a remote being SET UP is not a busy queue, and not a wake problem", async () => {
+  // During a programming run the "busy with another IR command" sentence was simply
+  // false: there is no other command, somebody is writing to the remote.
+  const b = ir._test.makeFiretvBackend(
+    { mac: "7C:ED:C6:12:E6:3C" },
+    firetvStub({ viaService: (m, t, cb) => cb(null, { ok: false, code: "held" }) }),
+  );
+  await assert.rejects(() => b.send("tv:HDMI2"), /being set up in the settings/);
+  await assert.rejects(
+    () => b.send("tv:HDMI2"),
+    (e) => !/press a button/.test(e.message),
+  );
+});
+
+test("causeOf keeps the failures apart, including the ones a screen must not merge", () => {
+  const c = ir.causeOf;
+  assert.equal(c("the remote did not answer - press a button on it to wake it, then retry"), "asleep");
+  assert.equal(c("the remote took the code but did not fire it - check the batteries and aim it"), "notFired");
+  assert.equal(c("the link to the remote dropped while sending - it may have fired"), "linkLost");
+  // A service that died mid-request is the same hazard as a lost link: it may have
+  // fired, so it must never be classified as something that invites a retry.
+  assert.equal(c("the IR link service stopped mid-request"), "linkLost");
+  // The BOX's helper, not the remote - the old classification blamed a device that was
+  // never asked.
+  assert.equal(c("the IR link service did not answer in time"), "serviceSlow");
+  assert.equal(c("the remote is being set up in the settings right now"), "held");
+  assert.equal(c("the remote is busy with other IR commands"), "busy");
+  // ...and the reasons the other two backends give, which a single "did not go out"
+  // sentence used to swallow.
+  assert.equal(c("IR blaster unreachable: 192.168.1.9"), "blasterUnreachable");
+  assert.equal(c("connect ECONNREFUSED 192.168.1.9:6053"), "blasterUnreachable");
+  assert.equal(c("Invalid encryption key"), "blasterKey");
+  assert.equal(c("entities not found on device (select=signal_select, button=send)"), "blasterEntities");
+  assert.equal(c("invalid Home Assistant URL"), "haUrl");
+  assert.equal(c("plain http is only allowed toward LAN hosts"), "haUrl");
+  assert.equal(c("Home Assistant answered HTTP 401"), "haCall");
+  assert.equal(c("no IR blaster configured"), "noBlaster");
+  assert.equal(c("something nobody has a pattern for"), "other");
+});
+
+test("firetv: a request the box built wrong blames the box, not the remote", async () => {
+  const b = ir._test.makeFiretvBackend(
+    { mac: "7C:ED:C6:12:E6:3C" },
+    firetvStub({ viaService: (m, t, cb) => cb(null, { ok: false, code: "badspec" }) }),
+  );
+  await assert.rejects(() => b.send("tv:HDMI2"), /the box built/);
+});
+
+test("firetv: a remote that cannot blast at all says THAT instead", async () => {
+  // Exit 3 / "nokeymap" is no keymap service - an older or different remote. Telling
+  // someone to wake it would send them to press buttons forever.
+  const viaSvc = ir._test.makeFiretvBackend(
+    { mac: "7C:ED:C6:12:E6:3C" },
+    firetvStub({ viaService: (m, t, cb) => cb(null, { ok: false, code: "nokeymap" }) }),
+  );
+  await assert.rejects(() => viaSvc.send("tv:HDMI2"), /no IR keymap service/);
+  const oneShot = ir._test.makeFiretvBackend(
+    { mac: "7C:ED:C6:12:E6:3C" },
+    firetvStub({ blastAction: (m, t, cb) => cb(null, { ok: false, code: 3 }) }),
+  );
+  await assert.rejects(() => oneShot.send("tv:HDMI2"), /no IR keymap service/);
+});
+
+test("firetv: a code the remote cannot encode is not a wake problem", async () => {
+  const viaSvc = ir._test.makeFiretvBackend(
+    { mac: "7C:ED:C6:12:E6:3C" },
+    firetvStub({ viaService: (m, t, cb) => cb(null, { ok: false, code: "badcode" }) }),
+  );
+  await assert.rejects(() => viaSvc.send("tv:HDMI2"), /pick another codeset/);
+});
+
+test("firetv: anything else speaks for itself", async () => {
+  const b = ir._test.makeFiretvBackend(
+    { mac: "7C:ED:C6:12:E6:3C" },
+    firetvStub({ blastAction: (m, t, cb) => cb(null, { ok: false, code: 2, output: "config not found" }) }),
+  );
+  await assert.rejects(() => b.send("tv:HDMI2"), /config not found/);
+  const err = ir._test.makeFiretvBackend(
+    { mac: "x" },
+    firetvStub({ blastAction: (m, t, cb) => cb(new Error("invalid MAC")) }),
+  );
+  await assert.rejects(() => err.send("tv:HDMI2"), /invalid MAC/);
+  // A service failure with no code of its own must not be swallowed into a generic
+  // sentence: it is the only thing that says what went wrong.
+  const svc = ir._test.makeFiretvBackend(
+    { mac: "7C:ED:C6:12:E6:3C" },
+    firetvStub({ viaService: (m, t, cb) => cb(null, { ok: false, error: "bad request: nope", code: "protocol" }) }),
+  );
+  await assert.rejects(() => svc.send("tv:HDMI2"), /bad request: nope/);
+});
+
+test("only volume repeats: a power toggle or an input switch goes out exactly once", async () => {
+  // `steps` arrives from MQTT, the phone remote and the remote bridge. Ten power
+  // toggles are five presses undone plus five more; ten input switches leave the
+  // television wherever the last one landed.
+  const sent = [];
+  ir._test.setBackendForTest(
+    { name: "x", send: async (v) => sent.push(v), connected: () => true, close() {} },
+    { volume_up: "Signal0", soundbar_volume_up: "Signal4", tv_power: "Signal2", input_hdmi2: "Signal5" },
+  );
+  await ir.send("volume_up", 4);
+  assert.equal(sent.length, 4, "volume repeats");
+  sent.length = 0;
+  await ir.send("soundbar_volume_up", 3);
+  assert.equal(sent.length, 3, "so does the soundbar's");
+  sent.length = 0;
+  await ir.send("tv_power", 10);
+  assert.deepEqual(sent, ["Signal2"], "power goes once whatever was asked");
+  sent.length = 0;
+  await ir.send("input_hdmi2", 7);
+  assert.deepEqual(sent, ["Signal5"], "and so does an input switch");
+});
+
+test("status() says whether the hub has applied its config at all", () => {
+  // An empty action list is a legitimate answer, and mqtt.js DELETES the retained Home
+  // Assistant buttons for it - so "nobody has asked yet" must not look like it.
+  ir.applyConfig();
+  assert.equal(ir.status().ready, true);
+});
+
+test("an action nothing is mapped to is refused, not guessed", async () => {
+  // The vocabulary is closed and the mapping is per-box: a box that never mapped an
+  // input must not send some other code instead.
+  ir._test.setBackendForTest(
+    { name: "firetv", send: async () => {}, connected: () => null, close() {} },
+    {
+      input_hdmi2: "tv:HDMI2",
+    },
+  );
+  await ir.send("input_hdmi2");
+  await assert.rejects(() => ir.send("soundbar_power"), /unknown IR action/);
+  assert.deepEqual(ir.status().actions, ["input_hdmi2"]);
+});

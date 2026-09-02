@@ -24,6 +24,12 @@ let deps = {
   navTo: () => false,
   showLauncher: () => {},
   cecPower: () => {},
+  cecActiveSource: () => {},
+  // An IR send that failed has nowhere else to be seen: the caller published over MQTT
+  // and is gone, an HA button reports nothing, and a voice turn has already answered.
+  // The screen is available exactly when it matters - a failed INPUT blast means the
+  // television is still showing the box.
+  notify: () => {},
   setVideoMode: () => {},
   setBoxVolume: () => {},
 };
@@ -215,6 +221,35 @@ function playMediaIn(cmd) {
   else send();
 }
 
+// The launcher localizes a note it is given a `kind` for, so the reason travels as a
+// CODE rather than as an English sentence on a Hungarian television. Which code matters:
+// ir.js tells six failures apart and "press a button on the remote to wake it" is wrong
+// advice for five of them - an action nothing is mapped to, a blaster that is not
+// configured, a remote with no keymap service, a code this build cannot encode, a
+// timeout.
+// The classifier lives in ir.js, because the settings page reads the same answer out of
+// /tvbox/api/ir/status - two copies would drift and one screen would disagree with the
+// other about what just failed.
+// Resolved per call rather than captured at load: this file's convention is injection
+// via `deps`, and a module-load capture would be `undefined` if a require cycle ever
+// appeared - inside a catch handler, which would swallow the note it exists to show.
+const irCause = (message) => require("./ir").causeOf(message);
+
+// One note per half minute. The card takes Back and Home for as long as it is up, and
+// an IR send can be failed on demand by anything that can publish a command - so
+// without a floor here a stream of them keeps the launcher un-navigable.
+const IR_NOTE_GAP_MS = 30000;
+let irNotedAt = 0;
+
+function irFailed(action, e) {
+  const message = String((e && e.message) || e);
+  console.warn("[ir]", action, "failed:", message);
+  const now = Date.now();
+  if (now - irNotedAt < IR_NOTE_GAP_MS) return;
+  irNotedAt = now;
+  deps.notify({ kind: "irFailed", cause: irCause(message), reason: message });
+}
+
 function handle(cmd) {
   const player = deps.player;
   const action = String((cmd && cmd.action) || "").toLowerCase();
@@ -290,14 +325,38 @@ function handle(cmd) {
     case "standby":
       deps.cecPower(false);
       break;
+    // Bring the television back to this box's own socket. Deliberately CEC rather than
+    // IR: it needs no codes, works on every set, and it is the recovery path for an
+    // input switch - which on a TV that forwards remote keys only to the active source
+    // leaves the box's remote unable to ask for anything at all. The recovery has to be
+    // more reliable than the departure.
+    case "active_source":
+      deps.cecActiveSource();
+      break;
     case "volume_up":
     case "volume_down":
     case "mute":
       // TV volume over the IR blaster (ir.js) - CEC volume doesn't reach every
       // TV. steps repeats the send ("volume up by 3"); ir.js clamps it.
-      deps.ir
-        .send(action, cmd && cmd.steps)
-        .catch((e) => console.warn("[ir]", action, "failed:", (e && e.message) || e));
+      deps.ir.send(action, cmd && cmd.steps).catch((e) => irFailed(action, e));
+      break;
+    // The rest of the IR vocabulary (config.js IR_ACTIONS). These exist because CEC has
+    // no equivalent: a source device cannot select a foreign TV input at all, and a
+    // soundbar is usually not on the CEC bus. Each is one press, so `steps` is NOT
+    // forwarded - repeating a power toggle undoes it, and nobody asked for two.
+    //
+    // Whether any of them can be sent depends on what the configured blaster has mapped;
+    // ir.js refuses an unmapped action rather than sending something else.
+    case "tv_power":
+    case "input_hdmi1":
+    case "input_hdmi2":
+    case "input_hdmi3":
+    case "input_hdmi4":
+    case "soundbar_power":
+    case "soundbar_volume_up":
+    case "soundbar_volume_down":
+    case "soundbar_mute":
+      deps.ir.send(action).catch((e) => irFailed(action, e));
       break;
     // The box's OWN output volume, deliberately separate from the three above:
     // those drive the TV's amplifier over IR and have no absolute value to set,
@@ -341,4 +400,16 @@ function handle(cmd) {
   }
 }
 
-module.exports = { init, handle, forwardCommand, showLyrics, playMediaIn, silenceForPlayMedia, soundingApp };
+module.exports = {
+  init,
+  handle,
+  forwardCommand,
+  showLyrics,
+  playMediaIn,
+  silenceForPlayMedia,
+  soundingApp,
+  // Shared with the HTTP route: a blast fired from a REMOTE BUTTON fails the same
+  // way and deserves the same note - and that is the path a person is told to use,
+  // because the press is what wakes the remote.
+  irFailed,
+};

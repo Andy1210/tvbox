@@ -69,6 +69,7 @@ const INFRA_FILES = [
   "flipper_protocols.py", // the same for a Flipper-IRDB parsed block (Samsung32/Kaseikyo/RCA/...)
   "firetv_hid_probe.py", // diagnostic: map a Fire TV remote's vendor-HID app buttons to hwdb lines
   "firetv_tv_codes.example.json", // sample TV code set (LG NEC) for firetv_remote_ir.py
+  "firetv_ir_plan.example.json", // a hand-written remote plan carrying real input codes
   "tvbox",
   "provision.sh",
   "install-libcec8.sh", // provision builds libcec >= 8 from it (no distro package yet)

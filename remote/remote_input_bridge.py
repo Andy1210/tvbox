@@ -110,8 +110,28 @@ IR_REPEAT_S = 0.3  # min gap between sends while a volume key autorepeats
 #   settings - open the launcher's Settings screen (shell /tvbox/api/nav)
 #   app:<id> - launch that app (a remote's dedicated app button -> any tile)
 #   appswitcher - cycle through the RUNNING (background) apps, FireTV-style
-SPECIAL_ACTIONS = ("power", "settings", "appswitcher")
+#   ir:<name> - send one configured IR action through the blaster (shell ir.js).
+#              This is how a button reaches something no key stands for: a TV's
+#              input, a soundbar's own power. On the `firetv` backend it is the
+#              remote's OWN LED that fires, unbound to any of its keys - so a
+#              button the remote does carry can drive a button it does not.
+#   back_to_box - bring the TV's input back to this box over CEC (<Active Source>).
+#              The recovery from an input switch, and the reason it is a BUTTON: while
+#              the set shows something else it forwards remote keys to whatever is on
+#              screen, so the box's CEC remote cannot ask for anything. A remote paired
+#              to the BOX still reaches it.
+SPECIAL_ACTIONS = ("power", "settings", "appswitcher", "back_to_box")
 APP_ACTION_RE = re.compile(r"^app:[a-z0-9_-]{1,32}$")
+# The name half is the blaster's action vocabulary (shell/config.js IR_ACTIONS); it is
+# checked against what is actually MAPPED at press time, not here, because the two
+# config sections are edited separately.
+# \Z rather than $: in Python $ also matches before a trailing newline, so a config
+# carrying `ir:foo\n` would pass here and its JS twin (config.js REMOTE_IR_ACTION) would
+# not - two answers to one question.
+IR_ACTION_RE = re.compile(r"^ir:[a-z0-9_]{1,32}\Z")
+MAC_RE = re.compile(r"^([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}\Z")
+# The name half on its own, for reading the blaster's own action map.
+IR_ACTION_NAME_RE = re.compile(r"[a-z0-9_]{1,32}")
 NAV_URL = "http://127.0.0.1:8097/tvbox/api/nav"
 RESET_URL = "http://127.0.0.1:8097/tvbox/api/remote/reset"
 
@@ -139,8 +159,17 @@ PANIC_TAPS = 8
 PANIC_GAP_S = 0.4
 PANIC_EXEMPT_ACTIONS = frozenset(
     ("up", "down", "left", "right", "volume_up", "volume_down",
-     "rewind", "fastforward", "prev", "next", "appswitcher")
+     "rewind", "fastforward", "prev", "next", "appswitcher",
+     # Pressed repeatedly by anyone whose television has not come back yet, and it is
+     # the recovery - wiping the remote's keymap in the middle of that is the last
+     # thing that should happen.
+     "back_to_box")
 )
+# `ir:` bindings are exempt too (checked by prefix in panic_tap, like `app:`), and for
+# a stronger reason than "normal use hammers them" - though it does: stepping the TV's
+# input means pressing until the right one appears, and a blast that fails is silent
+# from the sofa, so pressing again is exactly what a person does. The gesture would
+# then delete a binding that no screen can recreate.
 
 # Fire TV / Alexa remotes send several buttons as HID reports that a generic
 # kernel maps to no usable key, so they never reach evdev (or only as the
@@ -307,7 +336,12 @@ def load_keymaps():
         km = (entry or {}).get("keymap") or {}
         code2action = {}
         for action, codes in km.items():
-            known = action in ACTION_KEY or action in SPECIAL_ACTIONS or APP_ACTION_RE.match(action)
+            known = (
+                action in ACTION_KEY
+                or action in SPECIAL_ACTIONS
+                or APP_ACTION_RE.match(action)
+                or IR_ACTION_RE.match(action)
+            )
             if not known or not isinstance(codes, list):
                 continue
             for c in codes:
@@ -340,13 +374,34 @@ def load_ir_actions():
         with open(CONFIG) as f:
             cfg = json.load(f)
         ir = (cfg or {}).get("ir") or {}
-        backend = ir.get("backend") if ir.get("backend") in ("esphome", "homeassistant") else "esphome"
+        backend = ir.get("backend") if ir.get("backend") in ("esphome", "homeassistant", "firetv") else "esphome"
         block = ir.get(backend) or {}
-        ready = bool(block.get("host")) if backend == "esphome" else bool(block.get("url") and block.get("token"))
+        # What makes a backend usable differs: an ESPHome blaster is a host, a Home
+        # Assistant one is a URL and a token, and a Fire TV remote is a MAC - the bond
+        # is the credential. A backend missing from this decision reads as "not
+        # configured", which switches the whole IR surface off silently.
+        if backend == "esphome":
+            ready = bool(block.get("host"))
+        elif backend == "firetv":
+            # The shape, not just "non-empty": the shell holds this to MAC_RE on every
+            # save AND on every read, so a hand-edited or restored config is the way an
+            # invalid one gets here - and treating it as configured diverts the
+            # remote's own keys to a blaster that can never answer.
+            ready = bool(MAC_RE.match(str(block.get("mac") or "")))
+        else:
+            ready = bool(block.get("url") and block.get("token"))
         if not ready:
             return set()
         actions = block.get("actions") or {}
-        return {a for a in IR_KEY_ACTION.values() if actions.get(a)}
+        # Every action the config maps, not just the three the volume KEYS use.
+        # `IR_KEY_ACTION` answers a different question - which evdev key diverts to the
+        # blaster - and filtering through it capped this at volume_up/volume_down/mute,
+        # so an `ir:<name>` binding for an input or a soundbar was refused at press time
+        # however it was configured. The name is held to the topic/action charset rather
+        # than to a copy of the shell's vocabulary: the shell owns that list and refuses
+        # an unknown action itself, and a fourth copy of it here would be one more thing
+        # to drift.
+        return {a for a in actions if isinstance(a, str) and IR_ACTION_NAME_RE.fullmatch(a) and actions.get(a)}
     except Exception:
         return set()
 
@@ -424,10 +479,18 @@ class Bridge:
         # tiny queue + one worker preserves order; a full queue just drops the
         # press (the user can press again).
         self.post_q = queue.Queue(maxsize=8)
+        # IR sends get a queue and a worker of their OWN. The shell answers
+        # /tvbox/api/ir/send only once the blast has finished, and a blast to a Fire TV
+        # remote takes seconds - the normal case, since the remote sleeps between
+        # presses. On one shared worker that stalls every Settings / app-launch press
+        # behind it, and the 5 s timeout below would report a failure for a blast that
+        # may well have fired.
+        self.ir_q = queue.Queue(maxsize=4)
         self._ir_last = 0.0  # last IR enqueue, for the autorepeat throttle
         self._power_last = 0.0  # last power action, for the debounce
         self._panic = {}  # did -> [code, count, first_ts] for the reset gesture
         threading.Thread(target=self._post_worker, daemon=True).start()
+        threading.Thread(target=self._post_worker, args=(True,), daemon=True).start()
         self.ui = None
         self.ui_keys = set()
         # A native app is in front (shell told us over the FIFO): Home becomes an
@@ -698,9 +761,13 @@ class Bridge:
                     self.capture(did, code)
             return
         action = code2action.get(code)
-        if action and (action in SPECIAL_ACTIONS or action.startswith("app:")):
+        if action and (action in SPECIAL_ACTIONS or action.startswith("app:") or action.startswith("ir:")):
             # box behavior instead of a key (TV power toggle / open Settings /
-            # launch app / app switch): fire on press, swallow repeat+release
+            # launch app / app switch / one IR blast): fire on press, swallow
+            # repeat+release. Press-only matters most for the IR one: a blast is
+            # a single command (a power toggle held down would undo itself), and
+            # on the firetv backend each one is its own BLE connect, so an
+            # autorepeat would queue seconds of work per held second.
             if value == 1:
                 self.do_special(action)
             return
@@ -760,6 +827,7 @@ class Bridge:
             or action is None
             or action in PANIC_EXEMPT_ACTIONS
             or action.startswith("app:")
+            or action.startswith("ir:")
         ):
             self._panic.pop(did, None)
             return False
@@ -802,8 +870,20 @@ class Bridge:
             self.shell_post(NAV_URL, {"dest": "settings"})
         elif action == "appswitcher":
             self.shell_post(NAV_URL, {"dest": "switch"})
+        elif action == "back_to_box":
+            cec_cmd("as")
         elif APP_ACTION_RE.match(action):  # config is sanitized, but stay strict
             self.shell_post(NAV_URL, {"dest": "app", "app": action[4:]})
+        elif IR_ACTION_RE.match(action):
+            name = action[3:]
+            # A button bound to an IR action the blaster has no mapping for does
+            # nothing, and that is the honest outcome - emitting some key instead
+            # would act on the box when the user asked for the television. Logged
+            # because otherwise a press leaves no trace anywhere.
+            if name in self.ir_actions:
+                self.ir_press(name, 1)
+            else:
+                log(f"ir action not configured on the blaster: {name}")
 
     # ---- volume keys -> IR blaster (shell /tvbox/api/ir/send) ----
     def press_action(self, action):
@@ -822,7 +902,7 @@ class Bridge:
         `ir_passthrough` is deliberately not consulted: it exempts remotes that
         blast the TV with their OWN IR, and a phone cannot.
         """
-        if action in SPECIAL_ACTIONS or APP_ACTION_RE.match(action):
+        if action in SPECIAL_ACTIONS or APP_ACTION_RE.match(action) or IR_ACTION_RE.match(action):
             self.do_special(action)
             return True
         code = ACTION_KEY.get(action)
@@ -847,18 +927,22 @@ class Bridge:
             self.shell_post(IR_SEND_URL, {"action": action})
 
     def shell_post(self, url, payload):
+        q = self.ir_q if url == IR_SEND_URL else self.post_q
         try:
-            self.post_q.put_nowait((url, payload))
+            q.put_nowait((url, payload))
         except queue.Full:
             pass  # shell is behind; dropping a press is better than lagging keys
 
-    def _post_worker(self):
+    def _post_worker(self, ir=False):
+        # The IR worker waits longer than the shell's own blast budget, so a slow blast
+        # is reported by what it actually did rather than by this timing out first.
+        q, timeout = (self.ir_q, 20) if ir else (self.post_q, 5)
         while True:
-            url, payload = self.post_q.get()
+            url, payload = q.get()
             body = json.dumps(payload).encode()
             req = urllib.request.Request(url, data=body, headers={"Content-Type": "application/json"})
             try:
-                with urllib.request.urlopen(req, timeout=5) as resp:
+                with urllib.request.urlopen(req, timeout=timeout) as resp:
                     out = json.loads(resp.read() or b"{}")
                 if not out.get("ok"):
                     log("shell call failed:", url, payload, out.get("error", "unknown error"))

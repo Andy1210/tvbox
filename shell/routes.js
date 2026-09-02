@@ -101,6 +101,9 @@ function post(p, data, res, ctx) {
       config.setIr(data.ir); // IR blaster backend + action map (sanitized in config.js)
       ir.applyConfig(); // reconnect the backend right away
       ctx.remoteBridgeCmd("reload"); // the bridge re-reads whether volume keys go to IR
+      // The HA buttons mirror the action map, and their config topics are retained - so
+      // an action just removed has to be deleted from the broker, not merely left out.
+      ctx.publishIrDiscovery();
       changed.push("ir");
     }
     if (data.apps) {
@@ -142,12 +145,24 @@ function post(p, data, res, ctx) {
     );
   }
   if (p === "/tvbox/api/ir/send") {
-    // IR blaster: abstract TV command (volume_up/volume_down/mute), optionally
-    // repeated (steps). Callers: the remote bridge (BT volume keys) + the
-    // settings UI test buttons. A dead blaster answers ok:false, never a 500.
+    // IR blaster: any action in the house vocabulary (shell/config.js IR_ACTIONS),
+    // optionally repeated (steps - volume only in practice). Callers: the remote bridge
+    // (its volume keys, and any button bound to `ir:<action>`), the phone remote, and
+    // the settings UI test rows. A dead blaster answers ok:false, never a 500.
     return ir.send(String(data.action || ""), data.steps).then(
       (r) => httpserver.jsonRes(res, r),
-      (e) => httpserver.jsonRes(res, { ok: false, error: String((e && e.message) || e) }),
+      (e) => {
+        // The bridge logs this into its own journal and nothing reaches the room, so a
+        // button press failed in silence - on the very path the release notes call the
+        // reliable one. `test` is the settings row, which shows its own result on the
+        // screen the person is already looking at.
+        if (!data.test) ctx.irFailed(String(data.action || ""), e);
+        // `cause` so the caller can say it in the viewer's language: the settings page
+        // used to interpolate `error` verbatim, which put the box's own English
+        // sentence on a Hungarian screen right under the translated one.
+        const msg = String((e && e.message) || e);
+        httpserver.jsonRes(res, { ok: false, error: msg, cause: ir.causeOf(msg) });
+      },
     );
   }
   // Screen mirroring, armed and disarmed by hand. There is no "leave it on"

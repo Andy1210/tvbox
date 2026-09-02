@@ -525,6 +525,8 @@ function serve() {
     appsharesStatus: () => appshares.status(config.rawAppshares(), sharing.appsharesDeps()),
     applyFileserver: sharing.applyFileserver,
     applyMqttConfig: mediapublish.applyConfig,
+    publishIrDiscovery: mediapublish.publishIrDiscovery,
+    irFailed: tvcommand.irFailed,
     audioSink: () => audioSink,
     childEnv: () => ({ ...process.env, ...WL_ENV }),
     destroyAppWindow,
@@ -1445,11 +1447,20 @@ mediapublish.init({
   soundWidget: cards.soundWidget,
   onNotify: notify.handleTvNotify,
   onCommand: (cmd) => tvcommand.handle(cmd),
+  // What the blaster can send becomes a Home Assistant button each, so anything there -
+  // a dashboard, an automation, a voice assistant - can reach a TV input or a soundbar
+  // without knowing this box's MQTT topics.
+  // null, not [], while the hub has not applied its config: an empty list is a
+  // legitimate answer meaning "no actions", and mqtt.js deletes the retained buttons
+  // for exactly that answer.
+  irActions: () => (ir.status().ready ? ir.status().actions : null),
 });
 
 tvcommand.init({
   player,
   ir,
+  cecActiveSource: bridges.cecActiveSource,
+  notify: notify.handleTvNotify,
   remotefinder,
   mediastate,
   apps,
@@ -2010,6 +2021,10 @@ playerapi.init({
 function stopPlugins() {
   plugins.stopAll();
   supervisor.stopAll();
+  // The IR hub's firetv backend holds a BLE link to the household's remote through a
+  // child of its own. A leftover keeps the remote's ONE allowed connection, so the next
+  // shell's link can never be established and every blast answers "asleep".
+  ir.shutdown();
   fileserver.stop(null); // the symlinked view of the box's folders is not left behind
 }
 
@@ -2405,6 +2420,12 @@ app.whenReady().then(async () => {
     childEnv: () => ({ ...process.env, ...WL_ENV }),
   });
   ir.applyConfig(); // IR blaster hub; no-op if not configured
+  // The MQTT bridge came up above, before the blaster had read its config - so the
+  // discovery it published carried no IR buttons. Restate them now that there is
+  // something to say. (Only the retained topics from a previous run kept the buttons
+  // alive at all, which meant a box configured by hand never got them until somebody
+  // opened Settings and saved.)
+  mediapublish.publishIrDiscovery();
   // Keep the media state topic honest about which app is in front and how loud the
   // box is; both are cheap and neither is urgent (see mediapublish.js's ticks).
   mediapublish.startTicks();
