@@ -611,7 +611,7 @@
     "title": "IR jeladó (TV, hangprojektor)",
     "configured": "beállítva",
     "notConfigured": "nincs beállítva",
-    "hint": "A tévé hangereje, bemenete és a hangprojektor - amit a HDMI-CEC nem ér el.",
+    "hint": "Amit a DOBOZ küld infrán: a tévé hangereje és bemenete, meg a hangprojektor - amit a HDMI-CEC nem ér el. A távirányító saját négy gombja külön lapon van („A távirányító IR gombjai”).",
     "offHint": "Hagyd üresen az eszköz címét / URL-jét az integráció kikapcsolásához.",
     "saveFailed": "A beállítások mentése nem sikerült.",
     "backendTitle": "Jeladó típusa",
@@ -656,12 +656,13 @@
     "actionsHintFiretv": "Melyik akció a mentett kódterv melyik bejegyzését küldje, fajta:Gomb alakban - például tv:HDMI2 vagy audio:Power.",
     "testing": "Küldés…",
     "failedTitle": "Az infra parancs nem ment ki",
-    "failedMsg": "Ha a jeladó egy Fire TV távirányító, nyomj meg rajta egy gombot, hogy felébredjen, aztán próbáld újra."
+    "failedMsg": "Ha a jeladó egy Fire TV távirányító, nyomj meg rajta egy gombot, hogy felébredjen, aztán próbáld újra.",
+    "noPlanHint": "Előbb a távirányító kódtervét kell összeállítani: a táv saját lapján, a TV IR pont alatt."
   },
   "firetvir": {
-    "title": "TV IR (a távirányító saját jeladója)",
+    "title": "A távirányító IR gombjai",
     "entry": "TV IR (a távirányító saját jeladója)",
-    "hint": "Ebben a távirányítóban van infra jeladó. Vedd fel a szobában lévő készülékeket, aztán add meg, melyik gomb melyiket vezérelje - Fire TV doboz nem kell hozzá.",
+    "hint": "Ebben a távirányítóban van infra jeladó, és a saját négy gombja (hangerő, némítás, bekapcsolás) vezérelheti a szobában lévő készülékeket - Fire TV doboz nem kell hozzá. Amit a DOBOZ küld IR-en - bemenetváltás, hangprojektor, hangra vagy egy szabad gombra kötve -, az az „IR jeladó” lap.",
     "credit": "A kódok a közösségi irdb adatbázisból és a Flipper-IRDB-ből származnak, egy indexbe fűzve, amit a box letölt. Lásd a Névjegy menüt.",
     "key": {
       "VolumeUp": "Hangerő +",
@@ -890,7 +891,7 @@
   "peripherals": {
     "btHint": "Hangszórók, távirányítók, kontrollerek",
     "remoteHint": "Taníts be egy másik gombot a távirányítón",
-    "irHint": "TV-hangerő, ha a tv CEC-en nem fogadja",
+    "irHint": "Amit a doboz küld: hangerő, bemenetváltás, hangprojektor",
     "phoneRemoteHint": "Gombok nyomása a telefonodról"
   },
   "apps": {

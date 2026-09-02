@@ -611,7 +611,7 @@
     "title": "IR blaster (TV, soundbar)",
     "configured": "configured",
     "notConfigured": "not set up",
-    "hint": "The TV's volume, its input, and a soundbar - for what HDMI-CEC cannot reach.",
+    "hint": "What the BOX sends over infrared: the TV's volume and input, and a soundbar - what HDMI-CEC cannot reach. The remote's own four buttons are on their own page (“The remote's own IR buttons”).",
     "offHint": "Leave the device host / URL empty to turn the integration off.",
     "saveFailed": "Couldn't save the settings.",
     "backendTitle": "Blaster type",
@@ -656,12 +656,13 @@
     "actionsHintFiretv": "Which entry of the remote's saved code plan each action sends, as kind:Key - for example tv:HDMI2 or audio:Power.",
     "testing": "Sending…",
     "failedTitle": "The infrared command did not go out",
-    "failedMsg": "If a Fire TV remote is the blaster, press a button on it to wake it and try again."
+    "failedMsg": "If a Fire TV remote is the blaster, press a button on it to wake it and try again.",
+    "noPlanHint": "Build the remote's code plan first, under TV IR on the remote's own page."
   },
   "firetvir": {
-    "title": "TV IR (this remote's own blaster)",
+    "title": "The remote's own IR buttons",
     "entry": "TV IR (this remote's own blaster)",
-    "hint": "This remote has an infrared LED. Add the devices in the room, then say which button drives which - no Fire TV box needed.",
+    "hint": "This remote has an infrared blaster, and its own four buttons (volume, mute, power) can drive the devices in the room - no Fire TV needed. What the BOX sends over infrared - input switching, a soundbar, by voice or on a spare button - is the “IR blaster” page.",
     "credit": "Codes from the community irdb database and Flipper-IRDB, merged into an index this box downloads. See About for credits.",
     "key": {
       "VolumeUp": "Volume +",
@@ -890,7 +891,7 @@
   "peripherals": {
     "btHint": "Speakers, remotes, controllers",
     "remoteHint": "Teach a remote one of its other buttons",
-    "irHint": "TV volume for a TV that takes none over CEC",
+    "irHint": "What the box sends: volume, input switching, soundbar",
     "phoneRemoteHint": "Press the buttons from your phone"
   },
   "apps": {

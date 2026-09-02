@@ -21,6 +21,13 @@ power, neither of which HDMI-CEC can express. It is wired up as the `firetv`
 backend of the IR hub - see [ir-blaster.md](ir-blaster.md) - and its one
 limitation is below: the remote sleeps, and a blast leaves its link down.
 
+That limitation cannot be engineered around from this end, which is worth knowing
+before trying: a sleeping remote advertises nothing, BlueZ abandons a connect to
+it after about 41 seconds, twelve minutes of watching an untouched one shows zero
+reconnects, and the remote-finder fails on it too (`Not connected`). The finder
+works in daily use only because a remote somebody is looking for was in use a
+moment ago. A press is the only way back.
+
 Both were reverse-engineered from Fire OS 7.7.1.3 on a Fire TV Stick 4K Max
 (AFTKA). Those working notes are not part of this repo; what a reader needs is
 below and in the Python modules it names.

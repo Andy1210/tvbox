@@ -3,6 +3,7 @@ import type { IrAction, IrBackend } from "@sdk/config";
 import { useI18n } from "../../lib/i18n";
 import { useConfigStore } from "../../stores/config";
 import { sendIr, fetchIrStatus, type IrStatus } from "../../lib/ir";
+import { fetchIrSetup, deviceKeys, type IrSetup, type IrKey } from "../../lib/firetvir";
 import { SettingsPage } from "../SettingsPage";
 import { ChoicePage } from "../ChoicePage";
 import { Group, Note, Row, TextRow } from "../Rows";
@@ -56,6 +57,33 @@ export function IrPage() {
   const ha = ir?.homeassistant;
   const fv = ir?.firetv;
   const actions = (backend === "esphome" ? es?.actions : backend === "firetv" ? fv?.actions : ha?.actions) || {};
+
+  // What the `firetv` backend can actually send: the entries of the remote's saved code
+  // plan. A free-text `<kind>:<Key>` was the first cut and it is the wrong question to
+  // ask in front of a television - the value is a machine token, case-sensitive on both
+  // halves, and a typo is dropped by the save with nothing on screen to say so.
+  const [setup, setSetup] = useState<IrSetup | null>(null);
+  useEffect(() => {
+    let alive = true;
+    if (backend === "firetv" && fv?.mac) void fetchIrSetup(fv.mac).then((s) => alive && setSetup(s));
+    else setSetup(null);
+    return () => {
+      alive = false;
+    };
+  }, [backend, fv?.mac]);
+
+  // One entry per (device kind, key) the plan carries, labelled in the reader's own
+  // language. Deduplicated by target, first device winning - which is the same rule the
+  // box itself applies when two devices of a kind carry the key.
+  const targets: { id: string; label: string }[] = [];
+  for (const dev of setup?.devices || []) {
+    for (const key of deviceKeys(dev) as IrKey[]) {
+      const id = `${dev.kind}:${key}`;
+      if (targets.some((x) => x.id === id)) continue;
+      targets.push({ id, label: `${t("firetvir.kind." + dev.kind)} · ${t("firetvir.key." + key)}` });
+    }
+  }
+  const targetLabel = (v?: string) => targets.find((x) => x.id === v)?.label || v || "";
 
   useEffect(() => {
     let alive = true;
@@ -264,17 +292,46 @@ export function IrPage() {
               : t("ir.actionsHintHa")
         }
       >
-        {ACTIONS.map((a) => (
-          <TextRow
-            key={a}
-            id={"map-" + a}
-            label={t("ir.action." + a)}
-            title={t("ir.action." + a)}
-            value={actions[a]}
-            emptyLabel={t("ir.notSet")}
-            onSubmit={(v) => void saveAction(a, v.trim())}
-          />
-        ))}
+        {ACTIONS.map((a) =>
+          backend === "firetv" ? (
+            <Row
+              key={a}
+              id={"map-" + a}
+              label={t("ir.action." + a)}
+              value={actions[a] ? targetLabel(actions[a]) : t("ir.notSet")}
+              // Nothing to pick from means the remote has no saved code plan yet, and
+              // the row says where that is built rather than opening an empty list.
+              hint={targets.length ? undefined : t("ir.noPlanHint")}
+              onEnter={() =>
+                targets.length &&
+                nav.push({
+                  id: "ir-target-" + a,
+                  title: t("ir.action." + a),
+                  render: () => (
+                    <ChoicePage
+                      id={"ir-target-" + a}
+                      title={t("ir.action." + a)}
+                      failLabel={t("ir.saveFailed")}
+                      options={[{ id: "", label: t("ir.notSet") }, ...targets]}
+                      value={actions[a] || ""}
+                      onPick={(v) => saveAction(a, v).then(() => undefined)}
+                    />
+                  ),
+                })
+              }
+            />
+          ) : (
+            <TextRow
+              key={a}
+              id={"map-" + a}
+              label={t("ir.action." + a)}
+              title={t("ir.action." + a)}
+              value={actions[a]}
+              emptyLabel={t("ir.notSet")}
+              onSubmit={(v) => void saveAction(a, v.trim())}
+            />
+          ),
+        )}
       </Group>
 
       <Group title={t("ir.groupTest")}>

@@ -114,6 +114,16 @@ Two costs, both from the hardware:
   next blast. For a voice-driven input switch use a mains-powered blaster
   (`esphome`); it can be TAUGHT these codes by putting it in learn mode and
   blasting each one at it from the remote.
+- **The box cannot WAKE it, and this was measured four ways** - it is the first
+  idea everybody has, so here is why it does not work. A 20 s LE scan sees the
+  sleeping remote advertise nothing. A single patient `Connect()` is abandoned by
+  BlueZ itself after ~41 s (`le-connection-abort-by-local`) - the peripheral is
+  simply not connectable. Watched for **12 minutes untouched, it connected zero
+  times**, so waiting for a spontaneous reconnect is not a strategy either. And
+  the remote-finder - which does reach the remote in daily use - fails on a
+  sleeping one with `Call failed: Not connected`, which explains itself: when
+  somebody rings a lost remote they have just been using it, so it is still
+  connected. Only a button press brings it back.
 - **And a blast goes wherever the remote is LYING.** Measured on the same soundbar,
   minutes apart, with byte-identical codes: once nothing happened, once it switched.
   Nothing had changed but where the remote was. A television is a large target and
