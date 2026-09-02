@@ -314,6 +314,17 @@ check(
     ir_actions_for({"backend": "esphome", "esphome": {"host": "ir.local", "actions": ALL}}),
     {"volume_up", "input_hdmi2", "soundbar_power"},
 )
+# A MAC that is not one reads as "the blaster is configured" and diverts the remote's
+# own volume keys to something that can never answer. The shell holds this to MAC_RE on
+# save AND on read, so a restored or hand-edited config.json is how one arrives here.
+for mac, name in (
+    ("not-a-mac", "a hand-edited MAC leaves IR off"),
+    ("7C:ED:C6:12:E6", "so does a truncated one"),
+    ("7C-ED-C6-12-E6-3C", "so does the wrong separator"),
+    ("", "and so does an empty one"),
+):
+    check(name, ir_actions_for({"backend": "firetv", "firetv": {"mac": mac, "actions": ALL}}), set())
+
 check(
     "firetv is a MAC, not a url and a token",
     ir_actions_for({"backend": "firetv", "firetv": {"mac": "7C:ED:C6:12:E6:3C", "actions": ALL}}),

@@ -110,11 +110,21 @@ export function IrPage() {
     if (a.endsWith("volume_down")) return ["VolumeDown"];
     return null;
   };
+  // Which DEVICE kinds an action may point at. "not a television" was too loose: it let
+  // a soundbar action bind to a set-top box's Power, which is a device nobody means by
+  // "soundbar" and which the label on the row does not warn about. A TV input or the
+  // TV's own power is meaningless anywhere but the television. Volume and mute stay open
+  // on purpose - a house whose TV volume goes through the amplifier is an ordinary
+  // setup, and that is the one case where either kind is right.
+  const KINDS_FOR = (a: IrAction) => {
+    if (a.startsWith("soundbar_")) return ["audio"];
+    if (a === "tv_power" || a.startsWith("input_")) return ["tv"];
+    return null;
+  };
   const targetsFor = (a: IrAction) => {
     const keys = KEYS_FOR(a);
-    return allTargets.filter(
-      (x) => (!keys || keys.includes(x.key)) && (a.startsWith("soundbar_") ? x.kind !== "tv" : true),
-    );
+    const kinds = KINDS_FOR(a);
+    return allTargets.filter((x) => (!keys || keys.includes(x.key)) && (!kinds || kinds.includes(x.kind)));
   };
   const targetLabel = (v?: string) => allTargets.find((x) => x.id === v)?.label || v || "";
   // Which sentence the row gets when it has nothing to offer.

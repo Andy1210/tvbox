@@ -35,6 +35,7 @@ let backend = null; // { name, send(value), connected(), close() } - null until 
 let actions = {}; // action name -> backend-specific value (signal option / HA script)
 let lastError = "";
 let lastErrorAt = 0; // when, so a screen can say "last failure" instead of "now"
+let applied = false; // has applyConfig run? see status().ready
 // Sends are strictly serialized: two interleaved esphome select+send pairs
 // would replay the wrong signal. Failures must not break the chain.
 let queue = Promise.resolve();
@@ -284,6 +285,7 @@ function applyConfig() {
   ) {
     actions = raw0.firetv.actions;
     lastError = "";
+    applied = true;
     return;
   }
   if (backend) {
@@ -297,6 +299,7 @@ function applyConfig() {
   actions = {};
   lastError = "";
   const raw = config.rawIr(); // null unless the selected backend is fully configured
+  applied = true;
   if (!raw) return;
   try {
     if (raw.backend === "homeassistant") {
@@ -322,6 +325,13 @@ function clampSteps(steps) {
   return Number.isFinite(n) ? Math.max(1, Math.min(MAX_STEPS, n)) : 1;
 }
 
+// Repeating is a volume idea. `steps` reaches this from MQTT, the phone remote and the
+// remote bridge, and for anything else a repeat is either meaningless or destructive: a
+// power toggle sent ten times is five presses undone plus five more, and ten input
+// switches leave a television wherever the last one landed. So the vocabulary decides,
+// not the caller.
+const REPEATABLE = /(^|_)volume_(up|down)$/;
+
 // Send an abstract action ("volume_up"), optionally repeated. Resolves with
 // { ok, action, steps }; rejects with a user-presentable error.
 function send(action, steps) {
@@ -332,7 +342,7 @@ function send(action, steps) {
   // etc. slip past the whitelist as truthy inherited members
   const value = Object.prototype.hasOwnProperty.call(actions, key) ? actions[key] : undefined;
   if (!value) return Promise.reject(new Error("unknown IR action: " + action));
-  const n = clampSteps(steps);
+  const n = REPEATABLE.test(key) ? clampSteps(steps) : 1;
   const job = queue.then(async () => {
     for (let i = 0; i < n; i++) {
       if (i) await sleep(STEP_GAP_MS);
@@ -396,6 +406,11 @@ function causeOf(message) {
 
 function status() {
   return {
+    // Whether applyConfig has run at all. Without this, a caller that publishes Home
+    // Assistant discovery before the hub is up cannot tell "this box has no IR
+    // actions" from "nobody has asked the hub yet" - and the first reads as a reason
+    // to DELETE every retained button, which is what happened on every boot.
+    ready: applied,
     configured: !!backend,
     backend: backend ? backend.name : null,
     // Three-valued for the firetv backend: true/false once its resident link service

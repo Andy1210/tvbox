@@ -228,7 +228,13 @@ function publishIrDiscovery() {
   if (!ctl) return;
   let actions;
   try {
-    actions = deps.irActions() || [];
+    actions = deps.irActions();
+    if (actions === null || actions === undefined) {
+      // The hub has not applied its config yet (this runs from applyConfig, which the
+      // shell calls before ir.applyConfig). Publishing an empty set here deleted every
+      // retained IR button on every boot; they came back only after an IR settings save.
+      return;
+    }
   } catch (e) {
     // A blaster that cannot report is not a reason to drop the buttons that exist: an
     // empty list would delete every one of them.

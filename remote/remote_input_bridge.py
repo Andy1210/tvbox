@@ -129,6 +129,7 @@ APP_ACTION_RE = re.compile(r"^app:[a-z0-9_-]{1,32}$")
 # carrying `ir:foo\n` would pass here and its JS twin (config.js REMOTE_IR_ACTION) would
 # not - two answers to one question.
 IR_ACTION_RE = re.compile(r"^ir:[a-z0-9_]{1,32}\Z")
+MAC_RE = re.compile(r"^([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}\Z")
 # The name half on its own, for reading the blaster's own action map.
 IR_ACTION_NAME_RE = re.compile(r"[a-z0-9_]{1,32}")
 NAV_URL = "http://127.0.0.1:8097/tvbox/api/nav"
@@ -382,7 +383,11 @@ def load_ir_actions():
         if backend == "esphome":
             ready = bool(block.get("host"))
         elif backend == "firetv":
-            ready = bool(block.get("mac"))
+            # The shape, not just "non-empty": the shell holds this to MAC_RE on every
+            # save AND on every read, so a hand-edited or restored config is the way an
+            # invalid one gets here - and treating it as configured diverts the
+            # remote's own keys to a blaster that can never answer.
+            ready = bool(MAC_RE.match(str(block.get("mac") or "")))
         else:
             ready = bool(block.get("url") and block.get("token"))
         if not ready:

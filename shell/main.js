@@ -1450,7 +1450,10 @@ mediapublish.init({
   // What the blaster can send becomes a Home Assistant button each, so anything there -
   // a dashboard, an automation, a voice assistant - can reach a TV input or a soundbar
   // without knowing this box's MQTT topics.
-  irActions: () => ir.status().actions,
+  // null, not [], while the hub has not applied its config: an empty list is a
+  // legitimate answer meaning "no actions", and mqtt.js deletes the retained buttons
+  // for exactly that answer.
+  irActions: () => (ir.status().ready ? ir.status().actions : null),
 });
 
 tvcommand.init({
@@ -2417,6 +2420,10 @@ app.whenReady().then(async () => {
     childEnv: () => ({ ...process.env, ...WL_ENV }),
   });
   ir.applyConfig(); // IR blaster hub; no-op if not configured
+  // ...and only now can the Home Assistant buttons be published: mediapublish.applyConfig
+  // ran earlier in this function, when the hub had no actions yet, and a publish with an
+  // empty set DELETES every retained IR button on the broker.
+  mediapublish.publishIrDiscovery();
   // The MQTT bridge came up above, before the blaster had read its config - so the
   // discovery it published carried no IR buttons. Restate them now that there is
   // something to say. (Only the retained topics from a previous run kept the buttons

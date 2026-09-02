@@ -226,6 +226,45 @@ describe("the IR blaster's firetv targets", () => {
     expect(screen.queryByText("Power · Audio")).toBeNull();
   });
 
+  it("offers a soundbar row nothing but AUDIO devices", async () => {
+    // "not a television" was too loose: it let a soundbar action bind to a set-top
+    // box's Power, which is not what anyone means by "soundbar" and which the row's
+    // label does not warn about.
+    const withBox = {
+      ...PLAN,
+      devices: [
+        ...PLAN.devices,
+        { id: "aabbccddeeff", brand: "Sky", label: "Set-top", kind: "settop", keys: { Power: irdb(2) } },
+      ],
+    };
+    stubShell(withBox);
+    render(<Page />);
+    await settle();
+    await setFocus("ir:map-soundbar_power");
+    await remote.ok();
+    await settle();
+    expect(screen.getByText("Power · Audio")).toBeTruthy();
+    expect(screen.queryByText("Power · Set-top")).toBeNull();
+  });
+
+  it("offers a TV input row nothing but the television", async () => {
+    const withBox = {
+      ...PLAN,
+      devices: [
+        ...PLAN.devices,
+        { id: "aabbccddeeff", brand: "Sky", label: "Set-top", kind: "settop", keys: { HDMI1: irdb(206) } },
+      ],
+    };
+    stubShell(withBox);
+    render(<Page />);
+    await settle();
+    await setFocus("ir:map-input_hdmi1");
+    await remote.ok();
+    await settle();
+    expect(screen.getByText("HDMI 1 · TV")).toBeTruthy();
+    expect(screen.queryByText("HDMI 1 · Set-top")).toBeNull();
+  });
+
   it("offers a soundbar row nothing from the television", async () => {
     stubShell(PLAN);
     render(<Page />);

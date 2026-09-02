@@ -269,6 +269,35 @@ test("firetv: anything else speaks for itself", async () => {
   await assert.rejects(() => svc.send("tv:HDMI2"), /bad request: nope/);
 });
 
+test("only volume repeats: a power toggle or an input switch goes out exactly once", async () => {
+  // `steps` arrives from MQTT, the phone remote and the remote bridge. Ten power
+  // toggles are five presses undone plus five more; ten input switches leave the
+  // television wherever the last one landed.
+  const sent = [];
+  ir._test.setBackendForTest(
+    { name: "x", send: async (v) => sent.push(v), connected: () => true, close() {} },
+    { volume_up: "Signal0", soundbar_volume_up: "Signal4", tv_power: "Signal2", input_hdmi2: "Signal5" },
+  );
+  await ir.send("volume_up", 4);
+  assert.equal(sent.length, 4, "volume repeats");
+  sent.length = 0;
+  await ir.send("soundbar_volume_up", 3);
+  assert.equal(sent.length, 3, "so does the soundbar's");
+  sent.length = 0;
+  await ir.send("tv_power", 10);
+  assert.deepEqual(sent, ["Signal2"], "power goes once whatever was asked");
+  sent.length = 0;
+  await ir.send("input_hdmi2", 7);
+  assert.deepEqual(sent, ["Signal5"], "and so does an input switch");
+});
+
+test("status() says whether the hub has applied its config at all", () => {
+  // An empty action list is a legitimate answer, and mqtt.js DELETES the retained Home
+  // Assistant buttons for it - so "nobody has asked yet" must not look like it.
+  ir.applyConfig();
+  assert.equal(ir.status().ready, true);
+});
+
 test("an action nothing is mapped to is refused, not guessed", async () => {
   // The vocabulary is closed and the mapping is per-box: a box that never mapped an
   // input must not send some other code instead.
