@@ -32,8 +32,32 @@ unreachable remote either (`Ring operation timeout in 30 seconds`). Fire OS also
 keeps a standing intent to connect that it never withdraws: it suppresses
 connection-parameter updates for Amazon remotes and never removes one from the
 background connection list, which upstream AOSP does. `btmgmt add-device` is the
-Pi's equivalent. Provisioning the beacon from this end is a bench experiment
-nobody has run.
+Pi's equivalent.
+
+**Provisioning the beacon from this end was tried, and it did not work.** Worth
+recording so nobody repeats it blindly. With the remote awake, both writes went to
+`cfbfb001` **under the finder service** and were accepted with no ATT error - the
+33-byte `01` + two random 16-byte IRKs as a long write, then `02 01`. The remote
+then advertised nothing: 65 s of LE scanning with the link down found seven other
+devices and neither the remote's address nor any `0171` manufacturer data. Nothing
+broke either - the IR blast still works.
+
+Two reasons it may have failed, both of them things the firmware read did NOT
+settle: `02 01` being the enable is an inference (it is simply the only other
+two-byte constant beside the ring's `03 01`, with no semantic name anywhere), and
+the host also mints a `peerIdentityBDA` that is **not** part of the 33-byte write
+while `addIrkPairNative` takes both the real address and that invented identity -
+so the sequence may be missing its resolving-list half. The characteristic is
+write-only (`Read not permitted`), so there is no way to read a config state back
+and check. Settling it needs a rooted Fire TV to watch a real provisioning, not
+more guessing at this end.
+
+**Address the characteristic by PATH, not by UUID.** Demonstrated live on this
+remote: `serviceff02` is the finder service (`cfbfb000`) and its child
+`serviceff02/charff03` is the command characteristic - but `servicefe02/charfe0e`
+carries the **same** `cfbfb001` UUID under the DFU service, and writing there is a
+firmware update. Match the service first, then a char directly under it, exactly as
+`shell/remotefinder.js` does.
 
 Both were reverse-engineered from Fire OS 7.7.1.3 on a Fire TV Stick 4K Max
 (AFTKA). Those working notes are not part of this repo; what a reader needs is
