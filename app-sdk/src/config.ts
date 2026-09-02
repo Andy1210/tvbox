@@ -107,7 +107,6 @@ export type IrAction =
   | "volume_down"
   | "mute"
   | "tv_power"
-  | "input_next"
   | "input_hdmi1"
   | "input_hdmi2"
   | "input_hdmi3"

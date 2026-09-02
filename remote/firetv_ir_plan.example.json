@@ -12,13 +12,18 @@
     "soundbar that is not on the CEC bus. Set config.ir.backend to \"firetv\" and point",
     "each action at a `<kind>:<Key>` target from below.",
     "",
-    "The LG discrete socket codes are double-sourced (irdb LG/TV/4,-1.csv and the",
-    "Flipper LG_MKJ39170828_Service.ir capture agree byte for byte at address 4, which",
-    "is the address this TV's measured Power/Volume/Mute already sit on) - but their",
-    "provenance is a service remote plus a crowd-sourced CSV, NOT a capture from a",
-    "retail 2019 remote. Real LG consumer remotes carry only the stepping Input button",
-    "(0x0B), so `Input` is the code most likely to work and the discrete ones are the",
-    "prize. Try Input first, then HDMI2."
+    "MEASURED on a 2019 LG (2026-09-02): HDMI1 (0xCE) and HDMI2 (0xCC) both switch the",
+    "set, confirmed by the box's own CEC bridge seeing the route leave and come back.",
+    "The Samsung soundbar Power capture works too, and is byte-identical to the one",
+    "that box had already been programmed with by hand - so this index entry is good.",
+    "",
+    "`Input` (0x0B) reacts but is NOT a stepping code on this set: it opens the TV's",
+    "input LIST, which no remote paired to the BOX can drive. That is why there is no",
+    "`input_next` action - a menu nobody can navigate is worse than nothing. Bind it",
+    "yourself if your television steps on it.",
+    "",
+    "HDMI3 (0xE9) and HDMI4 (0xDA) are still unmeasured; they come from the same two",
+    "agreeing sources as the two that work."
   ],
   "aa:bb:cc:dd:ee:ff": {
     "devices": [

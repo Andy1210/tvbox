@@ -50,7 +50,6 @@ each one becomes a Home Assistant button with a stable entity id:
 | --------------------------------------------------------------- | ------------------------------------------------------------ |
 | `volume_up` / `volume_down` / `mute`                            | the TV's own amplifier                                       |
 | `tv_power`                                                      | the TV's power code, for a set whose CEC power does not work |
-| `input_next`                                                    | step to the next source                                      |
 | `input_hdmi1` … `input_hdmi4`                                   | select that socket directly                                  |
 | `soundbar_power`                                                | the soundbar's power key                                     |
 | `soundbar_volume_up` / `soundbar_volume_down` / `soundbar_mute` | its volume                                                   |
@@ -59,10 +58,13 @@ A power code is normally a TOGGLE - one key that switches whichever way the
 device was - and nothing here can read which way that is. Whatever sends the
 command owns that honesty; the box only reports that the code went out.
 
-`input_next` exists beside the four sockets because most TVs' own remotes carry
-only the stepping button, so it is the code most likely to be in a codeset at
-all. The discrete ones are worth trying first anyway: a step lands wherever the
-set's enabled-input list says, which is not something a command can aim at.
+The TV's own Source code is **not** in the list, though the code index carries it
+(as `Input`) and a plan can hold it. Measured on the living-room LG: it opens the
+set's input LIST rather than stepping to the next socket - and no remote the box
+owns can drive that list, because those are paired to the BOX rather than to the
+television. It would leave the screen in a menu somebody has to escape with the
+TV's own remote. A discrete code completes the job with no navigation, which is
+the only shape that works here. Bind it if your set steps on it instead.
 
 ## The `firetv` backend - no blaster hardware at all
 
@@ -85,7 +87,6 @@ remote plan to send, as `<kind>:<Key>`:
   "firetv": {
     "mac": "7C:ED:C6:12:E6:3C",
     "actions": {
-      "input_next": "tv:Input",
       "input_hdmi2": "tv:HDMI2",
       "soundbar_power": "audio:Power"
     }
@@ -104,8 +105,21 @@ Two costs, both from the hardware:
 - **The remote sleeps between presses, and a blast leaves its BLE link down.** So
   a blast when nobody has touched the remote may find nothing to talk to. The
   error says so ("press a button on it to wake it, then retry") rather than
-  reporting a failure that looks like a broken TV. A press-triggered blast is the
-  reliable direction, because the press itself wakes the remote.
+  reporting a failure that looks like a broken TV.
+  **This makes the backend a poor fit for VOICE and a good one for a BUTTON.** A
+  press wakes the remote, so a bound button always works; asking by voice when the
+  remote has been on the sofa for an hour usually does not - and if somebody is
+  holding the remote already, they are not going to ask out loud. Measured on a
+  Remote Pro: connected and blasting one second after a press, gone again by the
+  next blast. For a voice-driven input switch use a mains-powered blaster
+  (`esphome`); it can be TAUGHT these codes by putting it in learn mode and
+  blasting each one at it from the remote.
+- **And a blast goes wherever the remote is LYING.** Measured on the same soundbar,
+  minutes apart, with byte-identical codes: once nothing happened, once it switched.
+  Nothing had changed but where the remote was. A television is a large target and
+  forgiving; a soundbar's receiver is small and low. This is the second and less
+  obvious reason the backend suits a button - the hand that presses it is also the
+  hand that aims it.
 - **Each send is its own BLE connect**, a second or two, so a ten-step volume
   ramp takes tens of seconds and holds the queue. Let the remote's own programmed
   keys do volume (`irPassthrough`) and keep this for the one-shot actions.

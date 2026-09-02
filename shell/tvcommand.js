@@ -327,7 +327,6 @@ function handle(cmd) {
     // Whether any of them can be sent depends on what the configured blaster has mapped;
     // ir.js refuses an unmapped action rather than sending something else.
     case "tv_power":
-    case "input_next":
     case "input_hdmi1":
     case "input_hdmi2":
     case "input_hdmi3":

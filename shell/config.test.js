@@ -198,7 +198,6 @@ test("every action in the vocabulary can be mapped", () => {
     "volume_down",
     "mute",
     "tv_power",
-    "input_next",
     "input_hdmi1",
     "input_hdmi2",
     "input_hdmi3",

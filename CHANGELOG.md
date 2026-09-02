@@ -9,10 +9,12 @@ write for the person on the couch (what changes for THEM), not for developers.
 
 ### hu
 
-- **Át tudod váltani a tévé bemenetét a dobozról.** HDMI 1-4 külön, vagy csak a
-  következőre léptetve - hanggal, a Home Assistantból, vagy a távirányító egy
-  szabad gombjára kötve. Eddig erre nem volt mód: a HDMI-CEC-en egy lejátszó csak
-  magára tudja váltani a tévét, máshova nem.
+- **Át tudod váltani a tévé bemenetét a dobozról.** HDMI 1, 2, 3 vagy 4 - hanggal,
+  a Home Assistantból, vagy a távirányító egy szabad gombjára kötve. Eddig erre nem
+  volt mód: a HDMI-CEC-en egy lejátszó csak magára tudja váltani a tévét, máshova
+  nem. Egy Fire TV távirányítót használva a doboz a táv saját infra LED-jével lő -
+  ahhoz viszont a táv legyen ébren, tehát az inkább gombra kötve jó, mint hanggal;
+  hanghoz egy hálózatról járó jeladó (pl. ESPHome) a jobb.
 - **A hangprojektort is be tudod kapcsolni**, ami eddig szintén kimaradt, mert
   nincs a CEC-buszon. A hangerejét és a némítását a Home Assistantból vagy egy
   gombra kötve éred el - hanggal a "halkítsd le" továbbra is a tévét halkítja,
@@ -30,10 +32,13 @@ write for the person on the couch (what changes for THEM), not for developers.
 
 ### en
 
-- **The TV's input can be switched from the box.** HDMI 1-4 each on its own, or
-  just stepped to the next one - by voice, from Home Assistant, or bound to a
-  spare button on a remote. There was no way to do this before: over HDMI-CEC a
-  player can only bring the TV to itself, never move it elsewhere.
+- **The TV's input can be switched from the box.** HDMI 1, 2, 3 or 4 - by voice,
+  from Home Assistant, or bound to a spare button on a remote. There was no way to
+  do this before: over HDMI-CEC a player can only bring the TV to itself, never
+  move it elsewhere. With a Fire TV remote as the blaster the box fires the
+  remote's own infrared LED - but the remote has to be awake for that, so it suits
+  a bound button better than voice; for voice, a mains-powered blaster (ESPHome)
+  is the better one.
 - **A soundbar can be switched on too**, which was missing for the same kind of
   reason: it is not on the CEC bus. Its volume and mute are there from Home
   Assistant or on a bound button - by voice, "turn it down" still means the

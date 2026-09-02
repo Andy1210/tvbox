@@ -738,10 +738,12 @@ const IR_ACTIONS = [
   "volume_down",
   "mute",
   "tv_power",
-  // `input_next` steps through the sources; the discrete ones aim at a socket. Both
-  // exist because most TVs' own remotes only carry the stepping button, so a set that
-  // answers no discrete code can still be driven - one press at a time.
-  "input_next",
+  // Discrete sockets only. The TV's own Source code (irdb calls it `Input`, and the
+  // index still carries it) is deliberately NOT an action here: measured on the
+  // living-room LG, it opens the set's input LIST rather than stepping - and that list
+  // cannot be driven by any remote the box owns, because those are paired to the BOX,
+  // not to the television. So it leaves the screen in a menu somebody has to escape
+  // with the TV's own remote, which is worse than offering nothing.
   "input_hdmi1",
   "input_hdmi2",
   "input_hdmi3",

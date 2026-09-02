@@ -118,7 +118,6 @@ const IR_BUTTON_NAMES = {
   volume_down: "TV volume down",
   mute: "TV mute",
   tv_power: "TV power",
-  input_next: "TV next input",
   input_hdmi1: "TV input HDMI 1",
   input_hdmi2: "TV input HDMI 2",
   input_hdmi3: "TV input HDMI 3",
