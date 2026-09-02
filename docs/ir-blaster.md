@@ -102,10 +102,15 @@ grouped, and a rebuilt index can regroup them.
 
 Two costs, both from the hardware:
 
-- **The remote sleeps between presses, and a blast leaves its BLE link down.** So
-  a blast when nobody has touched the remote may find nothing to talk to. The
-  error says so ("press a button on it to wake it, then retry") rather than
-  reporting a failure that looks like a broken TV.
+- **The remote sleeps between presses.** So a blast when nobody has touched it may
+  find nothing to talk to, and the error says so ("press a button on it to wake it,
+  then retry") rather than reporting a failure that looks like a broken TV.
+
+  What it does NOT do is drop the link because of the blast. That was this repo's
+  own tool: `cmd_blast` closed the connection in a `finally` whether it had opened
+  it or not, and the note that "a blast leaves the BLE link down" was describing
+  us. It now leaves the link as it found it, which matters because of the next
+  point.
   **This makes the backend a poor fit for VOICE and a good one for a BUTTON.** A
   press wakes the remote, so a bound button always works; asking by voice when the
   remote has been on the sofa for an hour usually does not - and if somebody is
@@ -114,6 +119,7 @@ Two costs, both from the hardware:
   next blast. For a voice-driven input switch use a mains-powered blaster
   (`esphome`); it can be TAUGHT these codes by putting it in learn mode and
   blasting each one at it from the remote.
+
 - **The box cannot wake it, and the reason is not the one it looks like.** This is
   the first idea everybody has, so it is worth the paragraph. A sleeping remote is
   _silent_: 95 s of LE scanning finds a dozen other devices in the room, including
@@ -122,8 +128,25 @@ Two costs, both from the hardware:
   is abandoned by BlueZ after ~41 s, and the remote-finder fails with `Not
 connected`. Only a button press brings it back.
 
-  It is silent because **its find-my beacon has to be provisioned, and only a Fire
-  TV has ever done that**. From the Fire OS firmware: the host writes `01` plus two
+  **A drop is not permanent, but the window to catch it is.** From an HCI trace
+  (`btmon`, not `bluetoothctl` - see below): the remote sends an `ADV_DIRECT_IND`
+  aimed at this adapter, about once a minute at -92 dBm, for a while after a drop -
+  and then stops entirely. So the kernel's LE accept list with auto-connect
+  (`btmgmt add-device -a 2 -t 1 <mac>`) does hold a link up: measured, ten minutes
+  connected with nobody touching the remote, where without it the link was gone in
+  a minute or two. But once that advertising window has closed the remote really is
+  silent, and adding it to the list afterwards changes nothing - measured, three
+  minutes with no connection. Which is exactly why the tool must not disconnect: it
+  is what closes the chain.
+
+  Fire OS does the same thing and one more: it never removes an Amazon remote from
+  the background connection list even on an intentional disconnect (upstream AOSP
+  does), and it suppresses connection-parameter updates for it, so **the remote
+  owns its own power policy** - which is why a Fire TV can hold that link all day
+  without eating the battery.
+
+  A find-my beacon is a different thing again, and this remote has none: **it has to
+  be provisioned, and only a Fire TV has ever done that**. From the Fire OS firmware: the host writes `01` plus two
   16-byte IRKs to `cfbfb001` (the same characteristic the ring's `03 01` goes to),
   then `02 01`; the ring path itself is gated on `cfg_state == 1` and otherwise
   logs _"device is not configured, cannot ring"_. So the finder is not magic and a
@@ -136,8 +159,10 @@ connected`. Only a button press brings it back.
   LE accept list (`btmgmt add-device`), which removes the 41 s cap - but with an
   unprovisioned remote there is nothing on air to accept.
 
-  So the honest state: a button press is the only wake, **unless** somebody
-  provisions the beacon. That is a bench experiment, not a setting.
+  So the honest state: a press is the only way to reach a remote whose advertising
+  window has closed. Keeping it in the accept list and never disconnecting is what
+  keeps that from happening in the first place - the boot-time half of that is not
+  wired up here yet.
 
 - **And a blast goes wherever the remote is LYING.** Measured on the same soundbar,
   minutes apart, with byte-identical codes: once nothing happened, once it switched.

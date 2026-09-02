@@ -232,6 +232,23 @@ class Remote:
         await self._write(kc.CHAR_CONTROL, kc.frame_delete_all())
 
 
+async def _already_connected(mac):
+    """Is BlueZ already holding a link to this remote? Read before we attach, so the
+    blast can leave the link exactly as it found it."""
+    try:
+        from bleak.backends.bluezdbus.manager import get_global_bluez_manager
+
+        want = mac.upper().replace(":", "_")
+        m = await get_global_bluez_manager()
+        for path, ifaces in m._properties.items():
+            dev = ifaces.get("org.bluez.Device1")
+            if dev and path.rstrip("/").endswith("dev_" + want):
+                return bool(dev.get("Connected"))
+    except Exception as e:
+        log(f"  could not read the link state: {e}")
+    return False
+
+
 async def _device_from_bluez(mac):
     """Build a BLEDevice straight from BlueZ's D-Bus object for a bonded remote.
     bleak's connect() only skips its discovery scan when it already has a device
@@ -354,6 +371,7 @@ async def cmd_blast(args):
         log(f"! cannot build a blast for {key!r}: {ex}"); sys.exit(4)
     if args.dry_run:
         _dump_table("blast", t, blast=True); return
+    was_up = await _already_connected(args.mac)
     c, _scan_id, have = await connect(args.mac)  # the map is unused: a blast row is 0xFF
     try:
         if not have: log("! keymap service missing; aborting"); sys.exit(3)
@@ -362,7 +380,17 @@ async def cmd_blast(args):
         log(f"blast {key}: {'OK' if ok else 'FAILED'}")
         if not ok: sys.exit(1)
     finally:
-        await c.disconnect()
+        # Leave the link the way we found it. A remote that was ALREADY connected stays
+        # connected, because tearing it down is what makes the next blast fail: the
+        # remote advertises for a bounded window after a drop and then goes silent, so
+        # once that window closes nothing reaches it until somebody presses a button.
+        # Measured: with the link left alone a blast works on a remote nobody has
+        # touched for ten minutes; after a disconnect, three minutes later there is
+        # nothing to connect to. (The old unconditional disconnect is why this file's
+        # own notes used to describe a blast as "leaving the BLE link down" - that was
+        # us, not the remote.)
+        if not was_up:
+            await c.disconnect()
 
 
 async def cmd_program(args):
