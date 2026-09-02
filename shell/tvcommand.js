@@ -230,7 +230,10 @@ function playMediaIn(cmd) {
 // The classifier lives in ir.js, because the settings page reads the same answer out of
 // /tvbox/api/ir/status - two copies would drift and one screen would disagree with the
 // other about what just failed.
-const irCause = require("./ir").causeOf;
+// Resolved per call rather than captured at load: this file's convention is injection
+// via `deps`, and a module-load capture would be `undefined` if a require cycle ever
+// appeared - inside a catch handler, which would swallow the note it exists to show.
+const irCause = (message) => require("./ir").causeOf(message);
 
 // One note per half minute. The card takes Back and Home for as long as it is up, and
 // an IR send can be failed on demand by anything that can publish a command - so

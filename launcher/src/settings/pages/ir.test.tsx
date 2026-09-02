@@ -63,13 +63,19 @@ const config = (actions: Record<string, string>) => ({
 });
 
 // `plan` null = the box could not be asked; [] = there is no plan.
-function stubShell(plan: unknown, opts: { saveFails?: boolean; status?: Record<string, unknown> } = {}) {
+function stubShell(
+  plan: unknown,
+  opts: { saveFails?: boolean; status?: Record<string, unknown>; send?: () => Promise<unknown> } = {},
+) {
   const posted: Record<string, unknown>[] = [];
   vi.stubGlobal("fetch", (url: string, init?: RequestInit) => {
     const u = String(url);
     if (init?.method === "POST") {
       posted.push(JSON.parse(String(init.body || "{}")));
       if (opts.saveFails) return Promise.resolve(new Response("no", { status: 500 }));
+      // A send that only settles when the test says so, which is the only way to
+      // assert what the screen does WHILE a blast is in flight.
+      if (u.includes("/ir/send") && opts.send) return opts.send();
     }
     const body = u.includes("/firetvir/plan")
       ? plan === null
@@ -126,43 +132,81 @@ describe("the IR blaster's firetv targets", () => {
     expect(screen.queryByText(/not reachable/)).toBeNull();
   });
 
-  it("says the link is down only when it knows that, and never calls it broken", async () => {
+  it("a link that is merely down gets no warning at all", async () => {
+    // It is the resting state of a healthy box: the remote sleeps between presses and
+    // the link is opened by the next blast. A warning here fires after every reboot on
+    // a box with nothing wrong with it.
     stubShell(PLAN, {
-      status: { configured: true, backend: "firetv", connected: false, actions: [], lastError: "", cause: null },
+      status: {
+        configured: true,
+        backend: "firetv",
+        connected: false,
+        actions: [],
+        lastError: "",
+        cause: null,
+        service: { link: false, held: false, failed: false },
+      },
     });
     render(<Page />);
     await settle();
-    expect(screen.getByText(/No live link to the remote/)).toBeTruthy();
+    expect(screen.queryByText(/link/i)).toBeNull();
   });
 
-  it("says nothing at all while the link state is unknown", async () => {
-    // null is "nobody has asked yet", which must not read as a fault: the box may be
-    // perfectly able to blast.
+  it("a service that will not start IS a fault, and says so", async () => {
     stubShell(PLAN, {
-      status: { configured: true, backend: "firetv", connected: null, actions: [], lastError: "", cause: null },
+      status: {
+        configured: true,
+        backend: "firetv",
+        connected: false,
+        actions: [],
+        lastError: "",
+        cause: null,
+        service: { link: null, held: false, failed: true },
+      },
     });
     render(<Page />);
     await settle();
-    expect(screen.queryByText(/No live link to the remote/)).toBeNull();
+    expect(screen.getByText(/IR service will not start/)).toBeTruthy();
   });
 
   // A disabled row loses its focus key, so the cursor jumped to the top of the page and
   // the next OK opened the blaster-type picker - which unmounts this page and throws the
   // test result away.
-  it("keeps the tested row focusable while it runs, and ignores a second press", async () => {
-    const posted = stubShell(PLAN);
+  it("keeps the tested row focusable and says so when a second test is pressed", async () => {
+    // A disabled row loses its focus key, so the cursor jumped to the top of the page
+    // and the next OK opened the blaster-type picker - which unmounts this page and
+    // throws the result away. With the row enabled, a press that did nothing at all was
+    // the new dead button, so the second one has to say something.
+    let settleSend: ((v: unknown) => void) | null = null;
+    const posted = stubShell(PLAN, {
+      send: () =>
+        new Promise((res) => {
+          settleSend = () =>
+            res(new Response(JSON.stringify({ ok: true }), { headers: { "Content-Type": "application/json" } }));
+        }),
+    });
     render(<Page />);
     await settle();
-    expect(screen.getByText(/Test · Soundbar power/)).toBeTruthy();
+
     await setFocus("ir:test-soundbar_power");
     await remote.ok();
     await settle();
-    // The row is still there and still focusable while the blast runs. Disabled, it
-    // dropped its focus key, the page's watchdog moved the cursor to the top row, and
-    // the next OK opened the blaster-type picker.
-    const busy = screen.getByText(/Sending…|Test · Soundbar power/);
-    expect(busy.closest("[data-sfocus]")).toBeTruthy();
-    expect(posted.filter((x) => "action" in x).length).toBeLessThanOrEqual(1);
+    // In flight: the row says so, and it is still the focusable row it was.
+    const busyRow = screen.getByText(/Sending… · Soundbar power/);
+    expect(busyRow.closest("[data-sfocus]")).toBeTruthy();
+    expect(posted.filter((x) => "action" in x).length).toBe(1);
+
+    // A second press, on the same row: no second blast, and the screen says why.
+    await remote.ok();
+    await settle();
+    expect(posted.filter((x) => "action" in x).length).toBe(1);
+    expect(screen.getByText(/A test is already running/)).toBeTruthy();
+
+    (settleSend as unknown as () => void)();
+    await settle();
+    // ...and the outcome lands on the row that was pressed, not only in a note a
+    // screen and a half above it.
+    expect(screen.getAllByText(/Sent\./).length).toBeGreaterThan(1);
   });
 
   it("offers an input row only the keys that ARE inputs", async () => {

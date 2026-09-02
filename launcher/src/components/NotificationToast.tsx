@@ -6,6 +6,14 @@ import type { TvNotification } from "../lib/shell";
 // camera snapshot, …). A top-center card above everything (including app views
 // and the ambient screen); auto-dismisses after `duration` (default 8s, 0 =
 // sticky), and Back/Home dismisses it (swallowed so it doesn't also navigate).
+// Causes whose body would be contradicted by "the command did not go out".
+const IR_TITLE: Record<string, string> = {
+  linkLost: "ir.failedTitleUnknown",
+  notFired: "ir.failedTitleRemote",
+  held: "ir.failedTitleWait",
+  busy: "ir.failedTitleWait",
+};
+
 export function NotificationToast() {
   const { t } = useI18n();
   const [note, setNote] = useState<TvNotification | null>(null);
@@ -54,7 +62,10 @@ export function NotificationToast() {
       : note?.kind === "crashRestart"
         ? t("crash.restarted")
         : note?.kind === "irFailed"
-          ? t("ir.failedTitle")
+          ? // The generic title asserts the command did not go out, which two of the
+            // causes deliberately do not claim: a link lost mid-send may have fired,
+            // and a remote that took the code and did not fire is a different fault.
+            t(IR_TITLE[String(note.cause)] || "ir.failedTitle")
           : "";
   const kindMessage =
     note?.kind === "irFailed"

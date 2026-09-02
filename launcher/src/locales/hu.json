@@ -647,7 +647,6 @@
     "notSet": "nincs beállítva",
     "test": "Teszt",
     "testOk": "Elküldve.",
-    "testFailed": "Küldés sikertelen: {error}",
     "groupDevice": "Adó",
     "groupTest": "Kipróbálás",
     "portDefault": "alapértelmezett",
@@ -669,11 +668,23 @@
       "notFired": "A távirányító megkapta a kódot, de nem lőtte ki. Nézd meg az elemeket, és fordítsd a készülék felé.",
       "linkLost": "A kapcsolat megszakadt küldés közben - lehet, hogy a parancs kiment. Nézd meg, mielőtt újra próbálod.",
       "badSpec": "A doboz olyan infra parancsot állított össze, amit ez a távirányító nem fogad el. Ez hiba a dobozban.",
-      "busy": "A távirányító épp más infra parancson dolgozik. Próbáld újra egy pillanat múlva."
+      "busy": "A távirányító épp más infra parancson dolgozik. Próbáld újra egy pillanat múlva.",
+      "held": "A távirányítót épp beállítják a beállításokban. Próbáld újra, ha az kész.",
+      "serviceSlow": "A doboz infra szolgáltatása nem válaszolt időben.",
+      "blasterUnreachable": "A jeladó nem érhető el a hálózaton. Nézd meg, hogy be van-e dugva, és jó-e a címe.",
+      "blasterKey": "A jeladó API-kulcsa nem egyezik. Írd be újra a beállításokban.",
+      "blasterEntities": "A jeladón nincs meg a beállított két elem (jelválasztó és küldés gomb).",
+      "haUrl": "A Home Assistant címe nem jó, vagy titkosítás nélkül a házon kívülre mutat.",
+      "haCall": "A Home Assistant elutasította a hívást. Nézd meg a szkriptet és a tokent."
     },
-    "linkDown": "Nincs élő kapcsolat a távirányítóval.",
-    "awakeHintFiretv": "A doboz a távirányító saját infra LED-jével lő, ezért nyitva tartja hozzá a kapcsolatot. Ha a távirányító elaludt, egy gombnyomás felébreszti.",
-    "offHintFiretv": "Kikapcsolni a jeladó típusának átállításával lehet."
+    "awakeHintFiretv": "Ha a távirányító elaludt, egy gombnyomás felébreszti.",
+    "offHintFiretv": "Töröld a távirányító Bluetooth-címét a kikapcsoláshoz.",
+    "lastFailure": "Legutóbb nem sikerült: {reason}",
+    "testRunning": "Egy teszt már fut.",
+    "serviceFailed": "Az infra szolgáltatás nem indul el. Nézd meg a doboz naplóját.",
+    "failedTitleUnknown": "Nem tudjuk, kiment-e",
+    "failedTitleRemote": "A távirányító nem lőtt",
+    "failedTitleWait": "A távirányító most nem szabad"
   },
   "firetvir": {
     "title": "A távirányító IR gombjai",

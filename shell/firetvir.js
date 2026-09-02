@@ -552,12 +552,16 @@ function blastAction(mac, target, cb) {
 // that costs most: a shell that dies by signal (a crash, an OTA restart) skips every
 // shutdown path, and the leftover keeps holding the remote's ONE allowed connection -
 // so the new shell's service can never get it and every blast answers "asleep" until
-// somebody kills the orphan by hand. The supervisor reaps an orphan by command line,
-// escalates SIGTERM to SIGKILL, caps the respawn backoff and forwards the child's
-// stderr with a length bound.
+// somebody kills the orphan by hand. The supervisor reaps an orphan by command line
+// (SIGTERM, then SIGKILL on a second pass), caps the respawn backoff, has a failure
+// ceiling, and forwards the child's stderr with a length bound. Its own `stop` sends
+// SIGTERM only and does not wait - which is why the tool releases the link and removes
+// its socket from a signal handler rather than relying on being killed politely.
 const SERVICE_SOCK = path.join(TVBOX, "firetv-ir.sock");
 const SERVICE_NAME = "firetv-ir";
 const SERVICE_POLL_MS = 15000; // how often the held link's state is refreshed
+const MAX_HOLD_MS = 70000; // must match the tool's own cap
+let oneShots = 0; // one-shot commands this shell is running (program/test/erase)
 const SERVE_PROTO = 1; // must match firetv_remote_ir.py's SERVE_PROTO
 const supervisor = new Supervisor();
 let service = null; // { mac, linkUp, gaveUp }
@@ -568,6 +572,10 @@ let service = null; // { mac, linkUp, gaveUp }
 function serviceRequest(req, timeoutMs, cb) {
   let done = false;
   let wrote = false;
+  // Which service this request belongs to. A 12 s blast or a 20 s release can answer
+  // after a MAC change, and stamping the link state of the service that replaced it
+  // mislabels the new one until the next poll.
+  const owner = service;
   const finish = (err, resp) => {
     if (done) return;
     done = true;
@@ -607,7 +615,11 @@ function serviceRequest(req, timeoutMs, cb) {
     }
     clearTimeout(to);
     try {
-      sock.end();
+      // destroy(), not end(): end() half-closes and then waits for the peer's FIN,
+      // and the timeout that would have cleaned up is already cancelled - so a peer
+      // that never closes leaks one socket per request. At one status poll every 15 s
+      // that is the whole shell out of file descriptors in hours, not just IR.
+      sock.destroy();
     } catch (e) {}
     let resp;
     try {
@@ -616,7 +628,9 @@ function serviceRequest(req, timeoutMs, cb) {
       return finish(new Error("the IR link service sent nonsense"));
     }
     // Every reply carries the link state, so nothing has to poll for it.
-    if (service && typeof resp.connected === "boolean") service.linkUp = resp.connected;
+    if (service && service === owner && typeof resp.connected === "boolean") {
+      service.linkUp = resp.connected;
+    }
     finish(null, resp);
   });
   sock.on("error", (e) => {
@@ -642,7 +656,7 @@ function startService(mac) {
   if (service && service.mac === mac) return; // already holding this remote
   stopService();
   if (!fs.existsSync(PY) || !fs.existsSync(TOOL)) return; // deps not installed yet
-  const st = { mac, linkUp: null, gaveUp: false, poll: null };
+  const st = { mac, linkUp: null, held: false, gaveUp: false, protoWarned: false, poll: null };
   service = st;
   // The link state has to be knowable without blasting: a screen that cannot see
   // whether the link is held cannot report the one thing this service provides, and a
@@ -652,12 +666,22 @@ function startService(mac) {
     if (service !== st) return;
     serviceRequest({ cmd: "status" }, 4000, (err, resp) => {
       if (service !== st) return;
-      if (err || !resp || !resp.ok) st.linkUp = false;
-      else if (resp.proto !== SERVE_PROTO) {
-        // A shell and a tool from different releases. Saying so beats guessing at a
-        // reply whose shape we do not know.
+      if (err || !resp || !resp.ok) {
         st.linkUp = false;
-        console.log("[firetv-ir] link service speaks protocol", resp.proto, "not", SERVE_PROTO);
+        st.held = false;
+      } else if (resp.proto !== SERVE_PROTO) {
+        // A shell and a tool from different releases. Said once: this runs every 15 s,
+        // and the value comes from the peer, so a stuck mismatch would be thousands of
+        // identical lines a day in a log that is never rotated.
+        st.linkUp = false;
+        if (!st.protoWarned) {
+          st.protoWarned = true;
+          console.log("[firetv-ir] link service speaks protocol", resp.proto, "not", SERVE_PROTO);
+        }
+      } else {
+        // `held` is what makes the difference between "somebody is setting the remote
+        // up" and "the queue is full" visible to a screen.
+        st.held = !!resp.held;
       }
     });
   };
@@ -701,6 +725,13 @@ function serviceLinkState() {
   return service ? service.linkUp : null;
 }
 
+// The rest of what the screen may need to say something true: whether the remote is
+// being set up right now, and whether the service itself has stopped coming up.
+function serviceState() {
+  if (!service) return null;
+  return { link: service.linkUp, held: !!service.held, failed: !!service.gaveUp };
+}
+
 // Ask the service where it stands. Used by status(), so the screen can report the one
 // thing this service exists to provide; it also carries the protocol version, which is
 // what makes a shell/tool version skew visible instead of silent.
@@ -729,31 +760,52 @@ function serviceStatus(cb) {
 // two connections end up fighting over one remote. No service at all is not a failure -
 // there is nothing to release.
 function releaseService(holdMs, cb) {
-  if (!service) return cb();
-  serviceRequest({ cmd: "release", hold_ms: Math.max(0, Math.min(300000, holdMs | 0)) }, 20000, (err, resp) => {
-    if (err && err.absent) return cb();
+  if (!service) return cb(null, null);
+  serviceRequest({ cmd: "release", hold_ms: Math.max(0, Math.min(MAX_HOLD_MS, holdMs | 0)) }, 20000, (err, resp) => {
+    if (err && err.absent) return cb(null, null);
     if (err || !resp || !resp.ok) {
       return cb(new Error("an IR command is still in flight - try again in a moment"));
     }
-    cb();
+    cb(null, resp.token === undefined ? null : resp.token);
   });
 }
 
 // The other half of the hold: the one-shot is done, the link may come back before the
 // hold window expires on its own.
-function resumeService(cb) {
+function resumeService(token, cb) {
   if (!service) return cb && cb();
-  serviceRequest({ cmd: "resume" }, 4000, () => cb && cb());
+  // The token is what makes an overlapping one-shot safe: without it, the second one's
+  // resume lifted the hold protecting the first, which is the remote being pulled away
+  // mid-programming.
+  const req = token === null || token === undefined ? { cmd: "resume" } : { cmd: "resume", token };
+  serviceRequest(req, 4000, () => cb && cb());
 }
 
 // Run a one-shot BLE command with the resident link out of the way for its whole
 // budget. `budgetMs` is the tool's own timeout: the hold has to outlast it, or the
 // service comes back while the one-shot is still talking to the remote.
 function withRemote(budgetMs, run, cb) {
-  releaseService(budgetMs + 5000, (err) => {
+  releaseService(budgetMs + 5000, (err, token) => {
     if (err) return cb(err);
-    run((e, r) => resumeService(() => cb(e, r)));
+    oneShots += 1;
+    run((e, r) => {
+      oneShots = Math.max(0, oneShots - 1);
+      resumeService(token, () => cb(e, r));
+    });
   });
+}
+
+// Whether THIS shell is holding the remote for a one-shot. A `held` refusal is only
+// legitimate while that is true; otherwise something else on the box set the hold, and
+// a per-blast process is the honest way past it.
+function holdingRemote() {
+  return oneShots > 0;
+}
+
+// Whether a service is registered at all - not whether its link is up. applyConfig
+// needs it to tell "nothing changed" from "nothing is running".
+function serviceRunning() {
+  return !!service;
 }
 
 // The blast the button and Home Assistant paths take. Same target resolution as the
@@ -773,7 +825,19 @@ function blastViaService(mac, target, cb) {
   // is ~1 s), so a timeout here means something is wrong rather than something is slow.
   // The old way round - a client budget shorter than the server's - reported a failure
   // for a blast that then fired seconds later, and the retry fired it twice.
-  serviceRequest({ cmd: "blast", spec: parsed.spec, key: parsed.key }, 12000, cb);
+  serviceRequest({ cmd: "blast", spec: parsed.spec, key: parsed.key }, 12000, (err, resp) => {
+    // A `held` refusal is honest while THIS shell is running a one-shot: the remote is
+    // genuinely being written to, and a second connection would fight it. When we hold
+    // nothing, something else on the box set that hold - measured, one unauthenticated
+    // request can hold it for over a minute - and a per-blast process is the way past
+    // it rather than a failure on the television.
+    if (!err && resp && !resp.ok && resp.code === "held" && !holdingRemote()) {
+      const e = new Error("the IR link service is holding the remote for something else");
+      e.absent = true;
+      return cb(e);
+    }
+    cb(err, resp);
+  });
 }
 
 // What the codes file says about where its codes came from, so a later look at
@@ -919,7 +983,9 @@ module.exports = {
   startService,
   stopService,
   serviceLinkState,
+  serviceState,
   serviceStatus,
+  serviceRunning,
   _test: {
     sanitizePlan,
     updatePlan,

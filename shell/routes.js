@@ -157,7 +157,11 @@ function post(p, data, res, ctx) {
         // reliable one. `test` is the settings row, which shows its own result on the
         // screen the person is already looking at.
         if (!data.test) ctx.irFailed(String(data.action || ""), e);
-        httpserver.jsonRes(res, { ok: false, error: String((e && e.message) || e) });
+        // `cause` so the caller can say it in the viewer's language: the settings page
+        // used to interpolate `error` verbatim, which put the box's own English
+        // sentence on a Hungarian screen right under the translated one.
+        const msg = String((e && e.message) || e);
+        httpserver.jsonRes(res, { ok: false, error: msg, cause: ir.causeOf(msg) });
       },
     );
   }

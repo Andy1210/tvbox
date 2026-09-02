@@ -33,11 +33,14 @@ tvbox is a LAN device with no cloud account. The interesting boundaries:
   process holding the BLE link to a paired Fire TV remote, so the box can fire
   that remote's own infrared LED. Same assumption as the local API: reachable by
   anything running as the box user, which includes installed apps. It is bounded
-  by what it accepts rather than by who connects - only the request shape the
-  box's own saved code plan produces (`check_blast_request` in
-  `remote/firetv_remote_ir.py`), so a caller can choose between configured codes
-  and cannot invent one. A way to make it emit a code that is not in the plan, or
-  to reach it from off the box, matters.
+  by what it accepts rather than by who connects, and the bound is on the request's
+  SHAPE, not on the box's saved plan: `check_blast_request` in
+  `remote/firetv_remote_ir.py` holds a request to the fields, ranges, timing count
+  and time-on-air a real code has, so resource abuse is closed - but a well-formed
+  code the plan does not contain IS accepted, and anything running as the box user
+  can therefore fire arbitrary consumer IR while the link is held. A way to widen
+  that (past the shape checks, past the length or time-on-air bounds), or to reach
+  the socket from off the box, matters.
 - **Secrets** - `~/.tvbox/config.json` and Spotify tokens are chmod 600; leaks
   into logs/API responses matter.
 - **The system updater** (`deploy/tvbox-sysupdate`) - the one path by which code

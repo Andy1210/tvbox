@@ -647,7 +647,6 @@
     "notSet": "not set",
     "test": "Test",
     "testOk": "Sent.",
-    "testFailed": "Send failed: {error}",
     "groupDevice": "Blaster",
     "groupTest": "Try it",
     "portDefault": "default",
@@ -669,11 +668,23 @@
       "notFired": "The remote took the code but did not fire it. Check its batteries and aim it at the device.",
       "linkLost": "The link dropped while sending - the command may have gone out. Check before trying again.",
       "badSpec": "The box built an IR command this remote will not accept. That is a bug in the box.",
-      "busy": "The remote is busy with another IR command. Try again in a moment."
+      "busy": "The remote is busy with another IR command. Try again in a moment.",
+      "held": "The remote is being set up in the settings right now. Try again when that is done.",
+      "serviceSlow": "The box's IR service did not answer in time.",
+      "blasterUnreachable": "The blaster cannot be reached on the network. Check that it is plugged in and that its address is right.",
+      "blasterKey": "The blaster's API key does not match. Enter it again in the settings.",
+      "blasterEntities": "The blaster does not have the two configured entities (signal select and send button).",
+      "haUrl": "The Home Assistant address is wrong, or it points outside the house without encryption.",
+      "haCall": "Home Assistant refused the call. Check the script and the token."
     },
-    "linkDown": "No live link to the remote.",
-    "awakeHintFiretv": "The box fires the remote's own infrared LED, so it keeps the connection to it open. If the remote has gone to sleep, one button press wakes it.",
-    "offHintFiretv": "To turn it off, change the blaster type."
+    "awakeHintFiretv": "If the remote has gone to sleep, one button press wakes it.",
+    "offHintFiretv": "Clear the remote's Bluetooth address to turn it off.",
+    "lastFailure": "Last failure: {reason}",
+    "testRunning": "A test is already running.",
+    "serviceFailed": "The IR service will not start. Check the box's log.",
+    "failedTitleUnknown": "Not sure it went out",
+    "failedTitleRemote": "The remote did not fire",
+    "failedTitleWait": "The remote is not free right now"
   },
   "firetvir": {
     "title": "The remote's own IR buttons",

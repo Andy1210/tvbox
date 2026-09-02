@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { IrAction, IrBackend } from "@sdk/config";
 import { useI18n } from "../../lib/i18n";
 import { useConfigStore } from "../../stores/config";
@@ -49,7 +49,7 @@ export function IrPage() {
   const setIr = useConfigStore((s) => s.setIr);
   const [failed, setFailed] = useState(false);
   const [status, setStatus] = useState<IrStatus | null>(null);
-  const [tested, setTested] = useState<{ action: IrAction; ok: boolean; error?: string } | null>(null);
+  const [tested, setTested] = useState<{ action: IrAction; ok: boolean; cause?: string; busy?: boolean } | null>(null);
 
   const ir = config?.ir;
   const backend: IrBackend = ir?.backend || "esphome";
@@ -193,14 +193,25 @@ export function IrPage() {
   // A blast through a Fire TV remote takes up to twelve seconds, so a press with no
   // sign of life invites a second one - which queues a second blast behind the first.
   const [testing, setTesting] = useState<IrAction | null>(null);
+  // A ref as well as state: two OK presses inside one render commit would both read the
+  // stale `testing` and send twice, and the remote's blaster is not something to send
+  // twice by accident - a power toggle undoes itself.
+  const testingRef = useRef<IrAction | null>(null);
   const test = async (a: IrAction) => {
-    if (testing) return;
+    if (testingRef.current) {
+      // Saying so, rather than nothing: with the row no longer disabled, a press that
+      // silently did nothing for up to twelve seconds was the new dead button.
+      setTested({ action: a, ok: false, busy: true });
+      return;
+    }
     setTested(null);
+    testingRef.current = a;
     setTesting(a);
     try {
       const r = await sendIr(a);
-      setTested({ action: a, ok: r.ok, error: r.error });
+      setTested({ action: a, ok: r.ok, cause: r.cause });
     } finally {
+      testingRef.current = null;
       setTesting(null);
     }
   };
@@ -235,21 +246,22 @@ export function IrPage() {
           `lastError` here put an English sentence on a Hungarian screen. And a link
           that is merely down is NOT an unreachable blaster - a sleeping remote is one
           button press away, which is what `ir.failed.asleep` says. */}
-      {status?.configured && status.lastError ? (
-        <Note tone="warn">{t("ir.failed." + (status.cause || "other"))}</Note>
+      {/* The LAST failure, said as one: a box that blasts once a day would otherwise
+          carry a single failure as a standing claim about the present. A link that is
+          merely down gets no note at all - it is the resting state of a healthy box,
+          because the remote sleeps and the link is opened by the next blast. */}
+      {status?.lastError && !tested ? (
+        <Note tone="warn">{t("ir.lastFailure", { reason: t("ir.failed." + (status.cause || "other")) })}</Note>
       ) : null}
-      {status?.configured && backend === "firetv" && status.connected === false && !status.lastError ? (
-        <Note tone="warn">{t("ir.linkDown")}</Note>
-      ) : null}
+      {status?.service?.failed ? <Note tone="warn">{t("ir.serviceFailed")}</Note> : null}
       {tested ? (
         <Note tone={tested.ok ? "ok" : "warn"}>
-          {tested.ok ? t("ir.testOk") : t("ir.testFailed", { error: tested.error || "" })}
+          {tested.ok ? t("ir.testOk") : tested.busy ? t("ir.testRunning") : t("ir.failed." + (tested.cause || "other"))}
         </Note>
       ) : null}
       {/* The firetv backend has no host or URL to clear, so the generic hint would tell
           somebody to empty a field that is not there. */}
       <Note>{backend === "firetv" ? t("ir.offHintFiretv") : t("ir.offHint")}</Note>
-      {backend === "firetv" ? <Note>{t("ir.awakeHintFiretv")}</Note> : null}
 
       <Group>
         <Row
@@ -399,12 +411,21 @@ export function IrPage() {
       {/* Only when there is something to test - the header over an empty card reads as
           a screen that failed to load. */}
       {ACTIONS.some((a) => actions[a]) ? (
-        <Group title={t("ir.groupTest")}>
+        <Group title={t("ir.groupTest")} hint={backend === "firetv" ? t("ir.awakeHintFiretv") : undefined}>
           {ACTIONS.filter((a) => actions[a]).map((a) => (
             <Row
               key={a}
               id={"test-" + a}
               label={(testing === a ? t("ir.testing") : t("ir.test")) + " · " + t("ir.action." + a)}
+              // The notes are at the top of a page a screen and a half up, so the
+              // outcome also lands on the row that was pressed.
+              hint={
+                tested && tested.action === a && !tested.busy
+                  ? tested.ok
+                    ? t("ir.testOk")
+                    : t("ir.failed." + (tested.cause || "other"))
+                  : undefined
+              }
               trailing="none"
               // NOT disabled while a test runs: a disabled row loses its focus key, so
               // the cursor jumped to the top of the page and the next OK opened the

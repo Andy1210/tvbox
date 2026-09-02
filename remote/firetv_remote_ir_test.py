@@ -238,7 +238,10 @@ check("...and so does the Power spec with its two quirks",
       spec_err({"name": "tv Power", "source": "TV", "duty_cycle": 33,
                 "keys": {"Power": {**ENTRY, "optional": True, "post_delay": 1000}}}), None)
 check("a raw capture passes", spec_err({"duty_cycle": 33, "keys": {"Power": {
-          "raw": [4500, 4500, 560], "frequency": 38000}}}), None)
+          "raw": [4500, 4500, 560, 560, 560, 1690], "frequency": 38000}}}), None)
+check("...but not one shorter than the index ever publishes",
+      spec_err({"duty_cycle": 33, "keys": {"Power": {"raw": [4500, 4500, 560],
+                                                     "frequency": 38000}}}), "badspec")
 check("repeat is not a field any plan carries",
       spec_err({"duty_cycle": 33, "keys": {"Power": {**ENTRY, "repeat": 4294967295}}}),
       "badspec")
@@ -257,8 +260,35 @@ check("a 20,000-timing raw capture is refused - the index caps a real one at 512
 check("a timing wider than the wire format is refused",
       spec_err({"duty_cycle": 33, "keys": {"Power": {"raw": [500, 70000],
                                                      "frequency": 38000}}}), "badspec")
-check("a duty cycle outside 1..99 is refused",
-      spec_err({"duty_cycle": 0, "keys": {"Power": ENTRY}}), "badspec")
+check("a duty cycle the shell never writes is refused - 99 was the measured attack",
+      spec_err({"duty_cycle": 99, "keys": {"Power": ENTRY}}), "badspec")
+check("...and so is 0", spec_err({"duty_cycle": 0, "keys": {"Power": ENTRY}}), "badspec")
+check("a raw capture with no frequency is refused HERE, not by the builder later",
+      spec_err({"duty_cycle": 33, "keys": {"Power": {"raw": [500] * 8}}}), "badspec")
+check("512 timings of 65535 is 335 seconds on the air, and is refused",
+      spec_err({"duty_cycle": 33, "keys": {"Power": {"raw": [65535] * 512,
+                                                     "frequency": 38000}}}), "badspec")
+check("a raw2 sequence is not a field the index emits",
+      spec_err({"duty_cycle": 33, "keys": {"Power": {"raw": [500] * 8, "raw2": [500] * 8,
+                                                     "frequency": 38000}}}), "badspec")
+check("a key name with a trailing newline is refused ($ would have allowed it)",
+      spec_err(SPEC, "Power\n"), "badspec")
+check("a name that is not a string is refused",
+      spec_err({"name": 7, "duty_cycle": 33, "keys": {"Power": ENTRY}}), "badspec")
+check("an enormous label is refused", spec_err({"name": "x" * 500, "duty_cycle": 33,
+                                                "keys": {"Power": ENTRY}}), "badspec")
+check("a frequency below what the index allows is refused",
+      spec_err({"duty_cycle": 33, "keys": {"Power": {"raw": [500] * 8,
+                                                     "frequency": 15000}}}), "badspec")
+# And the documented RESIDUAL, asserted so the docs cannot drift back into claiming
+# more than this: the check is on the request's SHAPE, not on the box's saved plan, so a
+# well-formed code the plan does not contain is accepted. Anything running as the box
+# user can therefore fire arbitrary IR - which is what SECURITY.md must say.
+check("a well-formed code no plan contains is ACCEPTED - the bound is shape, not "
+      "plan membership",
+      spec_err({"duty_cycle": 33, "keys": {"Power": {"irdb": {"protocol": "NECx1",
+                                                              "device": 7, "subdevice": 7,
+                                                              "function": 2}}}}), None)
 check("a float where an int belongs is refused",
       spec_err({"duty_cycle": 33, "keys": {"Power": {**ENTRY, "post_delay": 1e308}}}),
       "badspec")
@@ -331,13 +361,32 @@ try:
             return ex.code
         return None
 
-    check("a blast during a one-shot's hold window is refused, not connected",
-          run(held_err()), "busy")
+    check("a blast during a one-shot's hold window says the remote is being SET UP, "
+          "which is a different thing from a busy queue",
+          run(held_err()), "held")
     before = state["connects"]
     check("...and it did not touch the radio", state["connects"], before)
     run(svc.resume())
     run(svc.blast(SPEC, "Power"))
     check("resume lets the link come back", svc.connected(), True)
+
+    # Two one-shots can overlap - the settings screen no longer disables its Test rows
+    # while one runs - and the inner one's resume used to cancel the hold protecting
+    # the outer one, which is the remote being pulled away mid-programming.
+    async def nested():
+        outer = await svc.release(hold_ms=60000)
+        inner = await svc.release(hold_ms=30000)
+        await svc.resume(inner)
+        still_held = svc.held()
+        await svc.resume(outer)
+        return still_held, svc.held()
+
+    check("the inner one-shot's resume does not lift the outer one's hold",
+          run(nested()), (True, False))
+    check("a resume for a token nobody holds lifts nothing",
+          (run(svc.release(hold_ms=60000)) and run(svc.resume(999999)), svc.held()),
+          (False, True))
+    run(svc.resume())
 finally:
     restore(monkey)
 

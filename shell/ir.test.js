@@ -178,6 +178,46 @@ test("firetv: a link lost mid-send never invites a retry", async () => {
   );
 });
 
+test("firetv: a remote being SET UP is not a busy queue, and not a wake problem", async () => {
+  // During a programming run the "busy with another IR command" sentence was simply
+  // false: there is no other command, somebody is writing to the remote.
+  const b = ir._test.makeFiretvBackend(
+    { mac: "7C:ED:C6:12:E6:3C" },
+    firetvStub({ viaService: (m, t, cb) => cb(null, { ok: false, code: "held" }) }),
+  );
+  await assert.rejects(() => b.send("tv:HDMI2"), /being set up in the settings/);
+  await assert.rejects(
+    () => b.send("tv:HDMI2"),
+    (e) => !/press a button/.test(e.message),
+  );
+});
+
+test("causeOf keeps the failures apart, including the ones a screen must not merge", () => {
+  const c = ir.causeOf;
+  assert.equal(c("the remote did not answer - press a button on it to wake it, then retry"), "asleep");
+  assert.equal(c("the remote took the code but did not fire it - check the batteries and aim it"), "notFired");
+  assert.equal(c("the link to the remote dropped while sending - it may have fired"), "linkLost");
+  // A service that died mid-request is the same hazard as a lost link: it may have
+  // fired, so it must never be classified as something that invites a retry.
+  assert.equal(c("the IR link service stopped mid-request"), "linkLost");
+  // The BOX's helper, not the remote - the old classification blamed a device that was
+  // never asked.
+  assert.equal(c("the IR link service did not answer in time"), "serviceSlow");
+  assert.equal(c("the remote is being set up in the settings right now"), "held");
+  assert.equal(c("the remote is busy with other IR commands"), "busy");
+  // ...and the reasons the other two backends give, which a single "did not go out"
+  // sentence used to swallow.
+  assert.equal(c("IR blaster unreachable: 192.168.1.9"), "blasterUnreachable");
+  assert.equal(c("connect ECONNREFUSED 192.168.1.9:6053"), "blasterUnreachable");
+  assert.equal(c("Invalid encryption key"), "blasterKey");
+  assert.equal(c("entities not found on device (select=signal_select, button=send)"), "blasterEntities");
+  assert.equal(c("invalid Home Assistant URL"), "haUrl");
+  assert.equal(c("plain http is only allowed toward LAN hosts"), "haUrl");
+  assert.equal(c("Home Assistant answered HTTP 401"), "haCall");
+  assert.equal(c("no IR blaster configured"), "noBlaster");
+  assert.equal(c("something nobody has a pattern for"), "other");
+});
+
 test("firetv: a request the box built wrong blames the box, not the remote", async () => {
   const b = ir._test.makeFiretvBackend(
     { mac: "7C:ED:C6:12:E6:3C" },

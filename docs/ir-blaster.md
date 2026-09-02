@@ -193,9 +193,12 @@ to `tvbox/<id>/cmd` on the broker (no box-side authentication - see
 That is the point of the feature; it is also a capability that used to be gated by a
 hand on a remote. The socket the service listens on is `0600` in the box user's home,
 which is a boundary against other USERS and not against the box's own apps - those run
-as the same user. What limits them is the request itself: the service accepts only the
-shape the box's own saved plan produces (`check_blast_request`), so a caller can pick
-between codes that are already configured and cannot invent one.
+as the same user. What the request check buys is narrower than it
+looks: `check_blast_request` holds a request to the fields, ranges, timing count and
+time on air of a real code - so it cannot be used to hold the air for five minutes or
+to hand the remote's firmware a value nothing would write - but a well-formed code that
+is in no plan is accepted, so anything running as that user can fire arbitrary consumer
+IR while the link is held.
 
 [remote/firetv_ir_plan.example.json](../remote/firetv_ir_plan.example.json) is a
 hand-written plan carrying real LG input codes and a Samsung soundbar's power

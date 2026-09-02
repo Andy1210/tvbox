@@ -1,6 +1,9 @@
 // IR blaster helpers (Settings → Peripherals). Test-send + backend health; the
 // config itself goes through the shared config store (saveIr in @sdk/config).
-export type IrSendResult = { ok: boolean; error?: string };
+// `cause` is the shell's own classification of a failure (ir.js causeOf), so a screen
+// says it in the viewer's language instead of showing the sentence the box writes for
+// itself; `error` stays for the log.
+export type IrSendResult = { ok: boolean; error?: string; cause?: string };
 export interface IrStatus {
   configured: boolean;
   backend: string | null;
@@ -13,6 +16,9 @@ export interface IrStatus {
   // What lastError MEANS, classified by the shell (ir.js causeOf) so the screen and the
   // TV toast say the same thing in the viewer's language. Null when there is no error.
   cause: string | null;
+  lastErrorAt: number | null; // when it happened - it is the LAST failure, not the state
+  // The firetv backend's resident link, or null for the other backends.
+  service: { link: boolean | null; held: boolean; failed: boolean } | null;
 }
 
 export async function sendIr(action: string): Promise<IrSendResult> {

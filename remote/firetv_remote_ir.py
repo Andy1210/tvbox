@@ -315,6 +315,26 @@ async def connect(mac, timeout=None):
     dev = await _resolve_device(mac)
     c = BleakClient(dev) if timeout is None else BleakClient(dev, timeout=timeout)
     await c.connect()
+    try:
+        return await _after_connect(c, mac)
+    except BaseException:
+        # Everything past the connect - two GATT reads and the service enumeration -
+        # can be cancelled by a caller's deadline, and the remote accepts ONE
+        # connection: a client nobody holds a reference to locks the feature out until
+        # this process exits. The cleanup is bounded because it runs AFTER the deadline
+        # that cancelled us, and an unbounded disconnect there measured +3.8 s on top.
+        await _drop_client(c)
+        raise
+
+
+async def _drop_client(c):
+    try:
+        await asyncio.wait_for(c.disconnect(), 2.0)
+    except Exception:
+        pass
+
+
+async def _after_connect(c, mac):
     log(f"connected to {mac}")
     vid, pid, ver = await _read_pnp(c)
     if vid is not None:
@@ -437,25 +457,13 @@ async def cmd_blast(args):
 # One request per connection, one JSON object per line. The caller (shell/ir.js) sends
 # the code spec with the request, so no temp file is written per blast.
 SERVE_PROTO = 1
-MAX_WAITING = 3   # blast requests queued behind the one in flight, before refusing
+# One blast in flight plus one queued. Each waiter pays its own connect budget, so a
+# deeper queue answers past the caller's own timeout: measured 8.0 / 15.9 / 23.8 s for
+# three at an unreachable remote, against a 12 s client budget.
+MAX_WAITING = 1
+LOCK_WAIT_S = 9.0   # ...and a waiter that cannot start by then is refused, not queued
+MAX_HOLD_MS = 70000  # the longest one-shot (a 60 s program) plus a beat
 
-# asyncio.timeout landed in 3.11; wait_for is the older spelling of the same thing and
-# this file has to import on whatever python a dev box has.
-if hasattr(asyncio, "timeout"):
-    asyncio_timeout = asyncio.timeout
-else:  # pragma: no cover - only on <3.11
-    import contextlib
-
-    @contextlib.asynccontextmanager
-    async def asyncio_timeout(seconds):
-        task = asyncio.current_task()
-        handle = asyncio.get_running_loop().call_later(seconds, task.cancel)
-        try:
-            yield
-        except asyncio.CancelledError:
-            raise TimeoutError from None
-        finally:
-            handle.cancel()
 
 
 # What a request's code spec is allowed to be. The shell builds every spec with
@@ -467,10 +475,12 @@ else:  # pragma: no cover - only on <3.11
 # ask for 20,000 raw timings (211 ATT writes) with repeat 4294967295 and duty cycle 99,
 # and got ok:true.
 SPEC_KEYS = {"name", "source", "duty_cycle", "keys"}
-ENTRY_KEYS = {"irdb", "flipper", "raw", "raw2", "frequency", "optional", "post_delay"}
-KEY_NAME_RE = __import__("re").compile(r"^[A-Za-z0-9]{1,24}$")
+ENTRY_KEYS = {"irdb", "flipper", "raw", "frequency", "optional", "post_delay"}
+KEY_NAME_RE = __import__("re").compile(r"^[A-Za-z0-9]{1,24}\Z")  # \Z: $ allows a newline
 MAX_RAW_TIMINGS = 512      # what shell/irindex.js sanitizeCode already caps a capture to
 MAX_TABLE_BYTES = 65535    # the start-table frame declares the length as a u16
+MAX_AIR_US = 1000000       # 1 s of marks and spaces; a real code is ~70 ms
+MAX_LABEL = 200            # `name`/`source` are labels the shell writes, not data
 
 
 def _check_int(value, lo, hi, what):
@@ -485,7 +495,12 @@ def check_blast_request(spec, key):
         raise ToolError("not a key name", "badspec")
     if not isinstance(spec, dict) or set(spec) - SPEC_KEYS:
         raise ToolError("spec carries fields no plan produces", "badspec")
-    _check_int(spec.get("duty_cycle", 33), 1, 99, "duty_cycle")
+    # resolveBlast writes 33 and the tool's own default is 33; the range is what a
+    # hand-written plan could sanely carry, not the whole byte.
+    _check_int(spec.get("duty_cycle", 33), 10, 50, "duty_cycle")
+    for label in ("name", "source"):
+        if label in spec and (not isinstance(spec[label], str) or len(spec[label]) > MAX_LABEL):
+            raise ToolError(f"{label} is not a label", "badspec")
     keys = spec.get("keys")
     if not isinstance(keys, dict) or list(keys) != [key]:
         raise ToolError("spec must carry exactly the key being blasted", "badspec")
@@ -503,18 +518,24 @@ def check_blast_request(spec, key):
     if sources[0] in ("irdb", "flipper"):
         if not isinstance(entry[sources[0]], dict):
             raise ToolError("code must be an object", "badspec")
-        if "raw2" in entry or "frequency" in entry:
-            raise ToolError("frequency and raw2 belong to a raw capture", "badspec")
+        if "frequency" in entry:
+            raise ToolError("frequency belongs to a raw capture", "badspec")
         return
-    for name in ("raw", "raw2"):
-        if name not in entry:
-            continue
-        seq = entry[name]
-        if not isinstance(seq, list) or not 2 <= len(seq) <= MAX_RAW_TIMINGS:
-            raise ToolError(f"{name} must be 2..{MAX_RAW_TIMINGS} timings", "badspec")
-        for v in seq:
-            _check_int(v, 1, 65535, name)
-    _check_int(entry.get("frequency", 38000), 15000, 60000, "frequency")
+    seq = entry["raw"]
+    if not isinstance(seq, list) or not 6 <= len(seq) <= MAX_RAW_TIMINGS:
+        raise ToolError(f"raw must be 6..{MAX_RAW_TIMINGS} timings", "badspec")
+    for v in seq:
+        _check_int(v, 1, 65535, "raw")
+    # Bounding the COUNT is not bounding the time on air: 512 timings of 65535 units is
+    # 335 seconds of marks and spaces in one request, against ~70 ms for a real code.
+    if sum(seq) * 10 > MAX_AIR_US:
+        raise ToolError("that code would hold the air far too long", "badspec")
+    if "frequency" not in entry:
+        # The builder needs it, so accepting a capture without one turns into a
+        # KeyError reported as "this code cannot be sent" - blaming the codeset for a
+        # field the request left out.
+        raise ToolError("a raw capture needs its frequency", "badspec")
+    _check_int(entry["frequency"], 20000, 60000, "frequency")
 
 
 class BlastService:
@@ -531,6 +552,9 @@ class BlastService:
         self.last_error = ""
         # While a one-shot command holds the remote, this service must not reconnect.
         self.hold_until = 0.0
+        self.holders = 0
+        self.hold_token = 0
+        self.held_tokens = set()
         # GATT is a single conversation: a start-table from one request interleaved with
         # another's chunks would blast whatever the remote had left in staging.
         self.lock = asyncio.Lock()
@@ -543,11 +567,11 @@ class BlastService:
         if self.connected():
             return
         await self._drop()
-        if self.hold_until > time.monotonic():
+        if self.held():
             # A one-shot command (program, test, erase) is using the remote's one
             # connection right now. Reconnecting here would take it back mid-write.
             raise ToolError("the remote is being set up right now, try again in a "
-                            "moment", "busy")
+                            "moment", "held")
         # One deadline for the whole of getting connected, not one per step: the device
         # lookup can spend 8 s scanning before an 8 s connect even starts, and a caller
         # whose own budget is shorter than that reports a failure for a blast that is
@@ -555,7 +579,7 @@ class BlastService:
         # not, and their retry fires it twice.
         c = None
         try:
-            async with asyncio_timeout(self.connect_timeout):
+            async with asyncio.timeout(self.connect_timeout):
                 c, scan_id, have = await connect(self.mac, timeout=self.connect_timeout)
                 if not have:
                     raise ToolError("this remote has no IR keymap service", "nokeymap")
@@ -597,7 +621,18 @@ class BlastService:
             self.waiting -= 1
 
     async def _blast_locked(self, spec, key):
-        async with self.lock:
+        try:
+            async with asyncio.timeout(LOCK_WAIT_S):
+                await self.lock.acquire()
+        except TimeoutError:
+            raise ToolError("the remote is busy with other IR commands", "busy")
+        try:
+            await self._blast_held(spec, key)
+        finally:
+            self.lock.release()
+
+    async def _blast_held(self, spec, key):
+        if True:
             try:
                 t = make_blast_table(spec, DEFAULT_SCAN_ID, key, self.blast_uuid)
             except KeyError:
@@ -641,19 +676,51 @@ class BlastService:
             self.last_error = ""
 
     async def release(self, hold_ms=0):
+        """Step aside for a one-shot command, and hand back a token to step back with.
+
+        Reference-counted, because two one-shots can overlap (the settings screen no
+        longer disables its Test rows while one runs): measured, the second one's
+        `resume` cleared the hold protecting the first, which is the "remote pulled
+        away mid-programming" this exists to prevent. The deadline is a safety net for
+        a caller that dies without resuming, not the mechanism.
+        """
         # The one-shot commands (program, test, info) open their own link, and the
         # remote accepts one connection - so the resident one has to step aside AND
         # stay aside: measured, a blast arriving right after a release spent its full
         # connect budget taking the link back, which during a 60 s programming run is
         # the remote being pulled out from under it.
-        self.hold_until = time.monotonic() + max(0, hold_ms) / 1000.0
+        self.holders += 1
+        self.hold_token += 1
+        token = self.hold_token
+        self.held_tokens.add(token)
+        self.hold_until = max(self.hold_until,
+                              time.monotonic() + max(0, hold_ms) / 1000.0)
         async with self.lock:
             await self._drop()
+        return token
 
-    async def resume(self):
-        # The one-shot is done; the next blast may reconnect. Called on the way out of
-        # program/test/erase so the hold above does not have to expire on its own.
-        self.hold_until = 0.0
+    async def resume(self, token=None):
+        # The one-shot is done. Only the holder that took this token steps back, and
+        # only once - a resume for a token nobody holds is ignored rather than
+        # cancelling a hold that is still needed.
+        if token is not None:
+            if token not in self.held_tokens:
+                return False
+            self.held_tokens.discard(token)
+            self.holders = max(0, self.holders - 1)
+        else:
+            self.holders = 0
+            self.held_tokens.clear()
+        if self.holders == 0:
+            self.hold_until = 0.0
+        return True
+
+    def held(self):
+        # BOTH: a caller that took a hold and has not stepped back, AND a window that
+        # has not expired. The count is what stops an overlapping one-shot from lifting
+        # somebody else's hold; the window is what stops a caller that dies (or one
+        # that only wanted to hand the link over, hold_ms=0) from blocking IR forever.
+        return self.holders > 0 and self.hold_until > time.monotonic()
 
 
 class ToolError(Exception):
@@ -678,17 +745,22 @@ async def _serve_request(svc, line):
         return {"ok": True, "proto": SERVE_PROTO, "connected": svc.connected(), **extra}
 
     if cmd == "status":
-        return answer(blasts=svc.blasts, last_error=svc.last_error,
-                      held=svc.hold_until > time.monotonic())
+        return answer(blasts=svc.blasts, last_error=svc.last_error, held=svc.held())
     if cmd == "release":
         hold = req.get("hold_ms", 0)
-        if not isinstance(hold, int) or isinstance(hold, bool) or not 0 <= hold <= 300000:
+        # Capped at what the longest one-shot actually needs (a 60 s program plus a
+        # beat). Anything longer is only useful for keeping IR switched off: a hold is
+        # not authenticated, and every caller on this box shares one user.
+        if not isinstance(hold, int) or isinstance(hold, bool) or not 0 <= hold <= MAX_HOLD_MS:
             return {"ok": False, "error": "hold_ms out of range", "code": "protocol"}
-        await svc.release(hold)
-        return answer()
+        token = await svc.release(hold)
+        return answer(token=token)
     if cmd == "resume":
-        await svc.resume()
-        return answer()
+        token = req.get("token")
+        if token is not None and (not isinstance(token, int) or isinstance(token, bool)):
+            return {"ok": False, "error": "token must be a number", "code": "protocol"}
+        lifted = await svc.resume(token)
+        return answer(lifted=lifted)
     if cmd == "blast":
         spec, key = req.get("spec"), req.get("key")
         if not isinstance(spec, dict) or not isinstance(key, str):
@@ -766,10 +838,14 @@ async def cmd_serve(args):
     # instance binding the same path, which is what an orphaned one leaves behind),
     # nothing can reach this process again while it still holds the link - so it exits
     # and lets the supervisor start a clean one.
+    try:
+        bound_ino = os.stat(path).st_ino
+    except OSError:
+        bound_ino = None
+
     async def watch_socket():
-        try:
-            mine = os.stat(path).st_ino
-        except OSError:
+        mine = bound_ino
+        if mine is None:
             return
         while not stop.is_set():
             await asyncio.sleep(5)
@@ -785,10 +861,21 @@ async def cmd_serve(args):
     async with server:
         await stop.wait()
     watcher.cancel()
-    await svc.release()
+    # Bounded: release takes the blast lock, and a hung GATT call would otherwise keep
+    # this process alive holding the remote - which is the orphan this service exists
+    # to avoid.
     try:
-        os.unlink(path)
-    except FileNotFoundError:
+        await asyncio.wait_for(svc.release(), 3.0)
+    except Exception:
+        pass
+    # ONLY our own socket. A second instance may have bound this path already (its
+    # first act is to unlink a stale one), and removing it kills the fresh instance -
+    # whose own watchdog then sees its socket gone and exits too. Measured: three
+    # processes and ~13 s with no link, from one MAC change during a blast.
+    try:
+        if bound_ino is not None and os.stat(path).st_ino == bound_ino:
+            os.unlink(path)
+    except OSError:
         pass
 
 

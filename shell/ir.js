@@ -34,6 +34,7 @@ const READY_TIMEOUT_MS = 6000; // give a (re)connecting esphome client this long
 let backend = null; // { name, send(value), connected(), close() } - null until configured
 let actions = {}; // action name -> backend-specific value (signal option / HA script)
 let lastError = "";
+let lastErrorAt = 0; // when, so a screen can say "last failure" instead of "now"
 // Sends are strictly serialized: two interleaved esphome select+send pairs
 // would replay the wrong signal. Failures must not break the chain.
 let queue = Promise.resolve();
@@ -70,15 +71,18 @@ function makeEsphomeBackend(cfg) {
     lastError = "";
     if (!ent.select || !ent.button)
       lastError = `entities not found on device (select=${cfg.select}, button=${cfg.button})`;
+    lastErrorAt = Date.now();
   });
   // An unhandled 'error' event would take the whole shell down - always absorb.
   client.on("error", (e) => {
     lastError = errMsg(e);
+    lastErrorAt = Date.now();
   });
   try {
     client.connect();
   } catch (e) {
     lastError = errMsg(e);
+    lastErrorAt = Date.now();
   }
   const ready = () => !!(client.initialized && ent.select && ent.button);
   return {
@@ -117,9 +121,11 @@ function makeEsphomeBackend(cfg) {
 // send any code in the saved plan - which is the only way to select a TV input, a
 // command CEC has no equivalent of.
 // The service answers with a code NAME per failure; the per-blast tool answers with an
-// exit code, which cannot tell as much apart. These sentences are shown on the TV and
-// read out by a voice assistant, so each one has to be true of what actually happened
-// and has to offer the press ONLY where a press is the fix:
+// exit code, which cannot tell as much apart. These are the box's own sentences: what
+// reaches a screen is `causeOf`'s classification of them, translated (the toast and the
+// settings page both), and the text itself goes to the log. So each one has to be true
+// of what actually happened, has to classify to the right cause, and must offer the
+// press ONLY where a press is the fix:
 //
 //   asleep    nothing was sent - the remote could not be reached at all. A press fixes
 //             it, and this is the normal state between presses.
@@ -132,11 +138,12 @@ function makeEsphomeBackend(cfg) {
 const FIRETV_SEND_ERRORS = {
   nokeymap: "this remote has no IR keymap service",
   badcode: "this code cannot be sent by this remote - pick another codeset",
-  badspec: "the box built an IR command this remote cannot accept - please report it",
+  badspec: "the box built an IR command this remote cannot accept",
   asleep: "the remote did not answer - press a button on it to wake it, then retry",
   notfired: "the remote took the code but did not fire it - check the batteries and aim it at the device",
   linklost: "the link to the remote dropped while sending - check whether it worked before trying again",
   busy: "the remote is busy with another IR command - try again in a moment",
+  held: "the remote is being set up in the settings right now - try again when that is done",
 };
 
 function makeFiretvBackend(cfg, mod) {
@@ -263,7 +270,18 @@ function applyConfig() {
   // firetv backend means killing the resident process - and about two seconds later the
   // remote is unreachable until somebody presses a button on it. So a save that changes
   // nothing about the link leaves it alone.
-  if (backend && backend.name === "firetv" && raw0 && raw0.backend === "firetv" && backend.mac === raw0.firetv.mac) {
+  if (
+    backend &&
+    backend.name === "firetv" &&
+    raw0 &&
+    raw0.backend === "firetv" &&
+    backend.mac === raw0.firetv.mac &&
+    // ...and only when the link service is actually running. Otherwise this branch
+    // swallows the one thing a save is for on a box where the service could not start
+    // yet (the BLE deps were installed after the MAC was saved), leaving it on the
+    // per-blast fallback until a reboot.
+    require("./firetvir").serviceRunning()
+  ) {
     actions = raw0.firetv.actions;
     lastError = "";
     return;
@@ -293,6 +311,7 @@ function applyConfig() {
     }
   } catch (e) {
     lastError = errMsg(e);
+    lastErrorAt = Date.now();
     backend = null;
     actions = {};
   }
@@ -331,6 +350,7 @@ function send(action, steps) {
   );
   return job.catch((e) => {
     lastError = errMsg(e);
+    lastErrorAt = Date.now();
     throw e;
   });
 }
@@ -346,10 +366,24 @@ const IR_CAUSES = [
   [/no IR keymap service/, "noService"],
   [/cannot be sent by this remote/, "badCode"],
   [/the box built an IR command/, "badSpec"],
-  [/busy with another IR command|still in flight/, "busy"],
-  [/dropped while sending/, "linkLost"],
+  [/being set up in the settings|still in flight/, "held"],
+  [/busy with (another|other) IR command/, "busy"],
+  // A service that died mid-request is the same hazard as a link lost mid-blast: the
+  // code may have gone out, so neither may invite a retry.
+  [/dropped while sending|stopped mid-request/, "linkLost"],
   [/took the code but did not fire/, "notFired"],
+  // The BOX's own helper, not the remote. Saying "the remote did not answer" here
+  // blames a device that was never asked.
+  [/IR link service did not answer/, "serviceSlow"],
   [/did not answer in time/, "timeout"],
+  // The esphome and Home Assistant backends: their reasons name what to check, and
+  // collapsing them into "the command did not go out" removed the only content those
+  // notes had.
+  [/IR blaster unreachable|ECONNREFUSED|EHOSTUNREACH|ETIMEDOUT/, "blasterUnreachable"],
+  [/encryption key/i, "blasterKey"],
+  [/entities not found|no select entity|no send button/, "blasterEntities"],
+  [/invalid Home Assistant URL|only allowed toward LAN/, "haUrl"],
+  [/Home Assistant (answered|returned)|script .* failed/i, "haCall"],
   // Last, because it is the broadest: several sentences end with the wake advice.
   [/press a button on it to wake it/, "asleep"],
 ];
@@ -371,8 +405,13 @@ function status() {
     actions: Object.keys(actions),
     lastError,
     // What the last failure MEANS, so a screen can say it in the viewer's language
-    // instead of showing the English sentence a voice assistant reads out.
+    // rather than showing the sentence the box writes for itself.
     cause: lastError ? causeOf(lastError) : null,
+    // ...and the fact that it is the LAST one rather than the current state. A box that
+    // blasts once a day would otherwise carry one failure as a standing warning.
+    lastErrorAt: lastError ? lastErrorAt : null,
+    // Only the firetv backend has a resident link: { link, held, failed } or null.
+    service: backend && backend.name === "firetv" ? require("./firetvir").serviceState() : null,
   };
 }
 
