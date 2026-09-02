@@ -19,9 +19,8 @@ remote does not physically have. That is what makes the remote usable as a
 general blaster for the box: switching the TV's own input, or a soundbar's
 power, neither of which HDMI-CEC can express. It is wired up as the `firetv`
 backend of the IR hub - see [ir-blaster.md](ir-blaster.md) - and its one
-limitation is below: the remote sleeps between presses. (A blast used to take the
-link down with it, but that was this repo's own tool disconnecting in a `finally`;
-it now leaves the link as it found it.)
+limitation is below: the remote sleeps between presses, and a blast both needs a
+wake and ends with the link closed.
 
 A sleeping remote is silent - 95 s of LE scanning sees a dozen other devices in the
 room and never it - so a press is the only way back, and BlueZ abandons a connect

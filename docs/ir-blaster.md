@@ -106,11 +106,12 @@ Two costs, both from the hardware:
   find nothing to talk to, and the error says so ("press a button on it to wake it,
   then retry") rather than reporting a failure that looks like a broken TV.
 
-  What it does NOT do is drop the link because of the blast. That was this repo's
-  own tool: `cmd_blast` closed the connection in a `finally` whether it had opened
-  it or not, and the note that "a blast leaves the BLE link down" was describing
-  us. It now leaves the link as it found it, which matters because of the next
-  point.
+  A blast also takes the link down, and that part IS this tool's own doing:
+  `cmd_blast` closes the connection in a `finally`. Leaving a link somebody else
+  opened up was tried and measured worse - the first blast then returns with the
+  link still up and the NEXT one hangs until the 12 s budget kills it, so the link
+  goes anyway and the failure is slower. The remote appears to accept **one
+  InstantFire per wake**, which no link management on this side changes.
   **This makes the backend a poor fit for VOICE and a good one for a BUTTON.** A
   press wakes the remote, so a bound button always works; asking by voice when the
   remote has been on the sofa for an hour usually does not - and if somebody is
@@ -128,22 +129,24 @@ Two costs, both from the hardware:
   is abandoned by BlueZ after ~41 s, and the remote-finder fails with `Not
 connected`. Only a button press brings it back.
 
-  **A drop is not permanent, but the window to catch it is.** From an HCI trace
-  (`btmon`, not `bluetoothctl` - see below): the remote sends an `ADV_DIRECT_IND`
-  aimed at this adapter, about once a minute at -92 dBm, for a while after a drop -
-  and then stops entirely. So the kernel's LE accept list with auto-connect
-  (`btmgmt add-device -a 2 -t 1 <mac>`) does hold a link up: measured, ten minutes
-  connected with nobody touching the remote, where without it the link was gone in
-  a minute or two. But once that advertising window has closed the remote really is
-  silent, and adding it to the list afterwards changes nothing - measured, three
-  minutes with no connection. Which is exactly why the tool must not disconnect: it
-  is what closes the chain.
+  **And the link does not come back on its own after a blast.** From an HCI trace
+  (`btmon -w`, read back with `btmon -r` - see the tooling note below): the
+  disconnect is ours (`Reason: Connection Terminated By Local Host`), and in the
+  next two minutes there is not one `LE Connection Complete` and exactly one
+  advertising report of any kind on the whole adapter, with scanning enabled for
+  part of that window. A second blast with no press in between fails ("the remote
+  did not answer in time"). So the chain is: press, one blast, silence until the
+  next press.
 
-  Fire OS does the same thing and one more: it never removes an Amazon remote from
-  the background connection list even on an intentional disconnect (upstream AOSP
-  does), and it suppresses connection-parameter updates for it, so **the remote
-  owns its own power policy** - which is why a Fire TV can hold that link all day
-  without eating the battery.
+  The kernel's LE accept list with auto-connect (`btmgmt add-device -a 2 -t 1
+  <mac>`) has NOT been shown to rescue that, and two earlier notes here claiming it
+  did were misread measurements rather than results: this `btmgmt` has no command
+  that lists the accept list at all (its usage error was read as an empty list),
+  and `bluetoothctl devices Connected` sampled straight after a blast still reports
+  the old state, which is not the same thing as a reconnect. The contents of an LE
+  accept list cannot be read back over HCI either - there is a command for its
+  size and none for its entries - so anything claimed about it has to be claimed
+  from behaviour.
 
   A find-my beacon is a different thing again, and this remote has none: **it has to
   be provisioned, and only a Fire TV has ever done that**. From the Fire OS firmware: the host writes `01` plus two
@@ -159,10 +162,12 @@ connected`. Only a button press brings it back.
   LE accept list (`btmgmt add-device`), which removes the 41 s cap - but with an
   unprovisioned remote there is nothing on air to accept.
 
-  So the honest state: a press is the only way to reach a remote whose advertising
-  window has closed. Keeping it in the accept list and never disconnecting is what
-  keeps that from happening in the first place - the boot-time half of that is not
-  wired up here yet.
+  So the honest state: **a button press is the only wake there is from this end.**
+  What Fire OS has that a Pi does not is read from its firmware rather than
+  measured here - a standing intent to connect that is never withdrawn, and
+  suppressed connection-parameter updates so the remote keeps its own power policy.
+  Copying that would be a bench experiment, not a setting, and it would still have
+  to get past the one-blast-per-wake limit above.
 
 - **And a blast goes wherever the remote is LYING.** Measured on the same soundbar,
   minutes apart, with byte-identical codes: once nothing happened, once it switched.
