@@ -23,7 +23,7 @@ Examples:
   python3 ~/.tvbox/firetv_remote_ir.py program --dry-run          # no BLE, just show bytes
   python3 ~/.tvbox/firetv_remote_ir.py erase   AA:BB:CC:DD:EE:FF
 """
-import argparse, asyncio, json, os, sys, time, uuid as _uuid
+import argparse, asyncio, json, os, signal, sys, time, uuid as _uuid
 
 import flipper_protocols
 import ir_protocols
@@ -391,8 +391,15 @@ async def cmd_blast(args):
         log(f"! cannot build a blast for {key!r}: {ex}"); sys.exit(4)
     if args.dry_run:
         _dump_table("blast", t, blast=True, uuid=args.blast_uuid, pad=not args.no_pad); return
-    # the map is unused: a blast row is 0xFF
-    c, _scan_id, have = await connect(args.mac, timeout=args.connect_timeout)
+    # the map is unused: a blast row is 0xFF.
+    # A remote that cannot be reached at all is its own exit code, because it is the one
+    # failure a person can fix (press a button on it) and exit 1 - "reached it, and it
+    # did not fire" - must not be answered with that advice.
+    try:
+        c, _scan_id, have = await connect(args.mac, timeout=args.connect_timeout)
+    except Exception as ex:
+        log(f"! cannot reach the remote: {type(ex).__name__}: {ex}")
+        sys.exit(5)
     try:
         if not have: log("! keymap service missing; aborting"); sys.exit(3)
         r = Remote(c); await r.open()
@@ -410,11 +417,11 @@ async def cmd_blast(args):
             await r.enable_sds()
         if not ok: sys.exit(1)
     finally:
-        # Always close, including a link somebody else opened. Keeping one was tried and
-        # measured worse: the remote answers one InstantFire per wake, so the next blast
-        # hangs on a held link until the caller's 12 s budget kills the tool - the link
-        # then goes anyway, minus the error message. A clean close costs the same link
-        # and fails honestly.
+        # A one-shot closes what it opened. Several blasts over ONE connection work
+        # (measured, and it is the firmware's own path - a Fire OS volume press sends
+        # three), which is what `serve` is for; a process that exits cannot hold the
+        # link for the next one, and about two seconds after this disconnect the remote
+        # is unreachable until somebody presses a button on it.
         await c.disconnect()
 
 
@@ -430,6 +437,84 @@ async def cmd_blast(args):
 # One request per connection, one JSON object per line. The caller (shell/ir.js) sends
 # the code spec with the request, so no temp file is written per blast.
 SERVE_PROTO = 1
+MAX_WAITING = 3   # blast requests queued behind the one in flight, before refusing
+
+# asyncio.timeout landed in 3.11; wait_for is the older spelling of the same thing and
+# this file has to import on whatever python a dev box has.
+if hasattr(asyncio, "timeout"):
+    asyncio_timeout = asyncio.timeout
+else:  # pragma: no cover - only on <3.11
+    import contextlib
+
+    @contextlib.asynccontextmanager
+    async def asyncio_timeout(seconds):
+        task = asyncio.current_task()
+        handle = asyncio.get_running_loop().call_later(seconds, task.cancel)
+        try:
+            yield
+        except asyncio.CancelledError:
+            raise TimeoutError from None
+        finally:
+            handle.cancel()
+
+
+# What a request's code spec is allowed to be. The shell builds every spec with
+# resolveBlast (shell/firetvir.js), so the shape is fully determined: one key, one code
+# entry out of the box's own sanitized plan, duty cycle 33. A socket in the user's home
+# is reachable by everything that runs as that user - the box's own store-installed and
+# native apps included - so the service holds a request to that shape rather than
+# handing whatever arrives to the keymap compiler. Measured before this: a request could
+# ask for 20,000 raw timings (211 ATT writes) with repeat 4294967295 and duty cycle 99,
+# and got ok:true.
+SPEC_KEYS = {"name", "source", "duty_cycle", "keys"}
+ENTRY_KEYS = {"irdb", "flipper", "raw", "raw2", "frequency", "optional", "post_delay"}
+KEY_NAME_RE = __import__("re").compile(r"^[A-Za-z0-9]{1,24}$")
+MAX_RAW_TIMINGS = 512      # what shell/irindex.js sanitizeCode already caps a capture to
+MAX_TABLE_BYTES = 65535    # the start-table frame declares the length as a u16
+
+
+def _check_int(value, lo, hi, what):
+    if isinstance(value, bool) or not isinstance(value, int) or not lo <= value <= hi:
+        raise ToolError(f"{what} out of range", "badspec")
+    return value
+
+
+def check_blast_request(spec, key):
+    """Hold a request to the shape the shell can actually produce, or refuse it."""
+    if not KEY_NAME_RE.match(key):
+        raise ToolError("not a key name", "badspec")
+    if not isinstance(spec, dict) or set(spec) - SPEC_KEYS:
+        raise ToolError("spec carries fields no plan produces", "badspec")
+    _check_int(spec.get("duty_cycle", 33), 1, 99, "duty_cycle")
+    keys = spec.get("keys")
+    if not isinstance(keys, dict) or list(keys) != [key]:
+        raise ToolError("spec must carry exactly the key being blasted", "badspec")
+    entry = keys[key]
+    if not isinstance(entry, dict) or set(entry) - ENTRY_KEYS:
+        raise ToolError("code entry carries fields no plan produces", "badspec")
+    # Exactly one code source, the three the index publishes.
+    sources = [k for k in ("irdb", "flipper", "raw") if k in entry]
+    if len(sources) != 1:
+        raise ToolError("code entry needs exactly one of irdb, flipper, raw", "badspec")
+    if "optional" in entry and not isinstance(entry["optional"], bool):
+        raise ToolError("optional must be a boolean", "badspec")
+    if "post_delay" in entry:
+        _check_int(entry["post_delay"], 0, 5000, "post_delay")
+    if sources[0] in ("irdb", "flipper"):
+        if not isinstance(entry[sources[0]], dict):
+            raise ToolError("code must be an object", "badspec")
+        if "raw2" in entry or "frequency" in entry:
+            raise ToolError("frequency and raw2 belong to a raw capture", "badspec")
+        return
+    for name in ("raw", "raw2"):
+        if name not in entry:
+            continue
+        seq = entry[name]
+        if not isinstance(seq, list) or not 2 <= len(seq) <= MAX_RAW_TIMINGS:
+            raise ToolError(f"{name} must be 2..{MAX_RAW_TIMINGS} timings", "badspec")
+        for v in seq:
+            _check_int(v, 1, 65535, name)
+    _check_int(entry.get("frequency", 38000), 15000, 60000, "frequency")
 
 
 class BlastService:
@@ -444,9 +529,12 @@ class BlastService:
         self.scan_id = DEFAULT_SCAN_ID
         self.blasts = 0
         self.last_error = ""
+        # While a one-shot command holds the remote, this service must not reconnect.
+        self.hold_until = 0.0
         # GATT is a single conversation: a start-table from one request interleaved with
         # another's chunks would blast whatever the remote had left in staging.
         self.lock = asyncio.Lock()
+        self.waiting = 0
 
     def connected(self):
         return bool(self.c is not None and self.c.is_connected)
@@ -455,15 +543,34 @@ class BlastService:
         if self.connected():
             return
         await self._drop()
-        c, scan_id, have = await connect(self.mac, timeout=self.connect_timeout)
-        if not have:
-            try:
-                await c.disconnect()
-            except Exception:
-                pass
-            raise ToolError("this remote has no IR keymap service", "nokeymap")
-        r = Remote(c)
-        await r.open()
+        if self.hold_until > time.monotonic():
+            # A one-shot command (program, test, erase) is using the remote's one
+            # connection right now. Reconnecting here would take it back mid-write.
+            raise ToolError("the remote is being set up right now, try again in a "
+                            "moment", "busy")
+        # One deadline for the whole of getting connected, not one per step: the device
+        # lookup can spend 8 s scanning before an 8 s connect even starts, and a caller
+        # whose own budget is shorter than that reports a failure for a blast that is
+        # still on its way - which then fires seconds after the person was told it did
+        # not, and their retry fires it twice.
+        c = None
+        try:
+            async with asyncio_timeout(self.connect_timeout):
+                c, scan_id, have = await connect(self.mac, timeout=self.connect_timeout)
+                if not have:
+                    raise ToolError("this remote has no IR keymap service", "nokeymap")
+                r = Remote(c)
+                await r.open()
+        except BaseException:
+            # Anything between a successful connect and the assignment below leaves a
+            # client nothing references - and the remote accepts ONE connection, so a
+            # leaked one locks the feature out until the process exits.
+            if c is not None and self.c is not c:
+                try:
+                    await c.disconnect()
+                except Exception:
+                    pass
+            raise
         self.c, self.r, self.scan_id = c, r, scan_id
 
     async def _drop(self):
@@ -476,6 +583,20 @@ class BlastService:
             pass
 
     async def blast(self, spec, key):
+        check_blast_request(spec, key)
+        # A blast is seconds of radio behind one lock, so an unbounded queue is a way to
+        # starve the button and Home Assistant paths (which wait on the same shell-side
+        # queue) with a handful of requests. Refusing is honest; queueing ten blasts
+        # nobody is waiting for is not.
+        if self.waiting >= MAX_WAITING:
+            raise ToolError("the remote is busy with other IR commands", "busy")
+        self.waiting += 1
+        try:
+            await self._blast_locked(spec, key)
+        finally:
+            self.waiting -= 1
+
+    async def _blast_locked(self, spec, key):
         async with self.lock:
             try:
                 t = make_blast_table(spec, DEFAULT_SCAN_ID, key, self.blast_uuid)
@@ -494,6 +615,13 @@ class BlastService:
                 self.last_error = f"{type(ex).__name__}: {ex}"
                 raise ToolError("the remote did not answer - press a button on it to "
                                 "wake it, then retry", "asleep")
+            # The start-table frame declares the payload length as a u16 while the
+            # write loop sends all of it, so a longer table would tell the remote's
+            # firmware to expect a fraction of what arrives. The whitelist above makes
+            # this unreachable; it is here because the two bounds are set in different
+            # files and only one of them is about security.
+            if len(t.compile_as_blast()) > MAX_TABLE_BYTES:
+                raise ToolError("that code is too long to send", "badcode")
             try:
                 ok = await self.r.blast(t, uuid=self.blast_uuid, pad=self.pad,
                                        retries=self.retries)
@@ -502,17 +630,30 @@ class BlastService:
                 # new one rather than writing into a dead client.
                 self.last_error = f"{type(ex).__name__}: {ex}"
                 await self._drop()
-                raise ToolError("the remote dropped the link during the blast", "asleep")
+                # NOT "asleep": the code may have gone out before the link went, so
+                # this must not be answered with "press a button and retry" - a retry
+                # of a power toggle undoes itself.
+                raise ToolError("the link to the remote dropped while sending - it may "
+                                "have fired", "linklost")
             if not ok:
                 raise ToolError("the remote did not fire", "notfired")
             self.blasts += 1
             self.last_error = ""
 
-    async def release(self):
+    async def release(self, hold_ms=0):
         # The one-shot commands (program, test, info) open their own link, and the
-        # remote accepts one connection - so the resident one has to step aside.
+        # remote accepts one connection - so the resident one has to step aside AND
+        # stay aside: measured, a blast arriving right after a release spent its full
+        # connect budget taking the link back, which during a 60 s programming run is
+        # the remote being pulled out from under it.
+        self.hold_until = time.monotonic() + max(0, hold_ms) / 1000.0
         async with self.lock:
             await self._drop()
+
+    async def resume(self):
+        # The one-shot is done; the next blast may reconnect. Called on the way out of
+        # program/test/erase so the hold above does not have to expire on its own.
+        self.hold_until = 0.0
 
 
 class ToolError(Exception):
@@ -529,12 +670,25 @@ async def _serve_request(svc, line):
     except Exception as ex:
         return {"ok": False, "error": f"bad request: {ex}", "code": "protocol"}
     cmd = req.get("cmd")
+    # Every reply carries the link state and the protocol version, not just `status`:
+    # the caller learns whether the link is up from the requests it already makes, so
+    # nothing has to poll for it - and a screen that cannot see the link cannot report
+    # the one thing this service exists to provide.
+    def answer(**extra):
+        return {"ok": True, "proto": SERVE_PROTO, "connected": svc.connected(), **extra}
+
     if cmd == "status":
-        return {"ok": True, "proto": SERVE_PROTO, "connected": svc.connected(),
-                "blasts": svc.blasts, "last_error": svc.last_error}
+        return answer(blasts=svc.blasts, last_error=svc.last_error,
+                      held=svc.hold_until > time.monotonic())
     if cmd == "release":
-        await svc.release()
-        return {"ok": True}
+        hold = req.get("hold_ms", 0)
+        if not isinstance(hold, int) or isinstance(hold, bool) or not 0 <= hold <= 300000:
+            return {"ok": False, "error": "hold_ms out of range", "code": "protocol"}
+        await svc.release(hold)
+        return answer()
+    if cmd == "resume":
+        await svc.resume()
+        return answer()
     if cmd == "blast":
         spec, key = req.get("spec"), req.get("key")
         if not isinstance(spec, dict) or not isinstance(key, str):
@@ -543,8 +697,9 @@ async def _serve_request(svc, line):
         try:
             await svc.blast(spec, key)
         except ToolError as ex:
-            return {"ok": False, "error": str(ex), "code": ex.code}
-        return {"ok": True, "ms": int((time.monotonic() - t0) * 1000)}
+            return {"ok": False, "error": str(ex), "code": ex.code,
+                    "connected": svc.connected()}
+        return answer(ms=int((time.monotonic() - t0) * 1000))
     if cmd == "stop":
         return {"ok": True, "_stop": True}
     return {"ok": False, "error": f"unknown cmd {cmd!r}", "code": "protocol"}
@@ -582,11 +737,54 @@ async def cmd_serve(args):
         os.unlink(path)
     except FileNotFoundError:
         pass
-    server = await asyncio.start_unix_server(handle, path=path)
-    os.chmod(path, 0o600)  # the plan and the codes are the user's, not the box's
+    # The mode is set by the umask AT BIND, not afterwards: a chmod after the fact
+    # leaves the socket world-connectable for a moment (measured: 0775 at the shell's
+    # umask 0002). The chmod stays as a belt for an inherited umask of 0.
+    prev_umask = os.umask(0o177)
+    try:
+        server = await asyncio.start_unix_server(handle, path=path)
+    finally:
+        os.umask(prev_umask)
+    try:
+        os.chmod(path, 0o600)
+    except OSError as ex:
+        # Racing somebody who unlinked it; the watchdog below notices and exits.
+        log(f"! could not chmod the socket: {ex}")
     log(f"serving {path} for {args.mac} (proto {SERVE_PROTO})")
+
+    # A signal is how the supervisor stops this, and without a handler the release
+    # below never runs - so the process dies holding the remote's one connection, and
+    # the next instance cannot have it.
+    loop = asyncio.get_running_loop()
+    for sig in (signal.SIGTERM, signal.SIGINT):
+        try:
+            loop.add_signal_handler(sig, stop.set)
+        except NotImplementedError:  # pragma: no cover - not on linux
+            pass
+
+    # The socket is this service's only door. If it is unlinked or replaced (a second
+    # instance binding the same path, which is what an orphaned one leaves behind),
+    # nothing can reach this process again while it still holds the link - so it exits
+    # and lets the supervisor start a clean one.
+    async def watch_socket():
+        try:
+            mine = os.stat(path).st_ino
+        except OSError:
+            return
+        while not stop.is_set():
+            await asyncio.sleep(5)
+            try:
+                if os.stat(path).st_ino != mine:
+                    log("! the socket was replaced; exiting so a clean instance can run")
+                    stop.set()
+            except OSError:
+                log("! the socket is gone; exiting so a clean instance can run")
+                stop.set()
+
+    watcher = asyncio.ensure_future(watch_socket())
     async with server:
         await stop.wait()
+    watcher.cancel()
     await svc.release()
     try:
         os.unlink(path)
@@ -752,9 +950,6 @@ def main():
                     help="blast this many times over ONE connection")
     pb.add_argument("--connect-timeout", type=float, default=8.0,
                     help="give up on a sleeping remote after this many seconds")
-    # Experiment only - see the `finally` in cmd_blast. Leaves a link somebody else
-    # opened up, which measured WORSE (the next blast hangs), and is kept so the
-    # disconnect-then-reconnect cycle can be told apart from it.
     pb.add_argument("--duty", type=int, default=33)
     pb.add_argument("--dry-run", action="store_true"); pb.set_defaults(fn=cmd_blast)
 

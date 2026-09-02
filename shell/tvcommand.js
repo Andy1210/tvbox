@@ -227,15 +227,10 @@ function playMediaIn(cmd) {
 // advice for five of them - an action nothing is mapped to, a blaster that is not
 // configured, a remote with no keymap service, a code this build cannot encode, a
 // timeout.
-function irCause(message) {
-  if (/no IR blaster configured/.test(message)) return "noBlaster";
-  if (/unknown IR action/.test(message)) return "unmapped";
-  if (/no IR keymap service/.test(message)) return "noService";
-  if (/cannot be sent by this remote/.test(message)) return "badCode";
-  if (/did not answer in time/.test(message)) return "timeout";
-  if (/press a button on it to wake it/.test(message)) return "asleep";
-  return "other";
-}
+// The classifier lives in ir.js, because the settings page reads the same answer out of
+// /tvbox/api/ir/status - two copies would drift and one screen would disagree with the
+// other about what just failed.
+const irCause = require("./ir").causeOf;
 
 // One note per half minute. The card takes Back and Home for as long as it is up, and
 // an IR send can be failed on demand by anything that can publish a command - so

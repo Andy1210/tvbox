@@ -134,17 +134,56 @@ test("firetv: a service that ran and did not answer is NOT retried in a second p
   await assert.rejects(() => b.send("tv:HDMI2"), /did not answer in time/);
 });
 
-test("firetv: a sleeping remote says what to do about it, either way it was reached", async () => {
+test("firetv: a remote that could not be reached says press a button, on either path", async () => {
   const viaSvc = ir._test.makeFiretvBackend(
     { mac: "7C:ED:C6:12:E6:3C" },
     firetvStub({ viaService: (m, t, cb) => cb(null, { ok: false, code: "asleep", error: "..." }) }),
   );
   await assert.rejects(() => viaSvc.send("tv:HDMI2"), /press a button on it/);
+  // The one-shot tool exits 5 for a remote it could not reach, which is why exit 1 can
+  // mean the narrower thing below.
   const oneShot = ir._test.makeFiretvBackend(
     { mac: "7C:ED:C6:12:E6:3C" },
-    firetvStub({ blastAction: (m, t, cb) => cb(null, { ok: false, code: 1 }) }),
+    firetvStub({ blastAction: (m, t, cb) => cb(null, { ok: false, code: 5 }) }),
   );
   await assert.rejects(() => oneShot.send("tv:HDMI2"), /press a button on it/);
+});
+
+test("firetv: a remote that took the code and did not fire is NOT told to press a button", async () => {
+  // It was reached a second ago, so pressing is not the fix - and on a power toggle a
+  // retry would undo whatever did happen.
+  for (const stub of [
+    firetvStub({ viaService: (m, t, cb) => cb(null, { ok: false, code: "notfired" }) }),
+    firetvStub({ blastAction: (m, t, cb) => cb(null, { ok: false, code: 1 }) }),
+  ]) {
+    const b = ir._test.makeFiretvBackend({ mac: "7C:ED:C6:12:E6:3C" }, stub);
+    await assert.rejects(() => b.send("tv:HDMI2"), /did not fire it/);
+    await assert.rejects(
+      () => b.send("tv:HDMI2"),
+      (e) => !/press a button/.test(e.message),
+    );
+  }
+});
+
+test("firetv: a link lost mid-send never invites a retry", async () => {
+  // The code may have gone out; a repeated power toggle undoes itself.
+  const b = ir._test.makeFiretvBackend(
+    { mac: "7C:ED:C6:12:E6:3C" },
+    firetvStub({ viaService: (m, t, cb) => cb(null, { ok: false, code: "linklost" }) }),
+  );
+  await assert.rejects(() => b.send("tv:HDMI2"), /check whether it worked/);
+  await assert.rejects(
+    () => b.send("tv:HDMI2"),
+    (e) => !/press a button|retry/.test(e.message),
+  );
+});
+
+test("firetv: a request the box built wrong blames the box, not the remote", async () => {
+  const b = ir._test.makeFiretvBackend(
+    { mac: "7C:ED:C6:12:E6:3C" },
+    firetvStub({ viaService: (m, t, cb) => cb(null, { ok: false, code: "badspec" }) }),
+  );
+  await assert.rejects(() => b.send("tv:HDMI2"), /the box built/);
 });
 
 test("firetv: a remote that cannot blast at all says THAT instead", async () => {

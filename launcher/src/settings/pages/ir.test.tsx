@@ -63,7 +63,7 @@ const config = (actions: Record<string, string>) => ({
 });
 
 // `plan` null = the box could not be asked; [] = there is no plan.
-function stubShell(plan: unknown, opts: { saveFails?: boolean } = {}) {
+function stubShell(plan: unknown, opts: { saveFails?: boolean; status?: Record<string, unknown> } = {}) {
   const posted: Record<string, unknown>[] = [];
   vi.stubGlobal("fetch", (url: string, init?: RequestInit) => {
     const u = String(url);
@@ -76,7 +76,7 @@ function stubShell(plan: unknown, opts: { saveFails?: boolean } = {}) {
         ? { ok: false } // the box could not be asked
         : { ok: true, plan }
       : u.includes("/ir/status")
-        ? {}
+        ? opts.status || {}
         : { config: config({}) };
     return Promise.resolve(new Response(JSON.stringify(body), { headers: { "Content-Type": "application/json" } }));
   });
@@ -100,6 +100,69 @@ describe("the IR blaster's firetv targets", () => {
     // `audio:Power` is what the box needs; it is not what anybody should have to read.
     expect(screen.getByText("Power · Audio")).toBeTruthy();
     expect(screen.queryByText("audio:Power")).toBeNull();
+  });
+
+  // ---- what the screen says about the link ------------------------------------------
+  // It used to render "A jeladó nem elérhető: " plus the shell's raw ENGLISH sentence.
+  // Two mistakes in one line: a sleeping remote is not an unreachable blaster - it is
+  // one button press away - and the only actionable half was untranslated.
+  it("shows a failure as its translated cause, with no English on the screen", async () => {
+    stubShell(PLAN, {
+      status: {
+        configured: true,
+        backend: "firetv",
+        connected: false,
+        actions: ["soundbar_power"],
+        lastError: "the remote did not answer - press a button on it to wake it, then retry",
+        cause: "asleep",
+      },
+    });
+    render(<Page />);
+    await settle();
+    // The cause, as the locale writes it - not the shell's own sentence, which is what
+    // a voice assistant reads out and has no business on a screen.
+    expect(screen.getByText(/Press a button on the remote to wake it/)).toBeTruthy();
+    expect(screen.queryByText(/press a button on it to wake it, then retry/)).toBeNull();
+    expect(screen.queryByText(/not reachable/)).toBeNull();
+  });
+
+  it("says the link is down only when it knows that, and never calls it broken", async () => {
+    stubShell(PLAN, {
+      status: { configured: true, backend: "firetv", connected: false, actions: [], lastError: "", cause: null },
+    });
+    render(<Page />);
+    await settle();
+    expect(screen.getByText(/No live link to the remote/)).toBeTruthy();
+  });
+
+  it("says nothing at all while the link state is unknown", async () => {
+    // null is "nobody has asked yet", which must not read as a fault: the box may be
+    // perfectly able to blast.
+    stubShell(PLAN, {
+      status: { configured: true, backend: "firetv", connected: null, actions: [], lastError: "", cause: null },
+    });
+    render(<Page />);
+    await settle();
+    expect(screen.queryByText(/No live link to the remote/)).toBeNull();
+  });
+
+  // A disabled row loses its focus key, so the cursor jumped to the top of the page and
+  // the next OK opened the blaster-type picker - which unmounts this page and throws the
+  // test result away.
+  it("keeps the tested row focusable while it runs, and ignores a second press", async () => {
+    const posted = stubShell(PLAN);
+    render(<Page />);
+    await settle();
+    expect(screen.getByText(/Test · Soundbar power/)).toBeTruthy();
+    await setFocus("ir:test-soundbar_power");
+    await remote.ok();
+    await settle();
+    // The row is still there and still focusable while the blast runs. Disabled, it
+    // dropped its focus key, the page's watchdog moved the cursor to the top row, and
+    // the next OK opened the blaster-type picker.
+    const busy = screen.getByText(/Sending…|Test · Soundbar power/);
+    expect(busy.closest("[data-sfocus]")).toBeTruthy();
+    expect(posted.filter((x) => "action" in x).length).toBeLessThanOrEqual(1);
   });
 
   it("offers an input row only the keys that ARE inputs", async () => {

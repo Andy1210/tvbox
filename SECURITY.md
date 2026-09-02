@@ -29,6 +29,15 @@ tvbox is a LAN device with no cloud account. The interesting boundaries:
   on-screen code with lockout + TTL; bypasses matter.
 - **The local API** (`:8097`, loopback-only) - assumed reachable only by local
   processes; anything that exposes it beyond loopback matters.
+- **The IR link service** (`~/.tvbox/firetv-ir.sock`, mode 0600) - a resident
+  process holding the BLE link to a paired Fire TV remote, so the box can fire
+  that remote's own infrared LED. Same assumption as the local API: reachable by
+  anything running as the box user, which includes installed apps. It is bounded
+  by what it accepts rather than by who connects - only the request shape the
+  box's own saved code plan produces (`check_blast_request` in
+  `remote/firetv_remote_ir.py`), so a caller can choose between configured codes
+  and cannot invent one. A way to make it emit a code that is not in the plan, or
+  to reach it from off the box, matters.
 - **Secrets** - `~/.tvbox/config.json` and Spotify tokens are chmod 600; leaks
   into logs/API responses matter.
 - **The system updater** (`deploy/tvbox-sysupdate`) - the one path by which code

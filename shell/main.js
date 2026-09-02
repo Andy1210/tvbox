@@ -2018,6 +2018,10 @@ playerapi.init({
 function stopPlugins() {
   plugins.stopAll();
   supervisor.stopAll();
+  // The IR hub's firetv backend holds a BLE link to the household's remote through a
+  // child of its own. A leftover keeps the remote's ONE allowed connection, so the next
+  // shell's link can never be established and every blast answers "asleep".
+  ir.shutdown();
   fileserver.stop(null); // the symlinked view of the box's folders is not left behind
 }
 

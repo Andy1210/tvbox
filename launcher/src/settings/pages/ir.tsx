@@ -230,15 +230,26 @@ export function IrPage() {
   return (
     <SettingsPage id="ir" title={t("ir.title")} subtitle={t("ir.hint")} onBack={nav.pop} animate="push">
       {failed && <Note tone="warn">{t("ir.saveFailed")}</Note>}
-      {status?.configured && status.connected !== true && status.lastError ? (
-        <Note tone="warn">{t("ir.disconnected", { error: status.lastError })}</Note>
+      {/* What the last failure MEANT, in the viewer's language. The shell classifies it
+          (ir.js causeOf) so this says the same thing as the toast on the TV; showing
+          `lastError` here put an English sentence on a Hungarian screen. And a link
+          that is merely down is NOT an unreachable blaster - a sleeping remote is one
+          button press away, which is what `ir.failed.asleep` says. */}
+      {status?.configured && status.lastError ? (
+        <Note tone="warn">{t("ir.failed." + (status.cause || "other"))}</Note>
+      ) : null}
+      {status?.configured && backend === "firetv" && status.connected === false && !status.lastError ? (
+        <Note tone="warn">{t("ir.linkDown")}</Note>
       ) : null}
       {tested ? (
         <Note tone={tested.ok ? "ok" : "warn"}>
           {tested.ok ? t("ir.testOk") : t("ir.testFailed", { error: tested.error || "" })}
         </Note>
       ) : null}
-      <Note>{t("ir.offHint")}</Note>
+      {/* The firetv backend has no host or URL to clear, so the generic hint would tell
+          somebody to empty a field that is not there. */}
+      <Note>{backend === "firetv" ? t("ir.offHintFiretv") : t("ir.offHint")}</Note>
+      {backend === "firetv" ? <Note>{t("ir.awakeHintFiretv")}</Note> : null}
 
       <Group>
         <Row
@@ -385,18 +396,26 @@ export function IrPage() {
         )}
       </Group>
 
-      <Group title={t("ir.groupTest")}>
-        {ACTIONS.filter((a) => actions[a]).map((a) => (
-          <Row
-            key={a}
-            id={"test-" + a}
-            label={(testing === a ? t("ir.testing") : t("ir.test")) + " · " + t("ir.action." + a)}
-            trailing="none"
-            disabled={!actions[a] || !!testing}
-            onEnter={() => void test(a)}
-          />
-        ))}
-      </Group>
+      {/* Only when there is something to test - the header over an empty card reads as
+          a screen that failed to load. */}
+      {ACTIONS.some((a) => actions[a]) ? (
+        <Group title={t("ir.groupTest")}>
+          {ACTIONS.filter((a) => actions[a]).map((a) => (
+            <Row
+              key={a}
+              id={"test-" + a}
+              label={(testing === a ? t("ir.testing") : t("ir.test")) + " · " + t("ir.action." + a)}
+              trailing="none"
+              // NOT disabled while a test runs: a disabled row loses its focus key, so
+              // the cursor jumped to the top of the page and the next OK opened the
+              // blaster-type picker - which unmounts this page and throws the result
+              // away. test() already ignores a second press while one is in flight.
+              disabled={!actions[a]}
+              onEnter={() => void test(a)}
+            />
+          ))}
+        </Group>
+      ) : null}
     </SettingsPage>
   );
 }

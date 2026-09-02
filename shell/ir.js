@@ -22,10 +22,11 @@ const config = require("./config");
 const netguard = require("./netguard");
 
 const MAX_STEPS = 10; // cap on "volume up by N" repeats (MQTT can ask for them)
-// Steps are sequential sends, and on the `firetv` backend each one is its own BLE
-// connect - so a ten-step ramp there takes tens of seconds and holds the queue. That is
-// the hardware's pace, not a bug; a box that ramps volume often should let the remote's
-// own programmed keys do it (config.remote.devices[<mac>].irPassthrough).
+// Steps are sequential sends, and on the `firetv` backend each one goes over BLE at
+// ~0.9 s plus the gap below - so a ten-step ramp there is about eleven seconds and holds
+// the queue. That is the hardware's pace, not a bug; a box that ramps volume often
+// should let the remote's own programmed keys do it
+// (config.remote.devices[<mac>].irPassthrough).
 const STEP_GAP_MS = 250; // pause between repeated sends - IR receivers need a beat
 const SELECT_SETTLE_MS = 150; // esphome: let the select apply on-device before "send"
 const READY_TIMEOUT_MS = 6000; // give a (re)connecting esphome client this long to surface entities
@@ -105,22 +106,37 @@ function makeEsphomeBackend(cfg) {
 
 // ---- Fire TV remote backend (the remote's own IR LED, over its BLE keymap) ----
 // The remote, not the box, carries the LED - so an "InstantFire" blast hands it a code
-// and it fires. Unlike the other two backends there is no appliance here: the link is
-// built per blast, because a blast leaves it down (measured) and the remote sleeps
-// between presses, so nothing persistent could be held open anyway.
+// and it fires. Unlike the other two backends there is no appliance here, but the link
+// is held the same way theirs are: one resident process keeps the BLE connection, since
+// a blast over an open link is ~0.9 s while a fresh connect per blast is seconds and
+// fails outright shortly after the previous process disconnected. The remote still
+// sleeps between presses, so a link that is gone needs a button press to come back.
 //
 // The interesting property is that a blast is bound to no BUTTON. Programming the
 // remote's keymap can only reach the four keys the remote physically has, while this can
 // send any code in the saved plan - which is the only way to select a TV input, a
 // command CEC has no equivalent of.
 // The service answers with a code NAME per failure; the per-blast tool answers with an
-// exit code. Both mean the same four things, and the sentences must not drift apart -
-// the middle one is the only failure a person can fix from the sofa.
+// exit code, which cannot tell as much apart. These sentences are shown on the TV and
+// read out by a voice assistant, so each one has to be true of what actually happened
+// and has to offer the press ONLY where a press is the fix:
+//
+//   asleep    nothing was sent - the remote could not be reached at all. A press fixes
+//             it, and this is the normal state between presses.
+//   notfired  the remote was reached and took the code, and its own status never said
+//             it fired. Pressing buttons will not help; aim and batteries might.
+//   linklost  the link went during the send, so the code MAY have gone out. Never
+//             invite a retry here - a repeated power toggle undoes itself.
+//   badspec   the request was not a shape the box builds. A bug on our side, not the
+//             remote's, and saying "press a button" would send someone chasing it.
 const FIRETV_SEND_ERRORS = {
   nokeymap: "this remote has no IR keymap service",
   badcode: "this code cannot be sent by this remote - pick another codeset",
-  asleep: "the remote did not fire - press a button on it to wake it, then retry",
-  notfired: "the remote did not fire - press a button on it to wake it, then retry",
+  badspec: "the box built an IR command this remote cannot accept - please report it",
+  asleep: "the remote did not answer - press a button on it to wake it, then retry",
+  notfired: "the remote took the code but did not fire it - check the batteries and aim it at the device",
+  linklost: "the link to the remote dropped while sending - check whether it worked before trying again",
+  busy: "the remote is busy with another IR command - try again in a moment",
 };
 
 function makeFiretvBackend(cfg, mod) {
@@ -136,6 +152,7 @@ function makeFiretvBackend(cfg, mod) {
   firetvir.startService(cfg.mac);
   return {
     name: "firetv",
+    mac: cfg.mac, // read by applyConfig to tell a no-op save from a real change
     // What the resident link last reported. `null` means nobody has asked yet or there
     // is no service - not "down", which would show a working remote as broken.
     connected: () => firetvir.serviceLinkState(),
@@ -153,10 +170,13 @@ function makeFiretvBackend(cfg, mod) {
             // failure a person can actually fix from the sofa.
             if (r && r.code === 3) return reject(new Error(FIRETV_SEND_ERRORS.nokeymap));
             if (r && r.code === 4) return reject(new Error(FIRETV_SEND_ERRORS.badcode));
+            if (r && r.code === 5) return reject(new Error(FIRETV_SEND_ERRORS.asleep));
             // A kill leaves no exit code at all, and it is the one failure where the
             // budget itself is the news: saying "no output" sends someone looking for a
             // crash that did not happen.
             if (r && r.code === null) return reject(new Error("the remote did not answer in time"));
+            // Exit 1 is "the remote took the code and its status never said it fired",
+            // which a press does not fix - a remote it could not reach at all exits 5.
             if (r && r.code === 1) return reject(new Error(FIRETV_SEND_ERRORS.notfired));
             reject(new Error("blast failed: " + ((r && r.output) || "no output")));
           });
@@ -222,7 +242,32 @@ function makeHaBackend(cfg) {
 
 // ---- hub ----
 // (Re)build the backend from config. Called at boot and on every config save.
+// Everything the hub holds, on the way out. Without this the firetv backend's resident
+// process outlives the shell, keeps the remote's ONE allowed BLE connection, and the
+// next shell's service can never get it - every blast then answers "asleep" and no
+// amount of pressing buttons helps. The supervisor reaps such an orphan on the next
+// start, but only after it has already broken the first attempt.
+function shutdown() {
+  if (!backend) return;
+  try {
+    backend.close();
+  } catch (e) {
+    /* best effort - we are quitting */
+  }
+  backend = null;
+}
+
 function applyConfig() {
+  const raw0 = config.rawIr();
+  // Saving the IR page unchanged used to close the backend and rebuild it, which on the
+  // firetv backend means killing the resident process - and about two seconds later the
+  // remote is unreachable until somebody presses a button on it. So a save that changes
+  // nothing about the link leaves it alone.
+  if (backend && backend.name === "firetv" && raw0 && raw0.backend === "firetv" && backend.mac === raw0.firetv.mac) {
+    actions = raw0.firetv.actions;
+    lastError = "";
+    return;
+  }
   if (backend) {
     try {
       backend.close();
@@ -291,13 +336,43 @@ function send(action, steps) {
 }
 
 // For the launcher settings card and /tvbox/api/ir/status.
+// One classifier for what a failed send MEANS, used by the on-screen toast and by the
+// settings page. It lives here rather than in tvcommand.js because the page reads its
+// answer out of /tvbox/api/ir/status: a second copy would drift, and the page would show
+// the raw English sentence next to a translated one.
+const IR_CAUSES = [
+  [/no IR blaster configured/, "noBlaster"],
+  [/unknown IR action/, "unmapped"],
+  [/no IR keymap service/, "noService"],
+  [/cannot be sent by this remote/, "badCode"],
+  [/the box built an IR command/, "badSpec"],
+  [/busy with another IR command|still in flight/, "busy"],
+  [/dropped while sending/, "linkLost"],
+  [/took the code but did not fire/, "notFired"],
+  [/did not answer in time/, "timeout"],
+  // Last, because it is the broadest: several sentences end with the wake advice.
+  [/press a button on it to wake it/, "asleep"],
+];
+
+function causeOf(message) {
+  const m = String(message || "");
+  for (const [re, cause] of IR_CAUSES) if (re.test(m)) return cause;
+  return "other";
+}
+
 function status() {
   return {
     configured: !!backend,
     backend: backend ? backend.name : null,
+    // Three-valued for the firetv backend: true/false once its resident link service
+    // has answered, null while nothing is known. A screen must not turn null into
+    // "unreachable" - a remote one button press away is not a broken blaster.
     connected: backend ? backend.connected() : false,
     actions: Object.keys(actions),
     lastError,
+    // What the last failure MEANS, so a screen can say it in the viewer's language
+    // instead of showing the English sentence a voice assistant reads out.
+    cause: lastError ? causeOf(lastError) : null,
   };
 }
 
@@ -310,5 +385,7 @@ module.exports = {
   applyConfig,
   send,
   status,
+  shutdown,
+  causeOf,
   _test: { clampSteps, haScriptCall, setBackendForTest, makeFiretvBackend },
 };

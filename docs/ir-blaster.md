@@ -115,10 +115,10 @@ Two costs, both from the hardware:
   **a blast costs ~0.9 s and 20 of them over 20 minutes all worked**, the link
   still up at the end - including one after three minutes of complete silence. So
   `serve` holds the link (see [firetv-remote-ir.md](firetv-remote-ir.md)) and the
-  shell keeps one of those per configured remote, the way the esphome backend keeps
+  shell keeps one of those - there is one IR backend, so one service - the way the
+  esphome backend keeps
   one connection to its device.
-  **A BUTTON is still the sure path, and voice works exactly as long as the link
-  does.** A press wakes the remote, so a bound button always works. Voice depends on
+  **A BUTTON is still the sure path, and voice works while the link is held.** A press wakes the remote, so a bound button always works. Voice depends on
   whether the resident link is up: while it is, a spoken blast is as good as a
   pressed one, and once it is gone only a press brings the remote back. For a voice
   path that does not depend on that, use a mains-powered blaster (`esphome`) - it
@@ -133,14 +133,15 @@ Two costs, both from the hardware:
   is abandoned by BlueZ after ~41 s, and the remote-finder fails with `Not
 connected`. Only a button press brings it back.
 
-  **And the link does not come back on its own after a blast.** From an HCI trace
+  **A link the box does not hold does not come back on its own.** From an HCI trace
   (`btmon -w`, read back with `btmon -r` - see the tooling note below): the
   disconnect is ours (`Reason: Connection Terminated By Local Host`), and in the
   next two minutes there is not one `LE Connection Complete` and exactly one
   advertising report of any kind on the whole adapter, with scanning enabled for
   part of that window. A second blast with no press in between fails ("the remote
-  did not answer in time"). So the chain is: press, one blast, silence until the
-  next press.
+  did not answer in time"). So without a held link the chain is: press, one blast,
+  silence until the next press - which is what the resident service exists to
+  break.
 
   The kernel's LE accept list with auto-connect (`btmgmt add-device -a 2 -t 1
 <mac>`) has NOT been shown to rescue that, and two earlier notes here claiming it
@@ -170,8 +171,8 @@ connected`. Only a button press brings it back.
   What Fire OS has that a Pi does not is read from its firmware rather than
   measured here - a standing intent to connect that is never withdrawn, and
   suppressed connection-parameter updates so the remote keeps its own power policy.
-  Copying that would be a bench experiment, not a setting, and it would still have
-  to get past the one-blast-per-wake limit above.
+  Copying that would be a bench experiment, not a setting. What the box does
+  instead is hold the link it already has, for as long as the remote keeps it up.
 
 - **And a blast goes wherever the remote is LYING.** Measured on the same soundbar,
   minutes apart, with byte-identical codes: once nothing happened, once it switched.
@@ -179,9 +180,22 @@ connected`. Only a button press brings it back.
   forgiving; a soundbar's receiver is small and low. This is the second and less
   obvious reason the backend suits a button - the hand that presses it is also the
   hand that aims it.
-- **A send over the held link is ~0.9 s**, so a ten-step volume ramp is still about
-  nine seconds of queue. Let the remote's own programmed keys do volume
+- **A send over the held link is ~0.9 s**, and the queue adds 250 ms between steps,
+  so a ten-step volume ramp is still about eleven seconds of it. Let the remote's own programmed keys do volume
   (`irPassthrough`) and keep this for the one-shot actions.
+
+**Holding the link changes who can fire IR, and that is worth stating.** Before it,
+a blast needed the remote awake, so in practice somebody had to have picked it up -
+a physical gate on every remote trigger. Now the box holds the link, so anything that
+can reach `POST /tvbox/api/ir/send` (loopback, and any process on the box) or publish
+to `tvbox/<id>/cmd` on the broker (no box-side authentication - see
+[SECURITY.md](../SECURITY.md)) can fire IR at the room for as long as the link lasts.
+That is the point of the feature; it is also a capability that used to be gated by a
+hand on a remote. The socket the service listens on is `0600` in the box user's home,
+which is a boundary against other USERS and not against the box's own apps - those run
+as the same user. What limits them is the request itself: the service accepts only the
+shape the box's own saved plan produces (`check_blast_request`), so a caller can pick
+between codes that are already configured and cannot invent one.
 
 [remote/firetv_ir_plan.example.json](../remote/firetv_ir_plan.example.json) is a
 hand-written plan carrying real LG input codes and a Samsung soundbar's power

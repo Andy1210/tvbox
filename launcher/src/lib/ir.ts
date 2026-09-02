@@ -4,9 +4,15 @@ export type IrSendResult = { ok: boolean; error?: string };
 export interface IrStatus {
   configured: boolean;
   backend: string | null;
-  connected: boolean | null; // null = stateless backend (HA), nothing to report
+  // null = nothing to report: a stateless backend (HA), or a firetv link whose resident
+  // service has not answered yet. NOT the same as false, which means the link is down -
+  // and a down link is still one button press from working.
+  connected: boolean | null;
   actions: string[];
   lastError: string;
+  // What lastError MEANS, classified by the shell (ir.js causeOf) so the screen and the
+  // TV toast say the same thing in the viewer's language. Null when there is no error.
+  cause: string | null;
 }
 
 export async function sendIr(action: string): Promise<IrSendResult> {

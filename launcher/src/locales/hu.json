@@ -648,7 +648,6 @@
     "test": "Teszt",
     "testOk": "Elküldve.",
     "testFailed": "Küldés sikertelen: {error}",
-    "disconnected": "A jeladó nem elérhető: {error}",
     "groupDevice": "Adó",
     "groupTest": "Kipróbálás",
     "portDefault": "alapértelmezett",
@@ -666,8 +665,15 @@
       "noService": "Ez a távirányító nem tud infra kódot kilőni.",
       "badCode": "Ezt a kódot ez a távirányító nem tudja kiküldeni.",
       "timeout": "A távirányító nem válaszolt időben.",
-      "other": "Az infra parancs nem ment ki."
-    }
+      "other": "Az infra parancs nem ment ki.",
+      "notFired": "A távirányító megkapta a kódot, de nem lőtte ki. Nézd meg az elemeket, és fordítsd a készülék felé.",
+      "linkLost": "A kapcsolat megszakadt küldés közben - lehet, hogy a parancs kiment. Nézd meg, mielőtt újra próbálod.",
+      "badSpec": "A doboz olyan infra parancsot állított össze, amit ez a távirányító nem fogad el. Ez hiba a dobozban.",
+      "busy": "A távirányító épp más infra parancson dolgozik. Próbáld újra egy pillanat múlva."
+    },
+    "linkDown": "Nincs élő kapcsolat a távirányítóval.",
+    "awakeHintFiretv": "A doboz a távirányító saját infra LED-jével lő, ezért nyitva tartja hozzá a kapcsolatot. Ha a távirányító elaludt, egy gombnyomás felébreszti.",
+    "offHintFiretv": "Kikapcsolni a jeladó típusának átállításával lehet."
   },
   "firetvir": {
     "title": "A távirányító IR gombjai",

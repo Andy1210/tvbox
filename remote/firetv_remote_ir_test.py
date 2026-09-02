@@ -193,10 +193,14 @@ try:
     check("and that connect was closed again", state["clients"][-1].disconnects, 1)
 
     state["have"] = True
-    check("a code this build cannot encode never touches the radio",
-          run(blast_err(svc, {"duty_cycle": 33, "keys": {}}, "Power")), "badcode")
     before = state["connects"]
-    check("...literally never", state["connects"], before)
+    check("a code this build cannot encode is not a wake problem",
+          run(blast_err(svc, {"duty_cycle": 33,
+                              "keys": {"Power": {"irdb": {"protocol": "NoSuchProtocol",
+                                                          "device": 1, "subdevice": -1,
+                                                          "function": 2}}}}, "Power")),
+          "badcode")
+    check("...and it never touched the radio", state["connects"], before)
 
     run(svc.blast(SPEC, "Power"))
     state["remotes"][-1].result = False
@@ -206,8 +210,134 @@ try:
           svc.connected(), True)
 
     state["remotes"][-1].raise_with = OSError("link gone")
-    check("a link lost mid-blast reports asleep", run(blast_err(svc)), "asleep")
+    # Deliberately not "asleep": the code may have gone out, so the answer must not be
+    # "press a button and retry" - retrying a power toggle undoes it.
+    check("a link lost mid-blast is its own failure", run(blast_err(svc)), "linklost")
     check("and is forgotten so the next blast reconnects", svc.connected(), False)
+finally:
+    restore(monkey)
+
+
+# ---- what a request is allowed to ask for -----------------------------------
+# The socket lives in the user's home, and everything on this box runs as that user -
+# store-installed apps, native apps, an app's in-process plugin. So the service holds a
+# request to the shape shell/firetvir.js's resolveBlast can actually produce, rather
+# than handing what arrives to the keymap compiler. Every case below was accepted with
+# ok:true before this check, measured through the real socket.
+def spec_err(spec, key="Power"):
+    try:
+        f.check_blast_request(spec, key)
+    except f.ToolError as ex:
+        return ex.code
+    return None
+
+
+ENTRY = SPEC["keys"]["Power"]
+check("the shell's own spec passes", spec_err(SPEC), None)
+check("...and so does the Power spec with its two quirks",
+      spec_err({"name": "tv Power", "source": "TV", "duty_cycle": 33,
+                "keys": {"Power": {**ENTRY, "optional": True, "post_delay": 1000}}}), None)
+check("a raw capture passes", spec_err({"duty_cycle": 33, "keys": {"Power": {
+          "raw": [4500, 4500, 560], "frequency": 38000}}}), None)
+check("repeat is not a field any plan carries",
+      spec_err({"duty_cycle": 33, "keys": {"Power": {**ENTRY, "repeat": 4294967295}}}),
+      "badspec")
+check("nor is toggle_mask", spec_err({"duty_cycle": 33, "keys": {"Power": {
+          **ENTRY, "toggle_mask": 65535}}}), "badspec")
+check("nor notify_host", spec_err({"duty_cycle": 33, "keys": {"Power": {
+          **ENTRY, "notify_host": True}}}), "badspec")
+check("a pronto code is not one of the three the index publishes",
+      spec_err({"duty_cycle": 33, "keys": {"Power": {"pronto": "0000 006D 0022 0002"}}}),
+      "badspec")
+check("an unknown top-level field is refused",
+      spec_err({"duty_cycle": 33, "keys": {"Power": ENTRY}, "wat": 1}), "badspec")
+check("a 20,000-timing raw capture is refused - the index caps a real one at 512",
+      spec_err({"duty_cycle": 33, "keys": {"Power": {"raw": [500] * 20000,
+                                                     "frequency": 38000}}}), "badspec")
+check("a timing wider than the wire format is refused",
+      spec_err({"duty_cycle": 33, "keys": {"Power": {"raw": [500, 70000],
+                                                     "frequency": 38000}}}), "badspec")
+check("a duty cycle outside 1..99 is refused",
+      spec_err({"duty_cycle": 0, "keys": {"Power": ENTRY}}), "badspec")
+check("a float where an int belongs is refused",
+      spec_err({"duty_cycle": 33, "keys": {"Power": {**ENTRY, "post_delay": 1e308}}}),
+      "badspec")
+check("a boolean is not a number", spec_err({"duty_cycle": True,
+                                             "keys": {"Power": ENTRY}}), "badspec")
+check("the spec must carry the key being blasted, and only it",
+      spec_err({"duty_cycle": 33, "keys": {"Mute": ENTRY}}, "Power"), "badspec")
+check("two keys in one blast is not a shape the shell makes",
+      spec_err({"duty_cycle": 33, "keys": {"Power": ENTRY, "Mute": ENTRY}}, "Power"),
+      "badspec")
+check("two code sources in one entry is refused",
+      spec_err({"duty_cycle": 33, "keys": {"Power": {**ENTRY, "raw": [500, 500],
+                                                     "frequency": 38000}}}), "badspec")
+check("no code source at all is refused",
+      spec_err({"duty_cycle": 33, "keys": {"Power": {"optional": True}}}), "badspec")
+check("a key name that is not one is refused", spec_err(SPEC, "../../etc/passwd"),
+      "badspec")
+check("an empty key name is refused", spec_err({"duty_cycle": 33, "keys": {"": ENTRY}}, ""),
+      "badspec")
+check("a spec that is not an object is refused", spec_err([1, 2, 3]), "badspec")
+
+# The service also refuses to queue an unbounded pile of seconds-long radio work.
+monkey = {}
+state = install(monkey)
+try:
+    svc = f.BlastService("AA:BB:CC:DD:EE:FF")
+
+    async def pile(n):
+        # Hold the lock, then send n more at it.
+        await svc.blast(SPEC, "Power")
+        held = asyncio.Event()
+
+        async def slow(*a, **k):
+            await held.wait()
+            return True
+
+        state["remotes"][-1].blast = slow
+        tasks = [asyncio.ensure_future(svc.blast(SPEC, "Power")) for _ in range(n)]
+        await asyncio.sleep(0)
+        codes = []
+        for t in tasks:
+            if t.done():
+                try:
+                    t.result()
+                except f.ToolError as ex:
+                    codes.append(ex.code)
+        held.set()
+        await asyncio.gather(*tasks, return_exceptions=True)
+        return codes
+
+    check("a pile of queued blasts is refused rather than served hours later",
+          run(pile(6)), ["busy"] * (6 - f.MAX_WAITING))
+finally:
+    restore(monkey)
+
+# And a one-shot command's hold window: after a release, a blast must NOT take the
+# link back - measured on the box, it spent its whole connect budget doing exactly that
+# while a 60 s programming run was using the remote.
+monkey = {}
+state = install(monkey)
+try:
+    svc = f.BlastService("AA:BB:CC:DD:EE:FF")
+    run(svc.blast(SPEC, "Power"))
+
+    async def held_err():
+        await svc.release(hold_ms=60000)
+        try:
+            await svc.blast(SPEC, "Power")
+        except f.ToolError as ex:
+            return ex.code
+        return None
+
+    check("a blast during a one-shot's hold window is refused, not connected",
+          run(held_err()), "busy")
+    before = state["connects"]
+    check("...and it did not touch the radio", state["connects"], before)
+    run(svc.resume())
+    run(svc.blast(SPEC, "Power"))
+    check("resume lets the link come back", svc.connected(), True)
 finally:
     restore(monkey)
 
@@ -236,8 +366,16 @@ try:
     check("a spec that is not an object is refused", (r["ok"], r["code"]), (False, "protocol"))
     check("the failed requests blasted nothing", svc.blasts, 1)
 
-    check("release is answered", req({"cmd": "release"}), {"ok": True})
+    r = req({"cmd": "release"})
+    check("release is answered, with the link state", (r["ok"], r["connected"]), (True, False))
     check("and it dropped the link", svc.connected(), False)
+    check("every reply carries the protocol version, so a version skew is visible",
+          req({"cmd": "release"})["proto"], f.SERVE_PROTO)
+    r = req({"cmd": "release", "hold_ms": 400000})
+    check("an absurd hold window is refused", (r["ok"], r["code"]), (False, "protocol"))
+    r = req({"cmd": "release", "hold_ms": True})
+    check("...and so is a boolean pretending to be one", (r["ok"], r["code"]),
+          (False, "protocol"))
 
     r = run(f._serve_request(svc, "not json at all"))
     check("a line that is not JSON does not kill the server",

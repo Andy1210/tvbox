@@ -648,7 +648,6 @@
     "test": "Test",
     "testOk": "Sent.",
     "testFailed": "Send failed: {error}",
-    "disconnected": "Blaster not reachable: {error}",
     "groupDevice": "Blaster",
     "groupTest": "Try it",
     "portDefault": "default",
@@ -666,8 +665,15 @@
       "noService": "This remote cannot fire an IR code.",
       "badCode": "This remote cannot send that code.",
       "timeout": "The remote did not answer in time.",
-      "other": "The infrared command did not go out."
-    }
+      "other": "The infrared command did not go out.",
+      "notFired": "The remote took the code but did not fire it. Check its batteries and aim it at the device.",
+      "linkLost": "The link dropped while sending - the command may have gone out. Check before trying again.",
+      "badSpec": "The box built an IR command this remote will not accept. That is a bug in the box.",
+      "busy": "The remote is busy with another IR command. Try again in a moment."
+    },
+    "linkDown": "No live link to the remote.",
+    "awakeHintFiretv": "The box fires the remote's own infrared LED, so it keeps the connection to it open. If the remote has gone to sleep, one button press wakes it.",
+    "offHintFiretv": "To turn it off, change the blaster type."
   },
   "firetvir": {
     "title": "The remote's own IR buttons",

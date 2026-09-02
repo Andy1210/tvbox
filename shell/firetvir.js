@@ -21,6 +21,7 @@ const net = require("net");
 const os = require("os");
 const edid = require("./edid");
 const irindex = require("./irindex");
+const { Supervisor } = require("./service_supervisor");
 
 const TVBOX = path.join(os.homedir(), ".tvbox");
 const PYENV = path.join(TVBOX, "pyenv");
@@ -546,15 +547,31 @@ function blastAction(mac, target, cb) {
 // per-blast runs. So the link is held by one resident `serve` process, exactly as the
 // esphome backend holds one connection to its device - and one-shot spawns stay as the
 // fallback, so a box where the service will not start behaves as it did before.
+//
+// It is a SUPERVISED child rather than a hand-rolled one, and the reason is the failure
+// that costs most: a shell that dies by signal (a crash, an OTA restart) skips every
+// shutdown path, and the leftover keeps holding the remote's ONE allowed connection -
+// so the new shell's service can never get it and every blast answers "asleep" until
+// somebody kills the orphan by hand. The supervisor reaps an orphan by command line,
+// escalates SIGTERM to SIGKILL, caps the respawn backoff and forwards the child's
+// stderr with a length bound.
 const SERVICE_SOCK = path.join(TVBOX, "firetv-ir.sock");
-const SERVICE_RESTART_MS = 5000;
-let service = null; // { mac, child, stopping, linkUp, timer }
+const SERVICE_NAME = "firetv-ir";
+const SERVICE_POLL_MS = 15000; // how often the held link's state is refreshed
+const SERVE_PROTO = 1; // must match firetv_remote_ir.py's SERVE_PROTO
+const supervisor = new Supervisor();
+let service = null; // { mac, linkUp, gaveUp }
 
+// The socket request. One request per connection, one JSON object per line.
+// `absent` on an error means "no service is listening", which is the only case worth
+// falling back to a per-blast process for - see blastViaService.
 function serviceRequest(req, timeoutMs, cb) {
   let done = false;
+  let wrote = false;
   const finish = (err, resp) => {
     if (done) return;
     done = true;
+    if (err && !wrote && ABSENT_ERRNOS.includes(err.code)) err.absent = true;
     cb(err, resp);
   };
   let sock;
@@ -570,7 +587,10 @@ function serviceRequest(req, timeoutMs, cb) {
     } catch (e) {}
     finish(new Error("the IR link service did not answer in time"));
   }, timeoutMs);
-  sock.on("connect", () => sock.write(JSON.stringify(req) + "\n"));
+  sock.on("connect", () => {
+    wrote = true;
+    sock.write(JSON.stringify(req) + "\n");
+  });
   sock.on("data", (d) => {
     out += d.toString();
     const nl = out.indexOf("\n");
@@ -595,6 +615,7 @@ function serviceRequest(req, timeoutMs, cb) {
     } catch (e) {
       return finish(new Error("the IR link service sent nonsense"));
     }
+    // Every reply carries the link state, so nothing has to poll for it.
     if (service && typeof resp.connected === "boolean") service.linkUp = resp.connected;
     finish(null, resp);
   });
@@ -604,54 +625,67 @@ function serviceRequest(req, timeoutMs, cb) {
   });
   sock.on("close", () => {
     clearTimeout(to);
-    finish(new Error("the IR link service closed the connection"));
+    // Closed with no reply. If we never got as far as writing, there is nothing
+    // listening and a per-blast process is worth trying; if we DID write, the request
+    // may have reached the radio before the server died, and a second attempt at a
+    // power toggle undoes the first - so that one is reported, not retried.
+    finish(new Error(wrote ? "the IR link service stopped mid-request" : "no IR link service"));
   });
 }
 
+// Errors that mean nothing is listening. ENOENT/ECONNREFUSED: no socket, or a stale
+// file where one was. EACCES: a socket at that path that is not ours to talk to.
+const ABSENT_ERRNOS = ["ENOENT", "ECONNREFUSED", "EACCES"];
+
 function startService(mac) {
   if (!MAC_RE.test(mac || "")) return;
-  if (service && service.mac === mac && service.child) return;
+  if (service && service.mac === mac) return; // already holding this remote
   stopService();
   if (!fs.existsSync(PY) || !fs.existsSync(TOOL)) return; // deps not installed yet
-  const st = { mac, child: null, stopping: false, linkUp: null, timer: null };
+  const st = { mac, linkUp: null, gaveUp: false, poll: null };
   service = st;
-  const spawnOne = () => {
-    if (st.stopping || service !== st) return;
-    const child = spawn(PY, [TOOL, "serve", mac, "--socket", SERVICE_SOCK], {
-      stdio: ["ignore", "pipe", "pipe"],
-    });
-    st.child = child;
-    // Its stderr is the only place a bleak or dbus failure says anything, and a pipe
-    // nobody drains eventually blocks the child - so it is read and logged.
-    const say = (d) => {
-      const t = d.toString().trim();
-      if (t) console.log("[firetv-ir]", t.split("\n").slice(-4).join(" | "));
-    };
-    child.stdout.on("data", say);
-    child.stderr.on("data", say);
-    child.on("error", (e) => console.log("[firetv-ir] failed to start:", e.message));
-    child.on("close", (code) => {
-      if (st.child === child) st.child = null;
-      st.linkUp = null;
-      if (st.stopping || service !== st) return;
-      console.log("[firetv-ir] link service exited (" + code + "), restarting in 5 s");
-      st.timer = setTimeout(spawnOne, SERVICE_RESTART_MS);
+  // The link state has to be knowable without blasting: a screen that cannot see
+  // whether the link is held cannot report the one thing this service provides, and a
+  // service that is crash-looping looks exactly like a healthy one from the sofa.
+  // `status` takes no lock, so this never waits behind a blast.
+  const poll = () => {
+    if (service !== st) return;
+    serviceRequest({ cmd: "status" }, 4000, (err, resp) => {
+      if (service !== st) return;
+      if (err || !resp || !resp.ok) st.linkUp = false;
+      else if (resp.proto !== SERVE_PROTO) {
+        // A shell and a tool from different releases. Saying so beats guessing at a
+        // reply whose shape we do not know.
+        st.linkUp = false;
+        console.log("[firetv-ir] link service speaks protocol", resp.proto, "not", SERVE_PROTO);
+      }
     });
   };
-  spawnOne();
+  st.poll = setInterval(poll, SERVICE_POLL_MS);
+  if (st.poll.unref) st.poll.unref(); // never a reason to keep the process alive
+  setTimeout(poll, 1500); // one early answer, so the first screen is not blank
+  supervisor.spawn(SERVICE_NAME, {
+    argv: () => [PY, TOOL, "serve", mac, "--socket", SERVICE_SOCK],
+    // An orphan for ANOTHER remote holds the radio just as effectively as one for this
+    // one, and after a MAC change the exact command line no longer matches - so the
+    // prefix is what identifies an instance as ours.
+    reapPrefix: [PY, TOOL, "serve"],
+    log: (m) => console.log("[firetv-ir]", m),
+    onGiveUp: () => {
+      // Blasts keep working through the per-blast fallback; this is why the screen has
+      // to be able to say the link is not held.
+      st.gaveUp = true;
+      st.linkUp = false;
+    },
+  });
 }
 
 function stopService() {
   const st = service;
   service = null;
   if (!st) return;
-  st.stopping = true;
-  if (st.timer) clearTimeout(st.timer);
-  if (st.child) {
-    try {
-      st.child.kill("SIGTERM");
-    } catch (e) {}
-  }
+  if (st.poll) clearInterval(st.poll);
+  supervisor.stop(SERVICE_NAME);
   try {
     fs.unlinkSync(SERVICE_SOCK);
   } catch (e) {
@@ -667,12 +701,59 @@ function serviceLinkState() {
   return service ? service.linkUp : null;
 }
 
+// Ask the service where it stands. Used by status(), so the screen can report the one
+// thing this service exists to provide; it also carries the protocol version, which is
+// what makes a shell/tool version skew visible instead of silent.
+function serviceStatus(cb) {
+  if (!service) return cb(null, null);
+  serviceRequest({ cmd: "status" }, 4000, (err, resp) => {
+    if (err || !resp || !resp.ok) return cb(null, { running: true, link: null, error: err && err.message });
+    cb(null, {
+      running: true,
+      link: resp.connected === true,
+      proto: resp.proto,
+      blasts: resp.blasts,
+      held: !!resp.held,
+      error: resp.last_error || "",
+    });
+  });
+}
+
 // A one-shot command (program, test, info) opens its own link, and the remote takes ONE
-// connection - so the resident holder has to let go first, and a failure to reach the
-// service is not a reason to refuse: there may be no service at all.
-function releaseService(cb) {
-  if (!service || !service.child) return cb();
-  serviceRequest({ cmd: "release" }, 6000, () => cb());
+// connection - so the resident holder has to let go, and stay let go: measured, a blast
+// arriving right after a release spent its whole connect budget taking the link back,
+// which during a 60 s programming run is the remote being pulled away mid-write.
+//
+// The budget is longer than a blast's, because that is what it may have to wait for. A
+// service that will not let go is reported rather than raced: proceeding anyway is how
+// two connections end up fighting over one remote. No service at all is not a failure -
+// there is nothing to release.
+function releaseService(holdMs, cb) {
+  if (!service) return cb();
+  serviceRequest({ cmd: "release", hold_ms: Math.max(0, Math.min(300000, holdMs | 0)) }, 20000, (err, resp) => {
+    if (err && err.absent) return cb();
+    if (err || !resp || !resp.ok) {
+      return cb(new Error("an IR command is still in flight - try again in a moment"));
+    }
+    cb();
+  });
+}
+
+// The other half of the hold: the one-shot is done, the link may come back before the
+// hold window expires on its own.
+function resumeService(cb) {
+  if (!service) return cb && cb();
+  serviceRequest({ cmd: "resume" }, 4000, () => cb && cb());
+}
+
+// Run a one-shot BLE command with the resident link out of the way for its whole
+// budget. `budgetMs` is the tool's own timeout: the hold has to outlast it, or the
+// service comes back while the one-shot is still talking to the remote.
+function withRemote(budgetMs, run, cb) {
+  releaseService(budgetMs + 5000, (err) => {
+    if (err) return cb(err);
+    run((e, r) => resumeService(() => cb(e, r)));
+  });
 }
 
 // The blast the button and Home Assistant paths take. Same target resolution as the
@@ -683,19 +764,16 @@ function blastViaService(mac, target, cb) {
     e.absent = true; // the caller may fall back to a per-blast process
     return e;
   };
-  if (!service || !service.child) return cb(absent("no IR link service"));
+  if (!service) return cb(absent("no IR link service"));
   if (service.mac !== mac) return cb(absent("the IR link service holds another remote"));
   if (!MAC_RE.test(String(mac || ""))) return cb(new Error("invalid MAC"));
   const parsed = resolveBlastTarget(mac, target);
   if (parsed.error) return cb(new Error(parsed.error));
-  serviceRequest({ cmd: "blast", spec: parsed.spec, key: parsed.key }, 12000, (err, resp) => {
-    // A socket that is gone or refusing means the server died between the check above
-    // and now - the same case as having none, so it is worth another process.
-    if (err && (err.code === "ENOENT" || err.code === "ECONNREFUSED")) {
-      err.absent = true;
-    }
-    cb(err, resp);
-  });
+  // Longer than the service's own worst case (its connect is bounded at 8 s and a blast
+  // is ~1 s), so a timeout here means something is wrong rather than something is slow.
+  // The old way round - a client budget shorter than the server's - reported a failure
+  // for a blast that then fired seconds later, and the retry fired it twice.
+  serviceRequest({ cmd: "blast", spec: parsed.spec, key: parsed.key }, 12000, cb);
 }
 
 // What the codes file says about where its codes came from, so a later look at
@@ -755,7 +833,7 @@ function testKey(mac, plan, key, cb) {
   } catch (e) {
     return cb(e);
   }
-  releaseService(() => runTool(["blast", mac, "--config", TEST_CODES_FILE, "--key", key], 30000, cb));
+  withRemote(30000, (done) => runTool(["blast", mac, "--config", TEST_CODES_FILE, "--key", key], 30000, done), cb);
 }
 
 function program(mac, plan, label, cb) {
@@ -767,31 +845,38 @@ function program(mac, plan, label, cb) {
   } catch (e) {
     return cb(e);
   }
-  releaseService(() =>
-    runTool(["program", mac, "--config", CODES_FILE], 60000, (err, r) => {
-      // Recorded against the MAC that was actually written, so a second remote's screen
-      // never reports this one's codes.
-      if (!err && r && r.ok) updatePlan(mac, (p) => ({ ...p, programmed: { label: str(label, 60), ts: Date.now() } }));
-      cb(err, r);
-    }),
+  withRemote(
+    60000,
+    (done) =>
+      runTool(["program", mac, "--config", CODES_FILE], 60000, (err, r) => {
+        // Recorded against the MAC that was actually written, so a second remote's
+        // screen never reports this one's codes.
+        if (!err && r && r.ok)
+          updatePlan(mac, (p) => ({ ...p, programmed: { label: str(label, 60), ts: Date.now() } }));
+        done(err, r);
+      }),
+    cb,
   );
 }
 
 function erase(mac, cb) {
   if (!MAC_RE.test(mac)) return cb(new Error("invalid MAC"));
-  releaseService(() =>
-    runTool(["erase", mac], 30000, (err, r) => {
-      // The devices stay - you erase to stop the remote blasting, not to throw away the
-      // setup, and re-programming should not mean building it again. What goes is the
-      // record that anything IS on the remote, for this remote only.
-      if (!err && r && r.ok) {
-        updatePlan(mac, (p) => ({ ...p, programmed: null }));
-        try {
-          fs.unlinkSync(CODES_FILE);
-        } catch (e) {}
-      }
-      cb(err, r);
-    }),
+  withRemote(
+    30000,
+    (done) =>
+      runTool(["erase", mac], 30000, (err, r) => {
+        // The devices stay - you erase to stop the remote blasting, not to throw away
+        // the setup, and re-programming should not mean building it again. What goes is
+        // the record that anything IS on the remote, for this remote only.
+        if (!err && r && r.ok) {
+          updatePlan(mac, (p) => ({ ...p, programmed: null }));
+          try {
+            fs.unlinkSync(CODES_FILE);
+          } catch (e) {}
+        }
+        done(err, r);
+      }),
+    cb,
   );
 }
 
@@ -833,8 +918,8 @@ module.exports = {
   blastViaService,
   startService,
   stopService,
-  releaseService,
   serviceLinkState,
+  serviceStatus,
   _test: {
     sanitizePlan,
     updatePlan,
@@ -845,6 +930,9 @@ module.exports = {
     codeSendable,
     makeToBrand,
     serviceRequest,
+    releaseService,
+    resumeService,
+    withRemote,
     SERVICE_SOCK,
   },
 };

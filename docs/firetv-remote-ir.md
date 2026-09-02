@@ -30,7 +30,8 @@ start being there, and every caller has a shorter budget than 41 s anyway).
 `firetv_remote_ir.py serve <mac> --socket <path>` keeps one BLE connection and
 blasts on request - one JSON object per line, one request per connection, the code
 spec travelling in the request so no file is written per blast. The shell starts one
-per configured remote and falls back to a process per blast when it cannot
+for the configured remote (there is one IR backend, so one service) and falls back to
+a process per blast when it cannot
 ([shell/ir.js](../shell/ir.js), [shell/firetvir.js](../shell/firetvir.js)). The
 numbers are the whole argument, measured on a Remote Pro (PID 0x0425):
 
@@ -59,7 +60,19 @@ second `02`, so deciding on one read reports a blast that fired as a failure. Th
 burst ends with CONTROL 32 (`ENABLE_SDS`), which Fire OS writes only after the
 _terminal_ blast of a burst - `RemoteBlasterExecutor` keeps it off between the LED,
 the IR code and the LED again, which is also proof that several blasts over one
-connection are the firmware's normal path rather than an edge case. The reason is worth knowing rather than re-deriving: **the find-my
+connection are the firmware's normal path rather than an edge case.
+
+The service is bounded on purpose in three ways, each because of something measured
+rather than imagined. A request may only carry the code-spec shape the box's own plan
+produces (`check_blast_request`), because the socket is reachable by everything running
+as the box user and the compiler behind it would otherwise accept 20,000 raw timings. At
+most a handful of blasts queue behind the one in flight, since each is seconds of radio
+and the button and Home Assistant paths wait on the same queue. And `release` takes a
+hold window: a blast arriving right after a release spent its whole connect budget taking
+the link back, which during a 60 s programming run is the remote being pulled away
+mid-write.
+
+**Why a sleeping remote cannot be reached at all, rather than slowly: the find-my
 beacon does not exist until a host provisions it.** Fire OS writes `01` plus two
 16-byte IRKs to `cfbfb001` and then `02 01`, and its own ring path refuses with
 _"device is not configured, cannot ring"_ when that has not happened - which is why
