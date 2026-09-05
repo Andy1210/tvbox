@@ -453,6 +453,9 @@ function listForUi(config) {
     // permanently, which is the state this list exists to make reachable. The
     // row therefore survives as long as ONE source answered; what changes is
     // the sentence, which may not claim a retirement nobody could check.
+    // `sources()` always yields at least the primary, so this is exactly "the
+    // catalogue did not fail entirely" - the same condition `error` above is
+    // set on, read from the other side.
     const someAnswered = loaded.some((s) => !s.error && Array.isArray(s.entries));
     // Offered somewhere and refused HERE - an unknown manifestVersion, an
     // unknown capability, or a trust rule. Not the same as retired, and not
@@ -468,7 +471,7 @@ function listForUi(config) {
     const candidates = apps
       .getManifests()
       .filter((m) => !builtinIds.has(m.id) && installedFromStore(m.id))
-      .filter((m) => answered || someAnswered || refused.has(m.id) || blocked.has(m.id));
+      .filter((m) => someAnswered || refused.has(m.id) || blocked.has(m.id));
     if (candidates.length) {
       const listed = new Set(out.map((a) => a.id));
       const pins = readPins();
@@ -527,10 +530,11 @@ function listForUi(config) {
           // between "this is stuck here" and "add that registry back".
           // Only for a retired app: a registry that is still serving this one and
           // merely speaks a newer dialect is not somewhere to be sent.
-          // Not for an unchecked one either: it points at a registry to add
-          // back, and the registry to look at is the one that failed.
-          unlistedFrom:
-            refused.has(m.id) || blocked.has(m.id) || !answered ? null : unlistedFrom(pins.get(m.id), configured),
+          // Said for an unchecked app too: the pin only names a registry the box
+          // NO LONGER has, and a different source being down says nothing about
+          // that one. A pin naming the source that failed is already suppressed,
+          // because that source is still configured.
+          unlistedFrom: refused.has(m.id) || blocked.has(m.id) ? null : unlistedFrom(pins.get(m.id), configured),
         });
       }
     }

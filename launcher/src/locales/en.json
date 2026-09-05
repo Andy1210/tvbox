@@ -385,9 +385,9 @@
     "blocked": "not accepted by this box",
     "blockedDetail": "A store still offers this app, but this box does not accept its entry - the registry rules refused it. It can be removed here.",
     "blockedGroup": "Installed, but this box does not accept what the store sent",
-    "unchecked": "the stores that answered do not offer it",
-    "uncheckedGroup": "Installed, and not offered by the stores that answered",
-    "uncheckedDetail": "No store that answered offers this app, and at least one store could not be reached - so this box cannot tell whether it is still offered. It still works, and it can be removed here. Store sources shows which store failed."
+    "unchecked": "a store did not answer",
+    "uncheckedGroup": "Installed, but this box could not ask every store",
+    "uncheckedDetail": "One store is not answering, and the ones that did answer do not offer this app - so this box cannot tell whether it is still offered. It still works, and it can be removed here. The Store sources screen shows which store is not answering."
   },
   "storeSources": {
     "title": "Store sources",

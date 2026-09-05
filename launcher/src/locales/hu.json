@@ -385,9 +385,9 @@
     "blocked": "a box nem fogadja el",
     "blockedDetail": "Egy bolt még kínálja ezt az alkalmazást, de a box nem fogadja el a leírását - a bolti szabályok visszautasították. Innen eltávolítható.",
     "blockedGroup": "Telepítve, de a box nem fogadja el, amit a bolt küld",
-    "unchecked": "az elért boltok nem kínálják",
-    "uncheckedGroup": "Telepítve, és az elért boltok nem kínálják",
-    "uncheckedDetail": "Az elért boltok egyike sem kínálja ezt az alkalmazást, és legalább egy boltot nem sikerült elérni - így a box nem tudja megmondani, hogy kínálja-e még valaki. Továbbra is működik, és innen eltávolítható. A Store források alatt látszik, melyik bolt nem válaszolt."
+    "unchecked": "egy bolt nem válaszol",
+    "uncheckedGroup": "Telepítve, de a box nem tudott minden boltot megkérdezni",
+    "uncheckedDetail": "Egy bolt nem válaszol, a többi pedig nem kínálja ezt az alkalmazást - így a box nem tudja megmondani, kínálja-e még valaki. Továbbra is működik, és innen eltávolítható. A Store források képernyőn látod, melyik bolt nem válaszol."
   },
   "storeSources": {
     "title": "Store források",

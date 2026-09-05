@@ -9,20 +9,24 @@ write for the person on the couch (what changes for THEM), not for developers.
 
 ### hu
 
-- **Újra látszanak a telepített alkalmazások, amelyeket már egyik bolt sem
-  kínál**, így le is lehet venni őket a tévéről. Ha egy beállított bolt nem
-  válaszol - például egy fejlesztői bolt, ami már nincs a hálózaton -, a doboz
-  eddig egyáltalán nem mutatta ezeket a sorokat, az Eltávolítás pedig csak
-  soron belül érhető el. Most megjelennek, azzal a jelöléssel, hogy a doboz nem
-  tudta minden boltot megkérdezni.
+- **Újra látszanak azok a telepített alkalmazások, amiket egyik bolt sem kínál**,
+  így le is lehet venni őket a tévéről. Eddig, ha akár egyetlen beállított bolt
+  nem válaszolt - például egy fejlesztői bolt, ami már nincs a hálózaton -, a
+  doboz ezeket a sorokat egyáltalán nem mutatta, márpedig egy appot csak innen
+  lehet levenni. Mostantól megjelennek, és a doboz odaírja, ha nem tudott minden
+  boltot megkérdezni.
+- **Egy app eltávolítása után a kijelölés a szomszédos sorra kerül**, nem a lista
+  tetejére, akkor is, ha közben valamelyik bolt nem válaszol.
 
 ### en
 
-- **Installed apps that no store offers any more are visible again**, so they
-  can be taken off the television. If a configured store does not answer, a dev
-  store that is no longer on the network for instance, the box used to hide
-  those rows entirely, and Remove lives only in a row. They come back now,
-  marked as not checked against every store.
+- **Installed apps that no store offers any more are visible again**, so they can
+  be taken off the television. Until now a single store that did not answer, such
+  as a dev store no longer on the network, hid those rows completely, and a store
+  row is the only place an app can be removed from. They show up now, and the box
+  says when it could not ask every store.
+- **After removing an app the highlight moves to the next row**, not to the top of
+  the list, even while one of the stores is not answering.
 
 ## 3.11.0
 

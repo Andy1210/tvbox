@@ -119,7 +119,7 @@ describe("an app the box could not check", () => {
       />,
     );
     await settle();
-    expect(container.textContent).toContain("at least one store could not be reached");
+    expect(container.textContent).toContain("One store is not answering");
     expect(container.textContent).not.toContain("No source offers this app any more");
     expect(container.textContent).not.toContain("cannot read its entry");
     // The row exists for one reason.
@@ -152,7 +152,10 @@ describe("an app that is also a flatpak", () => {
 });
 
 describe("the store list", () => {
-  function stub(apps: () => StoreEntry[], onUninstall?: () => void) {
+  // `sources` matters as much as `apps` here: an `unchecked` row can only exist
+  // when one source errored, and the panel reads that array to decide whether
+  // the list it just rendered may be believed.
+  function stub(apps: () => StoreEntry[], onUninstall?: () => void, sources: unknown[] = []) {
     vi.stubGlobal("fetch", (_url: string, init?: RequestInit) => {
       if (init?.method === "POST") {
         // What the box really answers a second time: the app is already gone,
@@ -168,7 +171,7 @@ describe("the store list", () => {
       }
       return Promise.resolve(
         new Response(
-          JSON.stringify({ registry: OFFICIAL, apps: apps(), error: null, updates: [], autoUpdates: [], sources: [] }),
+          JSON.stringify({ registry: OFFICIAL, apps: apps(), error: null, updates: [], autoUpdates: [], sources }),
           { headers: { "Content-Type": "application/json" } },
         ),
       );
@@ -189,9 +192,65 @@ describe("the store list", () => {
     stub(() => list);
     const { container } = render(<StoreSettings />);
     await settle();
-    expect(container.textContent).toContain("not offered by the stores that answered");
+    expect(container.textContent).toContain("could not ask every store");
+    // The ROW's own sentence too, not only the heading: without this the row
+    // could fall through to "this box cannot read it" and the test would still
+    // pass, since that is not the string being negated.
+    expect(container.textContent).toContain("a store did not answer");
     expect(container.textContent).not.toContain("cannot read what the store sent");
+    expect(container.textContent).not.toContain("this box cannot read it");
     expect(container.querySelector('[data-sfocus="store-app-goneapp"]')).not.toBeNull();
+  });
+
+  it("puts the cursor on a real row after removing one, with a source down", async () => {
+    // The state this whole release is about: a configured store that does not
+    // answer is what makes the row exist at all, and the panel used to read any
+    // source error as "I could not read the list". The cursor then went to the
+    // retry button, which is rendered only when the WHOLE catalogue failed - so
+    // it never mounted, and every arrow after the removal was discarded.
+    const DOWN = [
+      { url: OFFICIAL, official: true, name: null, autoUpdate: true, error: null, count: 1 },
+      {
+        url: "http://192.168.1.19:8790/index.json",
+        official: false,
+        name: "Dev",
+        autoUpdate: false,
+        error: "fetch failed",
+        count: 0,
+      },
+    ];
+    let list: StoreEntry[] = [
+      entry({ id: "a1", name: "A1" }),
+      gone({ unlistedReason: "unchecked", unlistedFrom: null }),
+      entry({ id: "z9", name: "Z9" }),
+    ];
+    stub(
+      () => list,
+      () => {
+        // What the shell really answers once it is gone: no source lists it and
+        // it is no longer installed, so it loses its row.
+        list = [entry({ id: "a1", name: "A1" }), entry({ id: "z9", name: "Z9" })];
+      },
+      DOWN,
+    );
+    const { container } = render(<StoreSettings />);
+    await settle();
+    await setFocus("store-app-goneapp");
+    await act(async () => {
+      await remote.ok();
+    });
+    await settle();
+    await setFocus("detail-remove");
+    await act(async () => {
+      await remote.ok();
+    });
+    await settle();
+    expect(getCurrentFocusKey(), "the neighbour, and a key that is actually on screen").toBe("store-app-z9");
+    expect(container.querySelector('[data-sfocus="store-app-z9"]')).not.toBeNull();
+    // And the removal is reported as one: a list read while one source was down
+    // is still proof for an INSTALLED app, which never drops out of it.
+    expect(container.textContent).toContain("Gone");
+    expect(container.textContent).not.toContain("nem sikerült");
   });
 
   it("keeps the cursor by name when the list changed under it", async () => {

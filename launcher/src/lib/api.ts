@@ -123,14 +123,18 @@ export interface StoreEntry {
   flatpakStatus?: { ok: boolean; changed: boolean; version: string | null } | null; // last manual flatpak update
   source?: StoreSource | null; // the registry this entry came from (null when none lists it)
   /**
-   * Installed, and no configured source offers it any more.
+   * Installed, and no source that ANSWERED offers it.
    *
    * The app still runs - the grid is built from what is on disk - but there is
-   * nothing to update it from, and this row exists so it can still be removed:
-   * Remove lives only here.
+   * no source to update it from, and this row exists so it can still be
+   * removed: Remove lives only here. Whether it was really dropped is
+   * `unlistedReason`: only `retired` is a claim that every configured registry
+   * was asked, so nothing here may be read as a confirmed retirement on its
+   * own.
    */
   unlisted?: boolean;
-  /** Why: the registries dropped it, or this box cannot read what they sent. */
+  /** Why: the registries dropped it, a store did not answer, or this box cannot
+   *  read what they sent. */
   unlistedReason?: "retired" | "unchecked" | "unreadable" | "blocked";
   /** The registry it was installed from, while the pin still records it. */
   unlistedFrom?: string | null;

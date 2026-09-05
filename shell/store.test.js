@@ -798,6 +798,10 @@ test("one source failing still leaves the row, and it does not claim the app was
     assert.equal(list.error, null, "one source of two failing is not the catalogue failing");
     assert.equal((await store.uninstall("stuckapp")).ok, true);
   } finally {
+    // Cleanup belongs here as well as in the assertion above: an assertion that
+    // fails earlier would otherwise leave the app installed, and an installed
+    // app is exactly what the later tests in this file have to see.
+    await store.uninstall("stuckapp");
     main.close();
     dev.close();
   }
@@ -817,8 +821,8 @@ test("with every source down the row stays away, because that is a passing outag
     assert.ok(list.error, "every source failing is the catalogue failing");
     const e = list.apps.find((a) => a.id === "darkapp");
     assert.ok(!e || !e.unlisted, "nothing about the app is knowable, so nothing is claimed");
-    await store.uninstall("darkapp");
   } finally {
+    await store.uninstall("darkapp");
     only.close();
   }
 });
@@ -916,6 +920,69 @@ test("a refusal keeps its row even while another source is unreachable", async (
     await store.uninstall("mixapp");
   } finally {
     a.close();
+  }
+});
+
+test("an unchecked row groups with the other reasons rather than among them", async () => {
+  // `unchecked` and `retired` can never share a list - one needs every source
+  // to have answered and the other needs one not to have - but `unchecked`,
+  // `unreadable` and `blocked` do share one, because a refusal is knowable from
+  // the source that DID answer.
+  const a = registry([
+    manifestOnly("eee", "Eee", "1.0.0"),
+    manifestOnly("fff", "Fff", "1.0.0"),
+    manifestOnly("ggg", "Ggg", "1.0.0"),
+  ]);
+  const dead = registry([]);
+  const [aUrl, deadUrl] = [await a.listen(), await dead.listen()];
+  const config = {
+    rawStore: () => ({ registry: aUrl, sources: [{ url: deadUrl, name: "Dev" }] }),
+    appConfig: () => ({}),
+  };
+  try {
+    for (const id of ["eee", "fff", "ggg"]) assert.equal((await store.install(config, id)).ok, true);
+    // eee unchecked (nobody lists it), fff unreadable, ggg blocked.
+    a.state.apps = [
+      { ...manifestOnly("fff", "Fff", "2.0.0"), manifestVersion: 99 },
+      { ...manifestOnly("ggg", "Ggg", "2.0.0"), requires: { aptRepo: { uri: "http://x", key: "k" } } },
+    ];
+    dead.close();
+    const list = await store.listForUi(config)(true);
+    const reasons = list.apps.filter((x) => x.unlisted).map((x) => x.unlistedReason);
+    const runs = reasons.filter((x, i) => x !== reasons[i - 1]);
+    assert.deepEqual(runs, [...new Set(reasons)], "one run per reason, so the panel draws each heading once");
+    assert.deepEqual(runs, ["unchecked", "unreadable", "blocked"]);
+  } finally {
+    for (const id of ["eee", "fff", "ggg"]) await store.uninstall(id);
+    a.close();
+    dead.close();
+  }
+});
+
+test("a registry the box no longer has is still named when a different source is down", async () => {
+  // The suppression this nearly grew: "installed from X" is a plain fact, and
+  // source Y failing says nothing about X. Naming X is the only thing that
+  // turns the screen into an action, so it must survive an unrelated outage.
+  const gone = registry([manifestOnly("fromapp", "FromApp", "1.0.0")]);
+  const main = registry([]);
+  const dead = registry([]);
+  const [goneUrl, mainUrl, deadUrl] = [await gone.listen(), await main.listen(), await dead.listen()];
+  let sources = [{ url: goneUrl, name: "Old" }];
+  const config = { rawStore: () => ({ registry: mainUrl, sources }), appConfig: () => ({}) };
+  try {
+    assert.equal((await store.install(config, "fromapp")).ok, true);
+    // The owner removes the registry it came from, and an unrelated one is down.
+    sources = [{ url: deadUrl, name: "Dev" }];
+    dead.close();
+    const list = await store.listForUi(config)(true);
+    const e = list.apps.find((x) => x.id === "fromapp");
+    assert.equal(e.unlistedReason, "unchecked");
+    assert.equal(e.unlistedFrom, goneUrl, "adding that registry back is still what would make it updatable");
+  } finally {
+    await store.uninstall("fromapp");
+    gone.close();
+    main.close();
+    dead.close();
   }
 });
 
