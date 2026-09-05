@@ -31,9 +31,9 @@ const chevron = (
 );
 
 /** What one catalogue read yielded: what the panel renders, and whether it may
- *  be believed. `partial` is one source of several failing, which the panel
- *  shows next to the source it belongs to rather than as a failed read. */
-type Loaded = { apps: StoreEntry[]; read: boolean; partial: boolean };
+ *  be believed. The two are not the same question - a list read while one source
+ *  of several was down is rendered in full, and is still proof. */
+type Loaded = { apps: StoreEntry[]; read: boolean };
 
 export function StoreSettings() {
   const { t, loc } = useI18n();
@@ -104,7 +104,7 @@ export function StoreSettings() {
     // still looked healthy, which reads as "removed". An INSTALLED app cannot
     // drop out that way any more - the shell keeps a row for it and marks it
     // `unchecked` - and an installed app is the only kind a removal is about.
-    return { apps, read: !!d && !d.error, partial: !!d && Array.isArray(d.sources) && d.sources.some((x) => x.error) };
+    return { apps, read: !!d && !d.error };
   }, []);
   useEffect(() => {
     load(false, true);
@@ -286,7 +286,11 @@ export function StoreSettings() {
     // and still installed - and never when the list could not be read at all.
     // One source of several failing does not cost the read: the shell keeps a
     // row for an installed app whatever the sources answered, so "the row is
-    // gone" still means the removal happened.
+    // gone" still means the removal happened. One exception, and it is the same
+    // one a healthy store has always had: the row is built from the manifests
+    // the box could PARSE, so an app whose manifest went bad between the render
+    // and the reload loses its row without being removed, and is reported as
+    // removed. It needs the file to be corrupted inside that window.
     const gone = read && (row === undefined || !row.installed);
     const removed = ok || gone;
     setStatus({ id: e.id, text: t(removed ? "store.removed" : "store.failed", { name: loc(e.name) }) });
@@ -416,16 +420,19 @@ export function StoreSettings() {
             // Only for an added registry: naming the official one on every row
             // would be noise, while an app from somewhere else is exactly what a
             // person scrolling the catalogue needs to see without opening it.
-            // The catch-all is the LEAST specific sentence: a reason this build
-            // does not know must not be announced as "this box cannot read it".
+            // An unknown reason falls where a MISSING one already falls, rather
+            // than to a second default of its own. Not to `unchecked`: that one
+            // sends the person to the store list to find the store that did not
+            // answer, and for a reason this build cannot read they would find
+            // every store answering.
             e.unlisted
-              ? reason === "retired"
-                ? t("store.unlisted")
-                : reason === "blocked"
-                  ? t("store.blocked")
-                  : reason === "unreadable"
-                    ? t("store.unreadable")
-                    : t("store.unchecked")
+              ? reason === "blocked"
+                ? t("store.blocked")
+                : reason === "unreadable"
+                  ? t("store.unreadable")
+                  : reason === "unchecked"
+                    ? t("store.unchecked")
+                    : t("store.unlisted")
               : null,
             e.source && !e.source.official ? t("store.fromSource", { name: sourceLabel(e.source) }) : null,
             e.urlConfig && e.installed && !e.baseUrl ? t("store.urlMissing") : null,
@@ -436,13 +443,13 @@ export function StoreSettings() {
             <Fragment key={e.id}>
               {opensGroup && (
                 <div className="mt-[1.4vh] px-[1.5vw] text-[1.7vh] text-fg-dim">
-                  {reason === "retired"
-                    ? t("store.unlistedGroup")
-                    : reason === "blocked"
-                      ? t("store.blockedGroup")
-                      : reason === "unreadable"
-                        ? t("store.unreadableGroup")
-                        : t("store.uncheckedGroup")}
+                  {reason === "blocked"
+                    ? t("store.blockedGroup")
+                    : reason === "unreadable"
+                      ? t("store.unreadableGroup")
+                      : reason === "unchecked"
+                        ? t("store.uncheckedGroup")
+                        : t("store.unlistedGroup")}
                 </div>
               )}
               <FocusButton

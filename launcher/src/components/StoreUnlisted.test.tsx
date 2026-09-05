@@ -15,6 +15,20 @@ import type { StoreEntry } from "../lib/api";
 setupRemote();
 
 const OFFICIAL = "https://andy1210.github.io/tvbox-apps/index.json";
+// One configured store answering, one not - the only state in which an
+// `unchecked` row exists at all, and the state the panel used to read as "I
+// could not read the list".
+const ONE_DOWN = [
+  { url: OFFICIAL, official: true, name: null, autoUpdate: true, error: null, count: 1 },
+  {
+    url: "http://192.168.1.19:8790/index.json",
+    official: false,
+    name: "Dev",
+    autoUpdate: false,
+    error: "fetch failed",
+    count: 0,
+  },
+];
 
 beforeEach(() => {
   useConfigStore.setState({
@@ -102,7 +116,7 @@ describe("an app this box cannot read", () => {
 });
 
 describe("an app the box could not check", () => {
-  it("says a store could not be reached, and names no registry to add back", async () => {
+  it("says a store did not answer rather than that nobody offers it", async () => {
     // One configured registry that is gone for good fails on every refresh, so
     // "no source offers this" would be a claim nobody checked - and the pinned
     // registry is not the one to go and look at. What is true is that a store
@@ -119,12 +133,34 @@ describe("an app the box could not check", () => {
       />,
     );
     await settle();
-    expect(container.textContent).toContain("One store is not answering");
+    expect(container.textContent).toContain("A store is not answering");
     expect(container.textContent).not.toContain("No source offers this app any more");
     expect(container.textContent).not.toContain("cannot read its entry");
     // The row exists for one reason.
     expect(container.querySelector('[data-sfocus="detail-remove"]')).not.toBeNull();
     expect(getCurrentFocusKey()).toBe("detail-remove");
+  });
+});
+
+describe("an app the box could not check, installed from a registry it no longer has", () => {
+  it("still names that registry", async () => {
+    // The pin only ever names a registry the box NO LONGER has configured, and
+    // a different store being down says nothing about that one. Suppressing it
+    // here would drop the only sentence that turns the screen into an action.
+    const { container } = render(
+      <AppDetail
+        app={gone({ unlistedReason: "unchecked", unlistedFrom: OFFICIAL })}
+        onInstall={() => {}}
+        onUpdate={() => {}}
+        onFlatpakUpdate={() => {}}
+        onRemove={() => {}}
+        onSetUrl={() => {}}
+        onExit={() => {}}
+      />,
+    );
+    await settle();
+    expect(container.textContent).toContain("A store is not answering");
+    expect(container.textContent).toContain(OFFICIAL);
   });
 });
 
@@ -155,7 +191,12 @@ describe("the store list", () => {
   // `sources` matters as much as `apps` here: an `unchecked` row can only exist
   // when one source errored, and the panel reads that array to decide whether
   // the list it just rendered may be believed.
-  function stub(apps: () => StoreEntry[], onUninstall?: () => void, sources: unknown[] = []) {
+  function stub(
+    apps: () => StoreEntry[],
+    onUninstall?: () => void,
+    sources: unknown[] = [],
+    answer?: () => { ok: boolean; error?: string },
+  ) {
     vi.stubGlobal("fetch", (_url: string, init?: RequestInit) => {
       if (init?.method === "POST") {
         // What the box really answers a second time: the app is already gone,
@@ -164,9 +205,12 @@ describe("the store list", () => {
         const known = apps().some((x) => x.id === id);
         onUninstall?.();
         return Promise.resolve(
-          new Response(JSON.stringify(known ? { ok: true } : { ok: false, error: "not a store app" }), {
-            headers: { "Content-Type": "application/json" },
-          }),
+          new Response(
+            JSON.stringify(answer ? answer() : known ? { ok: true } : { ok: false, error: "not a store app" }),
+            {
+              headers: { "Content-Type": "application/json" },
+            },
+          ),
         );
       }
       return Promise.resolve(
@@ -196,7 +240,7 @@ describe("the store list", () => {
     // The ROW's own sentence too, not only the heading: without this the row
     // could fall through to "this box cannot read it" and the test would still
     // pass, since that is not the string being negated.
-    expect(container.textContent).toContain("a store did not answer");
+    expect(container.textContent).toContain("a store is not answering");
     expect(container.textContent).not.toContain("cannot read what the store sent");
     expect(container.textContent).not.toContain("this box cannot read it");
     expect(container.querySelector('[data-sfocus="store-app-goneapp"]')).not.toBeNull();
@@ -208,17 +252,6 @@ describe("the store list", () => {
     // source error as "I could not read the list". The cursor then went to the
     // retry button, which is rendered only when the WHOLE catalogue failed - so
     // it never mounted, and every arrow after the removal was discarded.
-    const DOWN = [
-      { url: OFFICIAL, official: true, name: null, autoUpdate: true, error: null, count: 1 },
-      {
-        url: "http://192.168.1.19:8790/index.json",
-        official: false,
-        name: "Dev",
-        autoUpdate: false,
-        error: "fetch failed",
-        count: 0,
-      },
-    ];
     let list: StoreEntry[] = [
       entry({ id: "a1", name: "A1" }),
       gone({ unlistedReason: "unchecked", unlistedFrom: null }),
@@ -231,7 +264,7 @@ describe("the store list", () => {
         // it is no longer installed, so it loses its row.
         list = [entry({ id: "a1", name: "A1" }), entry({ id: "z9", name: "Z9" })];
       },
-      DOWN,
+      ONE_DOWN,
     );
     const { container } = render(<StoreSettings />);
     await settle();
@@ -247,10 +280,42 @@ describe("the store list", () => {
     await settle();
     expect(getCurrentFocusKey(), "the neighbour, and a key that is actually on screen").toBe("store-app-z9");
     expect(container.querySelector('[data-sfocus="store-app-z9"]')).not.toBeNull();
-    // And the removal is reported as one: a list read while one source was down
-    // is still proof for an INSTALLED app, which never drops out of it.
-    expect(container.textContent).toContain("Gone");
-    expect(container.textContent).not.toContain("nem sikerült");
+    expect(container.textContent).toContain("Gone removed");
+  });
+
+  it("believes the list over a refusal, with a source down", async () => {
+    // The second OK of a double press is answered "not a store app", which
+    // means the FIRST one worked - so the list settles it, and a list read
+    // while one store was down is still proof: an installed app keeps a row
+    // whatever the stores answered. That single line is the one round one
+    // argued hardest about, and before it the screen said a removal that had
+    // worked had failed.
+    let list: StoreEntry[] = [
+      entry({ id: "a1", name: "A1" }),
+      gone({ unlistedReason: "unchecked", unlistedFrom: null }),
+    ];
+    stub(
+      () => list,
+      () => {
+        list = [entry({ id: "a1", name: "A1" })];
+      },
+      ONE_DOWN,
+      () => ({ ok: false, error: "not a store app" }),
+    );
+    const { container } = render(<StoreSettings />);
+    await settle();
+    await setFocus("store-app-goneapp");
+    await act(async () => {
+      await remote.ok();
+    });
+    await settle();
+    await setFocus("detail-remove");
+    await act(async () => {
+      await remote.ok();
+    });
+    await settle();
+    expect(container.textContent).toContain("Gone removed");
+    expect(container.textContent).not.toContain("action failed");
   });
 
   it("keeps the cursor by name when the list changed under it", async () => {

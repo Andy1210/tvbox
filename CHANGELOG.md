@@ -12,21 +12,27 @@ write for the person on the couch (what changes for THEM), not for developers.
 - **Újra látszanak azok a telepített alkalmazások, amiket egyik bolt sem kínál**,
   így le is lehet venni őket a tévéről. Eddig, ha akár egyetlen beállított bolt
   nem válaszolt - például egy fejlesztői bolt, ami már nincs a hálózaton -, a
-  doboz ezeket a sorokat egyáltalán nem mutatta, márpedig egy appot csak innen
-  lehet levenni. Mostantól megjelennek, és a doboz odaírja, ha nem tudott minden
-  boltot megkérdezni.
-- **Egy app eltávolítása után a kijelölés a szomszédos sorra kerül**, nem a lista
-  tetejére, akkor is, ha közben valamelyik bolt nem válaszol.
+  doboz inkább elrejtette ezeket a sorokat, nehogy egy néma bolt miatt
+  visszavontnak tűnjön egy app, márpedig egy appot csak innen lehet levenni.
+  Mostantól inkább megjelennek, és a doboz odaírja, ha nem tudott minden boltot
+  megkérdezni.
+- **Egy app eltávolítása után nem ragad be a távirányító.** Ha közben valamelyik
+  bolt nem válaszolt, a kijelölés eddig sehova nem került: a nyilak és az OK nem
+  csináltak semmit, csak a Vissza. Most a szomszédos sorra áll, és az sem fordul
+  elő, hogy egy sikeres eltávolításra azt írja, nem sikerült.
 
 ### en
 
 - **Installed apps that no store offers any more are visible again**, so they can
   be taken off the television. Until now a single store that did not answer, such
-  as a dev store no longer on the network, hid those rows completely, and a store
-  row is the only place an app can be removed from. They show up now, and the box
-  says when it could not ask every store.
-- **After removing an app the highlight moves to the next row**, not to the top of
-  the list, even while one of the stores is not answering.
+  as a dev store no longer on the network, made the box hide those rows, so that
+  a silent store could not make an app look retired - and a store row is the only
+  place an app can be removed from. They show up now, and the box says when it
+  could not ask every store.
+- **The remote no longer freezes after removing an app.** With a store that was
+  not answering, the highlight used to land on nothing: arrows and OK did nothing
+  and only Back worked. It goes to the next row now, and a removal that worked is
+  no longer reported as failed.
 
 ## 3.11.0
 

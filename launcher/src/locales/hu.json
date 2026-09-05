@@ -387,7 +387,7 @@
     "blockedGroup": "Telepítve, de a box nem fogadja el, amit a bolt küld",
     "unchecked": "egy bolt nem válaszol",
     "uncheckedGroup": "Telepítve, de a box nem tudott minden boltot megkérdezni",
-    "uncheckedDetail": "Egy bolt nem válaszol, a többi pedig nem kínálja ezt az alkalmazást - így a box nem tudja megmondani, kínálja-e még valaki. Továbbra is működik, és innen eltávolítható. A Store források képernyőn látod, melyik bolt nem válaszol."
+    "uncheckedDetail": "Egy bolt nem válaszol, így a box nem tudja megmondani, kínálja-e még valaki ezt az alkalmazást. Továbbra is működik, és innen eltávolítható. A Store források képernyőn látod, melyik az."
   },
   "storeSources": {
     "title": "Store források",

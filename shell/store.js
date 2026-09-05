@@ -519,6 +519,13 @@ function listForUi(config) {
           // "unchecked" is the fourth: nothing that answered offers it, and
           // something did not answer, so this box cannot tell which of the
           // other three it is.
+          //
+          // `refused` and `blocked` are collected from EVERY source, so any
+          // configured registry can pick this sentence for an app it never
+          // shipped, by publishing that id with an unknown manifestVersion or a
+          // refused capability. That is the price of judging a refusal on the
+          // source that answered, and a registry is trusted to install code
+          // here anyway - but it means the sentence is remotely steerable.
           unlistedReason: blocked.has(m.id)
             ? "blocked"
             : refused.has(m.id)
