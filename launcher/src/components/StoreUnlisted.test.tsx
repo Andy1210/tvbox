@@ -188,9 +188,11 @@ describe("an app that is also a flatpak", () => {
 });
 
 describe("the store list", () => {
-  // `sources` matters as much as `apps` here: an `unchecked` row can only exist
-  // when one source errored, and the panel reads that array to decide whether
-  // the list it just rendered may be believed.
+  // `sources` is here because it is the state the box is really in when an
+  // `unchecked` row exists: one store answered and one did not. The panel no
+  // longer reads that array to decide anything - `read` comes from the
+  // top-level `error` alone - and a test that fed it an empty list was fixing
+  // the shape of the payload rather than the state under test.
   function stub(
     apps: () => StoreEntry[],
     onUninstall?: () => void,
