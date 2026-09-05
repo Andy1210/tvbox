@@ -445,6 +445,15 @@ function listForUi(config) {
     // was down - and the way back, re-adding or fixing the source, is exactly
     // what that sentence would talk them out of.
     const answered = loaded.every((s) => !s.error && Array.isArray(s.entries));
+    // But a row is where Remove lives, and requiring EVERY source took the row
+    // away from every retired app on the box for as long as one source was
+    // down. A configured registry that is gone for good fails on every refresh,
+    // so that is not a passing outage: measured on both boxes here, a dev
+    // registry left behind on the source list hid `plex` and `jellyfin`
+    // permanently, which is the state this list exists to make reachable. The
+    // row therefore survives as long as ONE source answered; what changes is
+    // the sentence, which may not claim a retirement nobody could check.
+    const someAnswered = loaded.some((s) => !s.error && Array.isArray(s.entries));
     // Offered somewhere and refused HERE - an unknown manifestVersion, an
     // unknown capability, or a trust rule. Not the same as retired, and not
     // silence either: dropping the row takes Remove with it, which is the one
@@ -459,7 +468,7 @@ function listForUi(config) {
     const candidates = apps
       .getManifests()
       .filter((m) => !builtinIds.has(m.id) && installedFromStore(m.id))
-      .filter((m) => answered || refused.has(m.id) || blocked.has(m.id));
+      .filter((m) => answered || someAnswered || refused.has(m.id) || blocked.has(m.id));
     if (candidates.length) {
       const listed = new Set(out.map((a) => a.id));
       const pins = readPins();
@@ -504,12 +513,24 @@ function listForUi(config) {
           // Which sentence the screen owes the person. "Retired" is a claim
           // about the world; "unreadable" is a claim about this box, and only
           // one of them is true at a time.
-          unlistedReason: blocked.has(m.id) ? "blocked" : refused.has(m.id) ? "unreadable" : "retired",
+          // "unchecked" is the fourth: nothing that answered offers it, and
+          // something did not answer, so this box cannot tell which of the
+          // other three it is.
+          unlistedReason: blocked.has(m.id)
+            ? "blocked"
+            : refused.has(m.id)
+              ? "unreadable"
+              : answered
+                ? "retired"
+                : "unchecked",
           // Where it came from, while the pin still says. It is the difference
           // between "this is stuck here" and "add that registry back".
           // Only for a retired app: a registry that is still serving this one and
           // merely speaks a newer dialect is not somewhere to be sent.
-          unlistedFrom: refused.has(m.id) || blocked.has(m.id) ? null : unlistedFrom(pins.get(m.id), configured),
+          // Not for an unchecked one either: it points at a registry to add
+          // back, and the registry to look at is the one that failed.
+          unlistedFrom:
+            refused.has(m.id) || blocked.has(m.id) || !answered ? null : unlistedFrom(pins.get(m.id), configured),
         });
       }
     }
@@ -517,7 +538,7 @@ function listForUi(config) {
     // Grouped by reason before they are handed over: they arrive id-sorted, so
     // interleaved kinds gave the panel one heading per RUN - the same heading
     // three times down one screen. Order within a kind is left alone.
-    const RANK = { retired: 0, unreadable: 1, blocked: 2 };
+    const RANK = { retired: 0, unchecked: 1, unreadable: 2, blocked: 3 };
     const tail = out.splice(catalogueLength);
     tail.sort((a, b) => RANK[a.unlistedReason] - RANK[b.unlistedReason]);
     out.push(...tail);

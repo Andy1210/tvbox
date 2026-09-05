@@ -384,7 +384,10 @@
     "unreadableGroup": "Installed, but this box cannot read what the store sent",
     "blocked": "not accepted by this box",
     "blockedDetail": "A store still offers this app, but this box does not accept its entry - the registry rules refused it. It can be removed here.",
-    "blockedGroup": "Installed, but this box does not accept what the store sent"
+    "blockedGroup": "Installed, but this box does not accept what the store sent",
+    "unchecked": "the stores that answered do not offer it",
+    "uncheckedGroup": "Installed, and not offered by the stores that answered",
+    "uncheckedDetail": "No store that answered offers this app, and at least one store could not be reached - so this box cannot tell whether it is still offered. It still works, and it can be removed here. Store sources shows which store failed."
   },
   "storeSources": {
     "title": "Store sources",

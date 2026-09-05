@@ -210,7 +210,9 @@ export function AppDetail({
                 ? "store.unreadableDetail"
                 : app.unlistedReason === "blocked"
                   ? "store.blockedDetail"
-                  : "store.unlistedDetail",
+                  : app.unlistedReason === "unchecked"
+                    ? "store.uncheckedDetail"
+                    : "store.unlistedDetail",
             )}
             {app.unlistedFrom ? " " + t("store.unlistedWasFrom", { url: app.unlistedFrom }) : ""}
           </div>

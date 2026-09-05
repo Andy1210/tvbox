@@ -101,6 +101,33 @@ describe("an app this box cannot read", () => {
   });
 });
 
+describe("an app the box could not check", () => {
+  it("says a store could not be reached, and names no registry to add back", async () => {
+    // One configured registry that is gone for good fails on every refresh, so
+    // "no source offers this" would be a claim nobody checked - and the pinned
+    // registry is not the one to go and look at. What is true is that a store
+    // did not answer.
+    const { container } = render(
+      <AppDetail
+        app={gone({ unlistedReason: "unchecked", unlistedFrom: null })}
+        onInstall={() => {}}
+        onUpdate={() => {}}
+        onFlatpakUpdate={() => {}}
+        onRemove={() => {}}
+        onSetUrl={() => {}}
+        onExit={() => {}}
+      />,
+    );
+    await settle();
+    expect(container.textContent).toContain("at least one store could not be reached");
+    expect(container.textContent).not.toContain("No source offers this app any more");
+    expect(container.textContent).not.toContain("cannot read its entry");
+    // The row exists for one reason.
+    expect(container.querySelector('[data-sfocus="detail-remove"]')).not.toBeNull();
+    expect(getCurrentFocusKey()).toBe("detail-remove");
+  });
+});
+
 describe("an app that is also a flatpak", () => {
   it("still lands the cursor on Remove", async () => {
     // The flatpak update is real - the ref is the box's, not the registry's -
@@ -154,6 +181,16 @@ describe("the store list", () => {
     const { container } = render(<StoreSettings />);
     await settle();
     expect(container.textContent).toContain("Installed, no longer offered by any source");
+    expect(container.querySelector('[data-sfocus="store-app-goneapp"]')).not.toBeNull();
+  });
+
+  it("gives an unchecked app a heading of its own, not the unreadable one", async () => {
+    const list: StoreEntry[] = [entry(), gone({ unlistedReason: "unchecked", unlistedFrom: null })];
+    stub(() => list);
+    const { container } = render(<StoreSettings />);
+    await settle();
+    expect(container.textContent).toContain("not offered by the stores that answered");
+    expect(container.textContent).not.toContain("cannot read what the store sent");
     expect(container.querySelector('[data-sfocus="store-app-goneapp"]')).not.toBeNull();
   });
 

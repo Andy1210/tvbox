@@ -5,6 +5,25 @@ updates). `scripts/make-release.sh` lifts the current version's `hu`/`en`
 blocks into the OTA feed's `notes` - keep both languages, keep it short, and
 write for the person on the couch (what changes for THEM), not for developers.
 
+## 3.11.1
+
+### hu
+
+- **Újra látszanak a telepített alkalmazások, amelyeket már egyik bolt sem
+  kínál**, így le is lehet venni őket a tévéről. Ha egy beállított bolt nem
+  válaszol - például egy fejlesztői bolt, ami már nincs a hálózaton -, a doboz
+  eddig egyáltalán nem mutatta ezeket a sorokat, az Eltávolítás pedig csak
+  soron belül érhető el. Most megjelennek, azzal a jelöléssel, hogy a doboz nem
+  tudta minden boltot megkérdezni.
+
+### en
+
+- **Installed apps that no store offers any more are visible again**, so they
+  can be taken off the television. If a configured store does not answer, a dev
+  store that is no longer on the network for instance, the box used to hide
+  those rows entirely, and Remove lives only in a row. They come back now,
+  marked as not checked against every store.
+
 ## 3.11.0
 
 ### hu

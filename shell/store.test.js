@@ -197,6 +197,10 @@ test("listForUi flags updateAvailable when the registry version is newer than in
     assert.equal(e.updateAvailable, true, "should offer an update when registry > installed");
     assert.deepEqual(list.updates, ["verapp"]);
   } finally {
+    // Every test here leaves the box as it found it: an app left installed is
+    // an app the later tests have to see, and it now gets a row of its own in
+    // any list where a source did not answer.
+    await store.uninstall("verapp");
     server.close();
   }
 });
@@ -761,6 +765,61 @@ test("a source that did not answer never makes an app look retired", async () =>
     await store.uninstall("liveapp");
   } finally {
     r.close();
+  }
+});
+
+test("one source failing still leaves the row, and it does not claim the app was retired", async () => {
+  // The other side of the rule above, and the expensive one: a configured
+  // registry that is gone for good fails on EVERY refresh, so requiring every
+  // source to answer took Remove away for good rather than for the length of an
+  // outage. Measured on both boxes here - a dev registry left on the source
+  // list hid two retired apps permanently.
+  const main = registry([manifestOnly("stuckapp", "StuckApp", "1.0.0")]);
+  const dev = registry([]);
+  const [mainUrl, devUrl] = [await main.listen(), await dev.listen()];
+  const config = {
+    rawStore: () => ({ registry: mainUrl, sources: [{ url: devUrl, name: "Dev" }] }),
+    appConfig: () => ({}),
+  };
+  try {
+    assert.equal((await store.install(config, "stuckapp")).ok, true);
+    main.state.apps = [];
+    dev.close();
+    const list = await store.listForUi(config)(true);
+    const e = list.apps.find((a) => a.id === "stuckapp");
+    assert.ok(e, "the row is where Remove lives, and one unreachable registry must not take it away");
+    assert.equal(e.unlisted, true);
+    assert.equal(e.unlistedReason, "unchecked", "a source that did not answer cannot be read as a retirement");
+    assert.equal(e.installed, true);
+    assert.equal(e.updateAvailable, false);
+    assert.equal(e.installedVersion, "1.0.0");
+    assert.equal(e.unlistedFrom, null, "the registry to look at is the one that failed, not one to add back");
+    assert.deepEqual(list.updates, []);
+    assert.equal(list.error, null, "one source of two failing is not the catalogue failing");
+    assert.equal((await store.uninstall("stuckapp")).ok, true);
+  } finally {
+    main.close();
+    dev.close();
+  }
+});
+
+test("with every source down the row stays away, because that is a passing outage", async () => {
+  // The launcher swaps the whole list for a retry screen when nothing answered,
+  // so a row here would not be seen - and "this box cannot tell" is a sentence
+  // about a catalogue that loaded, not about a box with no network.
+  const only = registry([manifestOnly("darkapp", "DarkApp", "1.0.0")]);
+  const url = await only.listen();
+  const config = { rawStore: () => ({ registry: url, sources: [] }), appConfig: () => ({}) };
+  try {
+    assert.equal((await store.install(config, "darkapp")).ok, true);
+    only.close();
+    const list = await store.listForUi(config)(true);
+    assert.ok(list.error, "every source failing is the catalogue failing");
+    const e = list.apps.find((a) => a.id === "darkapp");
+    assert.ok(!e || !e.unlisted, "nothing about the app is knowable, so nothing is claimed");
+    await store.uninstall("darkapp");
+  } finally {
+    only.close();
   }
 });
 

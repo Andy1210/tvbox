@@ -406,7 +406,9 @@ export function StoreSettings() {
                 ? t("store.unlisted")
                 : reason === "blocked"
                   ? t("store.blocked")
-                  : t("store.unreadable")
+                  : reason === "unchecked"
+                    ? t("store.unchecked")
+                    : t("store.unreadable")
               : null,
             e.source && !e.source.official ? t("store.fromSource", { name: sourceLabel(e.source) }) : null,
             e.urlConfig && e.installed && !e.baseUrl ? t("store.urlMissing") : null,
@@ -421,7 +423,9 @@ export function StoreSettings() {
                     ? t("store.unlistedGroup")
                     : reason === "blocked"
                       ? t("store.blockedGroup")
-                      : t("store.unreadableGroup")}
+                      : reason === "unchecked"
+                        ? t("store.uncheckedGroup")
+                        : t("store.unreadableGroup")}
                 </div>
               )}
               <FocusButton
