@@ -30,6 +30,11 @@ const chevron = (
   </svg>
 );
 
+/** What one catalogue read yielded: what the panel renders, and whether it may
+ *  be believed. The two are not the same question - a list read while one source
+ *  of several was down is rendered in full, and is still proof. */
+type Loaded = { apps: StoreEntry[]; read: boolean };
+
 export function StoreSettings() {
   const { t, loc } = useI18n();
   const [entries, setEntries] = useState<StoreEntry[] | null>(null);
@@ -70,7 +75,7 @@ export function StoreSettings() {
   // placed explicitly or the D-pad can never enter the panel.
   // Returns what it loaded: a caller that has just removed something needs to
   // know whether the row it was standing on still exists.
-  const load = useCallback(async (refresh = false, placeFocus = false): Promise<StoreEntry[] | null> => {
+  const load = useCallback(async (refresh = false, placeFocus = false): Promise<Loaded> => {
     const d = await fetchStore(refresh);
     const apps = d ? d.apps : [];
     const err = !d ? "network" : d.error ? "registry" : null;
@@ -86,16 +91,20 @@ export function StoreSettings() {
         if (err) setFocus("store-retry");
         else setFocus(firstKey(apps) ?? "store-empty");
       }, 0);
-    // null, not [], when the list could not be READ - which is not only a
-    // transport failure. An unreachable registry is answered 200 with an empty
-    // list and an `error` in the body, and reading that as "everything is gone"
-    // is how a removal that failed announced success.
-    // Any source failing is enough: `error` is only set when they ALL fail, and
-    // a single registry blinking out drops its apps from this list while the
-    // answer still looks healthy - which reads as "removed" for a removal that
-    // did not happen.
-    const partial = !!d && Array.isArray(d.sources) && d.sources.some((x) => x.error);
-    return d && !d.error && !partial ? apps : null;
+    // Both halves are handed back, because a caller after a removal asks two
+    // different questions of them. `apps` is what the panel RENDERS, so it is
+    // what the cursor may be sent into; `read` is whether the list may be
+    // believed as proof that a removal happened - an unreachable registry is
+    // answered 200 with an empty list and an `error` in the body, and reading
+    // that as "everything is gone" is how a removal that failed announced
+    // success.
+    //
+    // One source of several failing no longer costs that proof. It used to:
+    // a registry blinking out dropped its apps from this list while the answer
+    // still looked healthy, which reads as "removed". An INSTALLED app cannot
+    // drop out that way any more - the shell keeps a row for it and marks it
+    // `unchecked` - and an installed app is the only kind a removal is about.
+    return { apps, read: !!d && !d.error };
   }, []);
   useEffect(() => {
     load(false, true);
@@ -265,8 +274,8 @@ export function StoreSettings() {
     const before = entries || [];
     const wasAt = before.findIndex((x) => x.id === e.id);
     const ok = await storeUninstall(e.id);
-    const rest = await load();
-    const row = rest ? rest.find((x) => x.id === e.id) : undefined;
+    const { apps: shown, read } = await load();
+    const row = read ? shown.find((x) => x.id === e.id) : undefined;
     // A row does NOT disappear when an ordinary app is removed - the registry
     // still lists it, with `installed` false - so "is it still in the list" is
     // no test of anything. Only an app nobody offers loses its row.
@@ -275,7 +284,14 @@ export function StoreSettings() {
     // one round trip is refused with "not a store app", which means the FIRST
     // one worked. So a refusal is believed only while the app is still there
     // and still installed - and never when the list could not be read at all.
-    const gone = rest !== null && (row === undefined || !row.installed);
+    // One source of several failing does not cost the read: the shell keeps a
+    // row for an installed app whatever the sources answered, so "the row is
+    // gone" still means the removal happened. One exception, and it is the same
+    // one a healthy store has always had: the row is built from the manifests
+    // the box could PARSE, so an app whose manifest went bad between the render
+    // and the reload loses its row without being removed, and is reported as
+    // removed. It needs the file to be corrupted inside that window.
+    const gone = read && (row === undefined || !row.installed);
     const removed = ok || gone;
     setStatus({ id: e.id, text: t(removed ? "store.removed" : "store.failed", { name: loc(e.name) }) });
     const stillThere = !!row;
@@ -298,7 +314,10 @@ export function StoreSettings() {
     // Named, not positional. A list that grew between the press and the reload
     // put the cursor on an unrelated app - and that cursor sits one press from
     // its Uninstall.
-    const now = rest || [];
+    // What is on SCREEN, which is not the same question as what may be believed:
+    // a list read while one source of several was down is rendered in full, and
+    // the cursor has to land in the list a person is looking at.
+    const now = shown;
     const after = before.slice(wasAt + 1).find((x) => now.some((y) => y.id === x.id));
     const back = before
       .slice(0, Math.max(wasAt, 0))
@@ -308,7 +327,7 @@ export function StoreSettings() {
     // Which of the two the screen actually has: the empty button is rendered
     // only when there is no error, and the retry only when there is. Naming the
     // wrong one leaves the cursor on nothing.
-    const bare = rest === null ? "store-retry" : "store-empty";
+    const bare = read ? "store-empty" : "store-retry";
     const next = keep ? "store-app-" + keep.id : now.length ? "store-app-" + now[0].id : bare;
     // A press queued behind the removal would otherwise open whichever row the
     // cursor just landed on - and an installed app's detail opens focused on
@@ -401,12 +420,19 @@ export function StoreSettings() {
             // Only for an added registry: naming the official one on every row
             // would be noise, while an app from somewhere else is exactly what a
             // person scrolling the catalogue needs to see without opening it.
+            // An unknown reason falls where a MISSING one already falls, rather
+            // than to a second default of its own. Not to `unchecked`: that one
+            // sends the person to the store list to find the store that did not
+            // answer, and for a reason this build cannot read they would find
+            // every store answering.
             e.unlisted
-              ? reason === "retired"
-                ? t("store.unlisted")
-                : reason === "blocked"
-                  ? t("store.blocked")
-                  : t("store.unreadable")
+              ? reason === "blocked"
+                ? t("store.blocked")
+                : reason === "unreadable"
+                  ? t("store.unreadable")
+                  : reason === "unchecked"
+                    ? t("store.unchecked")
+                    : t("store.unlisted")
               : null,
             e.source && !e.source.official ? t("store.fromSource", { name: sourceLabel(e.source) }) : null,
             e.urlConfig && e.installed && !e.baseUrl ? t("store.urlMissing") : null,
@@ -417,11 +443,13 @@ export function StoreSettings() {
             <Fragment key={e.id}>
               {opensGroup && (
                 <div className="mt-[1.4vh] px-[1.5vw] text-[1.7vh] text-fg-dim">
-                  {reason === "retired"
-                    ? t("store.unlistedGroup")
-                    : reason === "blocked"
-                      ? t("store.blockedGroup")
-                      : t("store.unreadableGroup")}
+                  {reason === "blocked"
+                    ? t("store.blockedGroup")
+                    : reason === "unreadable"
+                      ? t("store.unreadableGroup")
+                      : reason === "unchecked"
+                        ? t("store.uncheckedGroup")
+                        : t("store.unlistedGroup")}
                 </div>
               )}
               <FocusButton

@@ -384,7 +384,10 @@
     "unreadableGroup": "Telepítve, de a box nem tudja értelmezni, amit a bolt küld",
     "blocked": "a box nem fogadja el",
     "blockedDetail": "Egy bolt még kínálja ezt az alkalmazást, de a box nem fogadja el a leírását - a bolti szabályok visszautasították. Innen eltávolítható.",
-    "blockedGroup": "Telepítve, de a box nem fogadja el, amit a bolt küld"
+    "blockedGroup": "Telepítve, de a box nem fogadja el, amit a bolt küld",
+    "unchecked": "egy bolt nem válaszol",
+    "uncheckedGroup": "Telepítve, de a box nem tudott minden boltot megkérdezni",
+    "uncheckedDetail": "Egy bolt nem válaszol, így a box nem tudja megmondani, kínálja-e még valaki ezt az alkalmazást. Továbbra is működik, és innen eltávolítható. A Store források képernyőn látod, melyik az."
   },
   "storeSources": {
     "title": "Store források",

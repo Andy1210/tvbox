@@ -445,6 +445,18 @@ function listForUi(config) {
     // was down - and the way back, re-adding or fixing the source, is exactly
     // what that sentence would talk them out of.
     const answered = loaded.every((s) => !s.error && Array.isArray(s.entries));
+    // But a row is where Remove lives, and requiring EVERY source took the row
+    // away from every retired app on the box for as long as one source was
+    // down. A configured registry that is gone for good fails on every refresh,
+    // so that is not a passing outage: measured on both boxes here, a dev
+    // registry left behind on the source list hid `plex` and `jellyfin`
+    // permanently, which is the state this list exists to make reachable. The
+    // row therefore survives as long as ONE source answered; what changes is
+    // the sentence, which may not claim a retirement nobody could check.
+    // `sources()` always yields at least the primary, so this is exactly "the
+    // catalogue did not fail entirely" - the same condition `error` above is
+    // set on, read from the other side.
+    const someAnswered = loaded.some((s) => !s.error && Array.isArray(s.entries));
     // Offered somewhere and refused HERE - an unknown manifestVersion, an
     // unknown capability, or a trust rule. Not the same as retired, and not
     // silence either: dropping the row takes Remove with it, which is the one
@@ -459,7 +471,7 @@ function listForUi(config) {
     const candidates = apps
       .getManifests()
       .filter((m) => !builtinIds.has(m.id) && installedFromStore(m.id))
-      .filter((m) => answered || refused.has(m.id) || blocked.has(m.id));
+      .filter((m) => someAnswered || refused.has(m.id) || blocked.has(m.id));
     if (candidates.length) {
       const listed = new Set(out.map((a) => a.id));
       const pins = readPins();
@@ -504,11 +516,31 @@ function listForUi(config) {
           // Which sentence the screen owes the person. "Retired" is a claim
           // about the world; "unreadable" is a claim about this box, and only
           // one of them is true at a time.
-          unlistedReason: blocked.has(m.id) ? "blocked" : refused.has(m.id) ? "unreadable" : "retired",
+          // "unchecked" is the fourth: nothing that answered offers it, and
+          // something did not answer, so this box cannot tell which of the
+          // other three it is.
+          //
+          // `refused` and `blocked` are collected from EVERY source, so any
+          // configured registry can pick this sentence for an app it never
+          // shipped, by publishing that id with an unknown manifestVersion or a
+          // refused capability. That is the price of judging a refusal on the
+          // source that answered, and a registry is trusted to install code
+          // here anyway - but it means the sentence is remotely steerable.
+          unlistedReason: blocked.has(m.id)
+            ? "blocked"
+            : refused.has(m.id)
+              ? "unreadable"
+              : answered
+                ? "retired"
+                : "unchecked",
           // Where it came from, while the pin still says. It is the difference
           // between "this is stuck here" and "add that registry back".
           // Only for a retired app: a registry that is still serving this one and
           // merely speaks a newer dialect is not somewhere to be sent.
+          // Said for an unchecked app too: the pin only names a registry the box
+          // NO LONGER has, and a different source being down says nothing about
+          // that one. A pin naming the source that failed is already suppressed,
+          // because that source is still configured.
           unlistedFrom: refused.has(m.id) || blocked.has(m.id) ? null : unlistedFrom(pins.get(m.id), configured),
         });
       }
@@ -517,7 +549,7 @@ function listForUi(config) {
     // Grouped by reason before they are handed over: they arrive id-sorted, so
     // interleaved kinds gave the panel one heading per RUN - the same heading
     // three times down one screen. Order within a kind is left alone.
-    const RANK = { retired: 0, unreadable: 1, blocked: 2 };
+    const RANK = { retired: 0, unchecked: 1, unreadable: 2, blocked: 3 };
     const tail = out.splice(catalogueLength);
     tail.sort((a, b) => RANK[a.unlistedReason] - RANK[b.unlistedReason]);
     out.push(...tail);
