@@ -136,7 +136,11 @@ jobs:
           sudo apt-get install -y -qq dosfstools e2fsprogs
           sudo -E scripts/image-smoke.sh --self-test
 
+      # A test that HANGS rather than fails costs the job's whole default budget
+      # of six hours. The suites here drive real threads and real pipes, which is
+      # exactly the shape that can hang, so the job says how long it may take.
       - name: python unit tests (keymap compiler + IR protocol encoders, no hardware)
+        timeout-minutes: 10
         run: |
           python3 remote/keymap_compile.py
           python3 remote/ir_protocols_test.py
