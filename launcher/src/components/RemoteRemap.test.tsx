@@ -27,7 +27,10 @@ const CONFIG = {
   },
 };
 
-function stubShell() {
+// `learnedCode` makes the bridge report that button as just pressed, which is
+// how the reassign question is reached: the code is already bound to another
+// action, so the screen asks before stealing it.
+function stubShell(learnedCode?: number) {
   const posted: { url: string; body: unknown }[] = [];
   // The box's own answer shape, and it is load-bearing: `postConfig` THROWS
   // unless the response carries a `config`, so a stub answering `{ok:true}` made
@@ -51,7 +54,15 @@ function stubShell() {
       return json({ ok: true });
     }
     if (String(url).includes("/remote/devices")) return json({ devices: [{ id: MAC, name: "AR" }] });
-    if (String(url).includes("/remote/learned")) return json({ learned: null });
+    if (String(url).includes("/remote/learned"))
+      return json({
+        // The screen ignores a capture older than the moment it armed, so this
+        // has to be stamped now rather than with a fixed number.
+        learned:
+          learnedCode === undefined
+            ? null
+            : { id: MAC, code: learnedCode, name: "KEY_X", ts: Math.floor(Date.now() / 1000) },
+      });
     if (String(url).includes("/finder/capable")) return json({ macs: [], ringing: null });
     if (String(url).includes("/firetvir/programmable")) return json({ macs: [] });
     if (String(url).includes("/api/apps")) return json({ apps: [] });
@@ -326,5 +337,45 @@ describe("an OK that is still held down", () => {
     await remote.ok();
     await settle();
     expect(container.querySelector('[data-sfocus="remote-learn-cancel"]')).toBeTruthy();
+  });
+});
+
+// The confirm button has two branches and only the destructive one is exercised
+// above, so a regression that painted the reassign confirm accent again would
+// have gone through. This is the other branch, reached the way a user reaches
+// it: teach a button that is already bound to something else.
+describe("the reassign question's buttons", () => {
+  beforeEach(() => {
+    useConfigStore.setState({ config: CONFIG as never, error: false });
+  });
+  afterEach(() => {
+    cleanup();
+    vi.unstubAllGlobals();
+  });
+
+  it("carry no fill either, and no warning colour on a question that destroys nothing", async () => {
+    // 1075 is the code `settings` already holds, so learning it for another
+    // action is the conflict.
+    stubShell(1075);
+    const { container } = render(<Screen />);
+    await settle();
+    await openButtons();
+
+    await press("Home"); // arms learn mode for the `home` action
+    // The screen polls the bridge every 250 ms for the captured code.
+    await act(async () => await new Promise((r) => setTimeout(r, 600)));
+
+    expect(screen.getByText("Button already mapped")).toBeTruthy();
+    const yes = container.querySelector('[data-sfocus="remote-confirm-yes"]');
+    const no = container.querySelector('[data-sfocus="remote-confirm-no"]');
+    expect(yes).toBeTruthy();
+    expect(no).toBeTruthy();
+    for (const b of [yes as Element, no as Element]) {
+      expect(b.className).not.toMatch(/\bbg-accent\b/);
+      expect(b.className).not.toMatch(/\bbg-warn\b/);
+    }
+    // Nothing is thrown away by reassigning, so this one carries no warning
+    // colour at all: the two buttons differ by their labels and the cursor.
+    expect((yes as Element).className).not.toMatch(/\btext-warn\b/);
   });
 });
