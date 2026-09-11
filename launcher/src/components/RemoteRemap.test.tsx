@@ -153,14 +153,17 @@ describe("a taught row's Clear button", () => {
   // wider than the 1vw gap beside it. Measured in Chromium with the launcher's
   // own CSS at 1920x1080: the action button ends at 998.07 while Clear starts
   // at 997.69, so `sibling.left >= current.right` is false and Clear was in no
-  // candidate list at all. Placed here to the same tenth of a pixel, so a
-  // future "simplification" back to geometry fails instead of shipping.
+  // candidate list at all. The horizontal edges below are those measurements to
+  // the tenth of a pixel, which is what the assertions turn on, so a future
+  // "simplification" back to geometry fails instead of shipping. The heights
+  // are rounded: nothing here reads them.
+  //
   // Which of the pair is scaled depends on which one the cursor is on, so the
-  // two directions are two different sets of numbers - both measured.
+  // two directions are two different sets of numbers.
   const ACTION_FOCUSED = { x: -19.57, y: 200, w: 1017.64, h: 61 };
   const ACTION_PLAIN = { x: 0, y: 200, w: 978.5, h: 59 };
-  const CLEAR_PLAIN = { x: 997.69, y: 202, w: 92.31, h: 55 };
-  const CLEAR_FOCUSED = { x: 995.37, y: 201, w: 96, h: 57 };
+  const CLEAR_PLAIN = { x: 997.69, y: 202, w: 115.91, h: 55 };
+  const CLEAR_FOCUSED = { x: 995.37, y: 201, w: 120.55, h: 57 };
 
   it("is reachable with Right, with the row's real overlapping geometry", async () => {
     stubShell();
@@ -211,11 +214,19 @@ describe("a taught row's Clear button", () => {
     await openButtons();
 
     // `up` is in the action list and unbound, so it has no Clear button - and
-    // Right there must stay geometry's to answer, or a row with no button
-    // beside it would eat the press.
+    // Right there must stay geometry's to answer. Dropping the `bound` half of
+    // the guard is not a cosmetic slip: `setFocus` to a key no component has is
+    // not refused, it makes that key the current focus, and the cursor is then
+    // on nothing. Every arrow and every OK is silently discarded and only Back
+    // gets out, on 28 of this screen's 31 rows.
     const unboundKey = keyBase(MAC) + "-up";
     expect(container.querySelector(`[data-sfocus="${unboundKey}"]`)).toBeTruthy();
     expect(container.querySelector(`[data-sfocus="${keyBase(MAC)}-clear-up"]`)).toBeNull();
+
+    place(container.querySelector(`[data-sfocus="${unboundKey}"]`) as Element, 0, 200, 1017.64, 61);
+    await navSetFocus(unboundKey);
+    await remote.right();
+    expect(getCurrentFocusKey()).toBe(unboundKey);
   });
 });
 

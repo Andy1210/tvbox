@@ -171,6 +171,17 @@ export function RemoteKeymapPage({ device }: { device: { id: string; name: strin
   // save or a clear updates the store instantly.
   const km = saved[id]?.keymap || {};
 
+  // The page itself swallows auto-repeated OK, not only the overlays.
+  //
+  // A press here can put a DIFFERENT control under the cursor and finish before
+  // the physical button is released: Clear deletes the mapping, unmounts itself
+  // and puts the cursor back on the row, so the hold's next repeat lands on the
+  // row and arms learn mode. The bridge then swallows every press on this
+  // remote for ten seconds, and the first fresh button pressed - whatever the
+  // user reaches for when the remote seems dead - gets bound to the action they
+  // had just cleared. Resetting refocuses a row the same way.
+  useSwallowEnterRepeats();
+
   const [learning, setLearning] = useState<RemoteAction | null>(null);
   const [testing, setTesting] = useState(false);
   const [testKeys, setTestKeys] = useState<{ name: string; code: number; ts: number }[]>([]);
@@ -443,13 +454,20 @@ export function RemoteKeymapPage({ device }: { device: { id: string; name: strin
                     // right edge. The direction filter is strict
                     // (`sibling.left >= current.right`), so Clear was dropped
                     // from the candidate list and could not be reached at all.
-                    // Measured 1920x1080, 1360x768 and 3840x2160: the overlap
-                    // is 0.38, 0.27 and 0.75 px - it is a ratio, so no
-                    // resolution escapes it.
+                    // Measured at 1920x1080, 1360x768 and 3840x2160, all 16:9:
+                    // the overlap is 0.38, 0.27 and 0.75 px. A focused button
+                    // is clipped whenever it is wider than 50x the gap, so it
+                    // is a ratio rather than a pixel count, and the row is
+                    // about 2% over it.
                     //
-                    // Only this one direction: Left off a row is how the page
-                    // is left, and Up and Down still have candidates that are
-                    // really above and below.
+                    // Only this one direction, and only where there is
+                    // something to reach: `setFocus` to a key no component has
+                    // is not refused, it parks the cursor on nothing, and then
+                    // every arrow and OK is silently discarded with only Back
+                    // left. Up and Down still have candidates really above and
+                    // below, and Left has nothing to reach on this page (a
+                    // pushed page makes the category rail unfocusable) and must
+                    // stay that way.
                     onArrowPress={(dir) => {
                       if (!bound || dir !== "right") return true;
                       setFocus(clearKey);
@@ -468,10 +486,11 @@ export function RemoteKeymapPage({ device }: { device: { id: string; name: strin
                     <FocusButton
                       focusKey={clearKey}
                       onEnter={() => clearAction(a)}
-                      // The way back, declared for the same reason - here the
-                      // scaled box is the small one, so today it measures
-                      // clear; saying it leaves no mirror of the bug above for
-                      // a longer translation of "Clear" to reintroduce.
+                      // The way back. This direction measures clear on its own,
+                      // because the scaled box here is the small one and the
+                      // 50x rule leaves it a wide margin - so it is declared
+                      // for symmetry, to make the pair one decision rather than
+                      // half a declared move and half a measured one.
                       onArrowPress={(dir) => {
                         if (dir !== "left") return true;
                         setFocus(rowKey);
