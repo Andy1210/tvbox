@@ -187,6 +187,35 @@ export function RemoteKeymapPage({ device }: { device: { id: string; name: strin
   // field added below this page would have to turn THIS one off.
   useSwallowEnterRepeats();
 
+  // Every refocus on this page is deferred a tick, because the row being
+  // returned to is often one React has not committed yet. A deferred focus can
+  // therefore land after the page has gone: Back does not wait for a save in
+  // flight, so leaving while one is pending used to fire `setFocus` at a key
+  // that no longer exists - and spatial navigation does not refuse that, it
+  // makes the missing key the current focus, which leaves the page underneath
+  // with a dead D-pad and only Back working.
+  //
+  // So the timers are owned: cancelled on unmount, and checked again when they
+  // fire, since one armed in the same tick as the unmount has already been
+  // scheduled.
+  const mounted = useRef(true);
+  const timers = useRef<ReturnType<typeof setTimeout>[]>([]);
+  useEffect(
+    () => () => {
+      mounted.current = false;
+      for (const t of timers.current) clearTimeout(t);
+      timers.current = [];
+    },
+    [],
+  );
+  const refocus = (key: string) => {
+    timers.current.push(
+      setTimeout(() => {
+        if (mounted.current) setFocus(key);
+      }, 0),
+    );
+  };
+
   const [learning, setLearning] = useState<RemoteAction | null>(null);
   const [testing, setTesting] = useState(false);
   const [testKeys, setTestKeys] = useState<{ name: string; code: number; ts: number }[]>([]);
@@ -273,7 +302,7 @@ export function RemoteKeymapPage({ device }: { device: { id: string; name: strin
     try {
       await setRemote(next);
     } finally {
-      setTimeout(() => setFocus(keyBase(id) + "-" + action), 0);
+      refocus(keyBase(id) + "-" + action);
     }
   };
   const resetDevice = async () => {
@@ -282,7 +311,7 @@ export function RemoteKeymapPage({ device }: { device: { id: string; name: strin
     // remote); reload the store to pick up the result
     await resetRemote(id);
     await load();
-    setTimeout(() => setFocus(keyBase(id) + "-" + REMOTE_ACTIONS[0]), 0);
+    refocus(keyBase(id) + "-" + REMOTE_ACTIONS[0]);
   };
 
   // Learn: tell the bridge to capture the next button on this device, poll for it.
@@ -302,7 +331,7 @@ export function RemoteKeymapPage({ device }: { device: { id: string; name: strin
       clearTimeout(to);
       void learnRemoteOff();
       setLearning(null);
-      setTimeout(() => setFocus(keyBase(id) + "-" + action), 0);
+      refocus(keyBase(id) + "-" + action);
     };
     const poll = setInterval(async () => {
       const lb = await fetchLearned();
@@ -366,7 +395,7 @@ export function RemoteKeymapPage({ device }: { device: { id: string; name: strin
       clearInterval(poll);
       clearTimeout(idleTimer);
       void learnRemoteOff();
-      setTimeout(() => setFocus(keyBase(id) + "-test"), 0);
+      refocus(keyBase(id) + "-test");
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [testing]);
@@ -378,7 +407,7 @@ export function RemoteKeymapPage({ device }: { device: { id: string; name: strin
     const c = conflict;
     const to = setTimeout(() => {
       setConflict(null);
-      setTimeout(() => setFocus(keyBase(id) + "-" + c.action), 0);
+      refocus(keyBase(id) + "-" + c.action);
     }, 20000);
     return () => clearTimeout(to);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -397,13 +426,13 @@ export function RemoteKeymapPage({ device }: { device: { id: string; name: strin
     if (!learning) return;
     const action = learning;
     setLearning(null);
-    setTimeout(() => setFocus(keyBase(id) + "-" + action), 0);
+    refocus(keyBase(id) + "-" + action);
   };
   const closeConflict = () => {
     const c = conflict;
     if (!c) return;
     setConflict(null);
-    setTimeout(() => setFocus(keyBase(id) + "-" + c.action), 0);
+    refocus(keyBase(id) + "-" + c.action);
   };
 
   return (
@@ -568,7 +597,7 @@ export function RemoteKeymapPage({ device }: { device: { id: string; name: strin
           onCancel={() => {
             setResetting(false);
             // Back on the row that asked, not at the top of the list.
-            setTimeout(() => setFocus(keyBase(id) + "-reset"), 0);
+            refocus(keyBase(id) + "-reset");
           }}
         />
       )}

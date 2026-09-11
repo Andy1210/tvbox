@@ -30,7 +30,12 @@ const CONFIG = {
 // `learnedCode` makes the bridge report that button as just pressed, which is
 // how the reassign question is reached: the code is already bound to another
 // action, so the screen asks before stealing it.
-function stubShell(learnedCode?: number) {
+//
+// `hold` keeps every config write pending until it is released, which is the
+// only way to write the "leave while a save is in flight" case without racing
+// it: the press arms the save, the release decides when it finishes, and the
+// test chooses what happens in between.
+function stubShell(learnedCode?: number, hold?: { wait: Promise<void> }) {
   const posted: { url: string; body: unknown }[] = [];
   // The box's own answer shape, and it is load-bearing: `postConfig` THROWS
   // unless the response carries a `config`, so a stub answering `{ok:true}` made
@@ -49,7 +54,8 @@ function stubShell(learnedCode?: number) {
         // which is what `saveRemote` is written against.
         const remote = { ...(live.remote as object), ...(body.remote as object) };
         live = { ...live, remote };
-        return json({ ok: true, config: live });
+        const answer = () => json({ ok: true, config: live });
+        return hold ? hold.wait.then(answer) : answer();
       }
       return json({ ok: true });
     }
@@ -377,5 +383,59 @@ describe("the reassign question's buttons", () => {
     // Nothing is thrown away by reassigning, so this one carries no warning
     // colour at all: the two buttons differ by their labels and the cursor.
     expect((yes as Element).className).not.toMatch(/\btext-warn\b/);
+  });
+});
+
+// Leaving the page while a save is in flight.
+//
+// Back does not wait for one, and every refocus here is deferred a tick, so a
+// timer armed by the press could fire after the page had gone. Spatial
+// navigation does not refuse a key that no longer exists - it makes it the
+// current focus - so the page underneath would be left with a dead D-pad and
+// only Back working.
+describe("leaving while a save is still going", () => {
+  beforeEach(() => {
+    useConfigStore.setState({ config: CONFIG as never, error: false });
+  });
+  afterEach(() => {
+    cleanup();
+    vi.unstubAllGlobals();
+  });
+
+  it("does not move the cursor once the page is gone", async () => {
+    let release = () => {};
+    const hold = { wait: new Promise<void>((r) => (release = r)) };
+    stubShell(undefined, hold);
+    const { container } = render(<Screen />);
+    await settle();
+    await openButtons();
+
+    const rowKey = keyBase(MAC) + "-settings";
+    const clearKey = keyBase(MAC) + "-clear-settings";
+    await navSetFocus(clearKey);
+
+    // The press. Its save cannot finish yet, so no refocus is armed.
+    await act(async () => {
+      (container.querySelector(`[data-sfocus="${clearKey}"]`) as HTMLElement).click();
+    });
+    await settle();
+    expect(screen.queryByText("Button test")).toBeTruthy();
+
+    // Back, while the write is still out. The page goes.
+    await act(async () => {
+      window.dispatchEvent(new KeyboardEvent("keydown", { key: "Backspace", bubbles: true }));
+    });
+    await settle();
+    expect(screen.queryByText("Button test")).toBeNull();
+    const landed = getCurrentFocusKey();
+
+    // Only now does the box answer, so the refocus is armed against a page that
+    // no longer exists. It must not fire.
+    await act(async () => {
+      release();
+      await new Promise((r) => setTimeout(r, 20));
+    });
+    expect(getCurrentFocusKey()).toBe(landed);
+    expect(getCurrentFocusKey()).not.toBe(rowKey);
   });
 });
