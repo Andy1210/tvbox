@@ -5,6 +5,31 @@ updates). `scripts/make-release.sh` lifts the current version's `hu`/`en`
 blocks into the OTA feed's `notes` - keep both languages, keep it short, and
 write for the person on the couch (what changes for THEM), not for developers.
 
+## 3.11.2
+
+### hu
+
+- **A Törlés gombra rá lehet állni a távirányító gombjainál.** A doboz nem látta
+  a kijelölt sor mellett lévőnek, így a jobbra nyíl nem csinált semmit. Most a
+  sorból jobbra a Törlés jön, balra vissza a sor.
+- **A kérdéseken csak a kijelölt gomb világít.** A másik gomb színes kitöltést
+  kapott, amitől a kérdés már megválaszoltnak látszott, ráadásul fordítva.
+- **Egy hosszabb OK-nyomás nem indít el véletlenül gombtanítást.** A Törlés után
+  a még nyomva tartott OK ismétlése eddig elindította a tanítást, és a
+  következő megnyomott gomb a most törölt művelethez került.
+
+### en
+
+- **The Clear button in a remote's button list can be reached.** The box did not
+  see it as being beside the highlighted row, so Right did nothing. Right from a
+  row now goes to Clear, and Left comes back.
+- **Only the highlighted button lights up on the questions.** The other one
+  carried a coloured fill, which made the question look already answered, and
+  answered the wrong way round.
+- **A slightly long OK press no longer starts teaching a button by accident.**
+  After Clear, the repeat of an OK still being held used to start teaching, and
+  the next button pressed was bound to the action just cleared.
+
 ## 3.11.1
 
 ### hu

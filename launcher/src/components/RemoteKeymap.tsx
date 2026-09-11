@@ -95,8 +95,14 @@ function LearnOverlay({ action, remote, onCancel }: { action: string; remote: st
 // FOCUS BOUNDARY, so a press from another remote mid-learn cannot wander onto a row
 // behind it. It defaults to CANCEL, because the press that opened it may still be
 // arriving (a taught remote sends its own stray events, and a held OK repeats). And
-// `destructive` colours the confirm as a warning rather than as the accent, so the
-// bright, safe-looking button is never the one that throws work away.
+// NEITHER button carries a fill of its own: focus is the single unmistakable
+// highlight in this UI - a white fill with dark text - so a second filled button
+// beside it reads as the selected one. The confirm used to be painted accent
+// (warn when `destructive`), which put a bright blue button next to the white
+// cursor and made the question look already answered, and answered the other way.
+// The dangerous-action cue stays, as the confirm's TEXT colour: warn on an
+// unfocused destructive confirm, and overridden by the focus fill's own dark text
+// when the cursor is on it.
 function ConfirmOverlay({
   title,
   body,
@@ -134,8 +140,8 @@ function ConfirmOverlay({
             focusKey="remote-confirm-yes"
             onEnter={onConfirm}
             className={
-              "px-[2.4vw] py-[1.4vh] rounded-[1.1vh] text-[#06090d] text-[2vh] font-semibold " +
-              (destructive ? "bg-warn" : "bg-accent")
+              "px-[2.4vw] py-[1.4vh] rounded-[1.1vh] bg-white/5 text-[2vh] font-semibold " +
+              (destructive ? "text-warn" : "")
             }
           >
             {confirmLabel}
@@ -164,6 +170,51 @@ export function RemoteKeymapPage({ device }: { device: { id: string; name: strin
   // The keymap comes from the config store, NOT from the polled device list: a
   // save or a clear updates the store instantly.
   const km = saved[id]?.keymap || {};
+
+  // The page itself swallows auto-repeated OK, not only the overlays.
+  //
+  // A press here can put a DIFFERENT control under the cursor and finish before
+  // the physical button is released: Clear deletes the mapping, unmounts itself
+  // and puts the cursor back on the row, so the hold's next repeat lands on the
+  // row and arms learn mode. The bridge then swallows every press on this
+  // remote for ten seconds, and the first fresh button pressed - whatever the
+  // user reaches for when the remote seems dead - gets bound to the action they
+  // had just cleared. Resetting refocuses a row the same way.
+  //
+  // It runs before the overlays' own copies and stops propagation, so an
+  // overlay under this page can no longer switch the swallow off with the
+  // hook's `enabled` argument. Nothing here types, so nothing needs to; a text
+  // field added below this page would have to turn THIS one off.
+  useSwallowEnterRepeats();
+
+  // Every refocus on this page is deferred a tick, because the row being
+  // returned to is often one React has not committed yet. A deferred focus can
+  // therefore land after the page has gone: Back does not wait for a save in
+  // flight, so leaving while one is pending used to fire `setFocus` at a key
+  // that no longer exists - and spatial navigation does not refuse that, it
+  // makes the missing key the current focus, which leaves the page underneath
+  // with a dead D-pad and only Back working.
+  //
+  // So the timers are owned: cancelled on unmount, and checked again when they
+  // fire, since one armed in the same tick as the unmount has already been
+  // scheduled.
+  const mounted = useRef(true);
+  const timers = useRef<ReturnType<typeof setTimeout>[]>([]);
+  useEffect(
+    () => () => {
+      mounted.current = false;
+      for (const t of timers.current) clearTimeout(t);
+      timers.current = [];
+    },
+    [],
+  );
+  const refocus = (key: string) => {
+    timers.current.push(
+      setTimeout(() => {
+        if (mounted.current) setFocus(key);
+      }, 0),
+    );
+  };
 
   const [learning, setLearning] = useState<RemoteAction | null>(null);
   const [testing, setTesting] = useState(false);
@@ -242,8 +293,25 @@ export function RemoteKeymapPage({ device }: { device: { id: string; name: strin
       // drop the emptied entry only if it carries nothing else (irPassthrough)
       if (!Object.keys(next[id].keymap).length && !next[id].irPassthrough) delete next[id];
     }
-    await setRemote(next);
-    setTimeout(() => setFocus(keyBase(id) + "-" + action), 0);
+    // On SUCCESS only, and the distinction is the whole point: the Clear button
+    // unmounts when the store loses the mapping, so the row is where the cursor
+    // has to go. A save that failed leaves the mapping - and the button - in
+    // place, and moving off it would put the cursor on a row whose OK starts
+    // TEACHING that action, one press after somebody asked to clear it. Leaving
+    // the cursor where it is makes the next press the retry.
+    //
+    // The failure is CAUGHT rather than left to escape: nothing awaits this
+    // handler, so a rejection here is an unhandled one, and the box's shell
+    // logs those as renderer errors with no line that says which press caused
+    // it. The screen still says nothing, which is what every config write on
+    // this page does and is a bigger question than this change.
+    try {
+      await setRemote(next);
+    } catch (e) {
+      console.warn("[launcher] clearing a remote button failed:", e);
+      return;
+    }
+    refocus(keyBase(id) + "-" + action);
   };
   const resetDevice = async () => {
     // through the shell endpoint, which keeps irPassthrough (a client-side delete of
@@ -251,7 +319,7 @@ export function RemoteKeymapPage({ device }: { device: { id: string; name: strin
     // remote); reload the store to pick up the result
     await resetRemote(id);
     await load();
-    setTimeout(() => setFocus(keyBase(id) + "-" + REMOTE_ACTIONS[0]), 0);
+    refocus(keyBase(id) + "-" + REMOTE_ACTIONS[0]);
   };
 
   // Learn: tell the bridge to capture the next button on this device, poll for it.
@@ -271,7 +339,7 @@ export function RemoteKeymapPage({ device }: { device: { id: string; name: strin
       clearTimeout(to);
       void learnRemoteOff();
       setLearning(null);
-      setTimeout(() => setFocus(keyBase(id) + "-" + action), 0);
+      refocus(keyBase(id) + "-" + action);
     };
     const poll = setInterval(async () => {
       const lb = await fetchLearned();
@@ -335,7 +403,7 @@ export function RemoteKeymapPage({ device }: { device: { id: string; name: strin
       clearInterval(poll);
       clearTimeout(idleTimer);
       void learnRemoteOff();
-      setTimeout(() => setFocus(keyBase(id) + "-test"), 0);
+      refocus(keyBase(id) + "-test");
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [testing]);
@@ -347,7 +415,7 @@ export function RemoteKeymapPage({ device }: { device: { id: string; name: strin
     const c = conflict;
     const to = setTimeout(() => {
       setConflict(null);
-      setTimeout(() => setFocus(keyBase(id) + "-" + c.action), 0);
+      refocus(keyBase(id) + "-" + c.action);
     }, 20000);
     return () => clearTimeout(to);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -366,13 +434,13 @@ export function RemoteKeymapPage({ device }: { device: { id: string; name: strin
     if (!learning) return;
     const action = learning;
     setLearning(null);
-    setTimeout(() => setFocus(keyBase(id) + "-" + action), 0);
+    refocus(keyBase(id) + "-" + action);
   };
   const closeConflict = () => {
     const c = conflict;
     if (!c) return;
     setConflict(null);
-    setTimeout(() => setFocus(keyBase(id) + "-" + c.action), 0);
+    refocus(keyBase(id) + "-" + c.action);
   };
 
   return (
@@ -419,13 +487,44 @@ export function RemoteKeymapPage({ device }: { device: { id: string; name: strin
             </FocusButton>
             {allActions.map((a) => {
               const bound = (km[a] || []).length > 0;
+              const rowKey = keyBase(id) + "-" + a;
+              const clearKey = keyBase(id) + "-clear-" + a;
               // during a learn the row stays mounted under the modal overlay, so
               // focus returns to it when the modal closes
               return (
                 <div key={a} className="flex items-center gap-[1vw]">
                   <FocusButton
-                    focusKey={keyBase(id) + "-" + a}
+                    focusKey={rowKey}
                     onEnter={() => !learning && setLearning(a)}
+                    // Sideways inside the row is DECLARED, because geometry
+                    // cannot answer it. A focused FocusButton grows 4%, and
+                    // spatial navigation measures the transformed box - on a
+                    // row that fills the settings width, 4% of the action
+                    // button is wider than the 1vw gap beside it, so the Clear
+                    // button's left edge lands inside the focused button's
+                    // right edge. The direction filter is strict
+                    // (`sibling.left >= current.right`), so Clear was dropped
+                    // from the candidate list and could not be reached at all.
+                    // Measured in the Hungarian UI at 1920x1080, 1360x768 and
+                    // 3840x2160, all 16:9: the overlap is 0.38, 0.27 and
+                    // 0.75 px, and in English 0.55, 0.39 and 1.09. A focused
+                    // button is clipped whenever it is wider than 50x the gap,
+                    // so it is a ratio rather than a pixel count, and the row
+                    // is over it by 1.9% in Hungarian and 2.8% in English.
+                    //
+                    // Only this one direction, and only where there is
+                    // something to reach: `setFocus` to a key no component has
+                    // is not refused, it parks the cursor on nothing, and then
+                    // every arrow and OK is silently discarded with only Back
+                    // left. Up and Down still have candidates really above and
+                    // below, and Left has nothing to reach on this page (a
+                    // pushed page makes the category rail unfocusable) and must
+                    // stay that way.
+                    onArrowPress={(dir) => {
+                      if (!bound || dir !== "right") return true;
+                      setFocus(clearKey);
+                      return false;
+                    }}
                     className="flex-1 px-[2vw] py-[1.3vh] rounded-[1.1vh] bg-white/5 flex items-center gap-[1.2vw] min-w-0"
                   >
                     <span className="text-[2vh] flex-1 text-left truncate">{actionLabel(a)}</span>
@@ -437,8 +536,18 @@ export function RemoteKeymapPage({ device }: { device: { id: string; name: strin
                   </FocusButton>
                   {bound && (
                     <FocusButton
-                      focusKey={keyBase(id) + "-clear-" + a}
+                      focusKey={clearKey}
                       onEnter={() => clearAction(a)}
+                      // The way back. This direction measures clear on its own,
+                      // because the scaled box here is the small one and the
+                      // 50x rule leaves it a wide margin - so it is declared
+                      // for symmetry, to make the pair one decision rather than
+                      // half a declared move and half a measured one.
+                      onArrowPress={(dir) => {
+                        if (dir !== "left") return true;
+                        setFocus(rowKey);
+                        return false;
+                      }}
                       className="px-[1.4vw] py-[1.3vh] rounded-[1.1vh] bg-white/5 text-[1.7vh] font-semibold shrink-0"
                     >
                       {t("remote.clear")}
@@ -496,7 +605,7 @@ export function RemoteKeymapPage({ device }: { device: { id: string; name: strin
           onCancel={() => {
             setResetting(false);
             // Back on the row that asked, not at the top of the list.
-            setTimeout(() => setFocus(keyBase(id) + "-reset"), 0);
+            refocus(keyBase(id) + "-reset");
           }}
         />
       )}

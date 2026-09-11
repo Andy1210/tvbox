@@ -100,6 +100,32 @@ async function fire(key: string): Promise<void> {
   });
 }
 
+// The autorepeat of an OK that is still physically held. Chromium synthesizes
+// these while a button is down, and a press that moves the cursor before the
+// finger lifts therefore fires again on whatever is under it now.
+//
+// Its own function because of the `repeat: true` and the absent keyup: a held
+// key sends one keydown per repeat and no keyup until it is let go.
+//
+// Dispatched at document.body rather than at window because that is what the
+// box delivers - a real key event's target is always an element, never window.
+// The distinction is only real in CHROMIUM, and only there: measured, a
+// capture listener on window precedes the target for an event aimed at an
+// element, while for one dispatched AT window there is no capture phase and
+// window's listeners run in registration order, which would put spatial
+// navigation (registered at init, before any component) ahead of a swallow
+// mounted later. happy-dom runs capture first whatever the target, so either
+// spelling passes this suite - measured both ways, and the assertion is
+// unchanged. Model the box anyway, or the next reader measures the harness.
+async function fireRepeat(key: string): Promise<void> {
+  await act(async () => {
+    updateAllLayouts();
+    await drainScheduler();
+    document.body.dispatchEvent(new KeyboardEvent("keydown", { key, bubbles: true, repeat: true }));
+    await drainScheduler();
+  });
+}
+
 // The remote as the shell delivers it. Arrows + OK(Enter) go through norigin;
 // Back is a plain Backspace that the shell preload synthesizes and useBackspace
 // (a capture-phase listener) handles - norigin ignores it. Await every press:
@@ -111,6 +137,8 @@ export const remote = {
   right: (): Promise<void> => fire("ArrowRight"),
   ok: (): Promise<void> => fire("Enter"),
   back: (): Promise<void> => fire("Backspace"),
+  // OK held down: the repeat, without a fresh press in front of it.
+  okHeld: (): Promise<void> => fireRepeat("Enter"),
 };
 
 // norigin's setFocus is scheduler-bound since 3.2.1 - this wrapper awaits the
