@@ -293,17 +293,14 @@ export function RemoteKeymapPage({ device }: { device: { id: string; name: strin
       // drop the emptied entry only if it carries nothing else (irPassthrough)
       if (!Object.keys(next[id].keymap).length && !next[id].irPassthrough) delete next[id];
     }
-    // The refocus happens whether or not the box accepted the write. The
-    // button unmounts only on success, so a failed save leaves the cursor on a
-    // Clear button that did nothing - but a save that THREW used to skip this
-    // line entirely, and the row it would have returned to is the only thing
-    // the cursor can be on once the button does go. Reachable by remote for the
-    // first time with this change, which is why it is guarded here.
-    try {
-      await setRemote(next);
-    } finally {
-      refocus(keyBase(id) + "-" + action);
-    }
+    // On SUCCESS only, and the distinction is the whole point: the Clear button
+    // unmounts when the store loses the mapping, so the row is where the cursor
+    // has to go. A save that failed leaves the mapping - and the button - in
+    // place, and moving off it would put the cursor on a row whose OK starts
+    // TEACHING that action, one press after somebody asked to clear it. Leaving
+    // the cursor where it is makes the next press the retry.
+    await setRemote(next);
+    refocus(keyBase(id) + "-" + action);
   };
   const resetDevice = async () => {
     // through the shell endpoint, which keeps irPassthrough (a client-side delete of

@@ -35,7 +35,7 @@ const CONFIG = {
 // only way to write the "leave while a save is in flight" case without racing
 // it: the press arms the save, the release decides when it finishes, and the
 // test chooses what happens in between.
-function stubShell(learnedCode?: number, hold?: { wait: Promise<void> }) {
+function stubShell(learnedCode?: number, hold?: { wait: Promise<void> }, failWrites?: boolean) {
   const posted: { url: string; body: unknown }[] = [];
   // The box's own answer shape, and it is load-bearing: `postConfig` THROWS
   // unless the response carries a `config`, so a stub answering `{ok:true}` made
@@ -54,7 +54,11 @@ function stubShell(learnedCode?: number, hold?: { wait: Promise<void> }) {
         // which is what `saveRemote` is written against.
         const remote = { ...(live.remote as object), ...(body.remote as object) };
         live = { ...live, remote };
-        const answer = () => json({ ok: true, config: live });
+        // A write the box refuses. `postConfig` throws on a non-2xx and on a
+        // 200 that carries no `config`, so either shape is the same rejection
+        // to the screen; this is the second, which is the one a half-updated
+        // shell would really send.
+        const answer = () => (failWrites ? json({ ok: false }) : json({ ok: true, config: live }));
         return hold ? hold.wait.then(answer) : answer();
       }
       return json({ ok: true });
@@ -437,5 +441,39 @@ describe("leaving while a save is still going", () => {
     });
     expect(getCurrentFocusKey()).toBe(landed);
     expect(getCurrentFocusKey()).not.toBe(rowKey);
+  });
+});
+
+// A Clear the box refused.
+//
+// The mapping and its button are still there, so the cursor has to stay on the
+// button: the row beside it teaches that action on OK, which is the opposite of
+// what was asked for one press earlier.
+describe("a Clear the box would not accept", () => {
+  beforeEach(() => {
+    useConfigStore.setState({ config: CONFIG as never, error: false });
+  });
+  afterEach(() => {
+    cleanup();
+    vi.unstubAllGlobals();
+  });
+
+  it("leaves the cursor on the button, so the next press is the retry", async () => {
+    stubShell(undefined, undefined, true);
+    const { container } = render(<Screen />);
+    await settle();
+    await openButtons();
+
+    const clearKey = keyBase(MAC) + "-clear-settings";
+    await navSetFocus(clearKey);
+    await act(async () => {
+      (container.querySelector(`[data-sfocus="${clearKey}"]`) as HTMLElement).click();
+    });
+    await settle();
+
+    // Nothing was cleared, so the button is still on screen...
+    expect(container.querySelector(`[data-sfocus="${clearKey}"]`)).toBeTruthy();
+    // ...and the cursor has not wandered onto the row that would teach it.
+    expect(getCurrentFocusKey()).toBe(clearKey);
   });
 });
