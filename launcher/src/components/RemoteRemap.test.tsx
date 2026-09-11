@@ -29,11 +29,25 @@ const CONFIG = {
 
 function stubShell() {
   const posted: { url: string; body: unknown }[] = [];
+  // The box's own answer shape, and it is load-bearing: `postConfig` THROWS
+  // unless the response carries a `config`, so a stub answering `{ok:true}` made
+  // every write on this screen reject. The three reset tests never saw it
+  // because they assert the request; a test about what the screen does AFTER a
+  // save cannot be written against that stub at all.
+  let live: Record<string, unknown> = structuredClone(CONFIG) as Record<string, unknown>;
   const json = (body: unknown) =>
     Promise.resolve(new Response(JSON.stringify(body), { headers: { "Content-Type": "application/json" } }));
   vi.stubGlobal("fetch", (url: string, init?: RequestInit) => {
     if (init?.method === "POST") {
-      posted.push({ url: String(url), body: JSON.parse(String(init.body || "{}")) });
+      const body = JSON.parse(String(init.body || "{}"));
+      posted.push({ url: String(url), body });
+      if (String(url).includes("/api/config")) {
+        // The shell replaces the devices map wholesale and merges around power,
+        // which is what `saveRemote` is written against.
+        const remote = { ...(live.remote as object), ...(body.remote as object) };
+        live = { ...live, remote };
+        return json({ ok: true, config: live });
+      }
       return json({ ok: true });
     }
     if (String(url).includes("/remote/devices")) return json({ devices: [{ id: MAC, name: "AR" }] });
@@ -43,7 +57,7 @@ function stubShell() {
     if (String(url).includes("/api/apps")) return json({ apps: [] });
     // The screen reloads the config store after a reset, and a store that came back
     // empty would take the row with it - answer as the box would.
-    if (String(url).includes("/api/config")) return json(CONFIG);
+    if (String(url).includes("/api/config")) return json(live);
     return json({});
   });
   return posted;
@@ -151,12 +165,16 @@ describe("a taught row's Clear button", () => {
   // point: a focused FocusButton is scaled 4%, spatial navigation reads the
   // TRANSFORMED box, and on a row filling the settings width that growth is
   // wider than the 1vw gap beside it. Measured in Chromium with the launcher's
-  // own CSS at 1920x1080: the action button ends at 998.07 while Clear starts
-  // at 997.69, so `sibling.left >= current.right` is false and Clear was in no
-  // candidate list at all. The horizontal edges below are those measurements to
-  // the tenth of a pixel, which is what the assertions turn on, so a future
-  // "simplification" back to geometry fails instead of shipping. The heights
-  // are rounded: nothing here reads them.
+  // own CSS at 1920x1080, in the HUNGARIAN UI: the action button ends at 998.07
+  // while Clear starts at 997.69, so `sibling.left >= current.right` is false
+  // and Clear was in no candidate list at all. The English layout overlaps too,
+  // by more (0.55 px), because "Clear" is shorter than "Törlés" and leaves the
+  // action button wider - the worse case is the one worth pinning.
+  //
+  // The horizontal edges are those measurements to the tenth of a pixel and are
+  // what the assertions turn on, so a future "simplification" back to geometry
+  // fails instead of shipping. The widths and heights are along for the ride:
+  // nothing reads Clear's right edge or any height.
   //
   // Which of the pair is scaled depends on which one the cursor is on, so the
   // two directions are two different sets of numbers.
@@ -186,9 +204,10 @@ describe("a taught row's Clear button", () => {
     expect(getCurrentFocusKey()).toBe(clearKey);
   });
 
-  // This direction measures clear today - the scaled box is the small one - so
-  // this pins the declared behaviour rather than a fix, and leaves no mirror of
-  // the bug above for a longer translation of "Clear" to reintroduce.
+  // This direction measures clear today - the scaled box is the small one, and
+  // the 50x rule leaves it a wide margin - so geometry would answer it too and
+  // this test passes with the declaration removed. It pins the OUTCOME, which
+  // is the half that matters to somebody holding the remote.
   it("hands the cursor back to its row with Left", async () => {
     stubShell();
     const { container } = render(<Screen />);
@@ -260,5 +279,52 @@ describe("the reassign question's buttons", () => {
     }
     // ...and the dangerous one still says so, in its text rather than a fill.
     expect((yes as Element).className).toMatch(/\btext-warn\b/);
+  });
+});
+
+// A press here can put a DIFFERENT control under the cursor and finish before
+// the finger lifts, which is what makes a held OK dangerous on this screen and
+// nowhere else in settings.
+describe("an OK that is still held down", () => {
+  beforeEach(() => {
+    useConfigStore.setState({ config: CONFIG as never, error: false });
+  });
+  afterEach(() => {
+    cleanup();
+    vi.unstubAllGlobals();
+  });
+
+  it("does not teach a button after Clear has moved the cursor onto its row", async () => {
+    const posted = stubShell();
+    const { container } = render(<Screen />);
+    await settle();
+    await openButtons();
+
+    const rowKey = keyBase(MAC) + "-settings";
+    const clearKey = keyBase(MAC) + "-clear-settings";
+    await navSetFocus(clearKey);
+    expect(getCurrentFocusKey()).toBe(clearKey);
+
+    // The press itself: the mapping goes, the button unmounts, and the cursor
+    // lands back on the row it belonged to.
+    await remote.ok();
+    await settle();
+    expect(container.querySelector(`[data-sfocus="${clearKey}"]`)).toBeNull();
+    expect(getCurrentFocusKey()).toBe(rowKey);
+
+    // ...and now the same hold repeats, onto the row. Without the page's
+    // swallow this arms learn mode, and the bridge then eats every press on
+    // this remote for ten seconds: the next button the user reaches for on a
+    // remote that has gone dead is bound to the action they just cleared.
+    await remote.okHeld();
+    await settle();
+    expect(posted.filter((p) => p.url.includes("/remote/learn"))).toHaveLength(0);
+    expect(container.querySelector('[data-sfocus="remote-learn-cancel"]')).toBeNull();
+
+    // The deliberate press that follows must still work, or the fix has traded
+    // one dead screen for another.
+    await remote.ok();
+    await settle();
+    expect(container.querySelector('[data-sfocus="remote-learn-cancel"]')).toBeTruthy();
   });
 });

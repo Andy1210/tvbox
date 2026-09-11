@@ -9,35 +9,26 @@ write for the person on the couch (what changes for THEM), not for developers.
 
 ### hu
 
-- **A távirányító gombjainál rá lehet állni a Törlés gombra.** A doboz nem látta
-  a kijelölt sor mellett lévőnek, így a jobbra nyíl nem csinált semmit, és a
-  gombot semerről nem lehetett elérni. Most a sorból jobbra a Törlés jön, balra
-  pedig vissza a sor.
-- **A „A gomb már hozzá van rendelve” és a „Visszaállítod a távirányító
-  gombjait?” kérdésen csak a kijelölt gomb világít.** A másik gomb eddig színes
-  kitöltést kapott, ami úgy festett, mintha az lenne kiválasztva, vagyis a
-  kérdés fordítva látszott megválaszolva. A visszaállítás gombja továbbra is
-  jelzi magát, de a feliratával.
+- **A Törlés gombra rá lehet állni a távirányító gombjainál.** A doboz nem látta
+  a kijelölt sor mellett lévőnek, így a jobbra nyíl nem csinált semmit. Most a
+  sorból jobbra a Törlés jön, balra vissza a sor.
+- **A kérdéseken csak a kijelölt gomb világít.** A másik gomb színes kitöltést
+  kapott, amitől a kérdés már megválaszoltnak látszott, ráadásul fordítva.
 - **Egy hosszabb OK-nyomás nem indít el véletlenül gombtanítást.** A Törlés után
-  a kijelölés a sorra ugrik vissza, és a még nyomva tartott OK ismétlése eddig
-  ott is lefutott: elindult a tanítás, a távirányító tíz másodpercre némának
-  tűnt, és a következő megnyomott gomb a most törölt művelethez került.
+  a még nyomva tartott OK ismétlése eddig elindította a tanítást, és a
+  következő megnyomott gomb a most törölt művelethez került.
 
 ### en
 
 - **The Clear button in a remote's button list can be reached.** The box did not
-  see it as being beside the highlighted row, so Right did nothing and the button
-  could not be reached from any direction. Right from a row now goes to Clear,
-  and Left comes back.
-- **Only the highlighted button lights up on the "Button already mapped" and
-  "Reset this remote's buttons?" questions.** The other one used to carry a
-  coloured fill, which looked like the selected answer, so the question read as
-  answered the wrong way round. The reset button still marks itself, with its
-  label.
+  see it as being beside the highlighted row, so Right did nothing. Right from a
+  row now goes to Clear, and Left comes back.
+- **Only the highlighted button lights up on the questions.** The other one
+  carried a coloured fill, which made the question look already answered, and
+  answered the wrong way round.
 - **A slightly long OK press no longer starts teaching a button by accident.**
-  After Clear the highlight jumps back to the row, and the repeat of an OK still
-  being held used to act there: teaching started, the remote seemed dead for ten
-  seconds, and the next button pressed was bound to the action just cleared.
+  After Clear, the repeat of an OK still being held used to start teaching, and
+  the next button pressed was bound to the action just cleared.
 
 ## 3.11.1
 

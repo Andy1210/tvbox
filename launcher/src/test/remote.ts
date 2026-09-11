@@ -100,6 +100,27 @@ async function fire(key: string): Promise<void> {
   });
 }
 
+// The autorepeat of an OK that is still physically held. Chromium synthesizes
+// these while a button is down, and a press that moves the cursor before the
+// finger lifts therefore fires again on whatever is under it now.
+//
+// Dispatched at document.body rather than at window, and that is the whole
+// reason this is a separate function. A capture listener on window runs before
+// the target only for an event whose target is BELOW window; for an event
+// dispatched AT window there is no capture phase, so window's listeners simply
+// run in registration order - and spatial navigation registers its own at
+// init(), before any component. Firing at window would therefore let norigin
+// act first and report that a swallow which works on the box does not, or the
+// reverse, depending on nothing but mount order.
+async function fireRepeat(key: string): Promise<void> {
+  await act(async () => {
+    updateAllLayouts();
+    await drainScheduler();
+    document.body.dispatchEvent(new KeyboardEvent("keydown", { key, bubbles: true, repeat: true }));
+    await drainScheduler();
+  });
+}
+
 // The remote as the shell delivers it. Arrows + OK(Enter) go through norigin;
 // Back is a plain Backspace that the shell preload synthesizes and useBackspace
 // (a capture-phase listener) handles - norigin ignores it. Await every press:
@@ -111,6 +132,8 @@ export const remote = {
   right: (): Promise<void> => fire("ArrowRight"),
   ok: (): Promise<void> => fire("Enter"),
   back: (): Promise<void> => fire("Backspace"),
+  // OK held down: the repeat, without a fresh press in front of it.
+  okHeld: (): Promise<void> => fireRepeat("Enter"),
 };
 
 // norigin's setFocus is scheduler-bound since 3.2.1 - this wrapper awaits the

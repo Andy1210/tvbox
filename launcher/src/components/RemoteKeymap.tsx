@@ -180,6 +180,11 @@ export function RemoteKeymapPage({ device }: { device: { id: string; name: strin
   // remote for ten seconds, and the first fresh button pressed - whatever the
   // user reaches for when the remote seems dead - gets bound to the action they
   // had just cleared. Resetting refocuses a row the same way.
+  //
+  // It runs before the overlays' own copies and stops propagation, so an
+  // overlay under this page can no longer switch the swallow off with the
+  // hook's `enabled` argument. Nothing here types, so nothing needs to; a text
+  // field added below this page would have to turn THIS one off.
   useSwallowEnterRepeats();
 
   const [learning, setLearning] = useState<RemoteAction | null>(null);
@@ -259,8 +264,17 @@ export function RemoteKeymapPage({ device }: { device: { id: string; name: strin
       // drop the emptied entry only if it carries nothing else (irPassthrough)
       if (!Object.keys(next[id].keymap).length && !next[id].irPassthrough) delete next[id];
     }
-    await setRemote(next);
-    setTimeout(() => setFocus(keyBase(id) + "-" + action), 0);
+    // The refocus happens whether or not the box accepted the write. The
+    // button unmounts only on success, so a failed save leaves the cursor on a
+    // Clear button that did nothing - but a save that THREW used to skip this
+    // line entirely, and the row it would have returned to is the only thing
+    // the cursor can be on once the button does go. Reachable by remote for the
+    // first time with this change, which is why it is guarded here.
+    try {
+      await setRemote(next);
+    } finally {
+      setTimeout(() => setFocus(keyBase(id) + "-" + action), 0);
+    }
   };
   const resetDevice = async () => {
     // through the shell endpoint, which keeps irPassthrough (a client-side delete of
@@ -454,11 +468,12 @@ export function RemoteKeymapPage({ device }: { device: { id: string; name: strin
                     // right edge. The direction filter is strict
                     // (`sibling.left >= current.right`), so Clear was dropped
                     // from the candidate list and could not be reached at all.
-                    // Measured at 1920x1080, 1360x768 and 3840x2160, all 16:9:
-                    // the overlap is 0.38, 0.27 and 0.75 px. A focused button
-                    // is clipped whenever it is wider than 50x the gap, so it
-                    // is a ratio rather than a pixel count, and the row is
-                    // about 2% over it.
+                    // Measured in the Hungarian UI at 1920x1080, 1360x768 and
+                    // 3840x2160, all 16:9: the overlap is 0.38, 0.27 and
+                    // 0.75 px, and in English 0.55, 0.39 and 1.09. A focused
+                    // button is clipped whenever it is wider than 50x the gap,
+                    // so it is a ratio rather than a pixel count, and the row is
+                    // about 2% over it in every locale here.
                     //
                     // Only this one direction, and only where there is
                     // something to reach: `setFocus` to a key no component has
