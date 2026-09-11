@@ -17,6 +17,9 @@ write for the person on the couch (what changes for THEM), not for developers.
 - **Egy hosszabb OK-nyomás nem indít el véletlenül gombtanítást.** A Törlés után
   a még nyomva tartott OK ismétlése eddig elindította a tanítást, és a
   következő megnyomott gomb a most törölt művelethez került.
+- **A távirányító mikrofonjával kapott válasz nem szakad félbe.** A hosszabb
+  válaszok a mondat közepén elhallgattak, és a Home Assistant közben újra
+  csatlakozott a dobozhoz. A hang lejátszása már nem tartja fel a kapcsolatot.
 
 ### en
 
@@ -29,6 +32,9 @@ write for the person on the couch (what changes for THEM), not for developers.
 - **A slightly long OK press no longer starts teaching a button by accident.**
   After Clear, the repeat of an OK still being held used to start teaching, and
   the next button pressed was bound to the action just cleared.
+- **An answer through the remote's microphone is no longer cut off.** Longer
+  answers stopped mid-sentence, and Home Assistant reconnected to the box while
+  it happened. Playing the audio no longer holds up the connection.
 
 ## 3.11.1
 
