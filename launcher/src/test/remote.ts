@@ -104,14 +104,19 @@ async function fire(key: string): Promise<void> {
 // these while a button is down, and a press that moves the cursor before the
 // finger lifts therefore fires again on whatever is under it now.
 //
-// Dispatched at document.body rather than at window, and that is the whole
-// reason this is a separate function. A capture listener on window runs before
-// the target only for an event whose target is BELOW window; for an event
-// dispatched AT window there is no capture phase, so window's listeners simply
-// run in registration order - and spatial navigation registers its own at
-// init(), before any component. Firing at window would therefore let norigin
-// act first and report that a swallow which works on the box does not, or the
-// reverse, depending on nothing but mount order.
+// Its own function because of the `repeat: true` and the absent keyup: a held
+// key sends one keydown per repeat and no keyup until it is let go.
+//
+// Dispatched at document.body rather than at window because that is what the
+// box delivers - a real key event's target is always an element, never window.
+// The distinction is only real in CHROMIUM, and only there: measured, a
+// capture listener on window precedes the target for an event aimed at an
+// element, while for one dispatched AT window there is no capture phase and
+// window's listeners run in registration order, which would put spatial
+// navigation (registered at init, before any component) ahead of a swallow
+// mounted later. happy-dom runs capture first whatever the target, so either
+// spelling passes this suite - measured both ways, and the assertion is
+// unchanged. Model the box anyway, or the next reader measures the harness.
 async function fireRepeat(key: string): Promise<void> {
   await act(async () => {
     updateAllLayouts();

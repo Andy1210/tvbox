@@ -509,8 +509,8 @@ export function RemoteKeymapPage({ device }: { device: { id: string; name: strin
                     // 3840x2160, all 16:9: the overlap is 0.38, 0.27 and
                     // 0.75 px, and in English 0.55, 0.39 and 1.09. A focused
                     // button is clipped whenever it is wider than 50x the gap,
-                    // so it is a ratio rather than a pixel count, and the row is
-                    // about 2% over it in every locale here.
+                    // so it is a ratio rather than a pixel count, and the row
+                    // is over it by 1.9% in Hungarian and 2.8% in English.
                     //
                     // Only this one direction, and only where there is
                     // something to reach: `setFocus` to a key no component has
