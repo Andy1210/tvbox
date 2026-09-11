@@ -1103,6 +1103,11 @@ async def test_the_note_never_holds_up_the_socket():
 
 
 async def test_a_shell_that_will_not_answer_drops_notes_rather_than_queue_them():
+    """`show()` is called from the task that answers Home Assistant's pings.
+
+    So it may never wait for the shell, whatever the queue looks like - which is
+    the whole reason the note has a thread at all.
+    """
     satellite, _ = connected(answer="both")
     held = threading.Event()
     seen = []
@@ -1133,6 +1138,7 @@ async def test_a_shell_that_will_not_answer_drops_notes_rather_than_queue_them()
 
 
 async def test_a_note_that_raises_does_not_end_the_notes():
+    """One failed note must not take the thread, and with it every later one."""
     satellite, _ = connected(answer="toast")
     seen = []
 
@@ -1148,6 +1154,7 @@ async def test_a_note_that_raises_does_not_end_the_notes():
 
 
 async def test_an_empty_answer_is_not_put_on_screen():
+    """An empty note is a dark bar over the film, and costs a thread to draw."""
     satellite, _ = connected(answer="both")
     seen = []
     with toaster_calling(seen.append):
@@ -1159,6 +1166,7 @@ async def test_an_empty_answer_is_not_put_on_screen():
 
 
 async def test_a_spoken_only_answer_shows_nothing():
+    """`voice.answer` is the operator's choice and the toaster must honour it."""
     satellite, _ = connected(answer="speak")
     seen = []
     with toaster_calling(seen.append):
