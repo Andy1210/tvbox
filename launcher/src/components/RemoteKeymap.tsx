@@ -299,7 +299,18 @@ export function RemoteKeymapPage({ device }: { device: { id: string; name: strin
     // place, and moving off it would put the cursor on a row whose OK starts
     // TEACHING that action, one press after somebody asked to clear it. Leaving
     // the cursor where it is makes the next press the retry.
-    await setRemote(next);
+    //
+    // The failure is CAUGHT rather than left to escape: nothing awaits this
+    // handler, so a rejection here is an unhandled one, and the box's shell
+    // logs those as renderer errors with no line that says which press caused
+    // it. The screen still says nothing, which is what every config write on
+    // this page does and is a bigger question than this change.
+    try {
+      await setRemote(next);
+    } catch (e) {
+      console.warn("[launcher] clearing a remote button failed:", e);
+      return;
+    }
     refocus(keyBase(id) + "-" + action);
   };
   const resetDevice = async () => {
