@@ -11,11 +11,13 @@ come from. The microphone and the decoder need real hardware and are not touched
 import asyncio
 import contextlib
 import fcntl
+import json
 import os
 import queue
 import subprocess
 import sys
 import threading
+import urllib.request
 import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -41,6 +43,7 @@ FRAME = b"\x00\x00" * vs.FRAME_SAMPLES
 # television, and the note now outlives the test that queued it. The tests that
 # are about notes replace this again with something of their own.
 DRAWN = []
+_real_show_toast = vs.show_toast   # kept so one test can still exercise the HTTP path
 vs.show_toast = DRAWN.append
 
 
@@ -1122,7 +1125,7 @@ async def test_a_shell_that_will_not_answer_drops_notes_rather_than_queue_them()
         assert vs.MAX_QUEUED_NOTES <= 8, "the queue is a freshness bound, not a buffer"
         held.set()
         # Delivered, not merely dequeued, before `show_toast` goes back: this
-        # toaster's thread outlives the test, and `_notes.empty()` goes true
+        # toaster's thread outlives the test, and the ring empties
         # while the thread is still between `get()` and the call - so a note
         # would land in whatever the NEXT test has put in that global.
         wait_for("every queued note to be delivered",
@@ -1235,6 +1238,58 @@ async def test_an_answer_that_is_not_a_string_is_still_survivable():
         await satellite._on_event({"type": "synthesize", "data": {"text": None}}, b"")
         await asyncio.sleep(0.05)
         assert seen == ["123"], "an empty answer was drawn"
+
+
+async def test_the_note_really_is_an_http_post_to_the_shell():
+    """The one test that exercises `show_toast` itself.
+
+    Everything else in this file replaces it, so without this the request - the
+    endpoint, the body, the timeout - is not covered at all, and a regression
+    there would leave the suite green while no box ever drew a note.
+    `urlopen` is mocked; nothing leaves this process.
+    """
+    seen = {}
+
+    class Answer:
+        def read(self):
+            return b'{"ok":true}'
+
+    def fake_urlopen(req, timeout=None):
+        seen["url"] = req.full_url
+        seen["method"] = req.get_method()
+        seen["type"] = req.headers.get("Content-type")
+        seen["body"] = json.loads(req.data.decode("utf-8"))
+        seen["timeout"] = timeout
+        return Answer()
+
+    real_urlopen = urllib.request.urlopen
+    urllib.request.urlopen = fake_urlopen
+    try:
+        _real_show_toast(" Kész a válasz. ")
+    finally:
+        urllib.request.urlopen = real_urlopen
+
+    assert seen["url"] == vs.SHELL_NOTIFY_URL, seen["url"]
+    assert seen["method"] == "POST", seen["method"]
+    assert seen["type"] == "application/json", seen["type"]
+    assert seen["body"]["message"] == "Kész a válasz.", seen["body"]
+    assert seen["body"]["duration"] > 0, seen["body"]
+    assert seen["timeout"] == vs.NOTIFY_TIMEOUT, seen["timeout"]
+    assert vs.NOTIFY_TIMEOUT < 5, "the wait must stay well inside a ping budget"
+
+
+async def test_a_shell_that_refuses_the_note_is_survivable():
+    """A box with no shell running is an ordinary state, not a failure."""
+    real_urlopen = urllib.request.urlopen
+
+    def refuse(req, timeout=None):
+        raise OSError("connection refused")
+
+    urllib.request.urlopen = refuse
+    try:
+        _real_show_toast("nincs shell")  # must not raise
+    finally:
+        urllib.request.urlopen = real_urlopen
 
 
 async def main():

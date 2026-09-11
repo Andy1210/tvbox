@@ -40,6 +40,7 @@ mean this room.
 """
 
 import asyncio
+import collections
 import ctypes
 import glob
 import json
@@ -443,7 +444,13 @@ class Toaster:
     """
 
     def __init__(self):
-        self._notes = queue.Queue(maxsize=MAX_QUEUED_NOTES)
+        # A ring rather than a `queue.Queue`, because the eviction has to be
+        # ATOMIC with the append: doing it as "the put failed, so take one out
+        # and put again" races the thread that is draining, and a note it had
+        # already taken meanwhile cost a second, live one. `deque(maxlen=)`
+        # drops the oldest as part of the append, under one lock.
+        self._notes = collections.deque(maxlen=MAX_QUEUED_NOTES)
+        self._ready = threading.Condition()
         self._thread = None
         self._dropped = 0
 
@@ -470,25 +477,21 @@ class Toaster:
                 LOG.error("cannot start the toast thread: %s", e)
                 return
             self._thread = thread
-        while True:
-            try:
-                self._notes.put_nowait(text)
-                return
-            except queue.Full:
-                pass
-            # **The OLDEST goes, not the newest.** A note is about the question
-            # that was just asked, so the one still waiting behind four others is
-            # the one nobody wants any more - dropping the arrival instead showed
-            # a queue of stale answers and silently lost the current one.
-            #
-            # Nothing here may wait, whatever else it costs: the caller is the
-            # task that answers Home Assistant's pings. On `answer: "toast"` the
-            # box says nothing either, so a dropped note is that whole turn lost
-            # - which is still better than a satellite that stops responding.
-            try:
-                self._notes.get_nowait()
-            except queue.Empty:
-                pass  # the thread drained it in between; try to queue again
+        # **The OLDEST goes, not the newest.** A note is about the question that
+        # was just asked, so the one still waiting behind the others is the one
+        # nobody wants any more - dropping the arrival instead showed a queue of
+        # stale answers and silently lost the current one. (Audio wants the
+        # opposite, which is why `Player` drops what arrives.)
+        #
+        # Nothing here waits, whatever else it costs: the caller is the task that
+        # answers Home Assistant's pings. On `answer: "toast"` the box says
+        # nothing either, so a dropped note is that whole turn lost - still
+        # better than a satellite that stops responding.
+        with self._ready:
+            dropped = len(self._notes) == MAX_QUEUED_NOTES
+            self._notes.append(text)
+            self._ready.notify()
+        if dropped:
             self._dropped += 1
             if self._dropped % 10 == 1:
                 LOG.warning(
@@ -498,7 +501,10 @@ class Toaster:
 
     def _run(self):
         while True:
-            text = self._notes.get()
+            with self._ready:
+                while not self._notes:
+                    self._ready.wait()
+                text = self._notes.popleft()
             try:
                 show_toast(text)
             except Exception as e:  # noqa: BLE001 - this thread may never die
