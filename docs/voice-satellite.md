@@ -167,6 +167,36 @@ its link rate. It covers everything the queue holds, not only the audio: an
 a flood of those was the more expensive of the two. Past the ceiling what arrives
 is dropped, with a line in the log saying so.
 
+**The note on the screen was the same mistake, one door down.** Drawing the
+answer on the television is an HTTP request to the shell on this box, and it was
+awaited from the read loop too - bounded by nothing but `urlopen`'s own timeout,
+which was five seconds, i.e. exactly the budget above. The satellite then goes
+quiet for as long as the shell takes to get to the request, and Home Assistant
+drops it. Measured against a shell held busy, with Home Assistant's own ping
+discipline on the other end: at six seconds the whole failure arrived at once -
+the note on screen, the answer never spoken, and the connection dropped at
+5.01 s. It also delayed the SPEECH one for one, because the audio could not be
+read off the socket until the note came back.
+
+It has a thread and a small queue of its own now, the same shape as the
+player's, and the longest silence is a flat 2.00 s at any shell latency - the
+ping cadence and nothing else.
+
+Two consequences worth knowing. **Which arrives first, the note or the sound, is
+no longer fixed**: the note used to be awaited before any audio was read, so it
+always won; now they race and the shell decides. And **a queue that fills drops
+the oldest note** - a note is about the question just asked, so the stale one is
+the one to lose. With `answer: "both"` the answer is spoken regardless; with
+`answer: "toast"` the note is the whole turn, so a drop there loses it. That
+needs several answers inside a few seconds while the shell is not taking them.
+
+The wait itself is 2 s rather than 5, and it is not a safety number any more -
+nothing is behind it. **The reply only says the shell's main loop reached the
+request, never that anything is on screen**: the route hands the note on and
+answers in the same tick. Measured with a shell held for 3.5 s, the wait timed
+out and the note was drawn anyway. So a shorter wait loses no notes and frees
+the thread sooner.
+
 `played` - which Home Assistant waits for before it considers the answer
 delivered - is said by that thread once the audio has really played. **Waiting for
 it on the connection's side does not work and was tried twice**: freeing the event
@@ -243,6 +273,14 @@ the launcher. Putting those in the strip would mean an empty bar over the film.
   cause described above; a box that still does it is on an older release. It only
   ever showed on answers longer than about six seconds, and Home Assistant's log
   is where it is visible - the box's side looks like an ordinary reconnect.
+- **The answer is spoken but nothing appears on screen.** The shell was not
+  taking notes - it is drawn by a different process on the box, and the
+  satellite will not wait for it. `the shell did not answer about the note` in
+  the log means the request went unacknowledged (the note may still have been
+  drawn); `the shell is not taking notes - dropping the oldest` means several
+  answers arrived while it was busy. With `voice.answer: "toast"` that is the
+  whole turn lost, so a box that only shows notes wants a shell that is not
+  stalling - check the launcher's own log first.
 - **The answer plays but the light is wrong.** The box has no area, or has the
   wrong one - see [Which room it acts in](#which-room-it-acts-in).
 - **The remote's microphone itself can be faulty.** A dead microphone still sends

@@ -35,6 +35,14 @@ CONFIG = {
 HA = "192.168.1.19"
 FRAME = b"\x00\x00" * vs.FRAME_SAMPLES
 
+# Nothing in this suite may reach the shell. Several tests drive a `synthesize`
+# without caring about the note, and the real `show_toast` POSTs to loopback -
+# harmless on a dev host, but on a BOX it draws the test's text on the
+# television, and the note now outlives the test that queued it. The tests that
+# are about notes replace this again with something of their own.
+DRAWN = []
+vs.show_toast = DRAWN.append
+
 
 class FakeWriter:
     def __init__(self, host=HA):
@@ -1047,6 +1055,186 @@ def test_a_refused_thread_does_not_end_playback_for_good():
     with real_player() as (live, procs):
         live.start(22050, 2, 1)
         wait_for("the next answer to get a thread", lambda: bool(procs) and live._proc is procs[0])
+
+
+# ---------------------------------------------------------------- the note
+
+
+@contextlib.contextmanager
+def toaster_calling(behaviour):
+    """`show_toast` replaced, and put back afterwards."""
+    real = vs.show_toast
+    vs.show_toast = behaviour
+    try:
+        yield
+    finally:
+        vs.show_toast = real
+
+
+async def test_the_note_never_holds_up_the_socket():
+    """The read loop is the only thing that answers a ping.
+
+    Home Assistant pings every 2 s and drops a satellite silent for 5, and the
+    note is an HTTP round trip to another process on this box - which used to be
+    awaited here, bounded by `urlopen`'s own five-second timeout, i.e. exactly
+    the budget. Same shape as the answer's audio before the player got a thread.
+    """
+    satellite, _ = connected(answer="toast")
+    shown = []
+    slow = threading.Event()
+
+    def hold(text):
+        slow.wait(2.0)
+        shown.append(text)
+
+    with toaster_calling(hold):
+        started = time.monotonic()
+        await satellite._on_event({"type": "synthesize", "data": {"text": "Kész."}}, b"")
+        took = time.monotonic() - started
+        assert took < 0.5, f"the read loop waited {took:.2f}s for the note"
+        # ...and a ping is still answered while the note is in flight.
+        await satellite._on_event({"type": "ping", "data": {"text": None}}, b"")
+        assert sent(satellite) == ["pong"], "a ping went unanswered during a note"
+        slow.set()
+        wait_for("the note to reach the shell", lambda: shown == ["Kész."])
+
+
+async def test_a_shell_that_will_not_answer_drops_notes_rather_than_queue_them():
+    satellite, _ = connected(answer="both")
+    held = threading.Event()
+    seen = []
+
+    def hold(text):
+        seen.append(text)
+        if len(seen) == 1:
+            held.wait(3.0)
+
+    with toaster_calling(hold):
+        # One note first, so the thread is busy with it before the rest arrive -
+        # otherwise the eviction below reaches it before it is ever picked up.
+        satellite.toaster.show("note 0")
+        wait_for("the first note to be taken", lambda: seen == ["note 0"])
+        for i in range(1, vs.MAX_QUEUED_NOTES + 6):
+            started = time.monotonic()
+            satellite.toaster.show(f"note {i}")
+            assert time.monotonic() - started < 0.2, "show() blocked"
+        assert satellite.toaster._dropped > 0, "a full queue must drop, not wait"
+        assert vs.MAX_QUEUED_NOTES <= 8, "the queue is a freshness bound, not a buffer"
+        held.set()
+        # Delivered, not merely dequeued, before `show_toast` goes back: this
+        # toaster's thread outlives the test, and `_notes.empty()` goes true
+        # while the thread is still between `get()` and the call - so a note
+        # would land in whatever the NEXT test has put in that global.
+        wait_for("every queued note to be delivered",
+                 lambda: len(seen) == vs.MAX_QUEUED_NOTES + 1)
+
+
+async def test_a_note_that_raises_does_not_end_the_notes():
+    satellite, _ = connected(answer="toast")
+    seen = []
+
+    def once(text):
+        seen.append(text)
+        if len(seen) == 1:
+            raise RuntimeError("the shell went away")
+
+    with toaster_calling(once):
+        satellite.toaster.show("első")
+        satellite.toaster.show("második")
+        wait_for("the note after the failing one", lambda: seen == ["első", "második"])
+
+
+async def test_an_empty_answer_is_not_put_on_screen():
+    satellite, _ = connected(answer="both")
+    seen = []
+    with toaster_calling(seen.append):
+        satellite.toaster.show("")
+        satellite.toaster.show("   ")
+        await asyncio.sleep(0.05)
+        assert seen == [], "an empty note reached the shell"
+        assert satellite.toaster._thread is None, "an empty note started a thread"
+
+
+async def test_a_spoken_only_answer_shows_nothing():
+    satellite, _ = connected(answer="speak")
+    seen = []
+    with toaster_calling(seen.append):
+        await satellite._on_event({"type": "synthesize", "data": {"text": "Kész."}}, b"")
+        await asyncio.sleep(0.05)
+        assert seen == [], "an answer configured as speech-only was drawn anyway"
+
+
+async def test_a_full_queue_keeps_the_newest_note():
+    """A note is about the question just asked, so the STALE one goes.
+
+    Dropping the arrival instead left a queue of old answers on screen and
+    silently lost the current one - the opposite of what audio wants, where a
+    hole belongs at the end.
+    """
+    satellite, _ = connected(answer="both")
+    held = threading.Event()
+    seen = []
+
+    def hold(text):
+        seen.append(text)
+        if len(seen) == 1:
+            held.wait(3.0)
+
+    with toaster_calling(hold):
+        # The first note is taken BEFORE the rest arrive, so the thread is busy
+        # and the queue really fills - pushing everything at once would let the
+        # eviction reach note 0 before it was ever picked up.
+        satellite.toaster.show("note 0")
+        wait_for("the first note to be taken", lambda: seen == ["note 0"])
+        for i in range(1, vs.MAX_QUEUED_NOTES + 4):
+            satellite.toaster.show(f"note {i}")
+        held.set()
+        wait_for("the queue to be delivered", lambda: len(seen) == vs.MAX_QUEUED_NOTES + 1)
+        newest = f"note {vs.MAX_QUEUED_NOTES + 3}"
+        assert seen[-1] == newest, f"the newest note was dropped: {seen}"
+
+
+async def test_a_refused_thread_does_not_end_the_session():
+    """`show()` is called from the task that answers Home Assistant's pings.
+
+    The player learned this the hard way: raising there takes the connection
+    with it, so a box that cannot start a thread must merely stop drawing notes.
+    """
+    satellite, _ = connected(answer="both")
+    real = threading.Thread
+
+    class Refusing(real):
+        def start(self):
+            raise RuntimeError("can't start new thread")
+
+    threading.Thread = Refusing
+    try:
+        satellite.toaster.show("nem indul szál")  # must not raise
+    finally:
+        threading.Thread = real
+    assert satellite.toaster._thread is None, "a thread that never started was kept"
+
+    seen = []
+    with toaster_calling(seen.append):
+        satellite.toaster.show("a következő viszont igen")
+        wait_for("the note after the refused thread", lambda: seen == ["a következő viszont igen"])
+
+
+async def test_an_answer_that_is_not_a_string_is_still_survivable():
+    """The text comes off a port with no authentication.
+
+    `(123 or "").strip()` raised out of `_on_event`, and an exception there ends
+    the session - so one malformed event cost the microphone until Home
+    Assistant reconnected.
+    """
+    satellite, _ = connected(answer="both")
+    seen = []
+    with toaster_calling(seen.append):
+        await satellite._on_event({"type": "synthesize", "data": {"text": 123}}, b"")
+        wait_for("the number to be drawn as text", lambda: seen == ["123"])
+        await satellite._on_event({"type": "synthesize", "data": {"text": None}}, b"")
+        await asyncio.sleep(0.05)
+        assert seen == ["123"], "an empty answer was drawn"
 
 
 async def main():

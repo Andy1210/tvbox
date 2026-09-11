@@ -5,6 +5,26 @@ updates). `scripts/make-release.sh` lifts the current version's `hu`/`en`
 blocks into the OTA feed's `notes` - keep both languages, keep it short, and
 write for the person on the couch (what changes for THEM), not for developers.
 
+## 3.11.3
+
+### hu
+
+- **A válasz nem marad néma attól, hogy a képernyőn is megjelenik.** Ha a doboz
+  épp mással volt elfoglalva, az értesítés kiírására várva nem szólalt meg -
+  vagy félbeszakadt -, és közben a mikrofon sem volt használható a következő
+  kérdéshez. Az értesítés mostantól a háttérben megy ki, a válasz pedig azonnal
+  hallható.
+  Az újraindítás után lép életbe.
+
+### en
+
+- **An answer is no longer silenced by also being shown on screen.** If the box
+  was busy with something else, waiting to put the notification up left the
+  answer unspoken - or cut it off - and the microphone unusable for the next
+  question. The notification is sent in the background now, and the answer is
+  heard straight away.
+  Takes effect after a restart.
+
 ## 3.11.2
 
 ### hu
