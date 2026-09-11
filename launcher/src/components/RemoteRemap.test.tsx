@@ -270,7 +270,7 @@ describe("a taught row's Clear button", () => {
   });
 });
 
-describe("the reassign question's buttons", () => {
+describe("the reset question's buttons", () => {
   beforeEach(() => {
     useConfigStore.setState({ config: CONFIG as never, error: false });
   });
