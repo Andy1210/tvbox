@@ -95,8 +95,14 @@ function LearnOverlay({ action, remote, onCancel }: { action: string; remote: st
 // FOCUS BOUNDARY, so a press from another remote mid-learn cannot wander onto a row
 // behind it. It defaults to CANCEL, because the press that opened it may still be
 // arriving (a taught remote sends its own stray events, and a held OK repeats). And
-// `destructive` colours the confirm as a warning rather than as the accent, so the
-// bright, safe-looking button is never the one that throws work away.
+// NEITHER button carries a fill of its own: focus is the single unmistakable
+// highlight in this UI - a white fill with dark text - so a second filled button
+// beside it reads as the selected one. The confirm used to be painted accent
+// (warn when `destructive`), which put a bright blue button next to the white
+// cursor and made the question look already answered, and answered the other way.
+// The dangerous-action cue stays, as the confirm's TEXT colour: warn on an
+// unfocused destructive confirm, and overridden by the focus fill's own dark text
+// when the cursor is on it.
 function ConfirmOverlay({
   title,
   body,
@@ -134,8 +140,8 @@ function ConfirmOverlay({
             focusKey="remote-confirm-yes"
             onEnter={onConfirm}
             className={
-              "px-[2.4vw] py-[1.4vh] rounded-[1.1vh] text-[#06090d] text-[2vh] font-semibold " +
-              (destructive ? "bg-warn" : "bg-accent")
+              "px-[2.4vw] py-[1.4vh] rounded-[1.1vh] bg-white/5 text-[2vh] font-semibold " +
+              (destructive ? "text-warn" : "")
             }
           >
             {confirmLabel}
@@ -419,13 +425,36 @@ export function RemoteKeymapPage({ device }: { device: { id: string; name: strin
             </FocusButton>
             {allActions.map((a) => {
               const bound = (km[a] || []).length > 0;
+              const rowKey = keyBase(id) + "-" + a;
+              const clearKey = keyBase(id) + "-clear-" + a;
               // during a learn the row stays mounted under the modal overlay, so
               // focus returns to it when the modal closes
               return (
                 <div key={a} className="flex items-center gap-[1vw]">
                   <FocusButton
-                    focusKey={keyBase(id) + "-" + a}
+                    focusKey={rowKey}
                     onEnter={() => !learning && setLearning(a)}
+                    // Sideways inside the row is DECLARED, because geometry
+                    // cannot answer it. A focused FocusButton grows 4%, and
+                    // spatial navigation measures the transformed box - on a
+                    // row that fills the settings width, 4% of the action
+                    // button is wider than the 1vw gap beside it, so the Clear
+                    // button's left edge lands inside the focused button's
+                    // right edge. The direction filter is strict
+                    // (`sibling.left >= current.right`), so Clear was dropped
+                    // from the candidate list and could not be reached at all.
+                    // Measured 1920x1080, 1360x768 and 3840x2160: the overlap
+                    // is 0.38, 0.27 and 0.75 px - it is a ratio, so no
+                    // resolution escapes it.
+                    //
+                    // Only this one direction: Left off a row is how the page
+                    // is left, and Up and Down still have candidates that are
+                    // really above and below.
+                    onArrowPress={(dir) => {
+                      if (!bound || dir !== "right") return true;
+                      setFocus(clearKey);
+                      return false;
+                    }}
                     className="flex-1 px-[2vw] py-[1.3vh] rounded-[1.1vh] bg-white/5 flex items-center gap-[1.2vw] min-w-0"
                   >
                     <span className="text-[2vh] flex-1 text-left truncate">{actionLabel(a)}</span>
@@ -437,8 +466,17 @@ export function RemoteKeymapPage({ device }: { device: { id: string; name: strin
                   </FocusButton>
                   {bound && (
                     <FocusButton
-                      focusKey={keyBase(id) + "-clear-" + a}
+                      focusKey={clearKey}
                       onEnter={() => clearAction(a)}
+                      // The way back, declared for the same reason - here the
+                      // scaled box is the small one, so today it measures
+                      // clear; saying it leaves no mirror of the bug above for
+                      // a longer translation of "Clear" to reintroduce.
+                      onArrowPress={(dir) => {
+                        if (dir !== "left") return true;
+                        setFocus(rowKey);
+                        return false;
+                      }}
                       className="px-[1.4vw] py-[1.3vh] rounded-[1.1vh] bg-white/5 text-[1.7vh] font-semibold shrink-0"
                     >
                       {t("remote.clear")}

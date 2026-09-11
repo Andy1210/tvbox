@@ -5,6 +5,31 @@ updates). `scripts/make-release.sh` lifts the current version's `hu`/`en`
 blocks into the OTA feed's `notes` - keep both languages, keep it short, and
 write for the person on the couch (what changes for THEM), not for developers.
 
+## 3.11.2
+
+### hu
+
+- **A távirányító gombjainál a Törlés gombra rá lehet állni.** A jobbra nyíl eddig
+  nem csinált semmit: a kijelölt sor fókuszban 4%-kal nagyobb, és ez éppen többel
+  nagyobb, mint a sor és a Törlés közti rés, így a doboz úgy számolta, hogy a
+  Törlés a kijelölt sor alatt van, nem mellette. Most a sorból jobbra a Törlés
+  jön, balra pedig vissza a sor.
+- **A "felülírom?" kérdésen már csak a kijelölt gomb világít.** A másik gomb kék
+  kitöltést kapott, ami úgy festett, mintha az lenne kiválasztva, vagyis a
+  kérdés fordítva látszott megválaszolva. A visszaállítás gombja továbbra is
+  jelzi magát, de a feliratával, nem kitöltéssel.
+
+### en
+
+- **The Clear button in a remote's button list can be reached.** Right used to do
+  nothing: a focused row grows 4%, which is just more than the gap beside it, so
+  the box measured Clear as being below the row rather than next to it. Right
+  from a row now goes to Clear, and Left comes back.
+- **Only the highlighted button lights up on the "already mapped?" question.** The
+  other one carried a blue fill, which looked like the selected answer, so the
+  question read as answered the wrong way round. The reset button still marks
+  itself, with its label rather than a fill.
+
 ## 3.11.1
 
 ### hu

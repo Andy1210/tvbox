@@ -1,8 +1,9 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { act, cleanup, render, screen } from "@testing-library/react";
 import { RemoteRemap } from "./RemoteRemap";
+import { keyBase } from "./RemoteKeymap";
 import { useConfigStore } from "../stores/config";
-import { setupRemote } from "../test/remote";
+import { getCurrentFocusKey, place, remote, setFocus as navSetFocus, setupRemote } from "../test/remote";
 import { SettingsNavProvider, type StackEntry } from "../settings/nav";
 
 // "Reset this remote's buttons" throws away every button the user taught, and one
@@ -131,5 +132,122 @@ describe("resetting a remote's buttons", () => {
 
     expect(resets(posted)).toHaveLength(1);
     expect((resets(posted)[0].body as { id: string }).id).toBe(MAC);
+  });
+});
+
+// The Clear button beside a taught row, and the reassign question's two buttons.
+// Both were reported from the sofa, and both are about what spatial navigation
+// and the eye are told rather than about what the code does.
+describe("a taught row's Clear button", () => {
+  beforeEach(() => {
+    useConfigStore.setState({ config: CONFIG as never, error: false });
+  });
+  afterEach(() => {
+    cleanup();
+    vi.unstubAllGlobals();
+  });
+
+  // The rectangles are the ones a box really measures, which is the whole
+  // point: a focused FocusButton is scaled 4%, spatial navigation reads the
+  // TRANSFORMED box, and on a row filling the settings width that growth is
+  // wider than the 1vw gap beside it. Measured in Chromium with the launcher's
+  // own CSS at 1920x1080: the action button ends at 998.07 while Clear starts
+  // at 997.69, so `sibling.left >= current.right` is false and Clear was in no
+  // candidate list at all. Placed here to the same tenth of a pixel, so a
+  // future "simplification" back to geometry fails instead of shipping.
+  // Which of the pair is scaled depends on which one the cursor is on, so the
+  // two directions are two different sets of numbers - both measured.
+  const ACTION_FOCUSED = { x: -19.57, y: 200, w: 1017.64, h: 61 };
+  const ACTION_PLAIN = { x: 0, y: 200, w: 978.5, h: 59 };
+  const CLEAR_PLAIN = { x: 997.69, y: 202, w: 92.31, h: 55 };
+  const CLEAR_FOCUSED = { x: 995.37, y: 201, w: 96, h: 57 };
+
+  it("is reachable with Right, with the row's real overlapping geometry", async () => {
+    stubShell();
+    const { container } = render(<Screen />);
+    await settle();
+    await openButtons();
+
+    const rowKey = keyBase(MAC) + "-settings";
+    const clearKey = keyBase(MAC) + "-clear-settings";
+    const row = container.querySelector(`[data-sfocus="${rowKey}"]`);
+    const clear = container.querySelector(`[data-sfocus="${clearKey}"]`);
+    expect(row).toBeTruthy();
+    expect(clear).toBeTruthy();
+    place(row as Element, ACTION_FOCUSED.x, ACTION_FOCUSED.y, ACTION_FOCUSED.w, ACTION_FOCUSED.h);
+    place(clear as Element, CLEAR_PLAIN.x, CLEAR_PLAIN.y, CLEAR_PLAIN.w, CLEAR_PLAIN.h);
+
+    await navSetFocus(rowKey);
+    expect(getCurrentFocusKey()).toBe(rowKey);
+    await remote.right();
+    expect(getCurrentFocusKey()).toBe(clearKey);
+  });
+
+  // This direction measures clear today - the scaled box is the small one - so
+  // this pins the declared behaviour rather than a fix, and leaves no mirror of
+  // the bug above for a longer translation of "Clear" to reintroduce.
+  it("hands the cursor back to its row with Left", async () => {
+    stubShell();
+    const { container } = render(<Screen />);
+    await settle();
+    await openButtons();
+
+    const rowKey = keyBase(MAC) + "-settings";
+    const clearKey = keyBase(MAC) + "-clear-settings";
+    const p = (key: string, r: { x: number; y: number; w: number; h: number }) =>
+      place(container.querySelector(`[data-sfocus="${key}"]`) as Element, r.x, r.y, r.w, r.h);
+    p(rowKey, ACTION_PLAIN);
+    p(clearKey, CLEAR_FOCUSED);
+
+    await navSetFocus(clearKey);
+    await remote.left();
+    expect(getCurrentFocusKey()).toBe(rowKey);
+  });
+
+  it("does not swallow Right on a row nothing is taught for", async () => {
+    stubShell();
+    const { container } = render(<Screen />);
+    await settle();
+    await openButtons();
+
+    // `up` is in the action list and unbound, so it has no Clear button - and
+    // Right there must stay geometry's to answer, or a row with no button
+    // beside it would eat the press.
+    const unboundKey = keyBase(MAC) + "-up";
+    expect(container.querySelector(`[data-sfocus="${unboundKey}"]`)).toBeTruthy();
+    expect(container.querySelector(`[data-sfocus="${keyBase(MAC)}-clear-up"]`)).toBeNull();
+  });
+});
+
+describe("the reassign question's buttons", () => {
+  beforeEach(() => {
+    useConfigStore.setState({ config: CONFIG as never, error: false });
+  });
+  afterEach(() => {
+    cleanup();
+    vi.unstubAllGlobals();
+  });
+
+  // Focus is the only fill in this UI. A second filled button beside the white
+  // cursor reads as the selected one, and on the reset question that painted
+  // the throw-it-away button as the bright one.
+  it("carries no fill of its own, so only the cursor looks selected", async () => {
+    stubShell();
+    const { container } = render(<Screen />);
+    await settle();
+    await openButtons();
+    await press("Reset this remote's buttons");
+    await settle();
+
+    const yes = container.querySelector('[data-sfocus="remote-confirm-yes"]');
+    const no = container.querySelector('[data-sfocus="remote-confirm-no"]');
+    expect(yes).toBeTruthy();
+    expect(no).toBeTruthy();
+    for (const b of [yes as Element, no as Element]) {
+      expect(b.className).not.toMatch(/\bbg-accent\b/);
+      expect(b.className).not.toMatch(/\bbg-warn\b/);
+    }
+    // ...and the dangerous one still says so, in its text rather than a fill.
+    expect((yes as Element).className).toMatch(/\btext-warn\b/);
   });
 });
