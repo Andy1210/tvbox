@@ -140,6 +140,39 @@ where it begins, where it ends - so an event that cannot be queued drops the
 connection at once rather than leaving Home Assistant waiting for something that
 can no longer arrive.
 
+**Nothing about playing the answer may hold up the connection.** The player
+consumes audio in real time while Home Assistant hands the whole answer over in
+a couple of seconds, so the pipe fills and a write to it blocks. Doing that from
+the task that reads the socket ties that task to real time for the rest of the
+answer, and it is one unbroken stall rather than many short ones, because reading
+an event out of a buffer that already holds data never gives the loop a turn.
+
+Home Assistant pings every 2 s and drops a satellite that has not answered in
+**5**, and the drop ends the session, which stops the player - so the same
+blocking write both cut the answer off mid-sentence and flapped the connection.
+Measured as the worst uninterrupted stall, across three harnesses that disagree
+on the seconds and agree on the shape: a 3 s answer costs 1.5-3.0 s and survives,
+a 6 s answer 4.5-6.0 s and is on the threshold, and by 12 s every measurement is
+past it. Which is why it only ever showed on long answers.
+
+**The player now has a thread of its own and the connection waits for nothing.**
+Everything the socket side does is put a command on a queue: begin an answer,
+here is a chunk, play it out, stop. That thread owns the player, the pipe and the
+ducked volume, so no two answers can be half-open at once. A ceiling on what may
+wait (16 MB - about six minutes of speech, or 87 s if a text-to-speech engine
+hands over 48 kHz stereo) is what the blocking write used to provide: the port
+takes a connection with no credentials, so without one a peer is bounded only by
+its link rate. It covers everything the queue holds, not only the audio: an
+`audio-stop` is 26 bytes on the wire and a command with a callback in memory, so
+a flood of those was the more expensive of the two. Past the ceiling what arrives
+is dropped, with a line in the log saying so.
+
+`played` - which Home Assistant waits for before it considers the answer
+delivered - is said by that thread once the audio has really played. **Waiting for
+it on the connection's side does not work and was tried twice**: freeing the event
+loop is not the same as freeing the read loop, and the read loop is the only thing
+that answers a ping.
+
 ## The answer on the screen
 
 `voice.answer` decides how an answer reaches the room:
@@ -206,6 +239,10 @@ the launcher. Putting those in the strip would mean an empty bar over the film.
   that will not finish - speech to text is the usual one. Look at that service's
   log rather than the box's: the run reached it, which is why `heard:` never
   appeared here. The connection drops itself after a minute either way.
+- **The answer is cut off part way and the satellite disconnects.** Fixed for the
+  cause described above; a box that still does it is on an older release. It only
+  ever showed on answers longer than about six seconds, and Home Assistant's log
+  is where it is visible - the box's side looks like an ordinary reconnect.
 - **The answer plays but the light is wrong.** The box has no area, or has the
   wrong one - see [Which room it acts in](#which-room-it-acts-in).
 - **The remote's microphone itself can be faulty.** A dead microphone still sends

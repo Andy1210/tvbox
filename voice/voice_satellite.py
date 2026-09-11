@@ -45,11 +45,15 @@ import glob
 import json
 import logging
 import os
+import queue
 import re
+import select
 import shutil
+import signal
 import socket
 import subprocess
 import sys
+import threading
 import time
 import urllib.request
 
@@ -386,22 +390,109 @@ def show_toast(text):
 # ---------------------------------------------------------------- playback
 
 
-class Player:
-    """Plays the answer, and gets out of the way of whatever else is playing.
+# What the answer queue may hold, counted as MEMORY rather than as audio: a
+# queued chunk costs a bytes object and a queue slot whatever its length, so
+# charging only the payload let a 4 MB budget hold 245 MB of RSS at one byte per
+# chunk, and an empty chunk cost nothing at all and was never refused.
+#
+# It is also, now that nothing blocks the reader, the only cap on how long an
+# answer may be: 16 MB is about 6 minutes of 22050 Hz mono, or 87 s if a text to
+# speech engine hands Home Assistant 48 kHz stereo (the pipeline forwards the
+# engine's own rate; only the announce path is converted to 22050 mono). Past it
+# audio is dropped with a warning, which is the same doctrine as the outbound
+# queue - a hole in a sentence beats a box with no memory left.
+MAX_QUEUED_AUDIO = 16 * 1024 * 1024
+CHUNK_OVERHEAD = 128
 
-    pw-cat reads raw PCM from stdin, so the chunks go straight there as they
-    arrive rather than through a temporary file. The box's own output is pulled
-    down for the duration: a spoken answer during a film should be audible without
-    stopping the film, and restoring the exact level afterwards is what keeps this
-    from being noticed.
+# What a queued command that is not audio costs. `audio-stop` is 26 bytes on the
+# wire and becomes a tuple and a closure: measured 442 bytes resident each, so a
+# peer that floods them while the thread is busy writing turned 116 MB of wire
+# into 1458 MB of RSS - worse than the audio it was sending. Everything the queue
+# holds is charged to the one budget for that reason.
+CONTROL_COST = 512
+
+# ...and they get a budget of their own rather than sharing the audio's. A
+# `finish` refused for want of room is a protocol event Home Assistant is waiting
+# on, and an answer long enough to fill the audio budget is exactly when it would
+# have been refused - so a full answer must never be able to crowd out the event
+# that ends it. 1 MB is about 2000 commands.
+MAX_QUEUED_CONTROL = 1024 * 1024
+
+# How long the player may still be holding after its stdin closes: the pipe,
+# which is 16 PAGES - 64 KiB on an ordinary host and 256 KiB on the box, whose
+# kernel uses 16 KiB pages - plus the player's own buffer. Closing stdin is what
+# makes it play that out, so this bounds the tail of the answer.
+PLAYOUT_TAIL = 10.0
+
+# An answer that stops moving, whichever end has stopped: a peer that opens one
+# and goes quiet, or a player that is alive and no longer reading its pipe. The
+# volume of whatever else is playing is pulled down for the duration of an answer,
+# so either would otherwise leave the room quiet for as long as it lasted - and a
+# write with no deadline is outside the reach of every other bound here, because
+# nothing else runs on this thread while it is stuck.
+IDLE_TEARDOWN = 30.0
+
+
+class Player:
+    """Plays the answer through pw-cat, ducking whatever else is playing.
+
+    The reference is the television: a spoken answer during a film should be
+    audible without stopping the film, and restoring the exact level afterwards
+    is what keeps this from being noticed.
+
+    **Everything happens on one thread of its own, and nothing here blocks the
+    caller.** pw-cat consumes in real time while Home Assistant delivers a whole
+    answer in a couple of seconds, so the pipe fills and `stdin.write` blocks.
+    Writing from the task that reads the socket ties that task to real time for
+    the rest of the answer - and reading an event out of a buffer that already
+    holds data never yields, so it is one unbroken stall rather than many short
+    ones, ending only when the player has caught up.
+
+    Home Assistant pings every 2 s and drops a satellite that has not answered in
+    **5**, and the drop ends the session, which stops this player. So the same
+    blocking write both cut the answer off mid-sentence and flapped the
+    connection. Measured as the worst uninterrupted stall seen by a task of its
+    own on the same loop, across three harnesses that disagree on the seconds and
+    agree on the shape: a 3 s answer costs 1.5-3.0 s and survives, a 6 s answer
+    4.5-6.0 s and is on the threshold, and by 12 s every measurement is past it.
+    Which is why this was only ever seen on long answers.
+
+    So the event loop only ever puts a command on a queue, and this thread owns
+    every piece of player state there is. **One thread rather than a task per
+    answer**, because `asyncio.to_thread` shares a pool of `cpu + 4` workers -
+    8 on a Pi 5 - and a wait that can legitimately last as long as the answer
+    parks one of them: measured, thirty `audio-stop` events in ~700 bytes parked
+    every worker and left the read loop unable to answer a ping for 99 s. It also
+    means `start`, the chunks and the drain cannot interleave, so none of them
+    needs a guard against acting on another answer's player. What order alone
+    does not give is CANCELLATION, so every command carries the answer it belongs
+    to and the thread discards the ones that have been abandoned.
     """
 
     def __init__(self, duck=0.3):
-        self._proc = None
         self._duck = duck
-        self._restore = None
-        self._node = None  # the stream we ducked, if we found one
+        self._cmds = queue.Queue()
+        self._thread = None
+        self._lock = threading.Lock()
+        # Bytes of queued audio plus their per-chunk overhead, so the ceiling is
+        # a memory bound. Incremented by the caller, decremented by the thread.
+        self._queued = 0
+        self._queued_control = 0
+        self._dropped = 0
+        # Which answer a command belongs to. `start` and `stop` bump it, and the
+        # thread discards anything older - because the queue's ORDER is not
+        # enough: a `stop` sent while an earlier `start` is still queued would
+        # otherwise be applied after that start had opened a player and written
+        # its chunks, so an abandoned answer went on playing into the next
+        # connection, which is the one thing `stop` promises not to do.
+        self._gen = 0
+        # From here down: the thread's own state, touched nowhere else.
+        self._proc = None
         self._written = 0
+        self._restore = None
+        self._node = None
+
+    # ---- the audio sink, read and set through wpctl
 
     def _wpctl(self, *args):
         if not shutil.which("wpctl"):
@@ -459,8 +550,192 @@ class Player:
         self._node = None
         self._restore = None
 
+    # ---- the caller's side: the event loop, so none of this may block
+
     def start(self, rate, width, channels):
+        """Begin an answer. Whatever was playing is abandoned."""
+        gen = self._abandon_queued()
+        self._submit(("start", int(rate), int(width), int(channels)), gen=gen)
+
+    def write(self, chunk):
+        """Hand one chunk over, or refuse it.
+
+        `MAX_QUEUED_AUDIO` is the only refusal and it is far above any answer a
+        pipeline produces. It is here because the thread drains in real time while
+        the port takes a connection with no credentials, so the blocking write it
+        replaced was the only backpressure there was: without a ceiling a peer
+        claimed 1.5 GB in a second, bounded by nothing but its link rate.
+        """
+        if not chunk:
+            return
+        self._submit(("chunk", chunk), len(chunk) + CHUNK_OVERHEAD, audio=True)
+
+    def finish(self, played):
+        """Play the answer out, then call `played` - from the player's thread.
+
+        `played` is a promise Home Assistant waits on before it considers an
+        announcement over, so it has to follow the sound rather than the last
+        chunk being handed over. Nothing is waited for here: the commands are in
+        order, so by the time the thread reaches this one every chunk has been
+        written, and all that is left is the buffered tail.
+        """
+        self._submit(("finish", played))
+
+    def stop(self):
+        """Abandon the answer, because the connection went.
+
+        Not `finish()`: nobody is waiting for the rest of it, and letting the
+        player play out what it holds would talk over whatever the next connection
+        does. The player is killed here rather than on the thread, so the chunks
+        still queued are discarded instead of being written first.
+        """
+        gen = self._abandon_queued()
+        self._submit(("stop",), gen=gen)
+
+    def close(self, timeout=5.0):
+        """Stop for good, and wait for the thread. Only for shutdown."""
         self.stop()
+        thread = self._thread
+        if thread is not None:
+            self._cmds.put(None)
+            thread.join(timeout=timeout)
+
+    def _abandon_queued(self):
+        """End the current answer: kill its player and drop what it left queued.
+
+        Returns the generation the caller's own command must carry. Dropping here
+        rather than leaving it to the thread is what guarantees that command a
+        place: the queue may be full of the answer being abandoned, and a `stop`
+        refused for want of room would leave the room ducked until the idle
+        teardown noticed.
+        """
+        with self._lock:
+            self._gen += 1
+            gen = self._gen
+        proc = self._proc
+        if proc is not None:
+            try:
+                proc.kill()
+            except OSError:
+                pass
+        while True:
+            try:
+                item = self._cmds.get_nowait()
+            except queue.Empty:
+                break
+            if item is None:
+                # The shutdown sentinel is not ours to drop.
+                self._cmds.put(None)
+                break
+            with self._lock:
+                if item[3]:
+                    self._queued -= item[0]
+                else:
+                    self._queued_control -= item[0]
+        return gen
+
+    def _submit(self, cmd, cost=CONTROL_COST, gen=None, audio=False):
+        """Queue one command, or refuse it because the queue is full.
+
+        Audio and commands are counted separately, so that a long answer cannot
+        crowd out the `finish` that ends it. Only a peer that is flooding reaches
+        the command ceiling, and refusing one there is safe: `start` and `stop`
+        have already killed the player from this side, and a player nothing is
+        feeding closes itself after `IDLE_TEARDOWN`.
+        """
+        with self._lock:
+            if audio:
+                over = self._queued + cost > MAX_QUEUED_AUDIO
+                if not over:
+                    self._queued += cost
+            else:
+                over = self._queued_control + cost > MAX_QUEUED_CONTROL
+                if not over:
+                    self._queued_control += cost
+            if over:
+                self._dropped += 1
+                dropped = self._dropped
+        if over:
+            # One line per fifty, like the outbound queue: a peer flooding this
+            # would otherwise flood the journal with it.
+            if dropped % 50 == 1:
+                LOG.warning(
+                    "the player's queue is full - dropping %s (%d so far)", cmd[0], dropped
+                )
+            return
+        thread = self._thread
+        if thread is None or not thread.is_alive():
+            # Lazily, and re-created if it ever died: a box that cannot speak
+            # until the service restarts is the worse failure. RuntimeError is
+            # the OS refusing a thread, which is what memory pressure looks like.
+            try:
+                thread = threading.Thread(target=self._run, name="tvbox-voice-audio", daemon=True)
+                thread.start()
+            except RuntimeError as e:
+                LOG.error("cannot start the audio thread: %s", e)
+                with self._lock:
+                    if audio:
+                        self._queued -= cost
+                    else:
+                        self._queued_control -= cost
+                return
+            self._thread = thread
+        if gen is None:
+            with self._lock:
+                gen = self._gen
+        self._cmds.put((cost, gen, cmd, audio))
+
+    # ---- the player's own thread
+
+    def _run(self):
+        while True:
+            try:
+                # The timeout only matters while a player is open, which is what
+                # bounds a half-finished answer - see IDLE_TEARDOWN.
+                item = self._cmds.get(timeout=IDLE_TEARDOWN if self._proc else None)
+            except queue.Empty:
+                LOG.warning("no audio for %.0f s - closing the player", IDLE_TEARDOWN)
+                self._teardown()
+                continue
+            if item is None:
+                return
+            cost, gen, cmd, audio = item
+            with self._lock:
+                if audio:
+                    self._queued -= cost
+                else:
+                    self._queued_control -= cost
+                stale = gen != self._gen
+            if stale:
+                # An answer that was abandoned while this was queued.
+                continue
+            try:
+                self._apply(cmd, gen)
+            except Exception as e:  # noqa: BLE001 - this thread may never die
+                LOG.exception("audio thread: %s", e)
+
+    def _apply(self, cmd, gen):
+        kind = cmd[0]
+        if kind == "chunk":
+            self._write(cmd[1])
+        elif kind == "start":
+            self._teardown()
+            self._open(cmd[1], cmd[2], cmd[3])
+        elif kind == "finish":
+            self._teardown(play_out=True)
+            with self._lock:
+                stale = gen != self._gen
+            if stale:
+                # Playing the tail out takes real time, and this answer was
+                # abandoned during it. Saying `played` now would mark the answer
+                # that REPLACED it complete, on the same connection, while its own
+                # audio is still going.
+                return
+            cmd[1]()
+        elif kind == "stop":
+            self._teardown()
+
+    def _open(self, rate, width, channels):
         fmt = {1: "u8", 2: "s16", 4: "s32"}.get(width, "s16")
         cmd = [
             "pw-cat",
@@ -474,8 +749,8 @@ class Player:
             "--raw",
             "-",
         ]
+        self._duck_start()
         try:
-            self._duck_start()
             # bufsize=0: the chunks are the answer arriving in real time, and
             # Python's default buffering would hold the first seconds of it back.
             # stderr is KEPT: throwing it away is what made a silent player look
@@ -483,50 +758,96 @@ class Player:
             self._proc = subprocess.Popen(
                 cmd, stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, bufsize=0
             )
-            self._written = 0
+            # Non-blocking, so `_write` can put a deadline on a player that has
+            # stopped reading. A blocking write is the one thing on this thread
+            # that nothing could interrupt.
+            os.set_blocking(self._proc.stdin.fileno(), False)
         except OSError as e:
+            # The volume is already down - `_duck_start` runs before this - and
+            # nothing else will put it back, because with no player open there is
+            # no teardown to come. A room left quiet is the failure nobody
+            # connects to a missing pw-cat.
             LOG.error("cannot play audio: %s", e)
             self._proc = None
             self._duck_end()
-
-    def write(self, chunk):
-        if not self._proc or not self._proc.stdin:
             return
+        self._written = 0
+
+    def _write(self, chunk):
+        proc = self._proc
+        if proc is None or proc.stdin is None:
+            return
+        left = memoryview(chunk)
+        deadline = time.monotonic() + IDLE_TEARDOWN
         try:
-            self._proc.stdin.write(chunk)
-            self._written += len(chunk)
-        except (BrokenPipeError, OSError) as e:
+            while left:
+                wrote = proc.stdin.write(left)
+                if wrote:
+                    left = left[wrote:]
+                    self._written += wrote
+                    continue
+                # Nothing could be written: the pipe is full, which is the normal
+                # case - the player consumes in real time. Wait for room, but not
+                # for ever: a player that is alive and no longer reading would
+                # otherwise hold this thread, and every bound here is checked
+                # somewhere this thread cannot reach while it is stuck.
+                budget = deadline - time.monotonic()
+                if budget <= 0 or not select.select([], [proc.stdin], [], budget)[1]:
+                    LOG.warning(
+                        "the player stopped reading after %d bytes - closing it", self._written
+                    )
+                    self._teardown()
+                    return
+        except (BrokenPipeError, OSError, ValueError) as e:
+            # ValueError is a stdin this thread has closed; a broken pipe is a
+            # player that went. Tear down rather than only noting it: the rest of
+            # this answer has nowhere to go, and a peer that keeps sending chunks
+            # keeps resetting the idle timeout - so the room would stay ducked
+            # for as long as it cared to.
             LOG.warning("playback pipe closed after %d bytes: %s", self._written, e)
-            self._reap()
+            self._teardown()
 
-    def _reap(self):
-        proc, self._proc = self._proc, None
-        if not proc:
+    def _teardown(self, play_out=False):
+        """Close the player, optionally letting it play out what it holds.
+
+        `_proc` is cleared only after the wait, not before it: the caller's kill
+        reads that field, and clearing it first meant a lost connection could not
+        reach a player that was in the middle of playing out its tail - the old
+        answer went on for up to `PLAYOUT_TAIL` into the next one.
+        """
+        proc = self._proc
+        if proc is None:
             return
+        LOG.info("played %d bytes", self._written)
         try:
             if proc.stdin:
                 proc.stdin.close()
         except OSError:
             pass
+        # Waiting BEFORE reading stderr is the order that matters: a read to EOF
+        # does not return until the player exits, so doing it first left the
+        # timeout bounding nothing - measured 20 s on a player that ignored its
+        # stdin closing.
         try:
-            err = proc.stderr.read() if proc.stderr else b""
-            proc.wait(timeout=10)
+            proc.wait(timeout=PLAYOUT_TAIL if play_out else 2.0)
         except (OSError, subprocess.SubprocessError):
-            err = b""
             try:
                 proc.kill()
-                proc.wait(timeout=5)  # kill without reaping leaves a zombie behind
+                proc.wait(timeout=2)  # kill without reaping leaves a zombie behind
             except (OSError, subprocess.SubprocessError):
                 pass
-        if proc.returncode not in (0, None) or err.strip():
+        self._proc = None
+        err = b""
+        try:
+            if proc.stderr:
+                err = proc.stderr.read()
+        except (OSError, ValueError):
+            pass
+        # A signal is how `stop()` ends a player on purpose, so it is not a fault.
+        if proc.returncode not in (0, None, -signal.SIGKILL, -signal.SIGTERM) or err.strip():
             LOG.warning("player exited %s: %s", proc.returncode, err.decode("utf-8", "replace").strip()[:300])
         # Whatever happened to the player, the film's volume is not ours to keep.
         self._duck_end()
-
-    def stop(self):
-        if self._proc:
-            LOG.info("played %d bytes", self._written)
-        self._reap()
 
 
 # ---------------------------------------------------------------- satellite
@@ -566,6 +887,10 @@ class Satellite:
         self._run_open = False
         self._awaiting_since = None
         self.player = Player(duck=config["duck"])
+        # Whether an answer is spoken at all. `toast` shows the text and plays
+        # nothing, so its audio must not reach the player: the chunks would be
+        # charged to a budget nothing ever drains them from.
+        self._speaks = config["answer"] in ("speak", "both")
         # Everything we send goes through one queue and one writer task. Audio is
         # fifty chunks a second and their ORDER is the recording: firing a task per
         # chunk would hand the ordering to the scheduler, and speech reassembled out
@@ -699,22 +1024,57 @@ class Satellite:
                 await asyncio.to_thread(show_toast, text)
         elif etype == "audio-start":
             LOG.info("answer audio: %s Hz", data.get("rate"))
-            if self.config["answer"] in ("speak", "both"):
+            if self._speaks:
                 self.player.start(
                     int(data.get("rate") or SND_RATE),
                     int(data.get("width") or SND_WIDTH),
                     int(data.get("channels") or SND_CHANNELS),
                 )
         elif etype == "audio-chunk":
-            self.player.write(payload)
+            if self._speaks:
+                self.player.write(payload)
         elif etype == "audio-stop":
-            self.player.stop()
-            await self._send("played")
+            if self._speaks:
+                self.player.finish(self._played_when_heard(self.writer))
+            else:
+                # Nothing was played, so there is nothing to wait for - and
+                # queueing a whole answer nobody will hear would spend the
+                # player's budget on it.
+                self.send("played")
         else:
             # Anything unrecognised is worth a line: this is a protocol we speak
             # from the outside, and silence about an unexpected event is how a
             # missing answer looks like nothing at all.
             LOG.info("event: %s %s", etype, {k: v for k, v in data.items() if k != "audio"})
+
+    def _played_when_heard(self, writer):
+        """What the player calls once the answer has really been heard.
+
+        **Nothing here waits, and that is the whole shape of it.** The obvious
+        version - awaiting the player in `_on_event` - frees the event loop but
+        not the connection: that coroutine is the only thing reading the socket,
+        and `ping`/`pong` is answered from it. Home Assistant pings every 2 s and
+        drops a satellite that has not answered in 5, and the drop ends the
+        session, which stops the player, so waiting there reproduced the exact
+        failure this exists to fix. Measured: a pong 11 s late on a 30 s answer.
+
+        The player calls this from its own thread, so it hops back to the loop -
+        `send` is queue-based, so nothing is awaited there either.
+        """
+        loop = asyncio.get_running_loop()
+
+        def heard():
+            loop.call_soon_threadsafe(self._say_played, writer)
+
+        return heard
+
+    def _say_played(self, writer):
+        if self.writer is not writer:
+            # The connection that owed this `played` is gone. Sending it now would
+            # credit the one that replaced it with a turn it never took, and Home
+            # Assistant ends an announcement's wait on it.
+            return
+        self.send("played")
 
     def send(self, etype, data=None, payload=b""):
         """Queue one event, reporting whether it got in.
@@ -892,7 +1252,7 @@ async def amain():
         )
     finally:
         mic.close()
-        satellite.player.stop()
+        satellite.player.close()
     return 0
 
 
