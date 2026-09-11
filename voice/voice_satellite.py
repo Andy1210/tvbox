@@ -40,6 +40,7 @@ mean this room.
 """
 
 import asyncio
+import collections
 import ctypes
 import glob
 import json
@@ -368,6 +369,23 @@ class RemoteMic:
 SHELL_NOTIFY_URL = "http://127.0.0.1:8097/tvbox/api/notify"
 
 
+# How long to wait for the shell to take a note.
+#
+# **The reply says the shell's main loop reached the request, not that anything
+# is on screen**: the route hands the note on and answers in the same tick, and
+# drawing it is asynchronous from there. Measured with a shell held for 3.5 s:
+# the wait timed out three times and all three notes were drawn anyway, because
+# the request had already been delivered. So a shorter wait costs a note
+# nothing - it only frees the thread sooner - and five seconds bought nothing at
+# all while costing a whole ping budget on the read loop.
+NOTIFY_TIMEOUT = 2.0
+
+# How many notes may wait for it. One answer produces one note, so this only
+# fills when several turns land while the shell is not taking them; four is the
+# depth at which the oldest is already stale enough to be worth losing.
+MAX_QUEUED_NOTES = 4
+
+
 def show_toast(text):
     """Put the answer on the TV as a note.
 
@@ -375,16 +393,122 @@ def show_toast(text):
     both are offered and both are the default. The shell draws it - the same note
     Home Assistant can already push over MQTT - and it is on loopback, so a box
     with no shell running simply gets a failed connection and carries on.
+
+    Called only from `Toaster`'s thread: this is an HTTP round trip to another
+    process, and the reason it may not happen on the read loop is written there.
     """
-    text = (text or "").strip()
+    text = str(text or "").strip()
     if not text:
         return
     body = json.dumps({"message": text, "duration": 8000}).encode("utf-8")
     req = urllib.request.Request(SHELL_NOTIFY_URL, data=body, headers={"Content-Type": "application/json"})
     try:
-        urllib.request.urlopen(req, timeout=5).read()
+        urllib.request.urlopen(req, timeout=NOTIFY_TIMEOUT).read()
     except Exception as e:  # the shell may be restarting; an answer is not worth a crash
-        LOG.warning("could not show the answer on screen: %s", e)
+        # Deliberately not "could not show": a timeout here means the reply did
+        # not come back, and the shell may well draw the note regardless - see
+        # NOTIFY_TIMEOUT. Only a refused connection really means no note.
+        LOG.warning("the shell did not answer about the note: %s", e)
+
+
+class Toaster:
+    """Draws the answer on screen, from a thread of its own.
+
+    **`show()` is called by the task that reads the socket, and that task is the
+    only thing that answers a ping.** Home Assistant pings every 2 s and drops a
+    satellite that has not answered in 5, and the drop ends the session - which
+    stops the player mid-answer. Awaiting the note there put an HTTP round trip
+    to another process on that path, bounded by `urlopen`'s own timeout, which
+    was five seconds: exactly the budget. Reading an event out of a buffer that
+    already holds data never yields, so it was one unbroken stall rather than
+    many short ones. Same shape, and the same reason, as the answer's audio in
+    `Player`.
+
+    Measured against a shell held at a chosen latency, with Home Assistant's own
+    discipline on the other end: before, a 6 s shell produced the whole failure
+    at once - the note on screen, the answer never spoken, and the connection
+    dropped at 5.01 s. It also delayed the SPEECH one for one, since the audio
+    could not be read until the note came back. After, the longest silence is a
+    flat 2.00 s at every latency - the ping cadence and nothing else - and the
+    first audio is handed over in 0.37 s.
+
+    One thread and a small queue rather than a task per note, for the reason the
+    player has one: `asyncio.to_thread` shares a pool of `cpu + 4` workers, and a
+    wait that can last seconds parks one of them.
+
+    **Which the room gets first, the note or the sound, is no longer fixed.** The
+    note used to be awaited before any audio was read, so it always won; now the
+    two race, and the winner depends on the shell and on how long the audio
+    player takes to start. Nothing downstream depends on the order - each is
+    complete on its own - and the alternative is the stall above.
+    """
+
+    def __init__(self):
+        # A ring rather than a `queue.Queue`, because the eviction has to be
+        # ATOMIC with the append: doing it as "the put failed, so take one out
+        # and put again" races the thread that is draining, and a note it had
+        # already taken meanwhile cost a second, live one. `deque(maxlen=)`
+        # drops the oldest as part of the append, under one lock.
+        self._notes = collections.deque(maxlen=MAX_QUEUED_NOTES)
+        self._ready = threading.Condition()
+        self._thread = None
+        self._dropped = 0
+
+    def show(self, text):
+        """Queue one note. Never blocks, never raises.
+
+        `str()` because the text comes off an unauthenticated port: a
+        `synthesize` carrying a number made `.strip()` raise, and an exception
+        here leaves `_on_event` and ends the session.
+        """
+        text = str(text or "").strip()
+        if not text:
+            return
+        thread = self._thread
+        if thread is None or not thread.is_alive():
+            # Lazily, and re-created if it ever died - a box that stops showing
+            # notes until the service restarts is the worse failure.
+            try:
+                thread = threading.Thread(
+                    target=self._run, name="tvbox-voice-toast", daemon=True
+                )
+                thread.start()
+            except RuntimeError as e:
+                LOG.error("cannot start the toast thread: %s", e)
+                return
+            self._thread = thread
+        # **The OLDEST goes, not the newest.** A note is about the question that
+        # was just asked, so the one still waiting behind the others is the one
+        # nobody wants any more - dropping the arrival instead showed a queue of
+        # stale answers and silently lost the current one. (Audio wants the
+        # opposite, which is why `Player` drops what arrives.)
+        #
+        # Nothing here waits, whatever else it costs: the caller is the task that
+        # answers Home Assistant's pings. On `answer: "toast"` the box says
+        # nothing either, so a dropped note is that whole turn lost - still
+        # better than a satellite that stops responding.
+        with self._ready:
+            dropped = len(self._notes) == MAX_QUEUED_NOTES
+            self._notes.append(text)
+            self._ready.notify()
+        if dropped:
+            self._dropped += 1
+            if self._dropped % 10 == 1:
+                LOG.warning(
+                    "the shell is not taking notes - dropping the oldest (%d so far)",
+                    self._dropped,
+                )
+
+    def _run(self):
+        while True:
+            with self._ready:
+                while not self._notes:
+                    self._ready.wait()
+                text = self._notes.popleft()
+            try:
+                show_toast(text)
+            except Exception as e:  # noqa: BLE001 - this thread may never die
+                LOG.exception("toast: %s", e)
 
 
 # ---------------------------------------------------------------- playback
@@ -887,6 +1011,7 @@ class Satellite:
         self._run_open = False
         self._awaiting_since = None
         self.player = Player(duck=config["duck"])
+        self.toaster = Toaster()
         # Whether an answer is spoken at all. `toast` shows the text and plays
         # nothing, so its audio must not reach the player: the chunks would be
         # charged to a budget nothing ever drains them from.
@@ -971,6 +1096,13 @@ class Satellite:
         while not self._out.empty():
             self._out.get_nowait()
         self.player.stop()
+        # The NOTES are deliberately left alone, which is the opposite of what is
+        # right for audio three lines up. Abandoned audio holds the one sound
+        # device and talks over whatever the next connection does; a note holds
+        # nothing and is gone in seconds. And the common case here is Home
+        # Assistant reconnecting after a turn that FINISHED, so dropping would
+        # throw away a correct answer - which on `answer: "toast"` is the whole
+        # of it.
         if writer is not None:
             try:
                 writer.close()
@@ -1021,7 +1153,7 @@ class Satellite:
             text = data.get("text", "")
             LOG.info("answer: %s", text)
             if self.config["answer"] in ("toast", "both"):
-                await asyncio.to_thread(show_toast, text)
+                self.toaster.show(text)
         elif etype == "audio-start":
             LOG.info("answer audio: %s Hz", data.get("rate"))
             if self._speaks:
