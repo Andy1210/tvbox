@@ -12,12 +12,21 @@ write for the person on the couch (what changes for THEM), not for developers.
 - **A doboz megmondja, ha tönkrement a memóriakártyája.** Eddig csak annyi
   látszott, hogy egyre több minden nem működik, aztán fekete lett a képernyő, és
   semmi nem árulta el, miért. Mostantól kiírja a tévére, amíg még van rá ideje.
+- **A visszaállítás nem akad el egy alkalmazáson, amit már nem kínál senki.** Ha
+  a mentés óta kikerült valami a kínálatból, a doboz minden indításkor újra
+  nekifutott, és a visszaállítás sávja hibával állt meg. Mostantól egyszer
+  megállapítja, hogy már egyik forrás sem kínálja, kiírja, melyik az, és többé
+  nem kéri.
 
 ### en
 
 - **The box says so when its memory card has failed.** Until now all you saw was
   more and more of it not working, then a black screen, and nothing that said
   why. It puts it on the television now, while there is still time to read it.
+- **A restore no longer gets stuck on an app that no source offers any more.** If
+  something was taken out of the catalogue after your backup was made, the box
+  tried again at every start and the restore bar stopped with an error. It now
+  works out once that nobody offers it, says which one, and stops asking.
 
 ## 3.11.3
 
