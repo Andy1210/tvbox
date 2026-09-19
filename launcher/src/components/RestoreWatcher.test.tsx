@@ -185,6 +185,16 @@ describe("RestoreWatcher", () => {
     expect(text).not.toContain("ccc");
   });
 
+  it("never says '+0 more'", async () => {
+    // Compressing needs something to hide. At exactly two names the width rule
+    // would otherwise fire with nothing left over, and "+0 more" is a longer way
+    // of saying the list it replaced - which two long ids still fit inside.
+    stubStatus({ total: 3, done: 3, gone: ["a".repeat(40), "b".repeat(40)] });
+    const text = await banner();
+    expect(text).not.toContain("+0");
+    expect(text).toContain("b".repeat(40));
+  });
+
   it("lets the finished summary wrap instead of truncating it", async () => {
     // The longest sentence it can produce is 94 characters in English and 106 in
     // Hungarian, against about 74 that fit on one line at 1360x768 - so

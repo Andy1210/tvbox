@@ -91,8 +91,12 @@ export function RestoreWatcher() {
   const wanted = status.wanted ?? status.total;
   const failedApps = appCounts ? new Set(status.failed.map((f) => f.id)).size : status.failed.length;
   const named = goneApps.join(", ");
+  // Compressing needs something to hide: at exactly MAX_NAMED the count would be
+  // "+0 more", which is a longer way of saying the list it replaced. Two long ids
+  // are 82 characters and still fit the two lines; three of them do not, and that
+  // is where the width rule earns its place.
   const apps =
-    goneApps.length > MAX_NAMED + 1 || named.length > MAX_NAMED_CHARS
+    goneApps.length > MAX_NAMED + 1 || (goneApps.length > MAX_NAMED && named.length > MAX_NAMED_CHARS)
       ? t("restore.andMore", {
           apps: goneApps.slice(0, MAX_NAMED).join(", "),
           n: String(goneApps.length - MAX_NAMED),
