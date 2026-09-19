@@ -493,9 +493,12 @@ function main() {
         // thing to have happened between the backup and now.
         for (const id of s.gone) console.log(`  ${id}: no longer offered by any configured registry - dropped`);
         if (!all) reconcile.settle(desired);
-        // Steps here, deliberately: this is the operator's view of the plan, and a
-        // retired app IS a step that ran - it just did not end in an install.
-        console.log(`done - ${s.done - s.failed.length}/${s.total} steps`);
+        // Apps, in the same units as the banner and the maintenance log. Steps
+        // would read as the operator's view of the plan, but `gone` now carries
+        // retirements from earlier passes too - no step ran for those in THIS run -
+        // so a step count beside that list said two different things at once.
+        const failedApps = new Set(s.failed.map((f) => f.id)).size;
+        console.log(`done - ${s.wanted - s.gone.length - failedApps}/${s.wanted - s.gone.length} app(s)`);
         if (s.failed.length) process.exit(1);
       })
       .catch((e) => {

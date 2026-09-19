@@ -79,12 +79,17 @@ export function RestoreWatcher() {
   //
   // `wanted` falls back to the step total for a shell that predates it, which is
   // the old behaviour rather than a crash.
-  const failedApps = new Set(status.failed.map((f) => f.id)).size;
   // An app no registry carries any more was never one of the apps this run could
   // bring back, so it is counted out of the total rather than against it: "8 of 9"
   // with one retired, not "8 of 10" with the tenth unexplained.
   const goneApps = status.gone ?? [];
+  // Both halves of the fallback move together or it is not the old behaviour:
+  // without an app count the total is a count of STEPS, and collapsing the failed
+  // steps by app id against it reports 3 of 4 where the old code said 2 of 4. An
+  // app that lost both its deps and its bundle is two steps of that total.
+  const appCounts = status.wanted != null;
   const wanted = status.wanted ?? status.total;
+  const failedApps = appCounts ? new Set(status.failed.map((f) => f.id)).size : status.failed.length;
   const named = goneApps.join(", ");
   const apps =
     goneApps.length > MAX_NAMED + 1 || named.length > MAX_NAMED_CHARS
@@ -119,7 +124,7 @@ export function RestoreWatcher() {
           // carried whole is exactly a step total of 1 - the shape this arithmetic
           // exists to fix. Claiming nothing came back there would be the old bug
           // wearing the new sentence.
-          t(total > 0 || status.wanted == null ? "restore.doneWithGone" : "restore.noneLeft", { apps })
+          t(total > 0 || !appCounts ? "restore.doneWithGone" : "restore.noneLeft", { apps })
         : t("restore.done");
   // Steps, not apps: this is how much of the plan is behind us, which is what a
   // progress bar is for.

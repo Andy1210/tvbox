@@ -418,19 +418,35 @@ test("what comes back out of the state file is held to the same id rule", async 
   reconcile.clear();
 });
 
-test("an id in both lists is counted once, not once on each side", async () => {
-  // Only settle() writes `retired`, and it removes the id from `apps` in the same
-  // breath - so the two are disjoint on every path the box takes. A file that
-  // says otherwise used to make "apps minus retired" negative, which reads on
-  // screen as "-1 of 0".
+test("an id in both lists is still wanted, not retired", async () => {
+  // Only settle() writes `retired`, and it takes the id out of `apps` in the same
+  // breath - so the two are disjoint on every path the box takes, and a file that
+  // says otherwise is stale or tampered. The overlap it produces is not a repeat
+  // inside one list, which is why the dedupe further down does not catch it: the
+  // id is reported as retired while still being asked for, so a run where it then
+  // FAILS counts it once in `gone` and once in `failed`, and "apps minus retired
+  // minus failed" goes to -1. On screen: "Apps restored: -1 of 0".
   fs.writeFileSync(
     reconcile.STATE_FILE,
     JSON.stringify({ v: 1, at: Date.now(), reason: "restore", attempts: 0, apps: [{ id: "plex" }], retired: ["plex"] }),
   );
-  const s = await reconcile.run(reconcile.pending(), RETIRED_IO("unlisted", "plex"));
-  assert.deepEqual(s.gone, ["plex"]);
+  const back = reconcile.pending();
+  assert.deepEqual(back.retired, [], "being wanted wins");
+  const s = await reconcile.run(back, {
+    apps: {
+      manifestById: (id) => ({ id, name: id }),
+      appDeps: () => ({ depsOk: true, installable: false, missing: [] }),
+      bundleMissing: () => true,
+      loadManifests: () => [],
+    },
+    installApp: () => ({ ok: true }),
+    installDeps: () => true,
+    installBundle: () => false, // it fails rather than retires
+  });
+  assert.deepEqual(s.gone, []);
   assert.equal(s.wanted, 1);
-  assert.ok(s.wanted - s.gone.length >= 0, "the app count can never go negative");
+  const failedApps = new Set(s.failed.map((f) => f.id)).size;
+  assert.ok(s.wanted - s.gone.length - failedApps >= 0, "the app count can never go negative");
   reconcile.clear();
 });
 

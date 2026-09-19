@@ -119,6 +119,23 @@ describe("RestoreWatcher", () => {
     expect(await banner()).toContain("Apps restored: 9 of 10");
   });
 
+  it("does not collapse the failed steps when it is counting steps", async () => {
+    // Both halves of the fallback move together or it is not the old behaviour.
+    // An app that lost both its deps and its bundle is two of a STEP total, and
+    // collapsing it to one app against that total reports 3 of 4 where the old
+    // code said 2 of 4 - an app claimed back that never came.
+    stubStatus({
+      total: 4,
+      done: 4,
+      wanted: undefined,
+      failed: [
+        { id: "broken", kind: "deps", error: "dependency install failed" },
+        { id: "broken", kind: "bundle", error: "bundle install failed" },
+      ],
+    });
+    expect(await banner()).toContain("Apps restored: 2 of 4 - 2 could not be downloaded");
+  });
+
   it("does not use the step total to claim nothing came back", async () => {
     // The same shape the app count exists to fix, on a shell that cannot send it:
     // one retired app beside one the backup carried whole is a STEP total of 1,

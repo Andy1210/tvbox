@@ -70,7 +70,16 @@ function pending() {
     // skipped.
     const apps = validIds(s.apps).map((id) => ({ id }));
     if (!apps.length) return null;
-    return { ...s, apps, retired: validIds(s.retired) };
+    // The two lists are made disjoint HERE rather than left to the dedupe further
+    // down, because the overlap they can produce is not a repeat inside one list.
+    // An id in both is reported as retired while still being asked for, so a run
+    // where it then fails normally counts it once in `gone` and once in `failed` -
+    // "apps minus retired minus failed" goes to -1, which reads on screen as
+    // "Apps restored: -1 of 0". Still being wanted wins: settle() is the only
+    // thing that writes `retired`, and it takes the id out of `apps` in the same
+    // breath, so a file saying otherwise is a stale or tampered one.
+    const wanted = new Set(apps.map((a) => a.id));
+    return { ...s, apps, retired: validIds(s.retired).filter((id) => !wanted.has(id)) };
   } catch (e) {
     return null;
   }
