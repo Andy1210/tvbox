@@ -85,13 +85,43 @@ describe("RestoreWatcher", () => {
     expect(text).not.toContain("Your apps are back");
   });
 
-  it("caps a long list with a count instead of letting it be cut off", async () => {
-    // One truncating line: a cut list reads as the whole list, and the person
+  it("caps a long list with a count instead of letting it run away", async () => {
+    // A list that outgrows the line reads as the whole list, and the person
     // cannot tell whether their own app is among the ones they cannot see.
     stubStatus({ total: 5, done: 5, gone: ["plex", "jellyfin", "kodi", "emby"] });
     const text = await banner();
     expect(text).toContain("plex, jellyfin +2 more");
     expect(text).not.toContain("kodi");
+  });
+
+  it("does not hide a single name behind a count that is longer than it", async () => {
+    // " +1 more" is longer than most app ids here, so compressing at three costs
+    // characters AND trades a name for a digit. Measured: "plex, jellyfin +1 more"
+    // is 22 characters against "plex, jellyfin, kodi" at 20.
+    stubStatus({ total: 4, done: 4, gone: ["plex", "jellyfin", "kodi"] });
+    const text = await banner();
+    expect(text).toContain("plex, jellyfin, kodi");
+    expect(text).not.toContain("more");
+  });
+
+  it("names both when there are exactly two", async () => {
+    stubStatus({ total: 3, done: 3, gone: ["plex", "jellyfin"] });
+    const text = await banner();
+    expect(text).toContain("plex, jellyfin");
+    expect(text).not.toContain("more");
+  });
+
+  it("lets the finished summary wrap instead of truncating it", async () => {
+    // The sentence that names a failure AND a retirement is 75 characters in
+    // English and 80 in Hungarian, against ~74 that fit on one line at
+    // 1360x768 - so truncating it ate the clause this banner exists to add.
+    // happy-dom lays nothing out, so the decision is pinned by the class.
+    stubStatus({ total: 2, done: 2, gone: ["plex"] });
+    const r = render(<RestoreWatcher />);
+    await act(async () => {});
+    const label = r.container.querySelector("span.flex-1");
+    expect(label?.className).not.toContain("truncate");
+    expect(label?.className).toContain("line-clamp-2");
   });
 
   it("says nothing extra when every app came back", async () => {

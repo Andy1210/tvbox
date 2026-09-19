@@ -15,10 +15,11 @@ import { fetchReconcileStatus, type ReconcileStatus } from "../lib/reconcile";
 const POLL_MS = 3000;
 const DWELL_MS = 8000; // how long the finished summary stays up
 const EARLY_RETRIES = 5; // before the first answer, a hiccup gets this many more goes
-// The summary is one truncating line in a 52vw box, so a long list of retired apps
-// would be cut mid-name with nothing saying how many were lost - which reads as
-// the whole list. Two names and a count instead: the count is the part a person
-// can act on, and it survives the narrowest panel here (1360x768).
+// A long list of retired apps is compressed to two names and a count, so it
+// cannot run away with the line. Only when at least TWO names would be hidden,
+// though: " +1 more" is longer than most app ids here (plex, kodi, emby), so
+// hiding exactly one is longer than printing it AND trades a name for a digit -
+// measured, "plex, jellyfin +1 more" against "plex, jellyfin, kodi".
 const MAX_NAMED = 2;
 
 export function RestoreWatcher() {
@@ -69,7 +70,7 @@ export function RestoreWatcher() {
   // with one retired, not "8 of 10" with the tenth unexplained.
   const goneApps = status.gone ?? [];
   const apps =
-    goneApps.length > MAX_NAMED
+    goneApps.length > MAX_NAMED + 1
       ? t("restore.andMore", {
           apps: goneApps.slice(0, MAX_NAMED).join(", "),
           n: String(goneApps.length - MAX_NAMED),
@@ -112,7 +113,14 @@ export function RestoreWatcher() {
         {running && (
           <span className="w-[2.4vh] h-[2.4vh] shrink-0 rounded-full border-[0.35vh] border-white/20 border-t-white animate-spin" />
         )}
-        <span className="text-[2vh] font-semibold truncate flex-1">{label}</span>
+        {/* The running label is replaced every few seconds and must stay one line,
+            so it truncates. The summary is written once and stands for eight
+            seconds: measured at 1360x768 it has room for ~74 characters, and the
+            sentence that names both a failure and a retirement runs to 75 in
+            English and 80 in Hungarian - so truncating it ate the clause this
+            banner exists to add. Two lines, clamped so nothing can grow without
+            bound. */}
+        <span className={"text-[2vh] font-semibold flex-1 " + (running ? "truncate" : "line-clamp-2")}>{label}</span>
         {running && status.total > 0 && (
           <span className="text-[1.8vh] text-fg-dim tabular-nums shrink-0">
             {status.done}/{status.total}

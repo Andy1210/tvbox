@@ -276,9 +276,12 @@ function settle(desired) {
   const skipped = status.steps.some((s) => s.state === "skipped");
   const attempts = Number(desired && desired.attempts) || 0;
   // Nothing left to come back for - either every step landed, or every app the
-  // backup named has been retired. The empty-list half also keeps `save` honest:
-  // a state with no apps is one `pending()` refuses to read, so writing it would
-  // leave a file behind that means the same as no file at all.
+  // backup named has been retired. The two halves overlap today: a retired app is
+  // absent, so it plans no deps or bundle step of its own, and an empty list can
+  // therefore only arise when every step was a retirement and nothing failed or
+  // stood down. The empty check is kept anyway for what it guards, which is
+  // writing a state file with no apps in it - one `pending()` refuses to read, so
+  // it would mean the same as no file while sitting on the card for ever.
   if (!apps.length || (!failed && !skipped)) {
     clear();
     return false;

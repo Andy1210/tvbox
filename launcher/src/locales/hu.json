@@ -576,7 +576,7 @@
     "doneWithGone": "Az alkalmazásaid visszakerültek. Már nem kínálja senki: {apps}",
     "doneWithErrorsAndGone": "{total} alkalmazásból {n} visszaállt - {failed} nem töltődött le. Már nem kínálja senki: {apps}",
     "noneLeft": "Nincs mit visszahozni. Már nem kínálja senki: {apps}",
-    "andMore": "{apps} +{n} további"
+    "andMore": "{apps} és még {n}"
   },
   "parental": {
     "title": "Szülői felügyelet",

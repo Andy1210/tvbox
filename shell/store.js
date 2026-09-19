@@ -646,6 +646,23 @@ async function install(config, id, sourceUrl) {
     const failed = loaded.find((s) => s.error);
     if (failed)
       return { ok: false, reason: "unreachable", error: "registry unreachable: " + (failed.error || "unknown") };
+    // A registry that OFFERS the app and had its entry refused HERE has not
+    // retired it. fetchIndex takes such an entry out of `entries` with no error
+    // recorded anywhere - an unknown manifestVersion, or a trust rule this box
+    // enforces - so from this point it looks exactly like an app nobody
+    // publishes, and `_dropped`/`_blocked` are what keep the two apart. listForUi
+    // has always refused to collapse them ("unreadable"/"blocked" against
+    // "retired"), for the reason written where they are collected: an older box
+    // must not announce that nobody offers an app any more.
+    //
+    // A `reason` is a licence to ACT on the verdict, and the restore reconciler
+    // acts on this one permanently, so neither kind gets one. A trust refusal
+    // will not change by asking again, but it is still not a retirement, and
+    // leaving it a plain failure is what the box did before any of this.
+    const refusedHere = loaded.some(
+      (s) => s.entries && ((s.entries._dropped || []).includes(id) || (s.entries._blocked || []).includes(id)),
+    );
+    if (refusedHere) return { ok: false, error: "offered, but this box refuses the entry" };
     return { ok: false, reason: "unlisted", error: "not in registry" };
   }
   const m = hit.entry;
