@@ -238,3 +238,265 @@ test("a box that stops being free skips the rest", async () => {
   assert.equal(s.steps.find((x) => x.id === "a").state, "done");
   assert.equal(s.steps.find((x) => x.id === "b").state, "skipped");
 });
+
+// ---- an app that is not published any more ----
+//
+// A backup names what the box HAD, and an app can be retired from the registry in
+// between. Asking again gets the same answer every time, so the retry budget is
+// spent on a settled question - and until it runs out, every boot puts the restore
+// banner back on the television reporting an app that could not be downloaded.
+//
+// The one thing that must not be confused with it is a registry that could not be
+// READ: it looks identical from here and means the opposite, which is why only the
+// store's own `reason` decides.
+const RETIRED_IO = (reason, absent) => ({
+  apps: {
+    // The app never arrives, so it is absent in pass 2 as well and owes no deps.
+    manifestById: (id) => (id === absent ? null : { id, name: id }),
+    appDeps: () => ({ depsOk: true, installable: false, missing: [] }),
+    bundleMissing: () => false,
+    loadManifests: () => [],
+  },
+  installApp: (id) => (id === absent ? { ok: false, reason, error: "not in registry" } : { ok: true }),
+  installDeps: () => true,
+  installBundle: () => true,
+});
+
+test("an app no registry carries any more is reported apart from the failures", async () => {
+  const s = await reconcile.run({ reason: "restore", apps: [{ id: "plex" }] }, RETIRED_IO("unlisted", "plex"));
+  assert.equal(s.steps.find((x) => x.id === "plex").state, "gone");
+  assert.deepEqual(s.failed, []);
+  // Ids: an app that never arrived has no name anywhere on the box, and the
+  // registries that would have one no longer offer it.
+  assert.deepEqual(s.gone, ["plex"]);
+  // It is settled, so the progress bar is full rather than stuck one short.
+  assert.equal(s.done, s.total);
+});
+
+test("a retired app leaves the desired state without spending the retry budget", async () => {
+  const desired = reconcile.record([{ id: "plex" }, { id: "keeper" }], "restore");
+  const io = RETIRED_IO("unlisted", "plex");
+  const s = await reconcile.run(desired, {
+    ...io,
+    installBundle: () => false,
+    apps: { ...io.apps, bundleMissing: (m) => m.id === "keeper" },
+  });
+  assert.equal(s.steps.find((x) => x.id === "plex").state, "gone");
+  assert.equal(
+    s.steps.find((x) => x.id === "keeper" && x.kind === "bundle").state,
+    "failed",
+    "the other app really did fail",
+  );
+  assert.equal(reconcile.settle(desired), true, "the failure is still worth a retry");
+  const left = reconcile.pending();
+  assert.deepEqual(
+    left.apps.map((a) => a.id),
+    ["keeper"],
+    "the retired app is not asked for again",
+  );
+  assert.equal(left.attempts, 1, "the failure spent one attempt, the retirement none");
+  reconcile.clear();
+});
+
+test("a retirement found on one pass is still named on the pass that reports", async () => {
+  // The case the whole `gone` list exists for, and the one it used to miss. A run
+  // that retires one app and fails on another keeps the desired state for the
+  // retry, and the launcher stays on its "still working" label while it does - so
+  // the summary naming the retired app is only drawn on the LAST pass. By then
+  // settle() had taken the id out of the wanted list and the next run planned no
+  // step for it, so the banner said nothing about it to anyone.
+  const desired = reconcile.record([{ id: "plex" }, { id: "keeper" }], "restore");
+  const io = RETIRED_IO("unlisted", "plex");
+  const failing = {
+    ...io,
+    apps: { ...io.apps, bundleMissing: (m) => m.id === "keeper" },
+    installBundle: () => false,
+  };
+  await reconcile.run(desired, failing);
+  assert.equal(reconcile.settle(desired), true);
+
+  // The next boot: only `keeper` is wanted, and this time its bundle lands.
+  const next = reconcile.pending();
+  assert.deepEqual(
+    next.apps.map((a) => a.id),
+    ["keeper"],
+    "the retired app is not asked for again",
+  );
+  const s = await reconcile.run(next, { ...io, apps: { ...io.apps, bundleMissing: () => false } });
+  assert.deepEqual(s.gone, ["plex"], "still named on the pass the person actually sees");
+  assert.deepEqual(s.failed, []);
+  // Counted as APPS: the restore was about two, one of them is retired, so one
+  // came back - which is the sentence the banner draws from these numbers. The
+  // step total is separately zero here, because `keeper` was whole by then and
+  // owed nothing; counting steps would have said "nothing to bring back".
+  assert.equal(s.wanted, 2);
+  assert.equal(s.wanted - s.gone.length, 1);
+  assert.equal(s.total, 0, "no step was owed on this pass");
+  assert.equal(reconcile.settle(next), false, "nothing left to come back for");
+  assert.equal(reconcile.pending(), null);
+});
+
+test("a second retirement joins the first rather than replacing it", async () => {
+  // Two passes with one retirement each. The two-app case cannot tell
+  // "accumulate" from "this pass only" apart - both give one id - so the rule the
+  // carry-forward exists for is only pinned by a third app arriving late.
+  const desired = reconcile.record([{ id: "plex" }, { id: "jellyfin" }, { id: "keeper" }], "restore");
+  const gone = new Set(["plex"]);
+  const io = {
+    apps: {
+      manifestById: (id) => (gone.has(id) ? null : { id, name: id }),
+      appDeps: () => ({ depsOk: true, installable: false, missing: [] }),
+      bundleMissing: (m) => m.id === "keeper",
+      loadManifests: () => [],
+    },
+    installApp: (id) => (gone.has(id) ? { ok: false, reason: "unlisted", error: "not in registry" } : { ok: true }),
+    installDeps: () => true,
+    installBundle: () => false, // keeper keeps the restore alive for a second pass
+  };
+  await reconcile.run(desired, io);
+  assert.equal(reconcile.settle(desired), true);
+
+  gone.add("jellyfin"); // retired between the two boots
+  const second = reconcile.pending();
+  await reconcile.run(second, io);
+  const s = reconcile.state();
+  assert.deepEqual(s.gone, ["plex", "jellyfin"], "the first retirement is still named");
+  assert.equal(reconcile.settle(second), true);
+  assert.deepEqual(reconcile.pending().retired, ["plex", "jellyfin"]);
+  reconcile.clear();
+});
+
+test("an INTERRUPTED pass keeps the retirements it found", async () => {
+  // The branch a box takes when somebody starts watching something mid-restore,
+  // which on a just-restored box is the commonest reason there is a second pass
+  // at all. It spends no attempt, and it must not spend the record either.
+  const desired = reconcile.record([{ id: "plex" }, { id: "later" }], "restore");
+  let free = true;
+  await reconcile.run(desired, {
+    apps: {
+      manifestById: (id) => (id === "plex" ? null : { id, name: id }),
+      appDeps: () => ({ depsOk: true, installable: false, missing: [] }),
+      bundleMissing: (m) => m.id === "later", // so `later` owes a step to stand down on
+      loadManifests: () => [],
+    },
+    installApp: (id) => (id === "plex" ? { ok: false, reason: "unlisted", error: "not in registry" } : { ok: true }),
+    installDeps: () => true,
+    installBundle: () => true,
+    free: () => {
+      const was = free;
+      free = false; // the retirement lands, then the box is claimed
+      return was;
+    },
+  });
+  assert.equal(reconcile.settle(desired), true, "interrupted, so it comes back");
+  const next = reconcile.pending();
+  assert.deepEqual(next.retired, ["plex"]);
+  assert.equal(next.attempts, 0, "an interruption still spends no budget");
+  reconcile.clear();
+});
+
+test("what comes back out of the state file is held to the same id rule", async () => {
+  // The file is attacker-supplied until the backup's password verifies, and this
+  // is the only door its ids come back through. record() writes clean ones; what
+  // is READ is what run() maps over, and a junk entry there used to reach it.
+  const raw = {
+    v: 1,
+    at: Date.now(),
+    reason: "restore",
+    attempts: 0,
+    apps: [{ id: "keeper" }, null, { id: "NOT VALID" }, { id: "keeper" }],
+    retired: ["plex", "plex", "no good", 7, "x".repeat(41)],
+  };
+  fs.writeFileSync(reconcile.STATE_FILE, JSON.stringify(raw));
+  const back = reconcile.pending();
+  assert.deepEqual(
+    back.apps.map((a) => a.id),
+    ["keeper"],
+    "junk, duplicates and bad shapes are dropped",
+  );
+  assert.deepEqual(back.retired, ["plex"]);
+  reconcile.clear();
+});
+
+test("an id in both lists is still wanted, not retired", async () => {
+  // Only settle() writes `retired`, and it takes the id out of `apps` in the same
+  // breath - so the two are disjoint on every path the box takes, and a file that
+  // says otherwise is stale or tampered. The overlap it produces is not a repeat
+  // inside one list, which is why the dedupe further down does not catch it: the
+  // id is reported as retired while still being asked for, so a run where it then
+  // FAILS counts it once in `gone` and once in `failed`, and "apps minus retired
+  // minus failed" goes to -1. On screen: "Apps restored: -1 of 0".
+  fs.writeFileSync(
+    reconcile.STATE_FILE,
+    JSON.stringify({ v: 1, at: Date.now(), reason: "restore", attempts: 0, apps: [{ id: "plex" }], retired: ["plex"] }),
+  );
+  const back = reconcile.pending();
+  assert.deepEqual(back.retired, [], "being wanted wins");
+  const s = await reconcile.run(back, {
+    apps: {
+      manifestById: (id) => ({ id, name: id }),
+      appDeps: () => ({ depsOk: true, installable: false, missing: [] }),
+      bundleMissing: () => true,
+      loadManifests: () => [],
+    },
+    installApp: () => ({ ok: true }),
+    installDeps: () => true,
+    installBundle: () => false, // it fails rather than retires
+  });
+  assert.deepEqual(s.gone, []);
+  assert.equal(s.wanted, 1);
+  const failedApps = new Set(s.failed.map((f) => f.id)).size;
+  assert.ok(s.wanted - s.gone.length - failedApps >= 0, "the app count can never go negative");
+  reconcile.clear();
+});
+
+test("an app that stood down is not counted as one that came back", async () => {
+  // The box was claimed mid-run, so a step was skipped: neither a failure nor an
+  // arrival. Counting it as restored made an interrupted run report every app
+  // back - "done: 2 of 2 app(s)" for two that were never attempted.
+  let free = true;
+  const s = await reconcile.run(
+    { reason: "restore", apps: [{ id: "a" }, { id: "b" }] },
+    {
+      ...OK_IO(false),
+      free: () => {
+        const was = free;
+        free = false;
+        return was;
+      },
+    },
+  );
+  assert.deepEqual(s.skipped, ["b"]);
+  assert.deepEqual(s.failed, []);
+  const unfinished = new Set([...s.failed.map((f) => f.id), ...s.skipped]).size;
+  assert.equal(s.wanted - s.gone.length - unfinished, 1, "one of the two came back, not both");
+});
+
+test("a restore whose apps are all retired stops after one run", async () => {
+  const desired = reconcile.record([{ id: "plex" }], "restore");
+  await reconcile.run(desired, RETIRED_IO("unlisted", "plex"));
+  assert.equal(reconcile.settle(desired), false, "nothing left to come back for");
+  assert.equal(reconcile.pending(), null);
+});
+
+test("a registry that could not be READ is still a failure to retry", async () => {
+  const desired = reconcile.record([{ id: "plex" }], "restore");
+  const s = await reconcile.run(desired, RETIRED_IO("unreachable", "plex"));
+  assert.equal(s.steps.find((x) => x.id === "plex").state, "failed");
+  assert.deepEqual(s.gone, []);
+  assert.equal(reconcile.settle(desired), true);
+  assert.deepEqual(
+    reconcile.pending().apps.map((a) => a.id),
+    ["plex"],
+    "an unread catalogue must not retire an app",
+  );
+  reconcile.clear();
+});
+
+test("an install failure with no verdict at all stays a failure", async () => {
+  const desired = reconcile.record([{ id: "plex" }], "restore");
+  const s = await reconcile.run(desired, RETIRED_IO(undefined, "plex"));
+  assert.equal(s.steps.find((x) => x.id === "plex").state, "failed");
+  assert.equal(reconcile.settle(desired), true);
+  reconcile.clear();
+});

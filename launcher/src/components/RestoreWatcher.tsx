@@ -15,6 +15,18 @@ import { fetchReconcileStatus, type ReconcileStatus } from "../lib/reconcile";
 const POLL_MS = 3000;
 const DWELL_MS = 8000; // how long the finished summary stays up
 const EARLY_RETRIES = 5; // before the first answer, a hiccup gets this many more goes
+// A long list of retired apps is compressed to two names and a count, so it
+// cannot run away with the line. Only when at least TWO names would be hidden,
+// though: " +1 more" is longer than most app ids here (plex, kodi, emby), so
+// hiding exactly one is longer than printing it AND trades a name for a digit -
+// measured, "plex, jellyfin +1 more" against "plex, jellyfin, kodi".
+const MAX_NAMED = 2;
+// ...and a count of names is not a bound on their WIDTH. An id may be 40
+// characters (shell/reconcile.js), so two of them are 82 on their own - enough to
+// push the count itself off the end of the clamp, which is the one thing the
+// compression exists to guarantee. Measured: about 74 characters fit on a line
+// here, so a list past this length compresses however few names it holds.
+const MAX_NAMED_CHARS = 60;
 
 export function RestoreWatcher() {
   const { t, loc } = useI18n();
@@ -58,18 +70,74 @@ export function RestoreWatcher() {
 
   const running = status.active || status.pending;
   const name = status.current ? loc(status.current.name ?? status.current.id) : "";
-  const failed = status.failed.length;
+  // The sentence counts APPS, so the arithmetic has to as well. `total` is a count
+  // of plan steps: one app can owe two of them (its deps and its bundle) and an app
+  // the backup restored whole owes none, so a restore of one retired app and one
+  // already-whole app has a step total of 1 and said "nothing to bring back" about
+  // a box whose app was back. `wanted` is the app count; `failed` is a step list,
+  // and an app that failed twice is still one app.
+  //
+  // `wanted` falls back to the step total for a shell that predates it, which is
+  // the old behaviour rather than a crash.
+  // An app no registry carries any more was never one of the apps this run could
+  // bring back, so it is counted out of the total rather than against it: "8 of 9"
+  // with one retired, not "8 of 10" with the tenth unexplained.
+  const goneApps = status.gone ?? [];
+  // Both halves of the fallback move together or it is not the old behaviour:
+  // without an app count the total is a count of STEPS, and collapsing the failed
+  // steps by app id against it reports 3 of 4 where the old code said 2 of 4. An
+  // app that lost both its deps and its bundle is two steps of that total.
+  const appCounts = status.wanted != null;
+  const wanted = status.wanted ?? status.total;
+  const failedApps = appCounts ? new Set(status.failed.map((f) => f.id)).size : status.failed.length;
+  const named = goneApps.join(", ");
+  // Compressing needs something to hide: at exactly MAX_NAMED the count would be
+  // "+0 more", which is a longer way of saying the list it replaced. Two long ids
+  // are 82 characters and still fit the two lines; three of them do not, and that
+  // is where the width rule earns its place.
+  const apps =
+    goneApps.length > MAX_NAMED + 1 || (goneApps.length > MAX_NAMED && named.length > MAX_NAMED_CHARS)
+      ? t("restore.andMore", {
+          apps: goneApps.slice(0, MAX_NAMED).join(", "),
+          n: String(goneApps.length - MAX_NAMED),
+        })
+      : named;
+  const total = wanted - goneApps.length;
+  // An app is back only if nothing of its own failed OR stood down. A skipped step
+  // is the box being claimed mid-run - neither a failure nor an arrival - and
+  // counting it as restored said "your apps are back" about ones never attempted.
+  const unfinished = appCounts
+    ? new Set([...status.failed.map((f) => f.id), ...(status.skipped ?? [])]).size
+    : failedApps;
+  const restored = total - unfinished;
   const label = running
     ? status.current
       ? t("restore.step." + status.current.kind, { name })
       : t("restore.preparing")
-    : failed
-      ? t("restore.doneWithErrors", {
-          n: String(status.total - failed),
-          total: String(status.total),
-          failed: String(failed),
+    : failedApps
+      ? // The retired ones are named here too. Dropping them left the person with a
+        // total smaller than their backup's and nothing accounting for the
+        // difference, on the only run that can ever say it: a retired app leaves
+        // the desired state, so there is no second showing.
+        t(goneApps.length ? "restore.doneWithErrorsAndGone" : "restore.doneWithErrors", {
+          n: String(restored),
+          total: String(total),
+          failed: String(failedApps),
+          apps,
         })
-      : t("restore.done");
+      : goneApps.length
+        ? // "Your apps are back" is a claim, and with every app in the backup
+          // retired it is a false one - there is nothing to have come back.
+          //
+          // Only said when the shell sent an app count, though: without one the
+          // total is a count of STEPS, and one retired app beside one the backup
+          // carried whole is exactly a step total of 1 - the shape this arithmetic
+          // exists to fix. Claiming nothing came back there would be the old bug
+          // wearing the new sentence.
+          t(total > 0 || !appCounts ? "restore.doneWithGone" : "restore.noneLeft", { apps })
+        : t("restore.done");
+  // Steps, not apps: this is how much of the plan is behind us, which is what a
+  // progress bar is for.
   const pct = status.total ? Math.round((status.done / status.total) * 100) : 0;
 
   return (
@@ -85,12 +153,19 @@ export function RestoreWatcher() {
         {running && (
           <span className="w-[2.4vh] h-[2.4vh] shrink-0 rounded-full border-[0.35vh] border-white/20 border-t-white animate-spin" />
         )}
-        <span className="text-[2vh] font-semibold truncate flex-1">{label}</span>
-        {running && status.total > 0 && (
-          <span className="text-[1.8vh] text-fg-dim tabular-nums shrink-0">
-            {status.done}/{status.total}
-          </span>
-        )}
+        {/* The running label is replaced every few seconds and must stay one line,
+            so it truncates. The summary is written once and stands for eight
+            seconds: about 74 characters fit on a line here, and the longest
+            sentence it can produce - a failure, a retirement and a "+N more" - is
+            94 characters in English and 106 in Hungarian, which is two lines with
+            a third of the second one spare. Measured in DejaVu Sans, the sans face
+            deploy/provision.sh installs. Truncating that ate the clause this
+            banner exists to add; clamped at two so it cannot grow without bound. */}
+        <span className={"text-[2vh] font-semibold flex-1 " + (running ? "truncate" : "line-clamp-2")}>{label}</span>
+        {/* No numeric counter beside it. It counted plan STEPS while the summary
+            counts apps, so the denominator changed between them - "1/4" while
+            running, "2 of 3 apps restored" at the end - which reads as a bug from
+            the sofa. The bar below is a progress indicator and needs no unit. */}
       </div>
       {running && (
         <div className="mt-[1.1vh] h-[0.6vh] rounded-full bg-white/10 overflow-hidden">

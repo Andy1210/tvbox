@@ -488,8 +488,18 @@ function main() {
       })
       .then((s) => {
         for (const f of s.failed) console.error(`  ${f.id} (${f.kind}): ${f.error}`);
+        // Said, but not counted as a step this run could have taken, and not an
+        // error either: the app was retired from the registry, which is a normal
+        // thing to have happened between the backup and now.
+        for (const id of s.gone) console.log(`  ${id}: no longer offered by any configured registry - dropped`);
         if (!all) reconcile.settle(desired);
-        console.log(`done - ${s.total - s.failed.length}/${s.total} steps`);
+        // Apps, in the same units as the banner and the maintenance log. Steps
+        // would read as the operator's view of the plan, but `gone` now carries
+        // retirements from earlier passes too - no step ran for those in THIS run -
+        // so a step count beside that list said two different things at once.
+        // An app is back only if nothing of its own failed OR stood down.
+        const unfinished = new Set([...s.failed.map((f) => f.id), ...s.skipped]).size;
+        console.log(`done - ${s.wanted - s.gone.length - unfinished}/${s.wanted - s.gone.length} app(s)`);
         if (s.failed.length) process.exit(1);
       })
       .catch((e) => {

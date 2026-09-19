@@ -572,7 +572,11 @@
       "bundle": "{name}: downloading the app…"
     },
     "done": "Your apps are back",
-    "doneWithErrors": "{n} of {total} apps restored - {failed} could not be downloaded"
+    "doneWithErrors": "Apps restored: {n} of {total} - {failed} could not be downloaded",
+    "doneWithGone": "Your apps are back. No longer offered: {apps}",
+    "doneWithErrorsAndGone": "Apps restored: {n} of {total} - {failed} could not be downloaded. No longer offered: {apps}",
+    "noneLeft": "None of your apps could come back. No longer offered: {apps}",
+    "andMore": "{apps} +{n} more"
   },
   "parental": {
     "title": "Parental controls",

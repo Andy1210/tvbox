@@ -275,14 +275,24 @@ async function reconcileTick() {
   });
   const s = reconcile.state();
   const retrying = reconcile.settle(desired);
+  // Apps, like the banner, not plan steps: one app can owe two steps and an app the
+  // backup restored whole owes none. A retired app is counted out of the total
+  // rather than against it - it was never one of the acquisitions this run could
+  // make - and an app that failed twice is still one app.
+  const gone = s.gone.length;
+  // An app is back only if nothing of its own failed OR stood down: a skipped step
+  // is the box being claimed mid-run, which is neither a failure nor an arrival.
+  const unfinished = new Set([...s.failed.map((f) => f.id), ...s.skipped]).size;
   console.log(
     "[reconcile] done:",
-    s.done - s.failed.length,
+    s.wanted - gone - unfinished,
     "of",
-    s.total,
+    s.wanted - gone,
+    "app(s)",
     s.failed.length
       ? "(" + s.failed.map((f) => f.id + "/" + f.kind).join(", ") + " failed" + (retrying ? ", will retry" : "") + ")"
       : "",
+    gone ? "(" + s.gone.join(", ") + " no longer in any registry - dropped)" : "",
   );
   // Every app that was going to arrive has arrived, so the files an app asked to
   // have carried can be placed - and whatever still has no app to belong to is

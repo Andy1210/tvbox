@@ -623,21 +623,47 @@ async function install(config, id, sourceUrl) {
   // for a missing app. With several sources configured the distinction is the
   // same one: the app is only missing if every source answered and none had it.
   if (!hit) {
+    // `reason` is the machine-readable half of that same distinction, for a caller
+    // that has to decide whether asking again can help: `unreachable` means the
+    // catalogue could not be read, `unlisted` that it was read and nobody offers
+    // this id. Those two are named because they are the two a caller acts on; a
+    // NAMED registry answering without the app is a fact about that one source and
+    // says nothing about the others, so it carries no reason at all.
+    //
     // With a registry NAMED, only that one's reachability is the answer: another
     // source being down says nothing about the press somebody just made, and
     // reporting it as unreachable sends them to look at a registry they did not
     // choose.
     if (wanted) {
       const src = loaded.find((s) => s.url === wanted);
-      if (src && src.error) return { ok: false, error: "registry unreachable: " + (src.error || "unknown") };
+      if (src && src.error)
+        return { ok: false, reason: "unreachable", error: "registry unreachable: " + (src.error || "unknown") };
       // It answered and does not have it, which is a different sentence from
       // "nobody has it" and the one somebody switching sources needs: the app is
       // still installed, from where it was.
       return { ok: false, error: "that registry does not offer it" };
     }
     const failed = loaded.find((s) => s.error);
-    if (failed) return { ok: false, error: "registry unreachable: " + (failed.error || "unknown") };
-    return { ok: false, error: "not in registry" };
+    if (failed)
+      return { ok: false, reason: "unreachable", error: "registry unreachable: " + (failed.error || "unknown") };
+    // A registry that OFFERS the app and had its entry refused HERE has not
+    // retired it. fetchIndex takes such an entry out of `entries` with no error
+    // recorded anywhere - an unknown manifestVersion, or a trust rule this box
+    // enforces - so from this point it looks exactly like an app nobody
+    // publishes, and `_dropped`/`_blocked` are what keep the two apart. listForUi
+    // has always refused to collapse them ("unreadable"/"blocked" against
+    // "retired"), for the reason written where they are collected: an older box
+    // must not announce that nobody offers an app any more.
+    //
+    // A `reason` is a licence to ACT on the verdict, and the restore reconciler
+    // acts on this one permanently, so neither kind gets one. A trust refusal
+    // will not change by asking again, but it is still not a retirement, and
+    // leaving it a plain failure is what the box did before any of this.
+    const refusedHere = loaded.some(
+      (s) => s.entries && ((s.entries._dropped || []).includes(id) || (s.entries._blocked || []).includes(id)),
+    );
+    if (refusedHere) return { ok: false, error: "offered, but this box refuses the entry" };
+    return { ok: false, reason: "unlisted", error: "not in registry" };
   }
   const m = hit.entry;
   const url = hit.source.url;

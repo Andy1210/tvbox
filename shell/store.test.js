@@ -454,6 +454,9 @@ test("an unreachable registry says so, instead of 'not in registry'", async () =
     const r = await fresh.install(cfg, "anything");
     assert.strictEqual(r.ok, false);
     assert.match(r.error, /registry unreachable/);
+    // The machine-readable half, for the restore reconciler: an unread catalogue
+    // must never be mistaken for one that answered without the app.
+    assert.strictEqual(r.reason, "unreachable");
   } finally {
     process.env.HOME = prevHome;
     fs.rmSync(home, { recursive: true, force: true });
@@ -570,6 +573,79 @@ test("install() refuses a registry that is not configured, and one that does not
     const missing = await store.install(config, "nosuch", url);
     assert.equal(missing.ok, false);
     assert.match(missing.error, /does not offer it/);
+    // One source answering without the app says nothing about the others, so this
+    // is deliberately NOT the verdict a caller may act on.
+    assert.strictEqual(missing.reason, undefined);
+  } finally {
+    server.close();
+  }
+});
+
+// The verdict the restore reconciler acts on: every configured registry answered
+// and none of them carries the app. Retiring an app from the index is a normal
+// thing to do, and a box restored from a backup that still names it would
+// otherwise ask for it at every boot until its retry budget ran out.
+test("an app no configured registry carries is reported as unlisted, not as a failure", async () => {
+  const http = require("node:http");
+  const server = http.createServer((req, res) => {
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ registryVersion: 1, apps: [] }));
+  });
+  await new Promise((r) => server.listen(0, "127.0.0.1", r));
+  const url = "http://127.0.0.1:" + server.address().port + "/index.json";
+  const config = { rawStore: () => ({ registry: url }), appConfig: () => ({}) };
+  try {
+    const r = await store.install(config, "retired");
+    assert.equal(r.ok, false);
+    assert.match(r.error, /not in registry/);
+    assert.strictEqual(r.reason, "unlisted");
+  } finally {
+    server.close();
+  }
+});
+
+// The other door into the same room, and the one that does not need a
+// misbehaving server: the registry offers the app, and THIS box takes the entry
+// out of the list - a manifestVersion it does not speak yet, or a trust rule it
+// enforces. The index answers perfectly, so nothing upstream records an error,
+// and without this the restore reconciler is handed a verdict it acts on for
+// good: it would tell somebody an app was retired because their box had not
+// taken its next update.
+test("an entry this box refuses is not reported as retired", async () => {
+  const http = require("node:http");
+  const app = (over) => ({
+    id: over.id,
+    name: over.id,
+    type: "webclient",
+    status: "ready",
+    version: "1.0.0",
+    runtime: { serve: "remote", url: "https://example.com" },
+    ...over,
+  });
+  const server = http.createServer((req, res) => {
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(
+      JSON.stringify({
+        registryVersion: 1,
+        apps: [
+          // Unreadable here: a manifest format this shell does not speak.
+          app({ id: "futureapp", manifestVersion: 99 }),
+          // Refused here: a third-party root apt repository.
+          app({ id: "rootyapp", requires: { aptRepo: { line: "deb https://example.test x main" } } }),
+        ],
+      }),
+    );
+  });
+  await new Promise((r) => server.listen(0, "127.0.0.1", r));
+  const url = "http://127.0.0.1:" + server.address().port + "/index.json";
+  const config = { rawStore: () => ({ registry: url }), appConfig: () => ({}) };
+  try {
+    for (const id of ["futureapp", "rootyapp"]) {
+      const r = await store.install(config, id);
+      assert.equal(r.ok, false, id);
+      assert.strictEqual(r.reason, undefined, id + " must not carry a verdict a caller can act on");
+      assert.match(r.error, /refuses the entry/, id);
+    }
   } finally {
     server.close();
   }
@@ -611,6 +687,16 @@ test("a named registry that answered reports its own state, not another one's", 
     const r = await store.install(config, "nothere", upUrl);
     assert.equal(r.ok, false);
     assert.match(r.error, /does not offer it/, "the registry that was named is the one being reported on");
+    // One source answering without the app says nothing about the others, so this
+    // is deliberately not a verdict a caller may act on.
+    assert.strictEqual(r.reason, undefined);
+
+    // ...and the other way round: the registry that was NAMED is the one that is
+    // down. That is a fact about the catalogue, not about the app.
+    const down = await store.install(config, "here", deadUrl);
+    assert.equal(down.ok, false);
+    assert.match(down.error, /registry unreachable/);
+    assert.strictEqual(down.reason, "unreachable");
   } finally {
     up.close();
   }

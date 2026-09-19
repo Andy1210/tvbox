@@ -572,7 +572,11 @@
       "bundle": "{name}: az alkalmazás letöltése…"
     },
     "done": "Az alkalmazásaid visszakerültek",
-    "doneWithErrors": "{total} alkalmazásból {n} visszaállt - {failed} nem töltődött le"
+    "doneWithErrors": "{total} alkalmazásból {n} visszaállt - {failed} nem töltődött le",
+    "doneWithGone": "Az alkalmazásaid visszakerültek. Már nem kínálja senki: {apps}",
+    "doneWithErrorsAndGone": "{total} alkalmazásból {n} visszaállt - {failed} nem töltődött le. Már nem kínálja senki: {apps}",
+    "noneLeft": "Egyik alkalmazásod sem hozható vissza. Már nem kínálja senki: {apps}",
+    "andMore": "{apps} és még {n} másik"
   },
   "parental": {
     "title": "Szülői felügyelet",
