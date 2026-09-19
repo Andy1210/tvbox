@@ -28,15 +28,25 @@ const MAX_ATTEMPTS = 3; // a permanently-failing app must not re-run at every bo
 // Written by a restore, read by the next boot. Small and declarative: the ids the
 // backup knew about. What each of them NEEDS is read off the manifest once the app
 // is on the box, so this file never has to describe a build.
-function record(appList, reason) {
-  const apps = [];
-  for (const a of Array.isArray(appList) ? appList : []) {
-    const id = a && typeof a === "object" ? a.id : a;
-    if (typeof id !== "string" || !/^[a-z0-9_-]{1,40}$/.test(id)) continue;
-    if (apps.some((x) => x.id === id)) continue;
-    apps.push({ id });
-    if (apps.length >= MAX_APPS) break;
+const ID_RE = /^[a-z0-9_-]{1,40}$/;
+
+// One gate for every id that comes out of the state file, which is
+// attacker-supplied until the backup's password verifies: the shape, the
+// duplicates and the count, in one place so a second list cannot forget one.
+function validIds(list) {
+  const out = [];
+  for (const raw of Array.isArray(list) ? list : []) {
+    const id = raw && typeof raw === "object" ? raw.id : raw;
+    if (typeof id !== "string" || !ID_RE.test(id)) continue;
+    if (out.includes(id)) continue;
+    out.push(id);
+    if (out.length >= MAX_APPS) break;
   }
+  return out;
+}
+
+function record(appList, reason) {
+  const apps = validIds(appList).map((id) => ({ id }));
   if (!apps.length) return null;
   const state = { v: 1, at: Date.now(), reason: String(reason || "restore").slice(0, 40), attempts: 0, apps };
   try {
@@ -116,7 +126,7 @@ function describe(id, apps) {
 // ---- the run ----
 // One at a time, module-level, because the acquisitions it drives (a flatpak, a
 // bundle) are exactly the heavy things the box must not do twice at once.
-let status = { active: false, reason: null, startedAt: null, finishedAt: null, steps: [] };
+let status = { active: false, reason: null, startedAt: null, finishedAt: null, steps: [], retired: [] };
 
 // A step that will not be tried again in this run, whatever its outcome. `gone`
 // belongs here for the same reason `failed` does: the progress bar is counting
@@ -125,6 +135,13 @@ const SETTLED = new Set(["done", "failed", "skipped", "gone"]);
 
 function state() {
   const steps = status.steps;
+  // Retirements carried in from an earlier pass of the same restore count as
+  // settled steps that are already behind us. They have no step of their own -
+  // settle() took them out of the desired state, so nothing plans them again -
+  // and adding them to both totals is what keeps every count that subtracts
+  // `gone` (the banner, the maintenance log, the CLI) arriving at the number of
+  // acquisitions this run could actually make.
+  const carried = status.retired.length;
   const done = steps.filter((s) => SETTLED.has(s.state)).length;
   const current = steps.find((s) => s.state === "running") || null;
   return {
@@ -135,8 +152,8 @@ function state() {
     reason: status.reason,
     startedAt: status.startedAt,
     finishedAt: status.finishedAt,
-    total: steps.length,
-    done,
+    total: steps.length + carried,
+    done: done + carried,
     current: current ? { id: current.id, name: current.name, kind: current.kind } : null,
     failed: steps.filter((s) => s.state === "failed").map((s) => ({ id: s.id, kind: s.kind, error: s.error || "" })),
     // Separate from `failed` because it is a different sentence to the person
@@ -147,7 +164,14 @@ function state() {
     // not on the box. Nothing else knows one either - the app is installed
     // nowhere and no registry offers it - so the id is what the box calls it, in
     // the log, in the CLI and on screen.
-    gone: steps.filter((s) => s.state === "gone").map((s) => s.id),
+    //
+    // Every app THIS RESTORE has found retired, not only the ones this pass did.
+    // A run that retires one app and fails on another keeps the desired state
+    // alive for the retry, and the launcher stays on its "still working" label
+    // while it does - so the summary naming the retired app is only ever drawn on
+    // the LAST pass, by which time settle() had taken the id out of the list and
+    // the next run planned no step for it. It was reported to nobody.
+    gone: [...status.retired, ...steps.filter((s) => s.state === "gone").map((s) => s.id)],
     steps: steps.map((s) => ({ id: s.id, name: s.name, kind: s.kind, state: s.state })),
   };
 }
@@ -170,6 +194,10 @@ async function run(desired, io) {
     startedAt: Date.now(),
     finishedAt: null,
     steps: [],
+    // What earlier passes of this same restore already found retired. Read back
+    // through the same id rule record() uses, because the file is
+    // attacker-supplied until the backup's password verifies.
+    retired: validIds(desired && desired.retired),
   };
   const tick = () => {
     try {
@@ -272,6 +300,10 @@ async function run(desired, io) {
 function settle(desired) {
   const gone = new Set(status.steps.filter((s) => s.state === "gone").map((s) => s.id));
   const apps = (desired && Array.isArray(desired.apps) ? desired.apps : []).filter((a) => !gone.has(a.id));
+  // Taken out of the wanted list, kept in the record of what this restore found.
+  // Without that the only pass on which the summary is drawn - the last one - has
+  // already forgotten them, and the person is never told which app is gone.
+  const retired = validIds([...status.retired, ...gone]);
   const failed = status.steps.some((s) => s.state === "failed");
   const skipped = status.steps.some((s) => s.state === "skipped");
   const attempts = Number(desired && desired.attempts) || 0;
@@ -291,10 +323,10 @@ function settle(desired) {
       clear();
       return false; // out of budget: stop asking at every tick
     }
-    save({ ...desired, apps, attempts: attempts + 1 });
+    save({ ...desired, apps, retired, attempts: attempts + 1 });
     return true;
   }
-  save({ ...desired, apps, attempts }); // interrupted only - come back later, budget untouched
+  save({ ...desired, apps, retired, attempts }); // interrupted only - budget untouched
   return true;
 }
 

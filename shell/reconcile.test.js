@@ -298,6 +298,41 @@ test("a retired app leaves the desired state without spending the retry budget",
   reconcile.clear();
 });
 
+test("a retirement found on one pass is still named on the pass that reports", async () => {
+  // The case the whole `gone` list exists for, and the one it used to miss. A run
+  // that retires one app and fails on another keeps the desired state for the
+  // retry, and the launcher stays on its "still working" label while it does - so
+  // the summary naming the retired app is only drawn on the LAST pass. By then
+  // settle() had taken the id out of the wanted list and the next run planned no
+  // step for it, so the banner said nothing about it to anyone.
+  const desired = reconcile.record([{ id: "plex" }, { id: "keeper" }], "restore");
+  const io = RETIRED_IO("unlisted", "plex");
+  const failing = {
+    ...io,
+    apps: { ...io.apps, bundleMissing: (m) => m.id === "keeper" },
+    installBundle: () => false,
+  };
+  await reconcile.run(desired, failing);
+  assert.equal(reconcile.settle(desired), true);
+
+  // The next boot: only `keeper` is wanted, and this time its bundle lands.
+  const next = reconcile.pending();
+  assert.deepEqual(
+    next.apps.map((a) => a.id),
+    ["keeper"],
+    "the retired app is not asked for again",
+  );
+  const s = await reconcile.run(next, { ...io, apps: { ...io.apps, bundleMissing: () => false } });
+  assert.deepEqual(s.gone, ["plex"], "still named on the pass the person actually sees");
+  assert.deepEqual(s.failed, []);
+  // And the counts stay consistent: the retirement is one of the total and one of
+  // the settled, so "total - gone" is still the work this run could do.
+  assert.equal(s.total - s.gone.length, s.steps.length);
+  assert.equal(s.done, s.total);
+  assert.equal(reconcile.settle(next), false, "nothing left to come back for");
+  assert.equal(reconcile.pending(), null);
+});
+
 test("a restore whose apps are all retired stops after one run", async () => {
   const desired = reconcile.record([{ id: "plex" }], "restore");
   await reconcile.run(desired, RETIRED_IO("unlisted", "plex"));
