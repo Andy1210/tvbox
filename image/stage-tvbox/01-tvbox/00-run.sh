@@ -380,11 +380,17 @@ install -d "${ROOTFS_DIR}/etc/systemd/system/systemd-coredump@.service.d"
 install -m 644 "${ROOTFS_DIR}${USER_HOME}/.tvbox/coredump-tvbox-runtimemax.conf" \
   "${ROOTFS_DIR}/etc/systemd/system/systemd-coredump@.service.d/10-tvbox-runtime-max.conf"
 # Keep the journal across a reboot: Raspberry Pi OS puts it in a tmpfs, so a box
-# that crashed has nothing to show once it has been restarted. The directory is
-# what actually switches journald over - it creates one itself only at start - and
-# in a chroot there is no manager to restart, so the first boot is where it takes
-# effect. The directory is made inside the chroot, below, because `systemd-journal`
-# has to resolve against the IMAGE's group file rather than the build host's.
+# that crashed has nothing to show once it has been restarted. KEEP IN SYNC with
+# the matching block in deploy/provision.sh, which does the same thing for a box
+# that is deployed to rather than flashed.
+#
+# The DROP-IN is what switches journald over: `Storage=persistent` creates
+# /var/log/journal itself if it has to. The directory is set here anyway, and the
+# line earns its place for a different reason - Debian's systemd package already
+# ships it, and `install -d -g` on an existing directory RE-APPLIES the group, so
+# running this on the build host was quietly stamping the host's `systemd-journal`
+# GID into the image. Inside the chroot it resolves against the image's own group
+# file, which is the only place the name means anything.
 install -d "${ROOTFS_DIR}/etc/systemd/journald.conf.d"
 install -m 644 "${ROOTFS_DIR}${USER_HOME}/.tvbox/journald-tvbox-persistent.conf" \
   "${ROOTFS_DIR}/etc/systemd/journald.conf.d/50-tvbox-persistent.conf"
