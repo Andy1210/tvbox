@@ -275,14 +275,18 @@ async function reconcileTick() {
   });
   const s = reconcile.state();
   const retrying = reconcile.settle(desired);
-  // A retired app is counted out of the total rather than against it, the same way
-  // the banner does: it was never one of the acquisitions this run could make.
+  // Apps, like the banner, not plan steps: one app can owe two steps and an app the
+  // backup restored whole owes none. A retired app is counted out of the total
+  // rather than against it - it was never one of the acquisitions this run could
+  // make - and an app that failed twice is still one app.
   const gone = s.gone.length;
+  const failedApps = new Set(s.failed.map((f) => f.id)).size;
   console.log(
     "[reconcile] done:",
-    s.done - s.failed.length - gone,
+    s.wanted - gone - failedApps,
     "of",
-    s.total - gone,
+    s.wanted - gone,
+    "app(s)",
     s.failed.length
       ? "(" + s.failed.map((f) => f.id + "/" + f.kind).join(", ") + " failed" + (retrying ? ", will retry" : "") + ")"
       : "",

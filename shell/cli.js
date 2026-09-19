@@ -493,7 +493,9 @@ function main() {
         // thing to have happened between the backup and now.
         for (const id of s.gone) console.log(`  ${id}: no longer offered by any configured registry - dropped`);
         if (!all) reconcile.settle(desired);
-        console.log(`done - ${s.total - s.failed.length - s.gone.length}/${s.total - s.gone.length} steps`);
+        // Steps here, deliberately: this is the operator's view of the plan, and a
+        // retired app IS a step that ran - it just did not end in an install.
+        console.log(`done - ${s.done - s.failed.length}/${s.total} steps`);
         if (s.failed.length) process.exit(1);
       })
       .catch((e) => {

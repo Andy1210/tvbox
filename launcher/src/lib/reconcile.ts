@@ -16,8 +16,13 @@ export interface ReconcileStatus {
   reason: string | null;
   startedAt: number | null;
   finishedAt: number | null;
+  // Plan steps, for the progress bar. One app can owe two of them and an app the
+  // backup restored whole owes none, so this is not a count of apps.
   total: number;
   done: number;
+  // Apps this restore is about, across all of its passes. Optional: a shell that
+  // predates it sends nothing, and the caller falls back to the step total.
+  wanted?: number;
   current: { id: string; name: string | Record<string, string> | null; kind: ReconcileStep["kind"] } | null;
   failed: { id: string; kind: ReconcileStep["kind"]; error: string }[];
   // App ids, not names: a step only reaches `gone` when its app is absent from

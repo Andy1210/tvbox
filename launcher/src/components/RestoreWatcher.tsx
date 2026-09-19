@@ -64,11 +64,21 @@ export function RestoreWatcher() {
 
   const running = status.active || status.pending;
   const name = status.current ? loc(status.current.name ?? status.current.id) : "";
-  const failed = status.failed.length;
+  // The sentence counts APPS, so the arithmetic has to as well. `total` is a count
+  // of plan steps: one app can owe two of them (its deps and its bundle) and an app
+  // the backup restored whole owes none, so a restore of one retired app and one
+  // already-whole app has a step total of 1 and said "nothing to bring back" about
+  // a box whose app was back. `wanted` is the app count; `failed` is a step list,
+  // and an app that failed twice is still one app.
+  //
+  // `wanted` falls back to the step total for a shell that predates it, which is
+  // the old behaviour rather than a crash.
+  const failedApps = new Set(status.failed.map((f) => f.id)).size;
   // An app no registry carries any more was never one of the apps this run could
   // bring back, so it is counted out of the total rather than against it: "8 of 9"
   // with one retired, not "8 of 10" with the tenth unexplained.
   const goneApps = status.gone ?? [];
+  const wanted = status.wanted ?? status.total;
   const apps =
     goneApps.length > MAX_NAMED + 1
       ? t("restore.andMore", {
@@ -76,13 +86,13 @@ export function RestoreWatcher() {
           n: String(goneApps.length - MAX_NAMED),
         })
       : goneApps.join(", ");
-  const total = status.total - goneApps.length;
-  const restored = total - failed;
+  const total = wanted - goneApps.length;
+  const restored = total - failedApps;
   const label = running
     ? status.current
       ? t("restore.step." + status.current.kind, { name })
       : t("restore.preparing")
-    : failed
+    : failedApps
       ? // The retired ones are named here too. Dropping them left the person with a
         // total smaller than their backup's and nothing accounting for the
         // difference, on the only run that can ever say it: a retired app leaves
@@ -90,14 +100,16 @@ export function RestoreWatcher() {
         t(goneApps.length ? "restore.doneWithErrorsAndGone" : "restore.doneWithErrors", {
           n: String(restored),
           total: String(total),
-          failed: String(failed),
+          failed: String(failedApps),
           apps,
         })
       : goneApps.length
         ? // "Your apps are back" is a claim, and with every app in the backup
           // retired it is a false one - there is nothing to have come back.
-          t(restored > 0 ? "restore.doneWithGone" : "restore.noneLeft", { apps })
+          t(total > 0 ? "restore.doneWithGone" : "restore.noneLeft", { apps })
         : t("restore.done");
+  // Steps, not apps: this is how much of the plan is behind us, which is what a
+  // progress bar is for.
   const pct = status.total ? Math.round((status.done / status.total) * 100) : 0;
 
   return (

@@ -126,7 +126,7 @@ function describe(id, apps) {
 // ---- the run ----
 // One at a time, module-level, because the acquisitions it drives (a flatpak, a
 // bundle) are exactly the heavy things the box must not do twice at once.
-let status = { active: false, reason: null, startedAt: null, finishedAt: null, steps: [], retired: [] };
+let status = { active: false, reason: null, startedAt: null, finishedAt: null, steps: [], retired: [], wanted: 0 };
 
 // A step that will not be tried again in this run, whatever its outcome. `gone`
 // belongs here for the same reason `failed` does: the progress bar is counting
@@ -135,13 +135,6 @@ const SETTLED = new Set(["done", "failed", "skipped", "gone"]);
 
 function state() {
   const steps = status.steps;
-  // Retirements carried in from an earlier pass of the same restore count as
-  // settled steps that are already behind us. They have no step of their own -
-  // settle() took them out of the desired state, so nothing plans them again -
-  // and adding them to both totals is what keeps every count that subtracts
-  // `gone` (the banner, the maintenance log, the CLI) arriving at the number of
-  // acquisitions this run could actually make.
-  const carried = status.retired.length;
   const done = steps.filter((s) => SETTLED.has(s.state)).length;
   const current = steps.find((s) => s.state === "running") || null;
   return {
@@ -152,8 +145,16 @@ function state() {
     reason: status.reason,
     startedAt: status.startedAt,
     finishedAt: status.finishedAt,
-    total: steps.length + carried,
-    done: done + carried,
+    // Steps, for the progress bar. One app can owe two of them (deps and bundle)
+    // and an app the backup restored whole owes none, so this is not a count of
+    // apps and must not be used as one - `wanted` below is.
+    total: steps.length,
+    done,
+    // Apps: what this restore is about, across all of its passes. The sentence on
+    // screen counts apps ("8 of 9 apps restored"), and counting steps there said
+    // "nothing to bring back" for a restore that had brought an app back without
+    // needing a single step.
+    wanted: status.wanted,
     current: current ? { id: current.id, name: current.name, kind: current.kind } : null,
     failed: steps.filter((s) => s.state === "failed").map((s) => ({ id: s.id, kind: s.kind, error: s.error || "" })),
     // Separate from `failed` because it is a different sentence to the person
@@ -198,7 +199,11 @@ async function run(desired, io) {
     // through the same id rule record() uses, because the file is
     // attacker-supplied until the backup's password verifies.
     retired: validIds(desired && desired.retired),
+    wanted: 0,
   };
+  // Every app this restore is about: the ones still wanted plus the ones earlier
+  // passes retired, which left the wanted list but not the restore.
+  status.wanted = new Set([...ids, ...status.retired]).size;
   const tick = () => {
     try {
       if (io.onChange) io.onChange(state());

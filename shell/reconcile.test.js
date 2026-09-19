@@ -325,10 +325,13 @@ test("a retirement found on one pass is still named on the pass that reports", a
   const s = await reconcile.run(next, { ...io, apps: { ...io.apps, bundleMissing: () => false } });
   assert.deepEqual(s.gone, ["plex"], "still named on the pass the person actually sees");
   assert.deepEqual(s.failed, []);
-  // And the counts stay consistent: the retirement is one of the total and one of
-  // the settled, so "total - gone" is still the work this run could do.
-  assert.equal(s.total - s.gone.length, s.steps.length);
-  assert.equal(s.done, s.total);
+  // Counted as APPS: the restore was about two, one of them is retired, so one
+  // came back - which is the sentence the banner draws from these numbers. The
+  // step total is separately zero here, because `keeper` was whole by then and
+  // owed nothing; counting steps would have said "nothing to bring back".
+  assert.equal(s.wanted, 2);
+  assert.equal(s.wanted - s.gone.length, 1);
+  assert.equal(s.total, 0, "no step was owed on this pass");
   assert.equal(reconcile.settle(next), false, "nothing left to come back for");
   assert.equal(reconcile.pending(), null);
 });

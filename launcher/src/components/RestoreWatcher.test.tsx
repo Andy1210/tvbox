@@ -26,6 +26,9 @@ function stubStatus(over: Partial<ReconcileStatus>) {
     steps: [],
     ...over,
   };
+  // Most fixtures are one plan step per app, so the app count follows the step
+  // total unless a case is specifically about the two differing.
+  if (!("wanted" in over)) status.wanted = status.total;
   vi.stubGlobal("fetch", () =>
     Promise.resolve(new Response(JSON.stringify(status), { headers: { "Content-Type": "application/json" } })),
   );
@@ -83,6 +86,37 @@ describe("RestoreWatcher", () => {
     const text = await banner();
     expect(text).toContain("Nothing to bring back");
     expect(text).not.toContain("Your apps are back");
+  });
+
+  it("counts apps, not plan steps", async () => {
+    // Two apps, one retired and one the backup restored whole - the whole one owes
+    // no step, so the STEP total is 1, and subtracting the retired app from it
+    // says "nothing to bring back" about a box whose app is back. The mismatch
+    // runs the other way too: one app can owe both a deps and a bundle step.
+    stubStatus({ total: 1, done: 1, wanted: 2, gone: ["plex"] });
+    const text = await banner();
+    expect(text).toContain("Your apps are back");
+    expect(text).toContain("plex");
+    expect(text).not.toContain("Nothing to bring back");
+  });
+
+  it("counts an app that failed twice as one app", async () => {
+    stubStatus({
+      total: 4,
+      done: 4,
+      wanted: 3,
+      failed: [
+        { id: "broken", kind: "deps", error: "dependency install failed" },
+        { id: "broken", kind: "bundle", error: "bundle install failed" },
+      ],
+    });
+    expect(await banner()).toContain("2 of 3 apps restored - 1 could not be downloaded");
+  });
+
+  it("falls back to the step total when the shell sends no app count", async () => {
+    // An older shell: the old behaviour rather than a crash or a blank sentence.
+    stubStatus({ total: 10, done: 10, wanted: undefined, failed: [{ id: "x", kind: "bundle", error: "no" }] });
+    expect(await banner()).toContain("9 of 10 apps restored");
   });
 
   it("caps a long list with a count instead of letting it run away", async () => {
