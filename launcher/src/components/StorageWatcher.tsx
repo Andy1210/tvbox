@@ -16,12 +16,13 @@ import { fetchStorageStatus } from "../lib/storage";
 // banner that fades is one nobody saw. Renders no focusable element, so it cannot
 // steal spatial-nav focus (cf. InstallWatcher, RestoreWatcher).
 //
-// Because it never goes away it must not stand where anything else does. The top
-// of the screen belongs to NotificationToast, and a permanent panel in that slot
-// would silence every note for the rest of the box's uptime - crash-restart
-// notices above all, which is exactly what a failing card produces. It sits above
-// the other two watchers instead, which have their own slot lower down and are
-// transient.
+// Because it never goes away it must not stand where anything else does, and that
+// turned out to rule out most of the screen. The top belongs to NotificationToast,
+// and a permanent panel there would silence every note for the rest of the box's
+// uptime - crash-restart notices above all, which is exactly what a failing card
+// produces. The band a few vh up from the bottom is where the centred panels and
+// the tails of the settings lists live. What is left is the edge itself, which is
+// why this is a strip rather than a card.
 //
 // One limit it shares with every structured note the shell raises (`crashRestart`,
 // `lowBattery`): the launcher's window is BEHIND a fullscreen app, so a person
@@ -61,18 +62,33 @@ export function StorageWatcher() {
   if (!failed) return null;
 
   return (
+    // A strip along the very bottom edge, not a panel floating in the content.
+    // Measured at 1360x768: at `bottom-[18vh]` it covered PowerMenu's Cancel
+    // button outright - the menu this banner's own text sends the person to - and
+    // the free-space row in Settings -> About, which is the first thing anyone
+    // checks after being told the card failed. The band 18vh up from the bottom is
+    // where this app's centred panels and list tails live; the last few vh are not.
+    //
+    // Above everything rather than tied for a z with the panels it used to lose
+    // to: at this edge it covers none of their controls, and a box that cannot
+    // write is a fact that outranks whatever is open in front of it.
     <div
       className={[
-        "fixed left-1/2 -translate-x-1/2 bottom-[18vh] z-[65] w-[60vw] px-[2.4vw] py-[1.6vh] rounded-[1.2vh]",
-        "bg-[rgba(70,20,20,0.96)] shadow-[0_1vh_3vh_rgba(0,0,0,0.5)]",
+        "fixed inset-x-0 bottom-0 z-[80] px-[2.4vw] py-[1.1vh]",
+        "bg-[rgba(70,20,20,0.97)] border-t-[0.3vh] border-[rgba(255,130,120,0.5)]",
+        "shadow-[0_-0.6vh_2vh_rgba(0,0,0,0.45)]",
       ].join(" ")}
       role="alert"
       aria-live="assertive"
     >
-      <div className="text-[2.2vh] font-semibold">{t("storage.failed.title")}</div>
-      {/* white/80 rather than the fg-dim token: that one is a blue-grey chosen
-          against the dark UI background, and it is barely legible on this red. */}
-      <div className="mt-[0.6vh] text-[1.8vh] text-white/80">{t("storage.failed.detail")}</div>
+      {/* One flowing line so the strip stays short enough to clear the ambient
+          screen's clock block, which is anchored 8vh up. white/80 for the detail
+          rather than the fg-dim token: that one is a blue-grey chosen against the
+          dark UI background, and it is barely legible on this red. */}
+      <p className="mx-auto max-w-[92vw] text-center text-[1.7vh] leading-[1.45]">
+        <span className="font-semibold">{t("storage.failed.title")}</span>{" "}
+        <span className="text-white/80">{t("storage.failed.detail")}</span>
+      </p>
     </div>
   );
 }
