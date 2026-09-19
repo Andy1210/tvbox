@@ -98,8 +98,16 @@ The [tvbox integration](homeassistant-integration.md) turns the payload into
 diagnostic sensors on the box's existing device, so nothing new has to be set up:
 if the box is already a `media_player` in Home Assistant, updating the integration
 files and reloading gives it `sensor.<box>_version`, `_update`, `_last_rollback`,
-`_booted`, `_link_rate`, `_signal`, `_cpu_temperature`, `_disk_free` and
-`_memory_free`.
+`_booted`, `_link_rate`, `_signal`, `_cpu_temperature`, `_disk_free`,
+`_memory_free` and `_storage`.
+
+`_storage` is the one to put an alert on. It reads `ok` or `read-only`, and it
+answers a different question from `_disk_free`: when a card fails, ext4 forces the
+filesystem read-only and the free bytes go on reading exactly as before, because
+they come off the same superblock. So `_disk_free` says a dying box is fine right
+up to the moment it goes black. `unknown` means the box could not tell - a release
+that does not publish the field - which is not a healthy card either, so write the
+alert against `read-only` rather than against "not ok".
 
 A card that shows the whole fleet, and which is the point of the exercise. It
 names no box: `auto-entities` (HACS) picks up whatever tvbox devices exist, so
