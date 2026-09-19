@@ -35,6 +35,7 @@ const reconcile = require("./reconcile");
 const remotefinder = require("./remotefinder");
 const shares = require("./shares");
 const sharing = require("./sharing");
+const storagehealth = require("./storagehealth");
 const store = require("./store");
 const system = require("./system");
 const updater = require("./updater");
@@ -175,6 +176,13 @@ function get(p, req, res, ctx) {
   }
   if (p === "/tvbox/api/system/info") {
     system.systemInfo((i) => httpserver.jsonRes(res, i));
+    return true;
+  }
+  // Its own route rather than a field on system/info, which the launcher would
+  // then have to poll: that one shells out to `nmcli device wifi` on every call,
+  // and this is a read of one file in /proc. Answers null when the box cannot tell.
+  if (p === "/tvbox/api/storage/status") {
+    httpserver.jsonRes(res, storagehealth.state());
     return true;
   }
   if (p === "/tvbox/api/update/status") {

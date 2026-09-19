@@ -574,6 +574,12 @@
     "done": "Your apps are back",
     "doneWithErrors": "{n} of {total} apps restored - {failed} could not be downloaded"
   },
+  "storage": {
+    "failed": {
+      "title": "The storage card has failed",
+      "detail": "The box cannot save anything any more, and more of it will stop working. Restart it - and if this comes back, the card needs replacing."
+    }
+  },
   "parental": {
     "title": "Parental controls",
     "set": "Set a PIN",

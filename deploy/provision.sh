@@ -42,7 +42,7 @@ fi
 # is not a reason to re-provision a fleet. scripts/provision_revision_check.js
 # is the reminder: it fails when the root payload's content moved and this did
 # not.
-PROVISION_REVISION=4
+PROVISION_REVISION=5
 
 # Set by tvbox-sysupdate: this run has nobody in front of it. Two things are a
 # person's to decide and are skipped in that mode - see where each is used.
@@ -902,6 +902,30 @@ if [ -f "$HERE/coredump-tvbox-runtimemax.conf" ]; then
     fi
   else
     warn "could not install the core dump time limit"
+  fi
+fi
+
+# Raspberry Pi OS keeps the journal in a tmpfs, so a box that crashed has nothing
+# to show once it has been restarted - which is the first thing anyone does.
+# Reasons and the size caps are in the file itself.
+if [ -f "$HERE/journald-tvbox-persistent.conf" ]; then
+  install -d /etc/systemd/journald.conf.d
+  if install -m 644 "$HERE/journald-tvbox-persistent.conf" \
+    /etc/systemd/journald.conf.d/50-tvbox-persistent.conf; then
+    # The drop-in alone does nothing: journald moves to /var/log/journal only if
+    # that directory exists when it starts, and it is created by tmpfiles (which
+    # also sets the group and the ACLs that let a non-root reader see the boot).
+    # Without this the box looks configured and keeps logging to /run - which is
+    # exactly the state this replaces.
+    install -d /var/log/journal
+    systemd-tmpfiles --create --prefix /var/log/journal >/dev/null 2>&1 || true
+    if systemctl restart systemd-journald 2>/dev/null; then
+      ok "persistent journal enabled (200M cap)"
+    else
+      warn "persistent journal written but journald would not restart; it applies at the next boot"
+    fi
+  else
+    warn "could not install the persistent journal drop-in"
   fi
 fi
 

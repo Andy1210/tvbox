@@ -68,3 +68,4 @@ deploy/sysupdate.conf
 deploy/release-key.pem
 deploy/greetd-tvbox-safemode.conf
 deploy/coredump-tvbox-runtimemax.conf
+deploy/journald-tvbox-persistent.conf

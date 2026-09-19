@@ -26,6 +26,7 @@ const child = require("child_process");
 const fs = require("fs");
 const os = require("os");
 const path = require("path");
+const storagehealth = require("./storagehealth");
 
 const UPDATE_DIR = path.join(os.homedir(), ".tvbox", "update");
 const FAILED_FILE = path.join(UPDATE_DIR, "failed");
@@ -236,6 +237,12 @@ function collect(deps, cb) {
             cpuTempC: info.cpuTempC,
             mem: info.mem,
             disk: info.disk,
+            // How much room is left, and whether it can still be USED. A card that
+            // has failed reports its free bytes exactly as before - the number comes
+            // from the same superblock - so `disk` alone says a dying box is fine.
+            // This is the field that does not, and it is published retained, which
+            // is what gets it off a box whose own log can no longer be written.
+            storage: storagehealth.state(),
             net: { ...net, ssid: net.kind === "wifi" ? wifi.ssid || "" : "" },
             update: {
               state: upd.state ?? null,

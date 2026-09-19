@@ -15,6 +15,7 @@ import { MirrorOverlay } from "./components/MirrorOverlay";
 import { NotificationToast } from "./components/NotificationToast";
 import { InstallWatcher } from "./components/InstallWatcher";
 import { RestoreWatcher } from "./components/RestoreWatcher";
+import { StorageWatcher } from "./components/StorageWatcher";
 import { useIdle } from "./lib/useIdle";
 import { useEntryAnim } from "./lib/useEntryAnim";
 import { applyPendingRestore } from "./lib/backup";
@@ -237,6 +238,7 @@ export function App() {
       <MirrorOverlay onActiveChange={setMirroring} />
       <InstallWatcher />
       <RestoreWatcher />
+      <StorageWatcher />
     </>
   );
 }

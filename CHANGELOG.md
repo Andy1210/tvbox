@@ -5,6 +5,22 @@ updates). `scripts/make-release.sh` lifts the current version's `hu`/`en`
 blocks into the OTA feed's `notes` - keep both languages, keep it short, and
 write for the person on the couch (what changes for THEM), not for developers.
 
+## 3.11.4
+
+### hu
+
+- **A doboz megmondja, ha tönkrement a tárolókártyája.** Eddig csak annyi
+  látszott, hogy egyre több minden nem működik, aztán fekete lett a képernyő, és
+  utólag semmi nem árulta el, mi történt. Mostantól kiírja a tévére, és a naplóját
+  is megőrzi az újraindításon át.
+
+### en
+
+- **The box says so when its storage card has failed.** Until now all you saw was
+  more and more of it not working, then a black screen, and afterwards nothing
+  that said why. It puts it on the television now, and keeps its log across a
+  restart.
+
 ## 3.11.3
 
 ### hu
