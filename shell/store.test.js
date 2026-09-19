@@ -454,6 +454,9 @@ test("an unreachable registry says so, instead of 'not in registry'", async () =
     const r = await fresh.install(cfg, "anything");
     assert.strictEqual(r.ok, false);
     assert.match(r.error, /registry unreachable/);
+    // The machine-readable half, for the restore reconciler: an unread catalogue
+    // must never be mistaken for one that answered without the app.
+    assert.strictEqual(r.reason, "unreachable");
   } finally {
     process.env.HOME = prevHome;
     fs.rmSync(home, { recursive: true, force: true });
@@ -570,6 +573,32 @@ test("install() refuses a registry that is not configured, and one that does not
     const missing = await store.install(config, "nosuch", url);
     assert.equal(missing.ok, false);
     assert.match(missing.error, /does not offer it/);
+    // One source answering without the app says nothing about the others, so this
+    // is deliberately NOT the verdict a caller may act on.
+    assert.strictEqual(missing.reason, undefined);
+  } finally {
+    server.close();
+  }
+});
+
+// The verdict the restore reconciler acts on: every configured registry answered
+// and none of them carries the app. Retiring an app from the index is a normal
+// thing to do, and a box restored from a backup that still names it would
+// otherwise ask for it at every boot until its retry budget ran out.
+test("an app no configured registry carries is reported as unlisted, not as a failure", async () => {
+  const http = require("node:http");
+  const server = http.createServer((req, res) => {
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ registryVersion: 1, apps: [] }));
+  });
+  await new Promise((r) => server.listen(0, "127.0.0.1", r));
+  const url = "http://127.0.0.1:" + server.address().port + "/index.json";
+  const config = { rawStore: () => ({ registry: url }), appConfig: () => ({}) };
+  try {
+    const r = await store.install(config, "retired");
+    assert.equal(r.ok, false);
+    assert.match(r.error, /not in registry/);
+    assert.strictEqual(r.reason, "unlisted");
   } finally {
     server.close();
   }

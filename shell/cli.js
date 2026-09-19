@@ -488,8 +488,12 @@ function main() {
       })
       .then((s) => {
         for (const f of s.failed) console.error(`  ${f.id} (${f.kind}): ${f.error}`);
+        // Said, but not counted as a step this run could have taken, and not an
+        // error either: the app was retired from the registry, which is a normal
+        // thing to have happened between the backup and now.
+        for (const g of s.gone) console.log(`  ${g.id}: no longer offered by any configured registry - dropped`);
         if (!all) reconcile.settle(desired);
-        console.log(`done - ${s.total - s.failed.length}/${s.total} steps`);
+        console.log(`done - ${s.total - s.failed.length - s.gone.length}/${s.total - s.gone.length} steps`);
         if (s.failed.length) process.exit(1);
       })
       .catch((e) => {

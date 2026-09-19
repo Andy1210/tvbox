@@ -6,7 +6,9 @@ export interface ReconcileStep {
   id: string;
   name: string | Record<string, string> | null;
   kind: "app" | "deps" | "bundle";
-  state: "pending" | "running" | "done" | "failed" | "skipped";
+  // "gone": no configured registry offers the app any more, so the box stopped
+  // asking for it. Settled like "failed", but nothing went wrong.
+  state: "pending" | "running" | "done" | "failed" | "skipped" | "gone";
 }
 export interface ReconcileStatus {
   active: boolean;
@@ -18,6 +20,10 @@ export interface ReconcileStatus {
   done: number;
   current: { id: string; name: string | Record<string, string> | null; kind: ReconcileStep["kind"] } | null;
   failed: { id: string; kind: ReconcileStep["kind"]; error: string }[];
+  // Optional because this is a wire format, not a local object: a launcher run
+  // against a shell that predates it (vite dev, a half-finished deploy) gets no
+  // such field, and a render that reads it unguarded takes the whole UI down.
+  gone?: { id: string; name: string | Record<string, string> | null }[];
   steps: ReconcileStep[];
 }
 

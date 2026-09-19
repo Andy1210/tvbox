@@ -275,14 +275,18 @@ async function reconcileTick() {
   });
   const s = reconcile.state();
   const retrying = reconcile.settle(desired);
+  // A retired app is counted out of the total rather than against it, the same way
+  // the banner does: it was never one of the acquisitions this run could make.
+  const gone = s.gone.length;
   console.log(
     "[reconcile] done:",
-    s.done - s.failed.length,
+    s.done - s.failed.length - gone,
     "of",
-    s.total,
+    s.total - gone,
     s.failed.length
       ? "(" + s.failed.map((f) => f.id + "/" + f.kind).join(", ") + " failed" + (retrying ? ", will retry" : "") + ")"
       : "",
+    gone ? "(" + s.gone.map((g) => g.id).join(", ") + " no longer in any registry - dropped)" : "",
   );
   // Every app that was going to arrive has arrived, so the files an app asked to
   // have carried can be placed - and whatever still has no app to belong to is

@@ -5,6 +5,22 @@ updates). `scripts/make-release.sh` lifts the current version's `hu`/`en`
 blocks into the OTA feed's `notes` - keep both languages, keep it short, and
 write for the person on the couch (what changes for THEM), not for developers.
 
+## 3.11.4
+
+### hu
+
+- **A visszaállítás nem akad el egy alkalmazáson, ami már nem létezik.** Ha a
+  mentés óta kikerült valami a kínálatból, a doboz minden indításkor újra
+  nekifutott, és a visszaállítás sávja hibával állt meg. Mostantól egyszer
+  megállapítja, hogy már nem elérhető, kiírja a nevét, és többé nem kéri.
+
+### en
+
+- **A restore no longer gets stuck on an app that does not exist any more.** If
+  something was taken out of the catalogue after your backup was made, the box
+  tried again at every start and the restore bar stopped with an error. It now
+  works out once that the app is gone, says which one, and stops asking.
+
 ## 3.11.3
 
 ### hu

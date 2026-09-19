@@ -67,11 +67,11 @@ function clear() {
   }
 }
 
-function saveAttempts(state, attempts) {
+function save(state) {
   try {
-    fs.writeFileSync(STATE_FILE, JSON.stringify({ ...state, attempts }), { mode: 0o600 });
+    fs.writeFileSync(STATE_FILE, JSON.stringify(state), { mode: 0o600 });
   } catch (e) {
-    /* only the retry budget is lost; the run itself already happened */
+    /* only the retry budget and the trimmed list are lost; the run itself already happened */
   }
 }
 
@@ -118,9 +118,14 @@ function describe(id, apps) {
 // bundle) are exactly the heavy things the box must not do twice at once.
 let status = { active: false, reason: null, startedAt: null, finishedAt: null, steps: [] };
 
+// A step that will not be tried again in this run, whatever its outcome. `gone`
+// belongs here for the same reason `failed` does: the progress bar is counting
+// how much of the plan is behind it, not how much of it worked.
+const SETTLED = new Set(["done", "failed", "skipped", "gone"]);
+
 function state() {
   const steps = status.steps;
-  const done = steps.filter((s) => s.state === "done" || s.state === "failed" || s.state === "skipped").length;
+  const done = steps.filter((s) => SETTLED.has(s.state)).length;
   const current = steps.find((s) => s.state === "running") || null;
   return {
     active: status.active,
@@ -134,13 +139,18 @@ function state() {
     done,
     current: current ? { id: current.id, name: current.name, kind: current.kind } : null,
     failed: steps.filter((s) => s.state === "failed").map((s) => ({ id: s.id, kind: s.kind, error: s.error || "" })),
+    // Separate from `failed` because it is a different sentence to the person
+    // watching: nothing went wrong, the app is simply not published any more.
+    gone: steps.filter((s) => s.state === "gone").map((s) => ({ id: s.id, name: s.name })),
     steps: steps.map((s) => ({ id: s.id, name: s.name, kind: s.kind, state: s.state })),
   };
 }
 
 // io:
 //   apps            - install.js (manifestById / appDeps / bundleMissing / loadManifests)
-//   installApp(id)  - acquire the app itself from the registry -> { ok, error? }
+//   installApp(id)  - acquire the app itself from the registry
+//                     -> { ok, error?, reason? }; reason "unlisted" means every
+//                     configured registry answered and none offers it any more
 //   installDeps(id) - its no-root binary/flatpak deps -> boolean
 //   installBundle(id) - its web bundle -> boolean
 //   free()          - is the box still free to keep going? (a wake-up aborts the run)
@@ -173,10 +183,19 @@ async function run(desired, io) {
     tick();
     try {
       let ok = false;
+      // An app the catalogue no longer carries is the one outcome retrying cannot
+      // change: the acquisition asked every configured registry, they all answered,
+      // and none of them has it. Only the store's own verdict may say so
+      // (`reason: "unlisted"`, store.js) - a registry that could not be read looks
+      // exactly the same from here and means the opposite.
+      let gone = false;
       if (step.kind === "app") {
         const r = await io.installApp(step.id);
         ok = !!(r && r.ok);
-        if (!ok) step.error = String((r && r.error) || "install failed").slice(0, 160);
+        if (!ok) {
+          step.error = String((r && r.error) || "install failed").slice(0, 160);
+          gone = !!r && r.reason === "unlisted";
+        }
       } else if (step.kind === "deps") {
         ok = !!(await io.installDeps(step.id));
         if (!ok) step.error = "dependency install failed";
@@ -184,7 +203,7 @@ async function run(desired, io) {
         ok = !!(await io.installBundle(step.id));
         if (!ok) step.error = "bundle install failed";
       }
-      step.state = ok ? "done" : "failed";
+      step.state = ok ? "done" : gone ? "gone" : "failed";
     } catch (e) {
       step.state = "failed";
       step.error = String((e && e.message) || e).slice(0, 160);
@@ -227,23 +246,37 @@ async function run(desired, io) {
 // desired state away and leave the box without its apps, which is the opposite of
 // what a retry budget is for. Only a step that genuinely failed - registry down,
 // flatpak refused - burns one, and MAX_ATTEMPTS of those is the end of it.
+//
+// A third outcome leaves the desired state altogether. An app that no configured
+// registry offers any more cannot be acquired by asking them again, so counting it
+// as a failure spends the budget on a question with a known answer - and until the
+// budget runs out, every boot re-runs the restore, puts its banner back on the
+// television and reports the app as one that could not be downloaded. It is dropped
+// from the list instead, and what remains is retried on its own terms.
 function settle(desired) {
+  const gone = new Set(status.steps.filter((s) => s.state === "gone").map((s) => s.id));
+  const apps = (desired && Array.isArray(desired.apps) ? desired.apps : []).filter((a) => !gone.has(a.id));
   const failed = status.steps.some((s) => s.state === "failed");
   const skipped = status.steps.some((s) => s.state === "skipped");
   const attempts = Number(desired && desired.attempts) || 0;
-  if (!failed && !skipped) {
+  // Nothing left to come back for - either every step landed, or every app the
+  // backup named has been retired. The empty-list half also keeps `save` honest:
+  // a state with no apps is one `pending()` refuses to read, so writing it would
+  // leave a file behind that means the same as no file at all.
+  if (!apps.length || (!failed && !skipped)) {
     clear();
-    return false; // everything landed
+    return false;
   }
   if (failed) {
     if (attempts + 1 >= MAX_ATTEMPTS) {
       clear();
       return false; // out of budget: stop asking at every tick
     }
-    saveAttempts(desired, attempts + 1);
+    save({ ...desired, apps, attempts: attempts + 1 });
     return true;
   }
-  return true; // interrupted only - come back later, budget untouched
+  save({ ...desired, apps, attempts }); // interrupted only - come back later, budget untouched
+  return true;
 }
 
 // Just "is a run in flight", for boxFree(): state() reads the desired-state file to

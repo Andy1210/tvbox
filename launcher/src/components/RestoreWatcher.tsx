@@ -59,17 +59,23 @@ export function RestoreWatcher() {
   const running = status.active || status.pending;
   const name = status.current ? loc(status.current.name ?? status.current.id) : "";
   const failed = status.failed.length;
+  // An app no registry carries any more was never one of the apps this run could
+  // bring back, so it is counted out of the total rather than against it: "8 of 9"
+  // with one retired, not "8 of 10" with the tenth unexplained.
+  const goneApps = status.gone ?? [];
   const label = running
     ? status.current
       ? t("restore.step." + status.current.kind, { name })
       : t("restore.preparing")
     : failed
       ? t("restore.doneWithErrors", {
-          n: String(status.total - failed),
-          total: String(status.total),
+          n: String(status.total - failed - goneApps.length),
+          total: String(status.total - goneApps.length),
           failed: String(failed),
         })
-      : t("restore.done");
+      : goneApps.length
+        ? t("restore.doneWithGone", { apps: goneApps.map((g) => loc(g.name ?? g.id)).join(", ") })
+        : t("restore.done");
   const pct = status.total ? Math.round((status.done / status.total) * 100) : 0;
 
   return (
