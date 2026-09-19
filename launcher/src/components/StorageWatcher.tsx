@@ -74,7 +74,11 @@ export function StorageWatcher() {
     // write is a fact that outranks whatever is open in front of it.
     <div
       className={[
-        "fixed inset-x-0 bottom-0 z-[80] px-[2.4vw] py-[1.1vh]",
+        // 4.9vh tall, measured in a browser at 1360x768 and 3840x2160 in both
+        // languages: one line, and clear of the ambient clock block anchored 8vh
+        // up. The padding is deliberately tight - Settings -> About's last row
+        // ends within a couple of pixels of this edge on the small panel.
+        "fixed inset-x-0 bottom-0 z-[80] px-[2.4vw] py-[0.9vh]",
         "bg-[rgba(70,20,20,0.97)] border-t-[0.3vh] border-[rgba(255,130,120,0.5)]",
         "shadow-[0_-0.6vh_2vh_rgba(0,0,0,0.45)]",
       ].join(" ")}
