@@ -61,6 +61,19 @@ test("an escaped mount point is unescaped before it is compared", () => {
   assert.equal(s.readOnly, true);
 });
 
+test("every character /proc escapes is put back", () => {
+  // The four /proc escapes, each one its own branch. Only the space had a case,
+  // and the other three could have been dropped from the pattern with the suite
+  // still green - a path carrying a tab or a backslash would then have matched
+  // nothing and the box would have answered "cannot tell" about a healthy card.
+  assert.equal(sh.unescapeField("/home/a\\040b"), "/home/a b");
+  assert.equal(sh.unescapeField("/home/a\\011b"), "/home/a\tb");
+  assert.equal(sh.unescapeField("/home/a\\012b"), "/home/a\nb");
+  assert.equal(sh.unescapeField("/home/a\\134b"), "/home/a\\b");
+  // Not an escape, and must survive: an octal-looking run that is just digits.
+  assert.equal(sh.unescapeField("/home/040"), "/home/040");
+});
+
 test("nothing to read means no claim at all", () => {
   // A box that cannot tell must say nothing: "the storage has failed" takes a
   // television off the wall, and "it is fine" is the silence this exists to end.

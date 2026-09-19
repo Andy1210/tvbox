@@ -576,8 +576,8 @@
   },
   "storage": {
     "failed": {
-      "title": "The storage card has failed",
-      "detail": "The box cannot save anything any more, and more of it will stop working. Restart it - and if this comes back, the card needs replacing."
+      "title": "The memory card has failed",
+      "detail": "The box cannot save anything any more, and more things in it will stop working. Restart it - and if this comes back, the card needs replacing."
     }
   },
   "parental": {

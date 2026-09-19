@@ -16,6 +16,20 @@ import { fetchStorageStatus } from "../lib/storage";
 // banner that fades is one nobody saw. Renders no focusable element, so it cannot
 // steal spatial-nav focus (cf. InstallWatcher, RestoreWatcher).
 //
+// Because it never goes away it must not stand where anything else does. The top
+// of the screen belongs to NotificationToast, and a permanent panel in that slot
+// would silence every note for the rest of the box's uptime - crash-restart
+// notices above all, which is exactly what a failing card produces. It sits above
+// the other two watchers instead, which have their own slot lower down and are
+// transient.
+//
+// One limit it shares with every structured note the shell raises (`crashRestart`,
+// `lowBattery`): the launcher's window is BEHIND a fullscreen app, so a person
+// watching a film does not see this until they come back to the launcher. The
+// overlay strip that can draw over an app takes finished text, and the sentence
+// lives here rather than in the shell, which has no locale of its own. Same reason
+// those notes are drawn here too.
+//
 // Slow poll: this is a once-in-the-life-of-a-card event, and the read is free on
 // the shell side, so a minute is soon enough to catch the window and rare enough
 // to cost nothing.
@@ -49,7 +63,7 @@ export function StorageWatcher() {
   return (
     <div
       className={[
-        "fixed left-1/2 -translate-x-1/2 top-[4vh] z-[70] w-[60vw] px-[2.4vw] py-[1.6vh] rounded-[1.2vh]",
+        "fixed left-1/2 -translate-x-1/2 bottom-[18vh] z-[65] w-[60vw] px-[2.4vw] py-[1.6vh] rounded-[1.2vh]",
         "bg-[rgba(70,20,20,0.96)] shadow-[0_1vh_3vh_rgba(0,0,0,0.5)]",
       ].join(" ")}
       role="alert"

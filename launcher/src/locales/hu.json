@@ -576,7 +576,7 @@
   },
   "storage": {
     "failed": {
-      "title": "A tárolókártya meghibásodott",
+      "title": "A memóriakártya meghibásodott",
       "detail": "A doboz már semmit nem tud elmenteni, és egyre több minden mondja fel benne a szolgálatot. Indítsd újra - ha újra előjön, ki kell cserélni a kártyát."
     }
   },

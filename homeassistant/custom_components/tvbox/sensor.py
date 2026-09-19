@@ -219,6 +219,28 @@ SENSORS: tuple[TvboxSensorDescription, ...] = (
         attributes=lambda d: {"total_gb": _bytes_to_gb(_get(d, "disk.totalBytes"))},
     ),
     TvboxSensorDescription(
+        key="storage",
+        name="Storage",
+        icon="mdi:micro-sd",
+        # Whether the free space above can still be USED. It is a separate question
+        # from how much there is: the free bytes come off the same superblock and
+        # read exactly as before on a card that has stopped accepting writes, so
+        # `disk_free` says a dying box is fine right up to the black screen.
+        #
+        # None when the box cannot tell - a release that does not publish the field,
+        # or a host with no /proc. Unknown is not a healthy card, and an alert
+        # should be written against the "read-only" state rather than against
+        # "not ok".
+        value=lambda d: (
+            None if _get(d, "storage.readOnly") is None else ("read-only" if _get(d, "storage.readOnly") else "ok")
+        ),
+        attributes=lambda d: {
+            "device": _get(d, "storage.device"),
+            "mount_point": _get(d, "storage.mountPoint"),
+            "filesystem": _get(d, "storage.fsType"),
+        },
+    ),
+    TvboxSensorDescription(
         key="memory_free",
         name="Memory free",
         device_class=SensorDeviceClass.DATA_SIZE,

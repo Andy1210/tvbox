@@ -29,7 +29,7 @@ describe("StorageWatcher", () => {
   it("says the card has failed, and what to do about it", async () => {
     stubStorage({ device: "/dev/mmcblk0p2", mountPoint: "/", fsType: "ext4", readOnly: true });
     const text = await banner();
-    expect(text).toContain("The storage card has failed");
+    expect(text).toContain("The memory card has failed");
     expect(text).toContain("Restart it");
   });
 

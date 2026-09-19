@@ -9,17 +9,15 @@ write for the person on the couch (what changes for THEM), not for developers.
 
 ### hu
 
-- **A doboz megmondja, ha tönkrement a tárolókártyája.** Eddig csak annyi
+- **A doboz megmondja, ha tönkrement a memóriakártyája.** Eddig csak annyi
   látszott, hogy egyre több minden nem működik, aztán fekete lett a képernyő, és
-  utólag semmi nem árulta el, mi történt. Mostantól kiírja a tévére, és a naplóját
-  is megőrzi az újraindításon át.
+  semmi nem árulta el, miért. Mostantól kiírja a tévére, amíg még van rá ideje.
 
 ### en
 
-- **The box says so when its storage card has failed.** Until now all you saw was
-  more and more of it not working, then a black screen, and afterwards nothing
-  that said why. It puts it on the television now, and keeps its log across a
-  restart.
+- **The box says so when its memory card has failed.** Until now all you saw was
+  more and more of it not working, then a black screen, and nothing that said
+  why. It puts it on the television now, while there is still time to read it.
 
 ## 3.11.3
 
