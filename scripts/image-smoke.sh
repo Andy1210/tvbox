@@ -104,6 +104,7 @@ PARTS
   echo fake >"$B/bcm2712-rpi-5-b.dtb"
   mkdir -p "$R/etc/ssh" "$R/usr/local/sbin" "$R/usr/local/bin" "$R/etc/greetd" \
     "$R/etc/systemd/system" "$R/etc/polkit-1/rules.d" "$R/etc/tvbox/release-keys.d" \
+    "$R/etc/systemd/journald.conf.d" "$R/var/log/journal" \
     "$R/home/tv/.tvbox/shell/launcher-dist/assets" \
     "$R/home/tv/.tvbox/shell/node_modules/electron/dist"
   printf 'PARTUUID=%s /boot/firmware vfat defaults 0 2\nPARTUUID=%s / ext4 defaults,noatime 0 1\n' "$BU" "$RU" >"$R/etc/fstab"
@@ -117,6 +118,7 @@ PARTS
     etc/polkit-1/rules.d/54-tvbox-power.rules \
     etc/systemd/system/tvbox-sysupdate.service etc/polkit-1/rules.d/54-tvbox-sysupdate.rules \
     etc/tvbox/sysupdate.conf etc/tvbox/release-keys.d/tvbox-release.pem \
+    etc/systemd/journald.conf.d/50-tvbox-persistent.conf \
     usr/local/bin/tvbox-wc usr/local/bin/tvbox-session home/tv/.tvbox/session.sh \
     home/tv/.tvbox/shell/main.js home/tv/.tvbox/run-shell.sh \
     home/tv/.tvbox/shell/launcher-dist/index.html \
@@ -128,6 +130,12 @@ PARTS
   printf 'FEED_URL=https://example.invalid/update.json\nTVBOX_USER=tv\n' >"$R/etc/tvbox/sysupdate.conf"
   printf -- '-----BEGIN PUBLIC KEY-----\nplaceholder\n-----END PUBLIC KEY-----\n' \
     >"$R/etc/tvbox/release-keys.d/tvbox-release.pem"
+  # The journal check reads the expected gid out of the IMAGE's group file, so the
+  # fixture needs one - and a gid that is not this host's, or the check would pass
+  # on exactly the mistake it exists to catch.
+  echo 'systemd-journal:x:874:' >"$R/etc/group"
+  chown 0:874 "$R/var/log/journal"
+  chmod 2755 "$R/var/log/journal"
   chmod 755 "$R/usr/local/bin/tvbox-wc" "$R/usr/local/bin/tvbox-session" "$R/home/tv/.tvbox/session.sh"
   printf '[default_session]\ncommand = "tvbox-wc -- /usr/local/bin/tvbox-session"\nuser = "tv"\n' \
     >"$R/etc/greetd/config.toml"
@@ -319,6 +327,7 @@ for f in \
   etc/polkit-1/rules.d/54-tvbox-sysupdate.rules \
   etc/tvbox/sysupdate.conf \
   etc/tvbox/release-keys.d/tvbox-release.pem \
+  etc/systemd/journald.conf.d/50-tvbox-persistent.conf \
   usr/local/bin/tvbox-wc \
   usr/local/bin/tvbox-session \
   home/tv/.tvbox/session.sh \
@@ -335,6 +344,15 @@ check "the image names the box user for system updates" \
   grep -q "^TVBOX_USER=tv$" "$ROOTMNT/etc/tvbox/sysupdate.conf"
 check "the pinned release key is a public key" \
   grep -q "BEGIN PUBLIC KEY" "$ROOTMNT/etc/tvbox/release-keys.d/tvbox-release.pem"
+# The journal directory's GROUP, against the image's own group file. This is the
+# one fault in the stage that is invisible everywhere else: a line that resolves
+# `systemd-journal` on the BUILD host bakes that host's GID into the image, passes
+# bash -n, shellcheck and every unit test, and is only visible by looking inside
+# the built image. Reading the expected id out of $ROOTMNT/etc/group rather than
+# naming a number is the whole point - a hard-coded 999 would pass on a wrong image.
+check "the journal directory belongs to the image's systemd-journal group" \
+  test "$(stat -c '%a %u %g' "$ROOTMNT/var/log/journal" 2>/dev/null)" = \
+  "2755 0 $(awk -F: '$1=="systemd-journal"{print $3}' "$ROOTMNT/etc/group")"
 # The session chain, end to end: greetd starts the compositor, the compositor starts
 # the wrapper, the wrapper execs the box user's session script. Any one of them
 # missing is a flashed box that shows nothing - and tvbox-session deliberately

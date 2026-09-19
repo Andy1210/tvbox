@@ -182,16 +182,31 @@ test("collect assembles one box's answer from system + updater", (t, done) => {
       os: { rebootRequired: true, packages: ["linux-image-rpi-2712"] },
     }),
   };
+  // The assertions are handed to done() rather than thrown. collect() answers from
+  // inside its own execFile callbacks, so a throw in here does not reach node:test
+  // as a failure - it reaches the process, done() is never called, and the case
+  // HANGS until the runner gives up. Found by mutating the payload: the suite
+  // stopped instead of saying what was missing.
   diag.collect({ system, updater }, (p) => {
-    assert.equal(p.hostname, "tvbox-gaming");
-    assert.equal(p.version, "2.2.0");
-    assert.equal(p.compositor, "0.1.6");
-    assert.equal(p.net.kind, "wifi");
-    assert.equal(p.net.ssid, "home");
-    assert.equal(p.net.rateMbps, 390);
-    assert.equal(p.update.os.rebootRequired, true);
-    assert.equal(typeof p.bootedAt, "string");
-    done();
+    try {
+      assert.equal(p.hostname, "tvbox-gaming");
+      assert.equal(p.version, "2.2.0");
+      assert.equal(p.compositor, "0.1.6");
+      assert.equal(p.net.kind, "wifi");
+      assert.equal(p.net.ssid, "home");
+      assert.equal(p.net.rateMbps, 390);
+      assert.equal(p.update.os.rebootRequired, true);
+      assert.equal(typeof p.bootedAt, "string");
+      // The field that says whether the free bytes above can still be USED. It is
+      // what reaches a fleet watching a box whose own log can no longer be
+      // written, so its absence has to fail something: null on a host with no
+      // /proc, a verdict on a box, but present either way.
+      assert.ok("storage" in p, "the field must be published even when it is null");
+      assert.ok(p.storage === null || typeof p.storage.readOnly === "boolean", "storage: " + JSON.stringify(p.storage));
+      done();
+    } catch (e) {
+      done(e);
+    }
   });
 });
 

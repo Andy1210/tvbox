@@ -112,6 +112,19 @@ test("the shell-state routes answer from the context", () => {
   }
 });
 
+// The route a failing box is judged by. Without a dispatch case, a typo in the
+// path or in which function it calls would ship: the module underneath has its own
+// suite, and it would keep passing while nothing answered on the wire.
+test("the storage route answers with the verdict the launcher acts on", () => {
+  const res = fakeRes();
+  const p = "/tvbox/api/storage/status";
+  assert.equal(getroutes.get(p, { url: p }, res, ctx()), true);
+  const body = JSON.parse(res.body);
+  // A dev host has a /proc; a Mac does not, and null is the honest answer there.
+  // Either way the shape is what storage.ts checks before it shows anything.
+  assert.ok(body === null || typeof body.readOnly === "boolean", res.body);
+});
+
 test("the app list is re-read on every call, so a dropped-in manifest appears live", () => {
   const res = fakeRes();
   assert.equal(getroutes.get("/tvbox/api/apps", { url: "/tvbox/api/apps" }, res, ctx()), true);

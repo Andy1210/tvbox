@@ -578,6 +578,12 @@
     "noneLeft": "Egyik alkalmazásod sem hozható vissza. Már nem kínálja senki: {apps}",
     "andMore": "{apps} és még {n} másik"
   },
+  "storage": {
+    "failed": {
+      "title": "A memóriakártya meghibásodott",
+      "detail": "A doboz már semmit nem tud elmenteni, és egyre több minden mondja fel benne a szolgálatot. Indítsd újra - ha újra előjön, ki kell cserélni a kártyát."
+    }
+  },
   "parental": {
     "title": "Szülői felügyelet",
     "set": "PIN beállítása",

@@ -72,6 +72,55 @@ test("every variable in the chroot block is either host-expanded on purpose or e
   }
 });
 
+// The mirror image of the trap above, and it arrived with the second block. A
+// QUOTED heredoc passes everything through untouched, which is what makes it the
+// safer default - but `ROOTFS_DIR` is exported by pi-gen's build.sh, so it is a
+// live variable INSIDE the chroot too. A line copied from the host-side style,
+// `install -d "${ROOTFS_DIR}/var/log/journal"`, would then create the build host's
+// rootfs path *inside the image* and leave the real one untouched. No error, and
+// the same fifty-minute delay before anyone notices.
+function quotedChrootBlocks(src) {
+  const lines = src.split("\n");
+  const blocks = [];
+  let start = -1;
+  let terminator = null;
+  lines.forEach((line, i) => {
+    if (terminator === null) {
+      const m = /^on_chroot\s*<<'([A-Za-z_][A-Za-z0-9_]*)'\s*$/.exec(line);
+      if (m) {
+        terminator = m[1];
+        start = i + 1;
+      }
+    } else if (line.trim() === terminator) {
+      blocks.push({ from: start, to: i, body: lines.slice(start, i) });
+      terminator = null;
+    }
+  });
+  assert.equal(terminator, null, "a quoted on_chroot heredoc is never terminated");
+  return blocks;
+}
+
+test("a quoted chroot block names no build-host path", () => {
+  const src = fs.readFileSync(STAGE, "utf8");
+  const blocks = quotedChrootBlocks(src);
+  assert.ok(blocks.length >= 1, "no `on_chroot <<'CHROOT'` block found - did it move or lose its quotes?");
+  for (const block of blocks) {
+    block.body.forEach((line, n) => {
+      const lineNo = block.from + n + 1;
+      if (line.trim().startsWith("#")) return;
+      for (const m of line.matchAll(/\$\{?([A-Za-z_][A-Za-z0-9_]*)\}?/g)) {
+        assert.ok(
+          !HOST_EXPANDED.has(m[1]),
+          `00-run.sh:${lineNo} uses $${m[1]} inside a QUOTED chroot heredoc. It is not expanded here, ` +
+            `and inside the chroot it either is empty or - for ROOTFS_DIR, which pi-gen exports - points ` +
+            `at the build host's path, so the line would act on the wrong tree with no error.\n` +
+            `    ${line.trim()}`,
+        );
+      }
+    });
+  }
+});
+
 test("the chroot block runs nothing on the build host by accident", () => {
   const src = fs.readFileSync(STAGE, "utf8");
   for (const block of chrootBlocks(src)) {

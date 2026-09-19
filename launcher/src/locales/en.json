@@ -578,6 +578,12 @@
     "noneLeft": "None of your apps could come back. No longer offered: {apps}",
     "andMore": "{apps} +{n} more"
   },
+  "storage": {
+    "failed": {
+      "title": "The memory card has failed",
+      "detail": "The box cannot save anything any more, and more things in it will stop working. Restart it - and if this comes back, the card needs replacing."
+    }
+  },
   "parental": {
     "title": "Parental controls",
     "set": "Set a PIN",

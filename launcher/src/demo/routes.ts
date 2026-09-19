@@ -220,6 +220,8 @@ export async function handleApi(
     // ---- system / update / ambient / backup / misc ----
     case "/tvbox/api/system/info":
       return data.SYSTEM_INFO;
+    case "/tvbox/api/storage/status":
+      return { device: "/dev/mmcblk0p2", mountPoint: "/", fsType: "ext4", readOnly: false };
     case "/tvbox/api/system/region":
       return region;
     case "/tvbox/api/system/timezone":

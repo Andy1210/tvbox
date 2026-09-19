@@ -90,6 +90,7 @@ const INFRA_FILES = [
   "tvbox-safemode-screen.service",
   "greetd-tvbox-safemode.conf",
   "coredump-tvbox-runtimemax.conf",
+  "journald-tvbox-persistent.conf",
   "tvbox-cec.service",
   "tvbox-remote.service",
   "tvbox-gamepad.service",
