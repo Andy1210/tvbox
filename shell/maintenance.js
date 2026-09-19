@@ -286,7 +286,7 @@ async function reconcileTick() {
     s.failed.length
       ? "(" + s.failed.map((f) => f.id + "/" + f.kind).join(", ") + " failed" + (retrying ? ", will retry" : "") + ")"
       : "",
-    gone ? "(" + s.gone.map((g) => g.id).join(", ") + " no longer in any registry - dropped)" : "",
+    gone ? "(" + s.gone.join(", ") + " no longer in any registry - dropped)" : "",
   );
   // Every app that was going to arrive has arrived, so the files an app asked to
   // have carried can be placed - and whatever still has no app to belong to is

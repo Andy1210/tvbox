@@ -141,7 +141,13 @@ function state() {
     failed: steps.filter((s) => s.state === "failed").map((s) => ({ id: s.id, kind: s.kind, error: s.error || "" })),
     // Separate from `failed` because it is a different sentence to the person
     // watching: nothing went wrong, the app is simply not published any more.
-    gone: steps.filter((s) => s.state === "gone").map((s) => ({ id: s.id, name: s.name })),
+    //
+    // Ids, not names, and there is no name to be had: a step only reaches `gone`
+    // when its app is absent, and describe() carries no name for an app that is
+    // not on the box. Nothing else knows one either - the app is installed
+    // nowhere and no registry offers it - so the id is what the box calls it, in
+    // the log, in the CLI and on screen.
+    gone: steps.filter((s) => s.state === "gone").map((s) => s.id),
     steps: steps.map((s) => ({ id: s.id, name: s.name, kind: s.kind, state: s.state })),
   };
 }
@@ -253,6 +259,16 @@ async function run(desired, io) {
 // budget runs out, every boot re-runs the restore, puts its banner back on the
 // television and reports the app as one that could not be downloaded. It is dropped
 // from the list instead, and what remains is retried on its own terms.
+//
+// That drop is made on ONE observation, where every other outcome here gets a
+// budget, and the trade is deliberate. The verdict already requires every
+// configured registry to have answered - one that errored makes it `unreachable`
+// and nothing is dropped - so being wrong needs all of them to agree wrongly at
+// once, e.g. a source caught mid-republish serving a well-formed index that is
+// missing the app. What it costs when that happens is one app id off a restore,
+// which a person can install again; what a second opinion would cost is the
+// banner coming back on the television for a settled question, which is the thing
+// being fixed.
 function settle(desired) {
   const gone = new Set(status.steps.filter((s) => s.state === "gone").map((s) => s.id));
   const apps = (desired && Array.isArray(desired.apps) ? desired.apps : []).filter((a) => !gone.has(a.id));

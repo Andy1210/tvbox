@@ -20,10 +20,14 @@ export interface ReconcileStatus {
   done: number;
   current: { id: string; name: string | Record<string, string> | null; kind: ReconcileStep["kind"] } | null;
   failed: { id: string; kind: ReconcileStep["kind"]; error: string }[];
+  // App ids, not names: a step only reaches `gone` when its app is absent from
+  // the box, and nothing then knows what it is called - not the box, which never
+  // had it, and not the registries, which no longer offer it.
+  //
   // Optional because this is a wire format, not a local object: a launcher run
   // against a shell that predates it (vite dev, a half-finished deploy) gets no
   // such field, and a render that reads it unguarded takes the whole UI down.
-  gone?: { id: string; name: string | Record<string, string> | null }[];
+  gone?: string[];
   steps: ReconcileStep[];
 }
 

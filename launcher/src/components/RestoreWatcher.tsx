@@ -15,6 +15,11 @@ import { fetchReconcileStatus, type ReconcileStatus } from "../lib/reconcile";
 const POLL_MS = 3000;
 const DWELL_MS = 8000; // how long the finished summary stays up
 const EARLY_RETRIES = 5; // before the first answer, a hiccup gets this many more goes
+// The summary is one truncating line in a 52vw box, so a long list of retired apps
+// would be cut mid-name with nothing saying how many were lost - which reads as
+// the whole list. Two names and a count instead: the count is the part a person
+// can act on, and it survives the narrowest panel here (1360x768).
+const MAX_NAMED = 2;
 
 export function RestoreWatcher() {
   const { t, loc } = useI18n();
@@ -63,18 +68,34 @@ export function RestoreWatcher() {
   // bring back, so it is counted out of the total rather than against it: "8 of 9"
   // with one retired, not "8 of 10" with the tenth unexplained.
   const goneApps = status.gone ?? [];
+  const apps =
+    goneApps.length > MAX_NAMED
+      ? t("restore.andMore", {
+          apps: goneApps.slice(0, MAX_NAMED).join(", "),
+          n: String(goneApps.length - MAX_NAMED),
+        })
+      : goneApps.join(", ");
+  const total = status.total - goneApps.length;
+  const restored = total - failed;
   const label = running
     ? status.current
       ? t("restore.step." + status.current.kind, { name })
       : t("restore.preparing")
     : failed
-      ? t("restore.doneWithErrors", {
-          n: String(status.total - failed - goneApps.length),
-          total: String(status.total - goneApps.length),
+      ? // The retired ones are named here too. Dropping them left the person with a
+        // total smaller than their backup's and nothing accounting for the
+        // difference, on the only run that can ever say it: a retired app leaves
+        // the desired state, so there is no second showing.
+        t(goneApps.length ? "restore.doneWithErrorsAndGone" : "restore.doneWithErrors", {
+          n: String(restored),
+          total: String(total),
           failed: String(failed),
+          apps,
         })
       : goneApps.length
-        ? t("restore.doneWithGone", { apps: goneApps.map((g) => loc(g.name ?? g.id)).join(", ") })
+        ? // "Your apps are back" is a claim, and with every app in the backup
+          // retired it is a false one - there is nothing to have come back.
+          t(restored > 0 ? "restore.doneWithGone" : "restore.noneLeft", { apps })
         : t("restore.done");
   const pct = status.total ? Math.round((status.done / status.total) * 100) : 0;
 

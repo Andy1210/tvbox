@@ -266,10 +266,9 @@ test("an app no registry carries any more is reported apart from the failures", 
   const s = await reconcile.run({ reason: "restore", apps: [{ id: "plex" }] }, RETIRED_IO("unlisted", "plex"));
   assert.equal(s.steps.find((x) => x.id === "plex").state, "gone");
   assert.deepEqual(s.failed, []);
-  assert.deepEqual(
-    s.gone.map((g) => g.id),
-    ["plex"],
-  );
+  // Ids: an app that never arrived has no name anywhere on the box, and the
+  // registries that would have one no longer offer it.
+  assert.deepEqual(s.gone, ["plex"]);
   // It is settled, so the progress bar is full rather than stuck one short.
   assert.equal(s.done, s.total);
 });
