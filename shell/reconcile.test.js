@@ -450,6 +450,28 @@ test("an id in both lists is still wanted, not retired", async () => {
   reconcile.clear();
 });
 
+test("an app that stood down is not counted as one that came back", async () => {
+  // The box was claimed mid-run, so a step was skipped: neither a failure nor an
+  // arrival. Counting it as restored made an interrupted run report every app
+  // back - "done: 2 of 2 app(s)" for two that were never attempted.
+  let free = true;
+  const s = await reconcile.run(
+    { reason: "restore", apps: [{ id: "a" }, { id: "b" }] },
+    {
+      ...OK_IO(false),
+      free: () => {
+        const was = free;
+        free = false;
+        return was;
+      },
+    },
+  );
+  assert.deepEqual(s.skipped, ["b"]);
+  assert.deepEqual(s.failed, []);
+  const unfinished = new Set([...s.failed.map((f) => f.id), ...s.skipped]).size;
+  assert.equal(s.wanted - s.gone.length - unfinished, 1, "one of the two came back, not both");
+});
+
 test("a restore whose apps are all retired stops after one run", async () => {
   const desired = reconcile.record([{ id: "plex" }], "restore");
   await reconcile.run(desired, RETIRED_IO("unlisted", "plex"));

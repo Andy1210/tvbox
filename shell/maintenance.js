@@ -280,10 +280,12 @@ async function reconcileTick() {
   // rather than against it - it was never one of the acquisitions this run could
   // make - and an app that failed twice is still one app.
   const gone = s.gone.length;
-  const failedApps = new Set(s.failed.map((f) => f.id)).size;
+  // An app is back only if nothing of its own failed OR stood down: a skipped step
+  // is the box being claimed mid-run, which is neither a failure nor an arrival.
+  const unfinished = new Set([...s.failed.map((f) => f.id), ...s.skipped]).size;
   console.log(
     "[reconcile] done:",
-    s.wanted - gone - failedApps,
+    s.wanted - gone - unfinished,
     "of",
     s.wanted - gone,
     "app(s)",

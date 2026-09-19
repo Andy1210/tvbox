@@ -497,8 +497,9 @@ function main() {
         // would read as the operator's view of the plan, but `gone` now carries
         // retirements from earlier passes too - no step ran for those in THIS run -
         // so a step count beside that list said two different things at once.
-        const failedApps = new Set(s.failed.map((f) => f.id)).size;
-        console.log(`done - ${s.wanted - s.gone.length - failedApps}/${s.wanted - s.gone.length} app(s)`);
+        // An app is back only if nothing of its own failed OR stood down.
+        const unfinished = new Set([...s.failed.map((f) => f.id), ...s.skipped]).size;
+        console.log(`done - ${s.wanted - s.gone.length - unfinished}/${s.wanted - s.gone.length} app(s)`);
         if (s.failed.length) process.exit(1);
       })
       .catch((e) => {

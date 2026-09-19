@@ -99,7 +99,13 @@ export function RestoreWatcher() {
         })
       : named;
   const total = wanted - goneApps.length;
-  const restored = total - failedApps;
+  // An app is back only if nothing of its own failed OR stood down. A skipped step
+  // is the box being claimed mid-run - neither a failure nor an arrival - and
+  // counting it as restored said "your apps are back" about ones never attempted.
+  const unfinished = appCounts
+    ? new Set([...status.failed.map((f) => f.id), ...(status.skipped ?? [])]).size
+    : failedApps;
+  const restored = total - unfinished;
   const label = running
     ? status.current
       ? t("restore.step." + status.current.kind, { name })

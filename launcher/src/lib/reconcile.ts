@@ -25,6 +25,9 @@ export interface ReconcileStatus {
   wanted?: number;
   current: { id: string; name: string | Record<string, string> | null; kind: ReconcileStep["kind"] } | null;
   failed: { id: string; kind: ReconcileStep["kind"]; error: string }[];
+  // Steps that stood down because the box was claimed mid-run: neither a failure
+  // nor an arrival. Optional like `wanted`, for a shell that predates it.
+  skipped?: string[];
   // App ids, not names: a step only reaches `gone` when its app is absent from
   // the box, and nothing then knows what it is called - not the box, which never
   // had it, and not the registries, which no longer offer it.

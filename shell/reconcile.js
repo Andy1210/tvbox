@@ -173,6 +173,11 @@ function state() {
     wanted: status.wanted,
     current: current ? { id: current.id, name: current.name, kind: current.kind } : null,
     failed: steps.filter((s) => s.state === "failed").map((s) => ({ id: s.id, kind: s.kind, error: s.error || "" })),
+    // Neither done nor failed: the box was claimed mid-run and the step stood down.
+    // Separate from `failed` because it spends no retry budget, and reported at all
+    // because without it a run that was interrupted says every app came back -
+    // "done: 2 of 2 app(s)" for two that were never attempted.
+    skipped: steps.filter((s) => s.state === "skipped").map((s) => s.id),
     // Separate from `failed` because it is a different sentence to the person
     // watching: nothing went wrong, the app is simply not published any more.
     //

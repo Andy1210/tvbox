@@ -23,6 +23,7 @@ function stubStatus(over: Partial<ReconcileStatus>) {
     current: null,
     failed: [],
     gone: [],
+    skipped: [],
     steps: [],
     ...over,
   };
@@ -205,6 +206,25 @@ describe("RestoreWatcher", () => {
     const text = await banner();
     expect(text).not.toContain("1/4");
     expect(text).not.toContain("/3");
+  });
+
+  it("does not count an app that stood down as one that came back", async () => {
+    // Three apps: one back, one whose download failed, one never attempted because
+    // the box was claimed mid-run. A skip is neither a failure nor an arrival, and
+    // counting it as restored said two came back.
+    //
+    // Which SENTENCE is drawn still turns on the failure - a skip is not a failed
+    // download and there is no string claiming it is. A skip-only run keeps
+    // `pending` true and draws no summary at all, which is why only the numbers
+    // here could be wrong.
+    stubStatus({
+      total: 3,
+      done: 3,
+      wanted: 3,
+      skipped: ["c"],
+      failed: [{ id: "b", kind: "bundle", error: "bundle install failed" }],
+    });
+    expect(await banner()).toContain("Apps restored: 1 of 3 - 1 could not be downloaded");
   });
 
   it("says nothing extra when every app came back", async () => {
