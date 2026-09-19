@@ -383,14 +383,15 @@ install -m 644 "${ROOTFS_DIR}${USER_HOME}/.tvbox/coredump-tvbox-runtimemax.conf"
 # that crashed has nothing to show once it has been restarted. The directory is
 # what actually switches journald over - it creates one itself only at start - and
 # in a chroot there is no manager to restart, so the first boot is where it takes
-# effect. `-g systemd-journal` resolves against the BUILD host here rather than the
-# image (this line runs outside on_chroot), which is only safe because systemd's
-# own tmpfiles rule for /var/log/journal re-applies the group and the ACLs on every
-# boot - so a host whose GID differs corrects itself the first time the box runs.
+# effect. The directory is made inside the chroot, below, because `systemd-journal`
+# has to resolve against the IMAGE's group file rather than the build host's.
 install -d "${ROOTFS_DIR}/etc/systemd/journald.conf.d"
 install -m 644 "${ROOTFS_DIR}${USER_HOME}/.tvbox/journald-tvbox-persistent.conf" \
   "${ROOTFS_DIR}/etc/systemd/journald.conf.d/50-tvbox-persistent.conf"
-install -d -m 2755 -o root -g systemd-journal "${ROOTFS_DIR}/var/log/journal"
+on_chroot <<'CHROOT'
+set -e
+install -d -m 2755 -o root -g systemd-journal /var/log/journal
+CHROOT
 
 # Screen mirroring's privileged half. A flashed box never runs provision.sh, and
 # this block did not exist - so every SD-image box offered mirroring in Settings
