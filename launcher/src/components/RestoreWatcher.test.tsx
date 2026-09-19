@@ -63,7 +63,7 @@ describe("RestoreWatcher", () => {
       failed: [{ id: "broken", kind: "bundle", error: "bundle install failed" }],
       gone: ["plex"],
     });
-    expect(await banner()).toContain("8 of 9 apps restored");
+    expect(await banner()).toContain("Apps restored: 8 of 9");
   });
 
   it("still names the retired app when something else failed too", async () => {
@@ -84,7 +84,7 @@ describe("RestoreWatcher", () => {
   it("does not claim the apps are back when every one of them was retired", async () => {
     stubStatus({ total: 1, done: 1, gone: ["plex"] });
     const text = await banner();
-    expect(text).toContain("Nothing to bring back");
+    expect(text).toContain("None of your apps could come back");
     expect(text).not.toContain("Your apps are back");
   });
 
@@ -97,7 +97,7 @@ describe("RestoreWatcher", () => {
     const text = await banner();
     expect(text).toContain("Your apps are back");
     expect(text).toContain("plex");
-    expect(text).not.toContain("Nothing to bring back");
+    expect(text).not.toContain("could come back");
   });
 
   it("counts an app that failed twice as one app", async () => {
@@ -110,13 +110,24 @@ describe("RestoreWatcher", () => {
         { id: "broken", kind: "bundle", error: "bundle install failed" },
       ],
     });
-    expect(await banner()).toContain("2 of 3 apps restored - 1 could not be downloaded");
+    expect(await banner()).toContain("Apps restored: 2 of 3 - 1 could not be downloaded");
   });
 
   it("falls back to the step total when the shell sends no app count", async () => {
     // An older shell: the old behaviour rather than a crash or a blank sentence.
     stubStatus({ total: 10, done: 10, wanted: undefined, failed: [{ id: "x", kind: "bundle", error: "no" }] });
-    expect(await banner()).toContain("9 of 10 apps restored");
+    expect(await banner()).toContain("Apps restored: 9 of 10");
+  });
+
+  it("does not use the step total to claim nothing came back", async () => {
+    // The same shape the app count exists to fix, on a shell that cannot send it:
+    // one retired app beside one the backup carried whole is a STEP total of 1,
+    // so subtracting the retirement gives 0. Saying "none could come back" there
+    // is the old bug wearing the new sentence.
+    stubStatus({ total: 1, done: 1, wanted: undefined, gone: ["plex"] });
+    const text = await banner();
+    expect(text).toContain("Your apps are back");
+    expect(text).not.toContain("could come back");
   });
 
   it("caps a long list with a count instead of letting it run away", async () => {
@@ -145,17 +156,38 @@ describe("RestoreWatcher", () => {
     expect(text).not.toContain("more");
   });
 
+  it("compresses two names that are long enough to push the count off the line", async () => {
+    // An id may be 40 characters, so a count of NAMES is not a bound on their
+    // width: two of them run to 82 on their own, and the clamp then ate the
+    // "+N more" itself - the one thing the compression is for.
+    const long = ["a".repeat(40), "b".repeat(40), "c"];
+    stubStatus({ total: 4, done: 4, gone: long });
+    const text = await banner();
+    expect(text).toContain("+1 more");
+    expect(text).not.toContain("ccc");
+  });
+
   it("lets the finished summary wrap instead of truncating it", async () => {
-    // The sentence that names a failure AND a retirement is 75 characters in
-    // English and 80 in Hungarian, against ~74 that fit on one line at
-    // 1360x768 - so truncating it ate the clause this banner exists to add.
-    // happy-dom lays nothing out, so the decision is pinned by the class.
+    // The longest sentence it can produce is 94 characters in English and 106 in
+    // Hungarian, against about 74 that fit on one line at 1360x768 - so
+    // truncating it ate the clause this banner exists to add. happy-dom lays
+    // nothing out, so the decision is pinned by the class.
     stubStatus({ total: 2, done: 2, gone: ["plex"] });
     const r = render(<RestoreWatcher />);
     await act(async () => {});
     const label = r.container.querySelector("span.flex-1");
     expect(label?.className).not.toContain("truncate");
     expect(label?.className).toContain("line-clamp-2");
+  });
+
+  it("shows no numeric counter while it runs", async () => {
+    // It counted plan STEPS while the summary counts apps, so the denominator
+    // changed between the two - "1/4" running, "2 of 3" at the end - which reads
+    // as a bug from the sofa. The bar carries the progress and needs no unit.
+    stubStatus({ active: true, finishedAt: null, total: 4, done: 1, wanted: 3 });
+    const text = await banner();
+    expect(text).not.toContain("1/4");
+    expect(text).not.toContain("/3");
   });
 
   it("says nothing extra when every app came back", async () => {

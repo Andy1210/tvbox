@@ -21,6 +21,12 @@ const EARLY_RETRIES = 5; // before the first answer, a hiccup gets this many mor
 // hiding exactly one is longer than printing it AND trades a name for a digit -
 // measured, "plex, jellyfin +1 more" against "plex, jellyfin, kodi".
 const MAX_NAMED = 2;
+// ...and a count of names is not a bound on their WIDTH. An id may be 40
+// characters (shell/reconcile.js), so two of them are 82 on their own - enough to
+// push the count itself off the end of the clamp, which is the one thing the
+// compression exists to guarantee. Measured: about 74 characters fit on a line
+// here, so a list past this length compresses however few names it holds.
+const MAX_NAMED_CHARS = 60;
 
 export function RestoreWatcher() {
   const { t, loc } = useI18n();
@@ -79,13 +85,14 @@ export function RestoreWatcher() {
   // with one retired, not "8 of 10" with the tenth unexplained.
   const goneApps = status.gone ?? [];
   const wanted = status.wanted ?? status.total;
+  const named = goneApps.join(", ");
   const apps =
-    goneApps.length > MAX_NAMED + 1
+    goneApps.length > MAX_NAMED + 1 || named.length > MAX_NAMED_CHARS
       ? t("restore.andMore", {
           apps: goneApps.slice(0, MAX_NAMED).join(", "),
           n: String(goneApps.length - MAX_NAMED),
         })
-      : goneApps.join(", ");
+      : named;
   const total = wanted - goneApps.length;
   const restored = total - failedApps;
   const label = running
@@ -106,7 +113,13 @@ export function RestoreWatcher() {
       : goneApps.length
         ? // "Your apps are back" is a claim, and with every app in the backup
           // retired it is a false one - there is nothing to have come back.
-          t(total > 0 ? "restore.doneWithGone" : "restore.noneLeft", { apps })
+          //
+          // Only said when the shell sent an app count, though: without one the
+          // total is a count of STEPS, and one retired app beside one the backup
+          // carried whole is exactly a step total of 1 - the shape this arithmetic
+          // exists to fix. Claiming nothing came back there would be the old bug
+          // wearing the new sentence.
+          t(total > 0 || status.wanted == null ? "restore.doneWithGone" : "restore.noneLeft", { apps })
         : t("restore.done");
   // Steps, not apps: this is how much of the plan is behind us, which is what a
   // progress bar is for.
@@ -127,17 +140,17 @@ export function RestoreWatcher() {
         )}
         {/* The running label is replaced every few seconds and must stay one line,
             so it truncates. The summary is written once and stands for eight
-            seconds: measured at 1360x768 it has room for ~74 characters, and the
-            sentence that names both a failure and a retirement runs to 75 in
-            English and 80 in Hungarian - so truncating it ate the clause this
-            banner exists to add. Two lines, clamped so nothing can grow without
-            bound. */}
+            seconds: about 74 characters fit on a line here, and the longest
+            sentence it can produce - a failure, a retirement and a "+N more" - is
+            94 characters in English and 106 in Hungarian, which is two lines with
+            a third of the second one spare. Measured in DejaVu Sans, the sans face
+            deploy/provision.sh installs. Truncating that ate the clause this
+            banner exists to add; clamped at two so it cannot grow without bound. */}
         <span className={"text-[2vh] font-semibold flex-1 " + (running ? "truncate" : "line-clamp-2")}>{label}</span>
-        {running && status.total > 0 && (
-          <span className="text-[1.8vh] text-fg-dim tabular-nums shrink-0">
-            {status.done}/{status.total}
-          </span>
-        )}
+        {/* No numeric counter beside it. It counted plan STEPS while the summary
+            counts apps, so the denominator changed between them - "1/4" while
+            running, "2 of 3 apps restored" at the end - which reads as a bug from
+            the sofa. The bar below is a progress indicator and needs no unit. */}
       </div>
       {running && (
         <div className="mt-[1.1vh] h-[0.6vh] rounded-full bg-white/10 overflow-hidden">

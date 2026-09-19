@@ -336,6 +336,104 @@ test("a retirement found on one pass is still named on the pass that reports", a
   assert.equal(reconcile.pending(), null);
 });
 
+test("a second retirement joins the first rather than replacing it", async () => {
+  // Two passes with one retirement each. The two-app case cannot tell
+  // "accumulate" from "this pass only" apart - both give one id - so the rule the
+  // carry-forward exists for is only pinned by a third app arriving late.
+  const desired = reconcile.record([{ id: "plex" }, { id: "jellyfin" }, { id: "keeper" }], "restore");
+  const gone = new Set(["plex"]);
+  const io = {
+    apps: {
+      manifestById: (id) => (gone.has(id) ? null : { id, name: id }),
+      appDeps: () => ({ depsOk: true, installable: false, missing: [] }),
+      bundleMissing: (m) => m.id === "keeper",
+      loadManifests: () => [],
+    },
+    installApp: (id) => (gone.has(id) ? { ok: false, reason: "unlisted", error: "not in registry" } : { ok: true }),
+    installDeps: () => true,
+    installBundle: () => false, // keeper keeps the restore alive for a second pass
+  };
+  await reconcile.run(desired, io);
+  assert.equal(reconcile.settle(desired), true);
+
+  gone.add("jellyfin"); // retired between the two boots
+  const second = reconcile.pending();
+  await reconcile.run(second, io);
+  const s = reconcile.state();
+  assert.deepEqual(s.gone, ["plex", "jellyfin"], "the first retirement is still named");
+  assert.equal(reconcile.settle(second), true);
+  assert.deepEqual(reconcile.pending().retired, ["plex", "jellyfin"]);
+  reconcile.clear();
+});
+
+test("an INTERRUPTED pass keeps the retirements it found", async () => {
+  // The branch a box takes when somebody starts watching something mid-restore,
+  // which on a just-restored box is the commonest reason there is a second pass
+  // at all. It spends no attempt, and it must not spend the record either.
+  const desired = reconcile.record([{ id: "plex" }, { id: "later" }], "restore");
+  let free = true;
+  await reconcile.run(desired, {
+    apps: {
+      manifestById: (id) => (id === "plex" ? null : { id, name: id }),
+      appDeps: () => ({ depsOk: true, installable: false, missing: [] }),
+      bundleMissing: (m) => m.id === "later", // so `later` owes a step to stand down on
+      loadManifests: () => [],
+    },
+    installApp: (id) => (id === "plex" ? { ok: false, reason: "unlisted", error: "not in registry" } : { ok: true }),
+    installDeps: () => true,
+    installBundle: () => true,
+    free: () => {
+      const was = free;
+      free = false; // the retirement lands, then the box is claimed
+      return was;
+    },
+  });
+  assert.equal(reconcile.settle(desired), true, "interrupted, so it comes back");
+  const next = reconcile.pending();
+  assert.deepEqual(next.retired, ["plex"]);
+  assert.equal(next.attempts, 0, "an interruption still spends no budget");
+  reconcile.clear();
+});
+
+test("what comes back out of the state file is held to the same id rule", async () => {
+  // The file is attacker-supplied until the backup's password verifies, and this
+  // is the only door its ids come back through. record() writes clean ones; what
+  // is READ is what run() maps over, and a junk entry there used to reach it.
+  const raw = {
+    v: 1,
+    at: Date.now(),
+    reason: "restore",
+    attempts: 0,
+    apps: [{ id: "keeper" }, null, { id: "NOT VALID" }, { id: "keeper" }],
+    retired: ["plex", "plex", "no good", 7, "x".repeat(41)],
+  };
+  fs.writeFileSync(reconcile.STATE_FILE, JSON.stringify(raw));
+  const back = reconcile.pending();
+  assert.deepEqual(
+    back.apps.map((a) => a.id),
+    ["keeper"],
+    "junk, duplicates and bad shapes are dropped",
+  );
+  assert.deepEqual(back.retired, ["plex"]);
+  reconcile.clear();
+});
+
+test("an id in both lists is counted once, not once on each side", async () => {
+  // Only settle() writes `retired`, and it removes the id from `apps` in the same
+  // breath - so the two are disjoint on every path the box takes. A file that
+  // says otherwise used to make "apps minus retired" negative, which reads on
+  // screen as "-1 of 0".
+  fs.writeFileSync(
+    reconcile.STATE_FILE,
+    JSON.stringify({ v: 1, at: Date.now(), reason: "restore", attempts: 0, apps: [{ id: "plex" }], retired: ["plex"] }),
+  );
+  const s = await reconcile.run(reconcile.pending(), RETIRED_IO("unlisted", "plex"));
+  assert.deepEqual(s.gone, ["plex"]);
+  assert.equal(s.wanted, 1);
+  assert.ok(s.wanted - s.gone.length >= 0, "the app count can never go negative");
+  reconcile.clear();
+});
+
 test("a restore whose apps are all retired stops after one run", async () => {
   const desired = reconcile.record([{ id: "plex" }], "restore");
   await reconcile.run(desired, RETIRED_IO("unlisted", "plex"));

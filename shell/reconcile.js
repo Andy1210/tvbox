@@ -62,8 +62,15 @@ function record(appList, reason) {
 function pending() {
   try {
     const s = JSON.parse(fs.readFileSync(STATE_FILE, "utf8"));
-    if (!s || s.v !== 1 || !Array.isArray(s.apps) || !s.apps.length) return null;
-    return s;
+    if (!s || s.v !== 1) return null;
+    // The one door the ids come back through, so it is where they are gated.
+    // record() validates what it writes, but the file on the card is what is
+    // actually read, and run() maps over `apps` before its own try/catch exists -
+    // an entry of `null` there took the maintenance tick down rather than being
+    // skipped.
+    const apps = validIds(s.apps).map((id) => ({ id }));
+    if (!apps.length) return null;
+    return { ...s, apps, retired: validIds(s.retired) };
   } catch (e) {
     return null;
   }
@@ -172,7 +179,14 @@ function state() {
     // while it does - so the summary naming the retired app is only ever drawn on
     // the LAST pass, by which time settle() had taken the id out of the list and
     // the next run planned no step for it. It was reported to nobody.
-    gone: [...status.retired, ...steps.filter((s) => s.state === "gone").map((s) => s.id)],
+    //
+    // Through validIds like every other id that leaves this module, and the
+    // DEDUPE there is what holds the arithmetic together: settle() takes an id out
+    // of the wanted list as it puts it into `retired`, so the two are disjoint on
+    // every path the box takes - but a state file that named one id in both would
+    // otherwise report it twice, and "apps minus retired" then goes negative,
+    // which reads on screen as "-1 of 0".
+    gone: validIds([...status.retired, ...steps.filter((s) => s.state === "gone").map((s) => s.id)]),
     steps: steps.map((s) => ({ id: s.id, name: s.name, kind: s.kind, state: s.state })),
   };
 }
