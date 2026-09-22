@@ -341,10 +341,14 @@ button:
 **Settings → Remotes & accessories → (remote) → learn a button → pick an action** (launch
 any installed app, `settings`, `appswitcher`, `power`, media/nav, …).
 
-No hwdb, no `captureAllNodes`, no per-box setup: `provision.sh` grants the
-`input` group read on Amazon-VID (0x0171) remotes' hidraw
+No hwdb, no `captureAllNodes`, no per-box setup: a udev rule grants the `input`
+group read AND write on Amazon-VID (0x0171) remotes' hidraw
 (`SUBSYSTEM=="hidraw", KERNELS=="0005:0171:*"`), and the bridge auto-detects the
-node by the remote's MAC. Without the grant the feature is simply inert.
+node by the remote's MAC. Without the grant the feature is simply inert - which is
+what every box flashed from an image older than this rule has been, because the
+image stage's copy of the rules file never carried it. Write as well as read,
+because the remote's microphone only streams after the host sends it an output
+report; the buttons themselves need only read.
 
 Debug (see EVERYTHING the bridge receives, raw: every evdev key event incl.
 dropped KEY_UNKNOWNs and every hidraw report before filtering): set

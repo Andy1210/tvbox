@@ -53,8 +53,11 @@ systemctl --user restart tvbox-voice
 **Settings -> Devices & services -> Add integration -> Wyoming Protocol**, and give
 it the box's address and port. A satellite entity appears, named after the box.
 
-The service is installed and enabled on every box; with `enabled` unset it starts,
-finds nothing to do and exits 0, which is why it is not a Restart=always unit.
+The service is installed and enabled by an SSH install, by any update, and by the
+image; with `enabled` unset it starts, finds nothing to do and exits 0, which is
+why it is not a Restart=always unit. A box flashed before the image stage enabled
+it has no unit at all until its first update - see
+[When it does not work](#when-it-does-not-work).
 
 ## Which room it acts in
 
@@ -258,9 +261,19 @@ the launcher. Putting those in the strip would mean an empty bar over the film.
 
 - **The key is seen but nothing is heard.** Almost always the udev rule: the log
   line is `cannot start the microphone ... is the hidraw rule 0660?`. Re-run
-  `deploy/provision.sh` (or reflash); OTA cannot do it.
+  `deploy/provision.sh`; OTA cannot do it, and neither can reflashing from an image
+  built before the stage carried that rule.
 - **Nothing happens at all.** `systemctl --user status tvbox-voice`. With
-  `voice.enabled` unset the service exits 0 by design.
+  `voice.enabled` unset the service exits 0 by design. `could not be found` is a
+  different case: the box was flashed before the stage enabled the unit and has
+  taken no update since. Any update installs and enables it, though it only starts
+  at the next boot. By hand, on an image from 2.4.0 on (older ones do not carry the
+  unit file):
+  ```sh
+  cp ~/.tvbox/tvbox-voice.service ~/.config/systemd/user/
+  systemctl --user daemon-reload
+  systemctl --user enable --now tvbox-voice
+  ```
 - **Home Assistant shows the satellite as unavailable.** It connects to the box, so
   check the port is reachable from Home Assistant's host and that the box's
   address has not changed. `refusing a second connection` in the log means the

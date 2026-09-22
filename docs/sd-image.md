@@ -43,7 +43,9 @@ image/
     01-tvbox/
       00-run.sh               # the install script (mirrors deploy.sh+provision.sh)
       conf/                   # committed system config - KEEP IN SYNC with the
-                              # heredocs in deploy/provision.sh:
+                              # heredocs in deploy/provision.sh, which
+                              # deploy/image-conf-sync.test.js enforces for every
+                              # file but 50-tvbox-networkmanager.rules:
                               #   99-tvbox.rules  50-tvbox-networkmanager.rules
                               #   20auto-upgrades 52tvbox-unattended-upgrades
       files/                  # NOT committed - populated by the workflow (or you):
@@ -59,8 +61,9 @@ and `${FIRST_USER_NAME}` are provided by pi-gen). The committed
 
 1. copies the tvbox tree into `~/.tvbox` (shell already contains
    `launcher-dist`, built host-side - arch-independent);
-2. installs the `conf/` system config: udev uinput/cec rules, the polkit
-   NetworkManager grant, and unattended-upgrades (install-yes/reboot-never);
+2. installs the `conf/` system config: the udev rules (uinput, CEC, and the Fire
+   TV remote's hidraw node), the polkit grants, and unattended-upgrades
+   (install-yes/reboot-never);
 3. writes the **greetd autologin** config (vt7, kiosk - the account password can
    stay locked, autologin doesn't need one). greetd starts
    `tvbox-wc -- /usr/local/bin/tvbox-session`: the compositor, which starts the
@@ -74,7 +77,8 @@ and `${FIRST_USER_NAME}` are provided by pi-gen). The committed
 6. in the chroot: group membership, `chown` of the tree, **`npm ci`
    INSIDE the arm64 chroot** (host-side would fetch the x86 Electron), the
    `tvbox` CLI symlink, user units "enabled" via hand-made
-   `*.target.wants` symlinks (CEC bridge + nightly flatpak-update timer), the
+   `*.target.wants` symlinks (the set is `USER_UNITS`/`UNIT_WANTS` in
+   `shell/updater.js`, held there by `deploy/image-user-units.test.js`), the
    compositor (`install-compositor.sh` - fatal, there is no fallback session),
    the flathub user remote, `systemctl enable greetd` + `set-default
 graphical.target`.
