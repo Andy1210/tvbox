@@ -103,7 +103,8 @@ PARTS
   echo fake >"$B/kernel8.img"
   echo fake >"$B/bcm2712-rpi-5-b.dtb"
   mkdir -p "$R/etc/ssh" "$R/usr/local/sbin" "$R/usr/local/bin" "$R/etc/greetd" \
-    "$R/etc/systemd/system" "$R/etc/polkit-1/rules.d" "$R/etc/tvbox/release-keys.d" \
+    "$R/etc/systemd/system" "$R/etc/polkit-1/rules.d" "$R/etc/udev/rules.d" \
+    "$R/etc/tvbox/release-keys.d" \
     "$R/etc/systemd/journald.conf.d" "$R/var/log/journal" \
     "$R/home/tv/.tvbox/shell/launcher-dist/assets" \
     "$R/home/tv/.tvbox/shell/node_modules/electron/dist"
@@ -120,11 +121,27 @@ PARTS
     etc/tvbox/sysupdate.conf etc/tvbox/release-keys.d/tvbox-release.pem \
     etc/systemd/journald.conf.d/50-tvbox-persistent.conf \
     usr/local/bin/tvbox-wc usr/local/bin/tvbox-session home/tv/.tvbox/session.sh \
+    etc/udev/rules.d/99-tvbox.rules \
     home/tv/.tvbox/shell/main.js home/tv/.tvbox/run-shell.sh \
     home/tv/.tvbox/shell/launcher-dist/index.html \
     home/tv/.tvbox/shell/launcher-dist/assets/index-fake.js; do
     echo placeholder >"$R/$f"
   done
+  # The user units, in the shape the stage leaves them: one that declares an
+  # [Install] WantedBy and is linked, and one that declares none because its timer
+  # pulls it in. Both branches of the enable check are then exercised by the
+  # self-test rather than only the first.
+  mkdir -p "$R/home/tv/.config/systemd/user/default.target.wants" \
+    "$R/home/tv/.config/systemd/user/timers.target.wants"
+  printf '[Service]\nExecStart=/bin/true\n\n[Install]\nWantedBy=default.target\n' \
+    >"$R/home/tv/.config/systemd/user/tvbox-cec.service"
+  ln -sf ../tvbox-cec.service \
+    "$R/home/tv/.config/systemd/user/default.target.wants/tvbox-cec.service"
+  printf '[Service]\nType=oneshot\nExecStart=/bin/true\n' \
+    >"$R/home/tv/.config/systemd/user/tvbox-flatpak-update.service"
+
+  printf 'SUBSYSTEM=="hidraw", KERNELS=="0005:0171:*", GROUP="input", MODE="0660"\n' \
+    >"$R/etc/udev/rules.d/99-tvbox.rules"
   # Two of those are checked for CONTENT, not just presence, so the fixture has to
   # carry the real shape or the self-test would only ever prove the checks fire.
   printf 'FEED_URL=https://example.invalid/update.json\nTVBOX_USER=tv\n' >"$R/etc/tvbox/sysupdate.conf"
@@ -328,6 +345,7 @@ for f in \
   etc/tvbox/sysupdate.conf \
   etc/tvbox/release-keys.d/tvbox-release.pem \
   etc/systemd/journald.conf.d/50-tvbox-persistent.conf \
+  etc/udev/rules.d/99-tvbox.rules \
   usr/local/bin/tvbox-wc \
   usr/local/bin/tvbox-session \
   home/tv/.tvbox/session.sh \
@@ -336,12 +354,65 @@ for f in \
   home/tv/.tvbox/shell/launcher-dist/index.html; do
   check "shipped: /$f" test -s "$ROOTMNT/$f"
 done
+# Every user unit the image copied is also ENABLED, and every enable symlink has a
+# unit behind it. systemctl --user cannot run in a chroot, so the stage writes the
+# WantedBy symlinks by hand; a unit copied without its link is on disk and never
+# started, and a link written without its unit is a dangling name systemd ignores.
+# Either way the feature is simply absent with nothing in any log to say so, and
+# the `su -c` string in the stage cannot catch it for us - its exit status is the
+# last `ln`, so a failed `cp` inside it does not fail the build.
+#
+# Derived from the image rather than from a list, because a hard-coded set here
+# would be a fourth copy of the list whose drift is the thing being guarded.
+# deploy/image-user-units.test.js holds the other end, the three install routes
+# against each other; it reads source and this reads the built image, so neither
+# sees what the other does.
+#
+# Two assumptions, both true of every unit shipped today: a unit declares at most
+# one WantedBy target, and it declares it under [Install]. A stray one elsewhere
+# would demand a symlink systemd never makes, so it fails the build rather than
+# passes it. RequiredBy is not handled.
+units_dir="$ROOTMNT/home/tv/.config/systemd/user"
+# Non-empty, not merely present: the stage creates both wants directories with one
+# mkdir and copies with another command, so a block that ran and did nothing else
+# still leaves the directories behind and every loop below would be a no-op.
+# default.target.wants specifically, because every unit the stage enables but the
+# flatpak timer lands there.
+check "the image enabled a user unit at boot" \
+  test -n "$(ls -A "$units_dir/default.target.wants" 2>/dev/null)"
+for u in "$units_dir"/*.service "$units_dir"/*.timer; do
+  [ -f "$u" ] || continue
+  name="$(basename "$u")"
+  # Only a unit that declares one: tvbox-flatpak-update.service is pulled in by its
+  # timer and has no [Install] section of its own.
+  wants="$(sed -n 's/^WantedBy=\([A-Za-z0-9@._-]*\).*/\1/p' "$u" | head -n1)"
+  [ -n "$wants" ] || continue
+  check "enabled: $name -> $wants.wants" test -L "$units_dir/$wants.wants/$name"
+  # Relative links only - image-user-units.test.js holds the stage to `../<unit>`.
+  check "enabled: $name resolves to its unit" test -f "$units_dir/$wants.wants/$name"
+done
+# The opposite half: a link whose unit never arrived. The loop above iterates unit
+# FILES, so it cannot see this one.
+for l in "$units_dir"/*.target.wants/*; do
+  [ -L "$l" ] || continue
+  check "enabled: $(basename "$l") has a unit behind its link" test -e "$l"
+done
+
 # The applier refuses to run without a valid box user, and this file is the only
 # place it can learn one - a substitution that silently missed would ship a box
 # whose every system update ends in bad-config, with no ssh to find that out over.
 # Presence is not enough here; the line has to name the user.
 check "the image names the box user for system updates" \
   grep -q "^TVBOX_USER=tv$" "$ROOTMNT/etc/tvbox/sysupdate.conf"
+# Presence is not enough for the udev rules either, and this is the one check that
+# would have caught the defect rather than its successor: the file shipped from
+# 1.0.0 onwards and simply never gained the rule that lets the box user read and
+# write the Fire TV remote's hidraw node. Without it the remote's app buttons are
+# inert and the voice satellite cannot open the microphone, on a flashed box only.
+# deploy/image-conf-sync.test.js holds the file's CONTENT against provision.sh;
+# this says the stage still installs it at all.
+check "the image's udev rules reach the remote's hidraw node" \
+  grep -q 'SUBSYSTEM=="hidraw"' "$ROOTMNT/etc/udev/rules.d/99-tvbox.rules"
 check "the pinned release key is a public key" \
   grep -q "BEGIN PUBLIC KEY" "$ROOTMNT/etc/tvbox/release-keys.d/tvbox-release.pem"
 # The journal directory's GROUP, against the image's own group file. This is the

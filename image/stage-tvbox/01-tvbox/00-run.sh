@@ -754,15 +754,20 @@ done
 # tvbox CLI on PATH
 su - ${FIRST_USER_NAME} -c 'mkdir -p ~/.local/bin && ln -sf ~/.tvbox/tvbox ~/.local/bin/tvbox'
 
-# user units: systemctl --user can't run in a chroot - "enable" by creating
-# the WantedBy symlinks directly (CEC bridge + remote-input bridge + gamepad shim
-# + nightly flatpak-update timer)
+# user units: systemctl --user can't run in a chroot - "enable" by creating the
+# WantedBy symlinks directly. This list has to follow the updater's
+# USER_UNITS/UNIT_WANTS: a unit reaches a box by three routes with three separate
+# lists - OTA's syncInfra, deploy.sh for an SSH install, and this block for a
+# flashed box - so a unit missing here works everywhere except on a freshly
+# flashed box that has not updated yet, with no error and no log line to say the
+# feature is absent. deploy/image-user-units.test.js fails on the difference.
 su - ${FIRST_USER_NAME} -c '
   mkdir -p ~/.config/systemd/user/default.target.wants ~/.config/systemd/user/timers.target.wants
-  cp ~/.tvbox/tvbox-cec.service ~/.tvbox/tvbox-remote.service ~/.tvbox/tvbox-gamepad.service ~/.tvbox/tvbox-flatpak-update.service ~/.tvbox/tvbox-flatpak-update.timer ~/.config/systemd/user/
+  cp ~/.tvbox/tvbox-cec.service ~/.tvbox/tvbox-remote.service ~/.tvbox/tvbox-gamepad.service ~/.tvbox/tvbox-voice.service ~/.tvbox/tvbox-flatpak-update.service ~/.tvbox/tvbox-flatpak-update.timer ~/.config/systemd/user/
   ln -sf ../tvbox-cec.service ~/.config/systemd/user/default.target.wants/tvbox-cec.service
   ln -sf ../tvbox-remote.service ~/.config/systemd/user/default.target.wants/tvbox-remote.service
   ln -sf ../tvbox-gamepad.service ~/.config/systemd/user/default.target.wants/tvbox-gamepad.service
+  ln -sf ../tvbox-voice.service ~/.config/systemd/user/default.target.wants/tvbox-voice.service
   ln -sf ../tvbox-flatpak-update.timer ~/.config/systemd/user/timers.target.wants/tvbox-flatpak-update.timer'
 
 # flathub user remote (network works in the chroot; harmless to skip - the deploy
