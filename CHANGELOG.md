@@ -5,6 +5,26 @@ updates). `scripts/make-release.sh` lifts the current version's `hu`/`en`
 blocks into the OTA feed's `notes` - keep both languages, keep it short, and
 write for the person on the couch (what changes for THEM), not for developers.
 
+## 3.11.5
+
+### hu
+
+- **Frissen telepített dobozon megszólal a távirányító mikrofonja, és működnek a
+  Netflix/Prime gombjai.** Aki SD-kártyáról telepítette a dobozt, annál ez a
+  kettő eddig néma volt: a kártyakép nem engedte hozzá a dobozt a
+  távirányítóhoz, a hangasszisztens szolgálatát pedig el sem indította. Ha a
+  doboz eddig is frissült magától, nálad mindkettő eddig is működött, és ez a
+  frissítés nem változtat rajta semmit - a javítás a következő kártyaképbe megy.
+
+### en
+
+- **On a freshly installed box the remote's microphone speaks up, and its
+  Netflix and Prime buttons work.** If you set the box up from an SD card, both
+  were silent: the card image did not let the box reach the remote, and it never
+  started the voice assistant's service at all. If your box has been updating by
+  itself, both already worked and nothing changes for you here - the fix is in
+  the next card image.
+
 ## 3.11.4
 
 ### hu
