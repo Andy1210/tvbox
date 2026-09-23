@@ -162,13 +162,14 @@ function originOf(url) {
 // route is one the same-origin gate applies to. Asking them separately let the
 // gate be decided against one route and the request served by another.
 function resolvePluginRoute(routes, method, pathname) {
-  for (const { prefix, table, guard } of routes) {
+  for (const { id, prefix, table, guard } of routes) {
     if (!pathname.startsWith(prefix)) continue;
     const sub = pathname.slice(prefix.length);
     if (sub && sub[0] !== "/") continue; // don't let "/spotify" match "/spotifyX"
     const key = method + " " + sub;
-    const fn = table[key];
-    if (fn) return { fn, guarded: !!(guard && guard.includes(key)) };
+    const fn = Object.prototype.hasOwnProperty.call(table, key) ? table[key] : null;
+    // `owner`: the app whose plugin registered the table (null for the bare host).
+    if (typeof fn === "function") return { fn, guarded: !!(guard && guard.includes(key)), owner: id ?? null };
   }
   return null;
 }

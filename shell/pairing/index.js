@@ -23,11 +23,24 @@ const PAGES_DIR = path.join(__dirname, "pages");
 const DEFAULT_MAX_BODY = 1e5; // per-write body cap; a provider route can raise it (e.g. photo uploads)
 
 // kind -> { page, routes }. Registered by core (built-in kinds) or by plugins.
+// `owner` is the app whose plugin registered the kind (null for a built-in
+// one), which is what decides which app's screen may open it.
 const providers = new Map();
-function register(kind, provider) {
+function register(kind, provider, owner) {
   if (!kind || !provider || typeof provider.page !== "function")
     throw new Error("pairing.register: bad provider for '" + kind + "'");
-  providers.set(kind, { page: provider.page, routes: provider.routes || {} });
+  providers.set(kind, { page: provider.page, routes: provider.routes || {}, owner: owner || null });
+}
+
+// The kind start() would really open for `kind`, the same fallback included.
+function resolveKind(kind) {
+  return providers.has(kind) ? kind : providers.has("iptv") ? "iptv" : providers.keys().next().value || null;
+}
+
+/** Who registered the kind start(kind) would open: an app id, null for built-in, undefined for none. */
+function ownerOf(kind) {
+  const k = resolveKind(kind);
+  return k ? providers.get(k).owner : undefined;
 }
 
 let server = null;
@@ -164,7 +177,7 @@ function handle(req, res) {
 function start(locale, kind) {
   code = String(crypto.randomInt(1000, 10000));
   activeLocale = locale === "hu" ? "hu" : "en"; // default en; hu when the launcher runs Hungarian
-  activeKind = providers.has(kind) ? kind : providers.has("iptv") ? "iptv" : providers.keys().next().value || null;
+  activeKind = resolveKind(kind);
   fails = 0;
   pageOpened = false;
   if (!server) {
@@ -192,4 +205,4 @@ function stop() {
   }
 }
 
-module.exports = { start, stop, register, phoneConnected: () => pageOpened };
+module.exports = { start, stop, register, ownerOf, phoneConnected: () => pageOpened };
