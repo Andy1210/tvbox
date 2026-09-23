@@ -152,6 +152,7 @@
       <div class="st" id="rst"></div>
     </div>
 
+    <script src="/tvbox-seal.js"></script>
     <script>
       var code = new URLSearchParams(location.search).get("c") || "";
       function st(el, msg, cls) {
@@ -173,7 +174,7 @@
           var r = await fetch("/backup-file", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ code: code, password: pw, clone: clone }),
+            body: tvboxSeal.body({ code: code, password: pw, clone: clone }),
           });
           var d = await r.json();
           if (!d.ok) throw 0;
@@ -222,7 +223,7 @@
           var r = await fetch("/restore", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ code: code, password: pw, envelope: envelope, hostname: host }),
+            body: tvboxSeal.body({ code: code, password: pw, envelope: envelope, hostname: host }),
           });
           var d = await r.json();
           if (d.ok) {

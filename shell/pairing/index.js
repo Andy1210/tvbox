@@ -16,8 +16,9 @@ const path = require("path");
 const crypto = require("crypto");
 const netguard = require("../netguard"); // shared lanIp (the QR must show the box's LAN address)
 const apigate = require("../apigate"); // the Host check
+const seal = require("./seal"); // end-to-end sealed bodies (key in the QR fragment)
 
-const PORT = 8099;
+let PORT = 8099; // a test moves it off a port the dev host may already use
 const TTL_MS = 5 * 60 * 1000;
 const MAX_FAILS = 8; // stop the server after this many wrong codes (anti-brute-force)
 const PAGES_DIR = path.join(__dirname, "pages");
@@ -50,7 +51,9 @@ let timer = null;
 let fails = 0;
 let activeKind = null;
 let activeLocale = "en";
-let pageOpened = false; // the phone has loaded the current session's page (e.g. to auto-advance the TV)
+let pageOpened = false;
+let sessionKey = null; // this session's sealing key; travels only in the QR URL fragment
+let seenNonces = new Set(); // sealed bodies already accepted, so one cannot be replayed // the phone has loaded the current session's page (e.g. to auto-advance the TV)
 
 function armTimeout() {
   if (timer) clearTimeout(timer);
@@ -108,6 +111,10 @@ function handle(req, res) {
     return res.end();
   }
   const u = new URL(req.url, `http://localhost:${PORT}`);
+  if (req.method === "GET" && u.pathname === "/tvbox-seal.js") {
+    res.writeHead(200, { "Content-Type": "application/javascript; charset=utf-8", "Cache-Control": "no-store" });
+    return res.end(seal.script());
+  }
   const prov = providers.get(activeKind);
   if (!prov) {
     res.writeHead(503);
@@ -149,13 +156,27 @@ function handle(req, res) {
   let body = "";
   req.on("data", (c) => {
     body += c;
-    if (body.length > maxBody) req.destroy();
+    // A sealed body is base64, a third larger than what it carries.
+    if (body.length > Math.ceil(maxBody * 1.4) + 1024) req.destroy();
   });
   req.on("end", () => {
     let d = {};
     try {
       d = JSON.parse(body || "{}");
     } catch (e) {}
+    const isSealed = !!(d && typeof d.sealed === "string");
+    if (!isSealed && body.length > maxBody) {
+      res.writeHead(413, { "Content-Type": "application/json" });
+      return res.end(JSON.stringify({ ok: false, error: "too large" }));
+    }
+    if (isSealed) {
+      const opened = seal.open(d.sealed, sessionKey, seenNonces);
+      if (!opened) {
+        res.writeHead(400, { "Content-Type": "application/json" });
+        return res.end(JSON.stringify({ ok: false, error: "sealed" }));
+      }
+      d = opened;
+    }
     const presented = d.code != null ? d.code : u.searchParams.get("c");
     if (!codeOk(presented)) {
       res.writeHead(403, { "Content-Type": "application/json" });
@@ -187,6 +208,8 @@ function start(locale, kind) {
   activeKind = resolveKind(kind);
   fails = 0;
   pageOpened = false;
+  sessionKey = seal.newKey();
+  seenNonces = new Set();
   if (!server) {
     server = http.createServer(handle);
     server.on("error", (e) => console.warn("[pairing] server error:", e.message));
@@ -194,7 +217,10 @@ function start(locale, kind) {
   }
   armTimeout();
   const ip = netguard.lanIp() || "127.0.0.1"; // no external IPv4: a useless-but-valid QR beats a broken one
-  return { url: `http://${ip}:${PORT}/?c=${code}`, shortUrl: `http://${ip}:${PORT}`, ip, port: PORT, code };
+  // The key rides in the fragment: a browser never sends that part of a URL, so
+  // it goes from the QR to the page without ever crossing the network.
+  const k = seal.keyParam(sessionKey);
+  return { url: `http://${ip}:${PORT}/?c=${code}#k=${k}`, shortUrl: `http://${ip}:${PORT}`, ip, port: PORT, code };
 }
 
 function stop() {
@@ -203,6 +229,8 @@ function stop() {
     timer = null;
   }
   code = null;
+  sessionKey = null;
+  seenNonces = new Set();
   if (server) {
     try {
       server.close();
@@ -212,4 +240,11 @@ function stop() {
   }
 }
 
-module.exports = { start, stop, register, ownerOf, phoneConnected: () => pageOpened };
+module.exports = {
+  start,
+  stop,
+  register,
+  ownerOf,
+  phoneConnected: () => pageOpened,
+  _setPortForTest: (p) => (PORT = p),
+};

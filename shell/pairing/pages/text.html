@@ -83,6 +83,7 @@
     <button class="btn" id="go">{{send}}</button>
     <div class="warn" id="secretWarn" style="display: none">{{secret}}</div>
     <div id="st"></div>
+    <script src="/tvbox-seal.js"></script>
     <script>
       document.getElementById("code").value = new URLSearchParams(location.search).get("c") || "";
       function code() {
@@ -117,7 +118,7 @@
           var r = await fetch("/text?c=" + encodeURIComponent(code()), {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ text: text }),
+            body: tvboxSeal.body({ text: text }),
           });
           var j = await r.json();
           if (j.ok) {

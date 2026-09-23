@@ -21,6 +21,7 @@ export default tseslint.config(
       "shell/launcher-dist/",
       "shell/apps-data/",
       "shell/electron-web-client/",
+      "shell/pairing/vendor/",
       "launcher/dist/",
       "dist/",
     ],
