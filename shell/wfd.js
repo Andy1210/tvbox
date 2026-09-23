@@ -48,7 +48,10 @@ const MAX_BUFFER = 64 * 1024;
 
 // Split an RTSP message off the front of a buffer, or answer null when the
 // buffer does not hold a whole one yet. RTSP frames like HTTP: a start line,
-// headers, a blank line, then Content-Length bytes of body.
+// headers, a blank line, then Content-Length bytes of body. A Content-Length
+// that is not a plain decimal within the buffer limit answers `{ error }`: a
+// negative one would otherwise slice backwards and hand the same bytes back
+// as the "rest", so the caller would parse them for ever.
 function parseMessage(text) {
   const headEnd = text.indexOf("\r\n\r\n");
   if (headEnd < 0) return null;
@@ -58,7 +61,10 @@ function parseMessage(text) {
     const at = line.indexOf(":");
     if (at > 0) headers[line.slice(0, at).trim().toLowerCase()] = line.slice(at + 1).trim();
   }
-  const length = parseInt(headers["content-length"] || "0", 10) || 0;
+  const declared = headers["content-length"];
+  if (declared !== undefined && !/^\d{1,5}$/.test(declared)) return { error: "bad content-length" };
+  const length = declared === undefined ? 0 : Number(declared);
+  if (length > MAX_BUFFER) return { error: "content-length over the buffer limit" };
   const bodyStart = headEnd + 4;
   if (text.length < bodyStart + length) return null; // body still arriving
   return {
@@ -247,6 +253,12 @@ function createSession(opts) {
       for (;;) {
         const parsed = parseMessage(state.buffer);
         if (!parsed) break;
+        if (parsed.error) {
+          log("dropping a peer:", parsed.error);
+          state.buffer = "";
+          state.torndown = true;
+          break;
+        }
         state.buffer = parsed.rest;
         const message = parsed.message;
         log("<<<", message.start);
