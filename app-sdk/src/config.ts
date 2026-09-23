@@ -71,6 +71,7 @@ export interface PublicConfig {
     port: number | null;
     username: string;
     hasPassword: boolean;
+    tls: boolean;
     deviceId: string;
   };
   // IR blaster (shell ir.js): TV volume/mute over a network IR transceiver.
@@ -210,6 +211,7 @@ export type MqttInput = Partial<{
   port: number | null;
   username: string;
   password: string;
+  tls: boolean;
   deviceId: string;
 }>;
 export async function saveMqtt(mqtt: MqttInput): Promise<PublicConfig> {

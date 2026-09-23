@@ -95,6 +95,7 @@ function publicConfig() {
       port: (c.mqtt && c.mqtt.port) || null, // null = the default (1883)
       username: (c.mqtt && c.mqtt.username) || "",
       hasPassword: !!(c.mqtt && c.mqtt.password), // whether one is stored, never the value
+      tls: !!(c.mqtt && c.mqtt.tls), // mqtts:// (default port 8883)
       // The id the bridge ACTUALLY uses, derived from the hostname when unset -
       // it is the topic segment every message travels under, so showing "" here
       // would hide the one field that must differ between two boxes.
@@ -344,8 +345,12 @@ function setMqtt(mqtt) {
   if (deviceId && deviceId === identity.defaultDeviceId()) deviceId = "";
   const password =
     mqtt && typeof mqtt.password === "string" && mqtt.password ? mqtt.password.slice(0, 200) : prev.password;
+  // Omitted keeps what was stored, so a caller that predates the field cannot
+  // turn encryption off by saving another one.
+  const tls = mqtt && typeof mqtt.tls === "boolean" ? mqtt.tls : !!prev.tls;
   c.mqtt = {
     host,
+    ...(tls ? { tls: true } : {}),
     ...(Number.isInteger(port) && port >= 1 && port <= 65535 ? { port } : {}),
     ...(username ? { username } : {}),
     ...(password ? { password } : {}),

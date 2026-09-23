@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useI18n } from "../../lib/i18n";
 import { useConfigStore } from "../../stores/config";
 import { SettingsPage } from "../SettingsPage";
-import { Group, Note, TextRow } from "../Rows";
+import { Group, Note, TextRow, ToggleRow } from "../Rows";
 import { useSettingsNav } from "../nav";
 
 // Settings -> Network -> Home Assistant: the MQTT bridge (now-playing sensor,
@@ -30,6 +30,7 @@ export function MqttPage() {
         port: mqtt?.port ?? null,
         username: mqtt?.username ?? "",
         password: "", // keep the stored one unless this patch carries a new one
+        tls: mqtt?.tls ?? false,
         deviceId: mqtt?.deviceId ?? "",
         ...patch,
       });
@@ -57,7 +58,7 @@ export function MqttPage() {
           label={t("mqtt.port")}
           title={t("mqtt.port")}
           value={mqtt?.port ? String(mqtt.port) : ""}
-          emptyLabel={t("mqtt.portDefault")}
+          emptyLabel={mqtt?.tls ? t("mqtt.portDefaultTls") : t("mqtt.portDefault")}
           // Digits only and in range: Number() would take "0x1f" and "1e3". An empty or
           // unusable entry means "the default", which the shell represents as null -
           // not as the number 1883, so a future default change reaches old boxes.
@@ -65,6 +66,15 @@ export function MqttPage() {
             const n = /^\d{1,5}$/.test(v.trim()) ? Number(v.trim()) : NaN;
             void save({ port: n >= 1 && n <= 65535 ? n : null });
           }}
+        />
+        <ToggleRow
+          id="tls"
+          label={t("mqtt.tls")}
+          hint={t("mqtt.tlsHint")}
+          on={!!mqtt?.tls}
+          onToggle={() => void save({ tls: !mqtt?.tls })}
+          onWord={t("common.on")}
+          offWord={t("common.off")}
         />
       </Group>
       <Group title={t("mqtt.groupAuth")}>
