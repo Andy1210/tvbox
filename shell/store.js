@@ -14,6 +14,7 @@
 // an apt source or a Kodi repository has. What the box still owes that owner is
 // bookkeeping, and that is what the pins below are for.
 const fs = require("fs");
+const fsutil = require("./fsutil");
 const path = require("path");
 const apps = require("./install");
 const flatpak = require("./flatpak");
@@ -209,7 +210,7 @@ function readPins() {
 function writePin(id, url) {
   try {
     fs.mkdirSync(PIN_DIR, { recursive: true });
-    fs.writeFileSync(pinPath(id), JSON.stringify({ v: 1, url, at: Date.now() }));
+    fsutil.writeJsonAtomic(pinPath(id), { v: 1, url, at: Date.now() }, { pretty: false });
     return true;
   } catch (e) {
     console.warn("[store]", id, "could not record which registry it came from:", e.message);
@@ -678,7 +679,10 @@ async function install(config, id, sourceUrl) {
     // inherits the registry's host + scheme (same trust as the index fetch).
     const base = new URL("apps/" + id + "/", url).toString();
     try {
-      await apps.installPackage(id, base, m._pkg.files, (s) => console.log("[store]", id, s));
+      await apps.installPackage(id, base, m._pkg.files, (s) => console.log("[store]", id, s), {
+        expect: m,
+        trust: trustErrors,
+      });
     } catch (e) {
       return { ok: false, error: "package install failed: " + (e && e.message ? e.message : String(e)) };
     }
@@ -691,7 +695,7 @@ async function install(config, id, sourceUrl) {
     console.log("[store] installed package:", id);
   } else {
     fs.mkdirSync(apps.USER_APPS_DIR, { recursive: true });
-    fs.writeFileSync(storeManifestPath(id), JSON.stringify(m, null, 2) + "\n");
+    fsutil.writeJsonAtomic(storeManifestPath(id), m, { newline: true });
     fs.rmSync(packageDir(id), { recursive: true, force: true }); // ...and the other way round
     console.log("[store] installed manifest:", id);
   }
@@ -725,7 +729,14 @@ function uninstall(id) {
   return { ok: true };
 }
 
+// The registry an installed app came from, or null for one that did not come
+// through the store.
+function pinnedRegistry(id) {
+  return readPin(id);
+}
+
 module.exports = {
+  pinnedRegistry,
   listForUi,
   install,
   uninstall,

@@ -12,6 +12,7 @@
 // because it answers a different question: that one commits a release, this one
 // says the box is bootable at all.
 const fs = require("fs");
+const fsutil = require("./fsutil");
 const os = require("os");
 const path = require("path");
 
@@ -31,8 +32,10 @@ function markHealthy(version) {
   if (marked) return false;
   const bootId = readBootId();
   try {
-    fs.mkdirSync(path.dirname(MARKER), { recursive: true });
-    fs.writeFileSync(
+    // Durable before it counts: the next boot reads this to decide whether the
+    // last one reached the launcher, and a marker lost to a power cut soon after
+    // would count a good boot as a failed one.
+    fsutil.writeFileAtomic(
       MARKER,
       "boot=" + bootId + "\nat=" + new Date().toISOString() + "\nversion=" + (version || "") + "\n",
     );

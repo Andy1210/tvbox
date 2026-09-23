@@ -14,8 +14,10 @@
 // The saved plan carries the CODES, not references to them, so programming a remote
 // needs no network at all - and an index that changed upstream cannot alter what a
 // remote already set up would be written with.
-const { execFile, spawn } = require("child_process");
+const { execFile } = require("child_process");
 const fs = require("fs");
+const fsutil = require("./fsutil");
+const proc = require("./proc");
 const path = require("path");
 const net = require("net");
 const os = require("os");
@@ -108,6 +110,15 @@ function suggestedBrand(cb) {
 // remap UI, never for other remotes.
 const KEYMAP_SERVICE = "fe151500";
 
+// Read from `bluetoothctl info`: only the property lines count, never the device's
+// name or alias, which the device chooses and could spell either of these.
+function remoteInfoProgrammable(info) {
+  const lines = String(info || "").split("\n");
+  const connected = lines.some((l) => /^\s*Connected:\s*yes\s*$/i.test(l));
+  const hasService = lines.some((l) => /^\s*UUID:/i.test(l) && l.toLowerCase().includes(KEYMAP_SERVICE));
+  return connected && hasService;
+}
+
 // MACs (lowercase) of currently-connected remotes that expose the keymap service.
 // Cached briefly - bluetoothctl is cheap but this is polled from the UI.
 let progCache = { ts: 0, macs: [] };
@@ -130,7 +141,7 @@ function programmableRemotes(cb) {
       }
       macs.forEach((mac) =>
         execFile("bluetoothctl", ["info", mac], { timeout: 5000 }, (e2, info) => {
-          if (!e2 && /Connected: yes/i.test(info) && new RegExp(KEYMAP_SERVICE, "i").test(info)) {
+          if (!e2 && remoteInfoProgrammable(info)) {
             found.push(mac.toLowerCase());
           }
           if (--pending === 0) {
@@ -381,9 +392,9 @@ function readPlan(mac) {
   return p ? sanitizePlan(p) : { devices: [], assign: {}, ts: 0 };
 }
 
-// The one place the file is written. `mode` on writeFileSync only applies when the file
-// is CREATED and is masked by umask, so the permission is set explicitly afterwards -
-// this file names the devices in someone's living room.
+// The one place the file is written. It is written atomically and at 0600: the remote's
+// keymap cannot be read back, so this file is the only record of what it was programmed
+// with, and it names the devices the remote drives.
 function savePlans(all) {
   const body = JSON.stringify(all, null, 2);
   // The budget is enforced where the file is WRITTEN, not only where it is read: a file
@@ -395,8 +406,7 @@ function savePlans(all) {
   }
   try {
     fs.mkdirSync(TVBOX, { recursive: true }); // a box that has never written one
-    fs.writeFileSync(PLAN_FILE, body, { mode: 0o600 });
-    fs.chmodSync(PLAN_FILE, 0o600);
+    fsutil.writeFileAtomic(PLAN_FILE, body, { mode: 0o600 });
     return true;
   } catch (e) {
     console.warn("[firetvir] could not write", PLAN_FILE, String(e.message || e));
@@ -682,6 +692,9 @@ function startService(mac) {
         // `held` is what makes the difference between "somebody is setting the remote
         // up" and "the queue is full" visible to a screen.
         st.held = !!resp.held;
+        // The supervisor keeps retrying after its give-up call, so a service that
+        // answers again is no longer a failed one.
+        st.gaveUp = false;
       }
     });
   };
@@ -855,27 +868,22 @@ function planSource(plan) {
 // ---- running the BLE tool -----------------------------------------------------------
 function runTool(args, timeoutMs, cb) {
   if (!fs.existsSync(PY)) return cb(new Error("BLE support not installed"));
-  const child = spawn(PY, [TOOL, ...args], { stdio: ["ignore", "pipe", "pipe"] });
   let out = "";
   const cap = (d) => {
     out += d.toString();
     if (out.length > 8000) out = out.slice(-8000);
   };
-  child.stdout.on("data", cap);
-  child.stderr.on("data", cap);
-  const to = setTimeout(() => {
-    try {
-      child.kill("SIGKILL");
-    } catch (e) {}
-  }, timeoutMs);
-  child.on("close", (code) => {
-    clearTimeout(to);
-    cb(null, { ok: code === 0, code, output: out.trim().split("\n").slice(-8).join("\n") });
-  });
-  child.on("error", (e) => {
-    clearTimeout(to);
-    cb(e);
-  });
+  // spawnBounded completes once: a child that fails to start emits both 'error'
+  // and 'close', and answering twice throws in the route that called this.
+  proc.spawnBounded(
+    PY,
+    [TOOL, ...args],
+    { stdio: ["ignore", "pipe", "pipe"], onStdout: cap, onStderr: cap, maxBuffer: 0, timeout: timeoutMs, killAfter: 0 },
+    (r) => {
+      if (r.error) return cb(r.error);
+      cb(null, { ok: r.code === 0, code: r.code, output: out.trim().split("\n").slice(-8).join("\n") });
+    },
+  );
 }
 
 const MAC_RE = /^([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}$/;
@@ -893,7 +901,7 @@ function testKey(mac, plan, key, cb) {
   const spec = resolvePlan(plan, null, key);
   if (!spec) return cb(new Error("nothing is assigned to " + key));
   try {
-    fs.writeFileSync(TEST_CODES_FILE, JSON.stringify(spec, null, 2));
+    fsutil.writeJsonAtomic(TEST_CODES_FILE, spec);
   } catch (e) {
     return cb(e);
   }
@@ -905,7 +913,7 @@ function program(mac, plan, label, cb) {
   const spec = resolvePlan(plan, label);
   if (!spec) return cb(new Error("no button is assigned to a device"));
   try {
-    fs.writeFileSync(CODES_FILE, JSON.stringify(spec, null, 2));
+    fsutil.writeJsonAtomic(CODES_FILE, spec);
   } catch (e) {
     return cb(e);
   }
@@ -1000,5 +1008,6 @@ module.exports = {
     resumeService,
     withRemote,
     SERVICE_SOCK,
+    remoteInfoProgrammable,
   },
 };

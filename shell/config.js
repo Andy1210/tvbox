@@ -7,24 +7,28 @@ const path = require("path");
 const os = require("os");
 const crypto = require("crypto");
 const identity = require("./identity"); // per-box identity: hostname-derived device names
+const fsutil = require("./fsutil");
 
 const FILE = path.join(os.homedir(), ".tvbox", "config.json");
 
+// Set while the file exists but could not be read (EIO, EACCES). A save in that
+// state would replace the whole store with the one field being changed.
+let unreadable = false;
+
 function load() {
-  try {
-    return JSON.parse(fs.readFileSync(FILE, "utf8"));
-  } catch (e) {
-    return {};
-  }
+  const r = fsutil.readJsonGuarded(FILE);
+  unreadable = !!r.error;
+  if (r.corrupt) console.warn("[config] config.json did not parse; kept it as", r.movedTo || "(could not move it)");
+  if (r.error) console.warn("[config] config.json unreadable:", r.error.code || r.error.message);
+  return r.value && typeof r.value === "object" ? r.value : {};
 }
 function save(cfg) {
+  if (unreadable) throw new Error("config.json is unreadable; refusing to overwrite it");
   const dir = path.dirname(FILE);
   fs.mkdirSync(dir, { recursive: true });
-  fs.writeFileSync(FILE, JSON.stringify(cfg, null, 2), { mode: 0o600 });
-  // enforce perms on every write (mode only applies at creation, and masks by umask)
+  fsutil.writeJsonAtomic(FILE, cfg, { mode: 0o600 });
   try {
     fs.chmodSync(dir, 0o700);
-    fs.chmodSync(FILE, 0o600);
   } catch (e) {
     /* best effort */
   }

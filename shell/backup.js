@@ -27,6 +27,7 @@
 // an old box restores a new one (minus what it doesn't know about). Bump it only
 // when an existing field changes meaning.
 const fs = require("fs");
+const fsutil = require("./fsutil");
 const os = require("os");
 const path = require("path");
 const crypto = require("crypto");
@@ -331,8 +332,7 @@ function restoreAppFiles(appFiles) {
         // (retroarch-share.json) holds network-share credentials, and its own writer
         // goes out of its way to chmod it. A restore must not be the thing that
         // widens it.
-        fs.writeFileSync(out, buf, { mode: 0o600 });
-        fs.chmodSync(out, 0o600); // mode only applies at creation; an existing file keeps its own
+        fsutil.writeFileAtomic(out, buf, { mode: 0o600 });
         n++;
       } catch (e) {
         console.warn("[backup] could not restore", id + "/" + rel + ":", e.message);
@@ -359,7 +359,7 @@ function applyPendingAppFiles(opts) {
     if (left) console.warn("[backup] app files never placed (app not installed):", Object.keys(files).join(", "));
     fs.rmSync(PENDING_APPFILES, { force: true });
   } else {
-    fs.writeFileSync(PENDING_APPFILES, JSON.stringify({ appFiles: files, at: Date.now() }), { mode: 0o600 });
+    fsutil.writeJsonAtomic(PENDING_APPFILES, { appFiles: files, at: Date.now() }, { mode: 0o600, pretty: false });
   }
   return { written };
 }
@@ -512,7 +512,7 @@ function apply(payload) {
         console.warn("[backup] skipped invalid manifest:", id);
         continue;
       }
-      fs.writeFileSync(path.join(apps.USER_APPS_DIR, id + ".json"), JSON.stringify(valid, null, 2) + "\n");
+      fsutil.writeJsonAtomic(path.join(apps.USER_APPS_DIR, id + ".json"), valid, { newline: true });
     }
   }
   if (payload.files && typeof payload.files === "object") {
@@ -520,11 +520,8 @@ function apply(payload) {
       // fixed allowlist - never write attacker-chosen paths
       if (typeof payload.files[name] === "string") {
         const dest = path.join(TVBOX, name);
-        // `mode` applies only when the file is created and is masked by umask, so a
-        // file that already exists would keep whatever permissions it had. These
-        // carry tokens and the devices in someone's home.
-        fs.writeFileSync(dest, payload.files[name], { mode: 0o600 });
-        fs.chmodSync(dest, 0o600);
+        // 0600 whatever the file had before: these carry tokens and device names.
+        fsutil.writeFileAtomic(dest, payload.files[name], { mode: 0o600 });
       }
     }
   }
@@ -550,13 +547,17 @@ function apply(payload) {
   // (`tvbox backup` on the CLI has no renderer to collect from).
   const rawLs = typeof payload.localStorage === "string" ? payload.localStorage : "";
   const ls = rawLs ? ownStorageOnly(rawLs, sameBox(payload)) : "";
-  if (ls) fs.writeFileSync(RESTORE_LS, JSON.stringify({ data: ls, at: Date.now() }), { mode: 0o600 });
+  if (ls) fsutil.writeJsonAtomic(RESTORE_LS, { data: ls, at: Date.now() }, { mode: 0o600, pretty: false });
   else clearPendingLocalStorage();
   // Parked rather than written now: an app's files belong under a root derived
   // from ITS manifest, and a registry package's manifest only arrives with the
   // reconciliation below. applyPendingAppFiles places them in passes.
   if (payload.appFiles && typeof payload.appFiles === "object" && Object.keys(payload.appFiles).length) {
-    fs.writeFileSync(PENDING_APPFILES, JSON.stringify({ appFiles: payload.appFiles, at: Date.now() }), { mode: 0o600 });
+    fsutil.writeJsonAtomic(
+      PENDING_APPFILES,
+      { appFiles: payload.appFiles, at: Date.now() },
+      { mode: 0o600, pretty: false },
+    );
   }
   // The apps themselves cannot travel in the file; their ids can. Everything the
   // box has to re-acquire (packages, flatpaks, downloaded binaries, extracted

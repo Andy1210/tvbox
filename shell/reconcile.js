@@ -17,6 +17,7 @@
 // The planner is pure; the acquisition itself is injected, because the shell runs
 // it out of process (cli.js) while the CLI runs it in-process.
 const fs = require("fs");
+const fsutil = require("./fsutil");
 const os = require("os");
 const path = require("path");
 
@@ -50,8 +51,7 @@ function record(appList, reason) {
   if (!apps.length) return null;
   const state = { v: 1, at: Date.now(), reason: String(reason || "restore").slice(0, 40), attempts: 0, apps };
   try {
-    fs.mkdirSync(path.dirname(STATE_FILE), { recursive: true });
-    fs.writeFileSync(STATE_FILE, JSON.stringify(state), { mode: 0o600 });
+    fsutil.writeJsonAtomic(STATE_FILE, state, { mode: 0o600, pretty: false });
   } catch (e) {
     console.warn("[reconcile] could not record the desired state:", e.message);
     return null;
@@ -95,7 +95,7 @@ function clear() {
 
 function save(state) {
   try {
-    fs.writeFileSync(STATE_FILE, JSON.stringify(state), { mode: 0o600 });
+    fsutil.writeJsonAtomic(STATE_FILE, state, { mode: 0o600, pretty: false });
   } catch (e) {
     /* only the retry budget and the trimmed list are lost; the run itself already happened */
   }

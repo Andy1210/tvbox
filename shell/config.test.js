@@ -225,3 +225,17 @@ test("a button can be bound to an IR action", () => {
   assert.deepEqual(km["ir:soundbar_power"], [640], "the headphone button's usage, 0x0280");
   assert.ok(!("ir:nope!" in km), "but the charset is still the charset");
 });
+
+test("a config.json that does not parse is kept aside, and a save does not erase it", () => {
+  fs.mkdirSync(path.dirname(FILE), { recursive: true });
+  fs.writeFileSync(FILE, '{"mqtt":{"host":"broker","pass');
+  assert.strictEqual(config.publicConfig().setup.done, false);
+  const kept = fs.readdirSync(path.dirname(FILE)).filter((n) => n.startsWith("config.json.corrupt-"));
+  assert.equal(kept.length, 1, "the unreadable file is set aside");
+  config.setSetupDone();
+  assert.equal(
+    fs.readFileSync(path.join(path.dirname(FILE), kept[0]), "utf8"),
+    '{"mqtt":{"host":"broker","pass',
+    "the next save does not touch the only copy",
+  );
+});
