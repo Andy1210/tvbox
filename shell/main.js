@@ -1971,7 +1971,14 @@ ipcMain.handle("app:fetch", async (e, req) => {
   if (!m || !capsFor(id).includes("fetch")) return { ok: false, error: "no fetch capability" };
   const origins = (m.runtime && m.runtime.origins) || [];
   req = req || {};
-  return appfetch.proxy({ origins, url: req.url, method: req.method, headers: req.headers, body: req.body });
+  return appfetch.proxy({
+    origins,
+    url: req.url,
+    method: req.method,
+    headers: req.headers,
+    body: req.body,
+    owner: id, // the in-flight cap is per app
+  });
 });
 
 // ---- capability: per-app key/value storage ----
@@ -2211,7 +2218,8 @@ app.whenReady().then(async () => {
     setPhoneRemote: config.setPhoneRemote,
   });
   try {
-    phoneremote.apply(); // off unless the setting says otherwise
+    // off unless the setting says otherwise; a port that will not bind is reported, not fatal
+    phoneremote.apply((err) => err && console.warn("[phoneremote] could not listen:", err.message || err));
   } catch (e) {
     console.warn("[phoneremote] start:", e.message);
   }
