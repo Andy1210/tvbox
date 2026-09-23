@@ -217,8 +217,22 @@ function playMediaIn(cmd) {
       w.webContents.send("tv-command", { action: "play_media", app: id, query });
     } catch (e) {}
   };
-  if (w.webContents.isLoading()) w.webContents.once("did-finish-load", send);
-  else send();
+  if (!w.webContents.isLoading()) return send();
+  // Once, and only for THIS load: a load that fails never finishes, and a
+  // listener left waiting would replay an old request on whatever loads next.
+  const wc = w.webContents;
+  const done = () => {
+    wc.removeListener("did-finish-load", done);
+    wc.removeListener("did-fail-load", failed);
+    send();
+  };
+  const failed = () => {
+    wc.removeListener("did-finish-load", done);
+    wc.removeListener("did-fail-load", failed);
+    console.warn("[mqtt] play_media: the app did not load, dropped");
+  };
+  wc.on("did-finish-load", done);
+  wc.on("did-fail-load", failed);
 }
 
 // The launcher localizes a note it is given a `kind` for, so the reason travels as a
@@ -250,12 +264,20 @@ function irFailed(action, e) {
   deps.notify({ kind: "irFailed", cause: irCause(message), reason: message });
 }
 
+function logToken(v) {
+  return String(v)
+    .replace(/[^\x21-\x7e]/g, "?")
+    .slice(0, 40);
+}
+
 function handle(cmd) {
   const player = deps.player;
   const action = String((cmd && cmd.action) || "").toLowerCase();
   // The state is logged as well as the app: a state the box does not recognise is
-  // dropped in silence, and this log is where that is diagnosed.
-  console.log("[mqtt] command", action, (cmd && (cmd.app || cmd.state)) || "");
+  // dropped in silence, and this log is where that is diagnosed. Both come off the
+  // wire, so they are cut to one short printable token before they reach a log
+  // line a person reads.
+  console.log("[mqtt] command", logToken(action), logToken((cmd && (cmd.app || cmd.state)) || ""));
   switch (action) {
     case "launch":
     case "open":
@@ -374,7 +396,7 @@ function handle(cmd) {
       // Number(null) and Number("") are both 0, i.e. a silent seek to the start.
       const pos = cmd && typeof cmd.position === "number" ? cmd.position : NaN;
       if (player.media.active && Number.isFinite(pos) && pos >= 0) player.cmd({ command: ["seek", pos, "absolute"] });
-      else if (!Number.isFinite(pos)) console.warn("[mqtt] seek: bad position", cmd && cmd.position);
+      else if (!Number.isFinite(pos)) console.warn("[mqtt] seek: bad position", logToken(cmd && cmd.position));
       break;
     }
     case "find_remote":

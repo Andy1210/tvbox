@@ -39,6 +39,12 @@ let applied = false; // has applyConfig run? see status().ready
 // Sends are strictly serialized: two interleaved esphome select+send pairs
 // would replay the wrong signal. Failures must not break the chain.
 let queue = Promise.resolve();
+// How many sends may wait behind the one on the air. Commands arrive over MQTT
+// and from the phone remote as fast as anyone publishes them, and at ~1 s a send
+// on the slowest backend a flood would hold the blaster for hours; a person
+// pressing a key never has more than a few in flight.
+const MAX_WAITING = 8;
+let waiting = 0;
 
 function sleep(ms) {
   return new Promise((r) => setTimeout(r, ms));
@@ -343,7 +349,10 @@ function send(action, steps) {
   const value = Object.prototype.hasOwnProperty.call(actions, key) ? actions[key] : undefined;
   if (!value) return Promise.reject(new Error("unknown IR action: " + action));
   const n = REPEATABLE.test(key) ? clampSteps(steps) : 1;
+  if (waiting >= MAX_WAITING) return Promise.reject(new Error("IR queue full"));
+  waiting += 1;
   const job = queue.then(async () => {
+    waiting -= 1;
     for (let i = 0; i < n; i++) {
       if (i) await sleep(STEP_GAP_MS);
       await b.send(value);
