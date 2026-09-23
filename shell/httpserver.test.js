@@ -268,3 +268,24 @@ test("a guard that names no route is a plugin that does not load", () => {
   routes[0].guard = ["GET /waittime"];
   assert.strictEqual(httpserver.pluginRouteGuarded(routes, "GET", "/tvbox/api/x/waittime"), true);
 });
+
+test("a second JSON answer to one request is dropped, not thrown", () => {
+  const { jsonRes } = require("./httpserver");
+  const calls = [];
+  const res = {
+    headersSent: false,
+    writableEnded: false,
+    writeHead(code) {
+      if (this.headersSent) throw new Error("ERR_HTTP_HEADERS_SENT");
+      this.headersSent = true;
+      calls.push(code);
+    },
+    end(body) {
+      this.writableEnded = true;
+      calls.push(body);
+    },
+  };
+  jsonRes(res, { a: 1 });
+  jsonRes(res, { a: 2 });
+  assert.deepStrictEqual(calls, [200, '{"a":1}']);
+});

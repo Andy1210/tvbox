@@ -172,14 +172,24 @@ function phoneFor(token) {
 
 function start(cb) {
   if (server || !enabled()) return void (cb && cb());
-  server = http.createServer(handle);
-  server.on("error", (e) => {
+  const s = http.createServer(handle);
+  server = s;
+  let answered = false;
+  const answer = (err) => {
+    if (answered) return;
+    answered = true;
+    if (cb) cb(err);
+  };
+  s.on("error", (e) => {
     console.warn("[phoneremote] server error:", e.message);
-    server = null;
+    if (server === s) server = null;
+    // A listen that fails (port taken) never reaches the listening callback, and
+    // a caller waiting on it would wait for ever.
+    answer(e);
   });
-  server.listen(deps.port, "0.0.0.0", () => {
+  s.listen(deps.port, "0.0.0.0", () => {
     console.log("[phoneremote] listening on :" + boundPort());
-    if (cb) cb();
+    answer();
   });
 }
 

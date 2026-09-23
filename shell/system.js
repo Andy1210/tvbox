@@ -33,16 +33,21 @@ function init(deps) {
 // passwordless sudo if polkit blocks it. execFile (no shell) - SSID/password are
 // literal argv, no injection.
 function wifiStatus(cb) {
-  execFile("nmcli", ["-t", "-f", "GENERAL.STATE,GENERAL.CONNECTION", "device", "show", "wlan0"], (e, out) => {
-    if (e) return cb({ connected: false, ssid: "" });
-    let state = "",
-      conn = "";
-    for (const l of (out || "").split("\n")) {
-      if (l.startsWith("GENERAL.STATE:")) state = l.slice(14);
-      else if (l.startsWith("GENERAL.CONNECTION:")) conn = l.slice(19).trim();
-    }
-    cb({ connected: /(^|\D)100(\D|$)/.test(state), ssid: conn && conn !== "--" ? conn : "" });
-  });
+  execFile(
+    "nmcli",
+    ["-t", "-f", "GENERAL.STATE,GENERAL.CONNECTION", "device", "show", "wlan0"],
+    { timeout: 8000 },
+    (e, out) => {
+      if (e) return cb({ connected: false, ssid: "" });
+      let state = "",
+        conn = "";
+      for (const l of (out || "").split("\n")) {
+        if (l.startsWith("GENERAL.STATE:")) state = l.slice(14);
+        else if (l.startsWith("GENERAL.CONNECTION:")) conn = l.slice(19).trim();
+      }
+      cb({ connected: /(^|\D)100(\D|$)/.test(state), ssid: conn && conn !== "--" ? conn : "" });
+    },
+  );
 }
 // Ethernet presence + IP (the robust alternative to WiFi on a fixed box). Finds
 // the first connected ethernet device (name is eth0/end0-dependent) via nmcli.

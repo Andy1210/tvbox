@@ -10,7 +10,7 @@
 // Nothing runs in this process: every install is `cli.js` out of process, the same
 // code path the `tvbox` CLI takes, because curl and flatpak take seconds to
 // minutes and the Electron main thread cannot be blocked for either.
-const { spawn } = require("child_process");
+const proc = require("./proc");
 const fs = require("fs");
 const os = require("os");
 const path = require("path");
@@ -81,6 +81,18 @@ function setDebugPort(port, cb) {
 }
 
 const installing = new Set(); // app ids whose bundle is being installed on-demand (UI)
+// A cli.js run that has not finished by then is killed, process group and all.
+// Generous, because a flatpak with its runtime is a multi-hundred-MB pull; the
+// point is that it ends, since `installing` holds boxFree() false until it does.
+const CLI_TIMEOUT_MS = 60 * 60 * 1000;
+function runCli(args, opts, done) {
+  return proc.spawnBounded(
+    process.execPath,
+    [path.join(__dirname, "cli.js"), ...args],
+    { env: { ...deps.childEnv(), ELECTRON_RUN_AS_NODE: "1" }, timeout: CLI_TIMEOUT_MS, ...opts },
+    done,
+  );
+}
 // Per-app install progress for the store UI: id -> { phase }. `phase` is a
 // coarse, reliable stage the launcher turns into "Downloading.../Installing..."
 // text (not a fragile parsed %), so an install shows a live stage instead of a
@@ -106,23 +118,14 @@ function spawnCli(args, id, phase) {
   return new Promise((resolve) => {
     setInstallPhase(id, phase);
     logInstall(id, phase + " start: cli " + args.join(" "));
-    const child = spawn(process.execPath, [path.join(__dirname, "cli.js"), ...args], {
-      env: { ...deps.childEnv(), ELECTRON_RUN_AS_NODE: "1" },
-      stdio: ["ignore", "pipe", "pipe"],
-    });
     const onData = (d) =>
       String(d)
         .split(/\r?\n/)
         .forEach((l) => l.trim() && logInstall(id, l.trim()));
-    child.stdout.on("data", onData);
-    child.stderr.on("data", onData);
-    child.on("error", (e) => {
-      logInstall(id, phase + " spawn error: " + e.message);
-      resolve(false);
-    });
-    child.on("exit", (code) => {
-      logInstall(id, phase + " exit " + code);
-      resolve(code === 0);
+    runCli(args, { stdio: ["ignore", "pipe", "pipe"], onStdout: onData, onStderr: onData, maxBuffer: 0 }, (r) => {
+      if (r.error) logInstall(id, phase + " spawn error: " + r.error.message);
+      else logInstall(id, phase + (r.timedOut ? " timed out" : " exit " + r.code));
+      resolve(!r.error && !r.timedOut && r.code === 0);
     });
   });
 }
@@ -379,16 +382,9 @@ function startInstall(id, res) {
   console.log("[install] on-demand start:", id);
   // Run cli.js as Node via Electron's own binary (ELECTRON_RUN_AS_NODE) so we
   // don't depend on a separate `node` being on PATH in the shell's env.
-  const child = spawn(process.execPath, [path.join(__dirname, "cli.js"), "install", id], {
-    env: { ...deps.childEnv(), ELECTRON_RUN_AS_NODE: "1" },
-    stdio: "ignore",
-  });
-  child.on("error", (e) => {
-    console.warn("[install]", id, "spawn error:", e.message);
-    installing.delete(id);
-  });
-  child.on("exit", (code) => {
-    console.log("[install]", id, "exit", code);
+  runCli(["install", id], { stdio: "ignore" }, (r) => {
+    if (r.error) console.warn("[install]", id, "spawn error:", r.error.message);
+    else console.log("[install]", id, r.timedOut ? "timed out" : "exit " + r.code);
     installing.delete(id);
   });
   return deps.jsonRes(res, { ok: true, installing: true });
@@ -409,20 +405,13 @@ function startDeps(id, res) {
   if (installing.has(id)) return deps.jsonRes(res, { ok: true, installing: true });
   installing.add(id);
   console.log("[deps] on-demand start:", id);
-  const child = spawn(process.execPath, [path.join(__dirname, "cli.js"), "deps", id, "--download-only"], {
-    env: { ...deps.childEnv(), ELECTRON_RUN_AS_NODE: "1" },
-    stdio: "ignore",
-  });
-  child.on("error", (e) => {
-    console.warn("[deps]", id, "spawn error:", e.message);
-    installing.delete(id);
-  });
-  child.on("exit", (code) => {
-    console.log("[deps]", id, "exit", code);
+  runCli(["deps", id, "--download-only"], { stdio: "ignore" }, (r) => {
+    if (r.error) console.warn("[deps]", id, "spawn error:", r.error.message);
+    else console.log("[deps]", id, r.timedOut ? "timed out" : "exit " + r.code);
     installing.delete(id);
     // A freshly downloaded binary is now on PATH; activate a `service` plugin
     // by hot-load (no restart) - same as the store install path.
-    if (code === 0 && m.service) deps.hotLoadPlugin(id);
+    if (!r.error && !r.timedOut && r.code === 0 && m.service) deps.hotLoadPlugin(id);
   });
   return deps.jsonRes(res, { ok: true, installing: true });
 }

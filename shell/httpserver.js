@@ -28,7 +28,14 @@ const MIME = {
   ".map": "application/json",
 };
 
+// A second answer to one request throws from writeHead, and an uncaught throw
+// restarts the shell, so a handler whose callback fires twice only loses the
+// second answer.
 function jsonRes(res, obj) {
+  if (res.headersSent || res.writableEnded) {
+    console.warn("[http] dropped a second response to", res.req ? res.req.url : "a request");
+    return;
+  }
   res.writeHead(200, { "Content-Type": "application/json" });
   res.end(JSON.stringify(obj));
 }
@@ -53,6 +60,9 @@ function serveStatic(res, root, p, spaFallback) {
         res.end();
       } catch (e2) {}
     });
+    // A client that goes away mid-file leaves the read stream open, and its fd
+    // with it, unless the stream is torn down with the response.
+    res.on("close", () => stream.destroy());
     stream.pipe(res);
   } else if (spaFallback && isFile(spaFallback)) {
     res.writeHead(200, { "Content-Type": "text/html" });
