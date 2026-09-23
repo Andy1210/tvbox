@@ -11,6 +11,7 @@
 // it after it leaves the screen. A queue has to cross to its next track with nobody
 // looking at the app, and pause/stop have to keep working from a phone or the house
 // assistant. What a background sender still may not do is start a PICTURE.
+const path = require("path");
 const httpserver = require("./httpserver"); // originOf: a URL's origin, never the URL
 const playeropts = require("./playeropts"); // stream terms -> mpv commands + the settable-property allowlist
 
@@ -22,7 +23,32 @@ let deps = {
   setVideoMode: () => {},
   ensureAudio: (cb) => cb(),
   clearSoundWidget: () => {},
+  // (path, cb({ ok, path })): whether a local file may be played, and its real
+  // path. Refuses by default, so a caller that never wired it plays nothing local.
+  localFile: (_p, cb) => cb({ ok: false, error: "no local files" }),
 };
+
+// What mpv may be handed from an app. A network stream in one of the schemes a
+// player app has a use for, or an absolute local path that is then held to the
+// browsable roots before it is launched. Anything else is refused: mpv also
+// opens `file://`, `av://v4l2:`, `lavfi://` and friends, i.e. arbitrary local
+// files and devices, and no app needs those.
+const STREAM_SCHEMES = new Set(["http", "https", "rtsp", "rtsps", "rtmp", "rtmps", "udp", "rtp"]);
+function queueTarget(u) {
+  if (typeof u !== "string" || !u || u.length > 4096 || u.includes("\0")) return null;
+  const m = /^([a-z][a-z0-9+.-]*):\/\//i.exec(u);
+  if (m) return STREAM_SCHEMES.has(m[1].toLowerCase()) ? "net" : null;
+  return path.isAbsolute(u) ? "local" : null;
+}
+// A sidecar subtitle is fetched by mpv too, so it gets the same rule, minus the
+// local case: a local subtitle is not something an app has a path to.
+function vetStreams(streams) {
+  if (!streams || typeof streams !== "object") return null;
+  if (streams.subFile == null || queueTarget(streams.subFile) === "net") return streams;
+  const rest = { ...streams };
+  delete rest.subFile;
+  return rest;
+}
 
 function init(d) {
   deps = { ...deps, ...d };
@@ -35,7 +61,7 @@ function init(d) {
 // `kind` is the app saying what this is, not the shell guessing: "audio" skips
 // the output-mode handshake and the video reveal, which belong to a film and cost
 // a screen blank and a round trip before the first note.
-const queued = { url: null, startPos: 0, streams: null, kind: null };
+const queued = { url: null, startPos: 0, streams: null, kind: null, local: false };
 
 /**
  * @param senderId the sender WINDOW's own app id: null = the launcher, a string =
@@ -77,9 +103,12 @@ function handle(senderId, action, payload) {
     if (background && payload.kind !== "audio") {
       return { ok: false, error: "player not permitted (a background app may only queue sound)" };
     }
+    const target = queueTarget(payload.url);
+    if (!target) return { ok: false, error: "not a playable url" };
     queued.url = payload.url;
+    queued.local = target === "local";
     queued.startPos = payload.startPos || 0;
-    queued.streams = payload.streams || null;
+    queued.streams = vetStreams(payload.streams);
     queued.kind = payload.kind === "audio" ? "audio" : null;
   } else if (action === "enqueue") {
     // Entries behind the one playing, so the player crosses to the next itself.
@@ -137,13 +166,29 @@ function handle(senderId, action, payload) {
         player.cmd({ command: ["set_property", "pause", false] });
       }
     } else if (queued.url) {
-      player.setPlaying(queued.url);
-      deps.setVideoMode(false);
-      deps.ensureAudio(() =>
-        player.launch(queued.url, queued.startPos, false, null, queued.streams, {
-          audioOnly: queued.kind === "audio",
-        }),
-      );
+      const q = { ...queued };
+      const start = (url) => {
+        player.setPlaying(url);
+        deps.setVideoMode(false);
+        deps.ensureAudio(() =>
+          player.launch(url, q.startPos, false, null, q.streams, {
+            audioOnly: q.kind === "audio",
+          }),
+        );
+      };
+      if (!q.local) start(q.url);
+      else {
+        deps.localFile(q.url, (r) => {
+          // Another queue or play moved on while the check ran.
+          if (queued.url !== q.url || player.owner() !== senderId) return;
+          if (r && r.ok) start(r.path);
+          else {
+            console.warn("[player] local file refused:", (r && r.error) || "unknown");
+            player.emit({ type: "error" });
+            player.emit({ type: "finished" });
+          }
+        });
+      }
     } // fullscreen (also un-PiPs)
   } else if (action === "pause") player.cmd({ command: ["set_property", "pause", true] });
   else if (action === "resume") player.cmd({ command: ["set_property", "pause", false] });
@@ -204,4 +249,4 @@ function handle(senderId, action, payload) {
   return { ok: true };
 }
 
-module.exports = { init, handle, queued };
+module.exports = { init, handle, queued, queueTarget };
