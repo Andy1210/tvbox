@@ -127,3 +127,15 @@ test("a Host that is not ours is refused (DNS rebinding)", () => {
   assert.strictEqual(ok("[::1]:8097"), false);
   assert.strictEqual(apigate.hostAllowed(reqWith({ host: "[::1]:8097" }), ["::1"], 8097), true);
 });
+
+test("a LAN server answers to the box's own names and addresses only", () => {
+  const os = require("os");
+  const ok = (host) => apigate.lanHostAllowed({ headers: { host } }, 8099);
+  assert.strictEqual(ok("127.0.0.1:8099"), true);
+  assert.strictEqual(ok(os.hostname().toLowerCase() + ".local:8099"), true);
+  const v4 = Object.values(os.networkInterfaces())
+    .flat()
+    .find((a) => a && a.family === "IPv4");
+  if (v4) assert.strictEqual(ok(v4.address + ":8099"), true);
+  assert.strictEqual(ok("rebind.example:8099"), false);
+});

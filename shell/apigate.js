@@ -21,6 +21,7 @@
 // Anything else - a stamp with the wrong secret, a browser request that somehow
 // carries none - is `unknown`, which gets the public reads only.
 const crypto = require("crypto");
+const os = require("os");
 
 const HEADER = "x-tvbox-caller";
 const SECRET = crypto.randomBytes(18).toString("base64url");
@@ -181,6 +182,27 @@ function hostAllowed(req, allowed, port) {
   return allowed.includes(m[1]);
 }
 
+/**
+ * The names a LAN-facing server of this box answers to: every address it has
+ * right now, its hostname (and the mDNS spelling), and loopback. Read per
+ * request, because an address changes with the network.
+ */
+function boxNames() {
+  const names = new Set(["localhost", "127.0.0.1", "::1"]);
+  const host = String(os.hostname() || "").toLowerCase();
+  if (host) {
+    names.add(host);
+    names.add(host + ".local");
+  }
+  for (const list of Object.values(os.networkInterfaces() || {}))
+    for (const a of list || []) if (a && a.address) names.add(String(a.address).toLowerCase().split("%")[0]);
+  return [...names];
+}
+
+function lanHostAllowed(req, port) {
+  return hostAllowed(req, boxNames(), port);
+}
+
 module.exports = {
   HEADER,
   stamp,
@@ -188,6 +210,8 @@ module.exports = {
   identify,
   decide,
   hostAllowed,
+  lanHostAllowed,
+  boxNames,
   APP_GET,
   APP_POST,
   LOCAL_POST,

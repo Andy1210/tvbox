@@ -15,6 +15,7 @@ const fs = require("fs");
 const path = require("path");
 const crypto = require("crypto");
 const netguard = require("../netguard"); // shared lanIp (the QR must show the box's LAN address)
+const apigate = require("../apigate"); // the Host check
 
 const PORT = 8099;
 const TTL_MS = 5 * 60 * 1000;
@@ -100,6 +101,12 @@ function baseCtx(u) {
 }
 
 function handle(req, res) {
+  // A name that is not the box's is a page on some other site rebound to this
+  // address (see apigate.hostAllowed).
+  if (!apigate.lanHostAllowed(req, PORT)) {
+    res.writeHead(421);
+    return res.end();
+  }
   const u = new URL(req.url, `http://localhost:${PORT}`);
   const prov = providers.get(activeKind);
   if (!prov) {
