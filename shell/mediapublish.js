@@ -195,7 +195,17 @@ function applyConfig() {
   deps.mqtt.stop();
   ctl = null;
   const mcfg = deps.config.rawMqtt();
-  if (mcfg) ctl = deps.mqtt.init(mcfg, { onNotify: deps.onNotify, onCommand: deps.onCommand });
+  if (mcfg) ctl = deps.mqtt.init(mcfg, { onNotify: deps.onNotify, onCommand: deps.onCommand, onConnect: restate });
+  // Seeded now as well as on connect: the client queues what it is given before
+  // the first connect, and a caller reading `ctl` straight after expects it set up.
+  restate();
+}
+
+// Everything retained that this box owns, published again: at startup, and on
+// every (re)connect, because a broker that lost its retained store would
+// otherwise show Home Assistant an empty media player and no announce until the
+// shell restarted.
+function restate() {
   if (ctl) {
     ctl.announce({
       name: deps.identity.hostname(),

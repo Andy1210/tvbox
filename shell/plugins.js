@@ -160,6 +160,12 @@ function loadOne(m) {
         registerRoutes: (prefix, table, opts) => {
           pluginRoutes.push({ id: m.id, prefix, table, guard: guardList(opts, table) });
         },
+        // A pairing kind is registered as this app's, so only this app's screen
+        // can open it (apigate.js).
+        pairing:
+          deps.host && deps.host.pairing
+            ? { ...deps.host.pairing, register: (kind, prov) => deps.host.pairing.register(kind, prov, m.id) }
+            : undefined,
       }) || {};
     loadedPlugins.set(m.id, plugin);
     console.log("[plugin] loaded", m.id, "(" + name + ")");

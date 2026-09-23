@@ -289,3 +289,23 @@ test("a second JSON answer to one request is dropped, not thrown", () => {
   jsonRes(res, { a: 2 });
   assert.deepStrictEqual(calls, [200, '{"a":1}']);
 });
+
+test("an images-only root serves a picture, sandboxed, and nothing that could run", async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "tvbox-http-img-"));
+  fs.writeFileSync(path.join(dir, "x.html"), "<script>fetch('/tvbox/api/power')</script>");
+  fs.writeFileSync(path.join(dir, "x.svg"), "<svg onload='alert(1)'/>");
+  fs.writeFileSync(path.join(dir, "a.JPG"), "jpeg");
+  for (const name of ["x.html", "x.svg"]) {
+    const res = fakeRes();
+    httpserver.serveStatic(res, dir, name, null, { images: true });
+    await res.done;
+    assert.strictEqual(res.status, 404, name);
+  }
+  const res = fakeRes();
+  httpserver.serveStatic(res, dir, "a.JPG", null, { images: true });
+  await res.done;
+  assert.strictEqual(res.status, 200);
+  assert.strictEqual(res.headers["Content-Type"], "image/jpeg");
+  assert.strictEqual(res.headers["X-Content-Type-Options"], "nosniff");
+  assert.match(res.headers["Content-Security-Policy"], /sandbox/);
+});

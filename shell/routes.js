@@ -692,7 +692,7 @@ function post(p, data, res, ctx) {
     const on = !!data.enabled;
     config.setPhoneRemote({ enabled: on });
     if (!on) phoneremote.forgetAll(); // off means the paired phones go too
-    phoneremote.apply();
+    phoneremote.apply((err) => err && console.warn("[phoneremote] could not listen:", err.message || err));
     return httpserver.jsonRes(res, { ok: true, enabled: on, phones: phoneremote.list() });
   }
   // Show a code on the TV so a phone can be adopted. Returns what the QR carries.

@@ -253,8 +253,9 @@ function get(p, req, res, ctx) {
   }
   if (p === "/tvbox/api/ambient/photo") {
     const name = query(req).get("name") || "";
-    // serveStatic guards the root boundary (no traversal)
-    httpserver.serveStatic(res, ambient.PHOTO_DIR, name, null);
+    // serveStatic guards the root boundary (no traversal); the folder is a LAN
+    // share, so pictures only.
+    httpserver.serveStatic(res, ambient.PHOTO_DIR, name, null, { images: true });
     return true;
   }
   // TV powered off (from the CEC bridge) -> stop playback
@@ -506,4 +507,10 @@ function serveFallback(p, res, ctx) {
   httpserver.serveStatic(res, root, p, path.join(root, entry));
 }
 
-module.exports = { get, serveFallback, guardedGet, sendImage, imageError, IMAGE_ERROR_STATUS };
+// A local file an app asked to play, held to the same roots the browse routes
+// offer: the answer's `path` is the resolved one, inside a root.
+function localPlayable(target, cb) {
+  browse.file(browseDeps, target, cb);
+}
+
+module.exports = { get, serveFallback, guardedGet, sendImage, imageError, IMAGE_ERROR_STATUS, localPlayable };

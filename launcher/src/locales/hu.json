@@ -618,7 +618,10 @@
     "groupAuth": "Belépés",
     "groupIdentity": "Azonosító",
     "deviceIdHint": "A topic-szegmens, amin ez a box publikál. Két box soha ne használja ugyanazt.",
-    "portDefault": "1883"
+    "portDefault": "1883",
+    "portDefaultTls": "8883",
+    "tls": "Titkosított kapcsolat (TLS)",
+    "tlsHint": "mqtts://, a bróker tanúsítványának ellenőrzésével. A brókernek TLS-t kell kínálnia, általában a 8883-as porton."
   },
   "ir": {
     "title": "IR jeladó (TV, hangprojektor)",

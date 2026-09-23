@@ -24,6 +24,7 @@
 // second command of the caller's choosing. Actions are therefore checked against
 // a fixed vocabulary rather than sanitised, which is the difference between a
 // list of what is allowed and a guess at what is dangerous.
+const apigate = require("./apigate"); // the Host check
 const crypto = require("crypto");
 const http = require("http");
 const fs = require("fs");
@@ -338,6 +339,9 @@ function readBody(req, cb) {
 }
 
 function handle(req, res) {
+  // The phone reaches the box by its address; any other name is a page on
+  // another site rebound to it (apigate.hostAllowed).
+  if (!apigate.lanHostAllowed(req, boundPort())) return json(res, 421, { ok: false });
   let u;
   try {
     u = new URL(req.url, "http://localhost");

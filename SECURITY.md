@@ -26,9 +26,23 @@ tvbox is a LAN device with no cloud account. The interesting boundaries:
   that lets a manifest smuggle extra privileges past the validators
   (package-name/URL/path checks, sha256 verification) is a vulnerability.
 - **The pairing server** (`:8099`, LAN, only while pairing) - gated by an
-  on-screen code with lockout + TTL; bypasses matter.
-- **The local API** (`:8097`, loopback-only) - assumed reachable only by local
-  processes; anything that exposes it beyond loopback matters.
+  on-screen code with lockout + TTL; bypasses matter. What a phone that scanned
+  the QR code sends is sealed (XSalsa20-Poly1305) with a per-session key that
+  travels only in the URL fragment; a phone that typed the short URL sends plain
+  JSON, which is the accepted limit.
+- **The local API** (`:8097`, loopback-only) - reachable by local processes, and
+  it answers only to `localhost`/`127.0.0.1` as a Host (DNS rebinding). Every
+  local app is served from the same origin as the API, so the origin cannot tell
+  them apart: each request a page makes is stamped by the browser session with
+  the window that made it ([shell/apigate.js](shell/apigate.js)). The launcher
+  reaches everything, an app window reaches the app routes in
+  [docs/app-api.md](docs/app-api.md) and its own plugin's routes, a process with
+  no browser headers reaches reads and the few writes the box's own services
+  make. An app reaching a launcher-only route (store sources, installs, power,
+  another app's pairing code) is a vulnerability.
+- **Browser permissions** - every session refuses permissions it has not listed
+  (microphone, camera, clipboard reads, device choosers), in
+  [shell/sessionpolicy.js](shell/sessionpolicy.js).
 - **The IR link service** (`~/.tvbox/firetv-ir.sock`, mode 0600) - a resident
   process holding the BLE link to a paired Fire TV remote, so the box can fire
   that remote's own infrared LED. Same assumption as the local API: reachable by
@@ -56,7 +70,7 @@ tvbox is a LAN device with no cloud account. The interesting boundaries:
 Shell-side **plugins are trusted code by design** (they run in the host
 process) - "a malicious plugin can do X" is expected, not a vulnerability;
 review plugins before installing them. The same goes for an app package's
-**bridge** (`runtime.bridge: "./bridge.js"`), which runs in the app's own
-non-isolated renderer: it reaches only the capabilities that app declared, so
-it is strictly less than a plugin, but it is still code the package ships and
-review is what gates it.
+**bridge** (`runtime.bridge: "./bridge.js"`): it is `require()`d by the
+Node-capable preload of the app's non-isolated window, so it has Node itself
+(`child_process`, `fs`) and the raw IPC channel. Treat it as full host trust, the
+same as a plugin, and review it the same way.

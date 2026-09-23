@@ -15,8 +15,17 @@
 //  - subscribes  tvbox/<deviceId>/cmd    (control: launch app / transport / TV power)
 //        and     tvbox/<deviceId>/notify (on-screen notifications).
 // The mqtt npm client auto-reconnects. Secrets come from config.rawMqtt().
+const fs = require("fs");
+const os = require("os");
+const path = require("path");
 const mqtt = require("mqtt");
 const identity = require("./identity"); // what makes this box THIS box (derived device id)
+
+// The device id this box last published under. A rename (a new hostname, or an
+// id set in Settings) moves the whole topic tree, and every retained message
+// under the old one - the announce, the state, the discovery configs - would
+// stay on the broker for good: a second, dead box in Home Assistant.
+const LAST_ID_FILE = path.join(os.homedir(), ".tvbox", "mqtt-last-id");
 
 let client = null;
 let base = "";
@@ -43,7 +52,10 @@ function init(cfg, handlers) {
   deviceId = safeId(cfg.deviceId || identity.defaultDeviceId());
   base = "tvbox/" + deviceId;
   const statusTopic = base + "/status";
-  const url = "mqtt://" + cfg.host + ":" + (cfg.port || 1883);
+  // mqtts:// verifies the broker's certificate against the system store: the
+  // credentials and every command travel this connection, so a broker that
+  // cannot prove who it is does not get them.
+  const url = (cfg.tls ? "mqtts://" : "mqtt://") + cfg.host + ":" + (cfg.port || (cfg.tls ? 8883 : 1883));
   client = mqtt.connect(url, {
     username: cfg.username,
     password: cfg.password,
@@ -58,6 +70,17 @@ function init(cfg, handlers) {
       if (e) console.warn("[mqtt] subscribe:", e.message);
     });
     publishDiscovery();
+    forgetPreviousId(handlers.lastIdFile || LAST_ID_FILE);
+    // Everything else this box keeps retained, restated by the caller: a broker
+    // that restarted without its retained store has none of it, and nothing
+    // else would publish it again until the next change.
+    if (handlers.onConnect) {
+      try {
+        handlers.onConnect();
+      } catch (e) {
+        console.warn("[mqtt] onConnect:", e.message);
+      }
+    }
   });
   client.on("message", (topic, buf) => {
     let payload;
@@ -224,6 +247,40 @@ function publishDiscovery(irActions) {
   publishIrButtons(irActions === undefined ? irPublished : irActions, sid, payload.device);
 }
 
+// The retained topics a box id owns, all of them, so a rename can take them away.
+function retainedTopicsOf(id) {
+  const b = "tvbox/" + id;
+  const sid = safeId(id);
+  return [
+    ...["announce", "state", "nowplaying", "diag", "status"].map((t) => b + "/" + t),
+    "homeassistant/sensor/tvbox_" + sid + "/nowplaying/config",
+    ...[...Object.keys(IR_BUTTON_NAMES), ...IR_RETIRED_ACTIONS].map((a) => irButtonTopic(sid, a)),
+  ];
+}
+
+function forgetPreviousId(file) {
+  let prev = "";
+  try {
+    prev = fs.readFileSync(file, "utf8").trim();
+  } catch (e) {}
+  if (prev && prev !== deviceId && safeId(prev) === prev) {
+    console.log("[mqtt] device id changed from", prev, "- clearing its retained topics");
+    for (const t of retainedTopicsOf(prev)) {
+      try {
+        client.publish(t, "", { retain: true });
+      } catch (e) {}
+    }
+  }
+  if (prev === deviceId) return;
+  try {
+    const tmp = file + ".tmp";
+    fs.writeFileSync(tmp, deviceId + "\n", { mode: 0o600 });
+    fs.renameSync(tmp, file);
+  } catch (e) {
+    console.warn("[mqtt] could not record the device id:", e.message);
+  }
+}
+
 function stop() {
   if (!client) return;
   try {
@@ -250,6 +307,8 @@ module.exports = {
     irButtonTopic,
     publishDiscovery,
     setStateForTest,
+    retainedTopicsOf,
+    forgetPreviousId,
     published: () => irPublished,
   },
 };

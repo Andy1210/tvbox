@@ -650,6 +650,17 @@ GETs that fork a process (`/tvbox/api/browse/*`, `/tvbox/api/photoshare*`,
 `/tvbox/api/firetvir/*`, `/tvbox/api/tv/standby`). Read-only GETs are open,
 because blocking them would break `<img>` and other no-CORS uses.
 
+**The table below is ALL an app window may reach**, plus its own plugin's routes
+(`shell/apigate.js`). The rest of the API is the launcher's: the box stamps every
+request with the window that made it, so an app calling a launcher route (the
+store, installs, power, Wi-Fi) gets a 403. Three routes are narrower still:
+`POST /tvbox/api/config` needs the `config` capability and takes only `iptv`,
+`parental` and `player`; `POST /tvbox/api/nav` works only for the app on screen,
+except `{dest:"app", app:<its own id>}`, which is how a hidden app answers a cast;
+and `POST /tvbox/api/pairing/start` opens only a pairing kind the app's own plugin
+registered, or the shared `photoshare` and `text` kinds. The `app` field of a
+now-playing report is set from the sender, whatever the body says.
+
 | Route                                                                                                   | For                                                                                                                                                                          |
 | ------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `GET /tvbox/api/config`                                                                                 | The secret-free `PublicConfig`. Where `ambient.idleMinutes`, `ui.navSounds`, `player.audioLang`/`subLang`, `parental.pinSet` and `apps.background` come from.                |

@@ -304,3 +304,50 @@ test("not even the note is BORN with the name - it asks for it after", () => {
     "the name goes on straight after construction, before the window is ever shown",
   );
 });
+
+test("a refused placement is asked again after a while, not kept for the life of the shell", () => {
+  const n = fresh();
+  const log = [];
+  let now = 1000;
+  let places = false;
+  n.init({
+    BrowserWindow: function () {
+      log.push(["new"]);
+      return fakeWindow(log);
+    },
+    screen: { getPrimaryDisplay: () => ({ size: { width: 1920, height: 1080 } }) },
+    compositor: {
+      available: () => true,
+      placeWindowByTitle: (t, r, cb) => (log.push(["place"]), cb(places, places ? null : "down")),
+    },
+    sendToLauncher: (c) => log.push(["launcher", c]),
+    raiseWindow: () => {},
+    now: () => now,
+  });
+  n.handleTvNotify({ message: "one" });
+  n.handleTvNotify({ message: "two" });
+  assert.strictEqual(log.filter((l) => l[0] === "place").length, 1, "not asked for every note");
+  places = true;
+  now += 61 * 1000;
+  n.handleTvNotify({ message: "three" });
+  assert.strictEqual(log.filter((l) => l[0] === "place").length, 2);
+  assert.strictEqual(log.filter((l) => l[0] === "new").length, 1, "the strip is used once it can be");
+});
+
+test("a note from MQTT cannot claim a shell notice or point an image at the box", () => {
+  const n = fresh();
+  n.init({ boxNames: () => ["localhost", "127.0.0.1", "tvbox", "192.168.1.9"] });
+  const out = n.sanitizeRemote({ kind: "crashRestart", title: "t", message: "m", image: "http://ha.lan/cam.jpg" });
+  assert.strictEqual(out.kind, undefined);
+  assert.strictEqual(out.image, "http://ha.lan/cam.jpg");
+  for (const image of [
+    "http://127.0.0.1:8097/tvbox/api/tv/standby",
+    "http://localhost:8097/x",
+    "http://192.168.1.9:8097/x",
+    "http://tvbox:8097/x",
+    "http://127.1.2.3/x",
+    "file:///etc/passwd",
+    "javascript:1",
+  ])
+    assert.strictEqual(n.sanitizeRemote({ message: "m", image }).image, undefined, image);
+});

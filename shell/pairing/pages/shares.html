@@ -139,6 +139,7 @@
     <h2 id="existingTitle" style="display: none">{{existing}}</h2>
     <div id="existing"></div>
 
+    <script src="/tvbox-seal.js"></script>
     <script>
       document.getElementById("code").value = new URLSearchParams(location.search).get("c") || "";
       var $ = function (id) {
@@ -157,7 +158,7 @@
         var r = await fetch(path, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(Object.assign({ code: code() }, body)),
+          body: tvboxSeal.body(Object.assign({ code: code() }, body)),
         });
         return await r.json();
       }

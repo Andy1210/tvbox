@@ -187,3 +187,42 @@ test("the push button is a short, deliberate window - not a standing invitation"
   );
   assert.ok(miracast.PAIR_WINDOW_MS <= 180000, "a window measured in minutes, not for as long as mirroring is armed");
 });
+
+test("the FIFO writer waits for a reader without holding a pool thread", async () => {
+  const { execFileSync } = require("child_process");
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "mc-fifo-"));
+  const fifo = path.join(dir, "f");
+  execFileSync("mkfifo", [fifo]);
+  try {
+    // Four stale attempts, one per libuv pool thread by default: a blocking
+    // open would leave the pool full and the fs call below would never answer.
+    let stale = true;
+    for (let i = 0; i < 4; i++) miracast.openFifoWriter(fifo, { isCurrent: () => stale, retryMs: 20 });
+    await new Promise((r) => setTimeout(r, 80));
+    stale = false;
+    await fs.promises.stat(dir);
+
+    const ready = new Promise((resolve) => miracast.openFifoWriter(fifo, { onReady: resolve, retryMs: 20 }));
+    await new Promise((r) => setTimeout(r, 60));
+    const reader = fs.createReadStream(fifo);
+    const got = new Promise((resolve) => reader.once("data", (c) => resolve(String(c))));
+    const w = await ready;
+    w.write("frames");
+    assert.strictEqual(await got, "frames");
+    w.destroy();
+    await new Promise((r) => reader.destroy() && reader.once("close", r));
+
+    let failed = null;
+    await new Promise((resolve) =>
+      miracast.openFifoWriter(fifo, {
+        onReady: () => resolve(),
+        onFail: (e) => resolve((failed = e)),
+        retryMs: 10,
+        timeoutMs: 50,
+      }),
+    );
+    assert.strictEqual(failed && failed.code, "ENXIO", "gives up when nobody ever reads");
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
