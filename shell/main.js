@@ -1528,7 +1528,7 @@ mediapublish.init({
   currentApp: () => currentAppId,
   sources: mediaSources,
   soundWidget: cards.soundWidget,
-  onNotify: notify.handleTvNotify,
+  onNotify: (n) => notify.handleTvNotify(notify.sanitizeRemote(n)),
   onCommand: (cmd) => tvcommand.handle(cmd),
   // What the blaster can send becomes a Home Assistant button each, so anything there -
   // a dashboard, an automation, a voice assistant - can reach a TV input or a soundbar
@@ -2114,6 +2114,7 @@ notify.init({
   compositor,
   sendToLauncher,
   raiseWindow,
+  boxNames: apigate.boxNames,
 });
 
 remotepolicy.init({

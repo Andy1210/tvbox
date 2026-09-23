@@ -31,6 +31,9 @@ let deps = {
   // The launcher is where a note goes when the strip cannot take it.
   sendToLauncher: () => false,
   raiseWindow: () => {},
+  now: () => Date.now(),
+  // Every name this box answers to (apigate.boxNames).
+  boxNames: () => ["localhost", "127.0.0.1", "::1"],
 };
 
 function init(d) {
@@ -86,16 +89,27 @@ function overlayRect() {
 // Ask for the strip once, and remember the answer. Placed BEFORE the window maps:
 // a window is positioned as it appears, so asking afterwards would show it
 // fullscreen for a frame first.
+// A refusal is remembered only for a while: the compositor can be down for a
+// moment (it restarts, or the shell came up first), and a failure kept for good
+// would send every later note to the launcher for the life of the shell.
+const PLACEMENT_RETRY_MS = 60 * 1000;
+let overlayRefusedAt = 0;
 function claimOverlayPlacement(done) {
+  if (overlayPlaceable === false && deps.now() - overlayRefusedAt >= PLACEMENT_RETRY_MS) overlayPlaceable = null;
   if (overlayPlaceable !== null) return done(overlayPlaceable);
-  if (!deps.compositor.available()) {
+  const refused = () => {
     overlayPlaceable = false;
-    return done(false);
-  }
+    overlayRefusedAt = deps.now();
+    done(false);
+  };
+  if (!deps.compositor.available()) return refused();
   deps.compositor.placeWindowByTitle(OVERLAY_TITLE, overlayRect(), (ok, err) => {
-    overlayPlaceable = !!ok;
-    if (!ok) console.warn("[notify] no overlay window (compositor: " + (err || "refused") + ")");
-    done(overlayPlaceable);
+    if (!ok) {
+      console.warn("[notify] no overlay window (compositor: " + (err || "refused") + ")");
+      return refused();
+    }
+    overlayPlaceable = true;
+    done(true);
   });
 }
 
@@ -240,9 +254,37 @@ function sanitize(n) {
   };
 }
 
+// A note from OUTSIDE the box (the MQTT topic). The text fields are capped like
+// any other, `kind` is dropped - it names the notes the shell writes itself (a
+// crash, a failed IR send), and a message that could claim one could fake it -
+// and an image is an http(s) URL to somewhere that is not this box: the launcher
+// draws it with an <img>, from the API's own origin, so a loopback URL would be a
+// GET on the box's own routes.
+function sanitizeRemote(n) {
+  const out = sanitize(n);
+  const img = remoteImage(n && n.image);
+  if (img) out.image = img;
+  return out;
+}
+function remoteImage(v) {
+  if (typeof v !== "string" || v.length > 2048) return undefined;
+  let u;
+  try {
+    u = new URL(v);
+  } catch (e) {
+    return undefined;
+  }
+  if (u.protocol !== "http:" && u.protocol !== "https:") return undefined;
+  const host = u.hostname.replace(/^\[|\]$/g, "").toLowerCase();
+  if (deps.boxNames().includes(host) || host.endsWith(".localhost") || /^127\./.test(host) || host === "0.0.0.0")
+    return undefined;
+  return u.href;
+}
+
 module.exports = {
   init,
   handleTvNotify,
+  sanitizeRemote,
   overlayDone,
   hideOverlay,
   overlayRect,
