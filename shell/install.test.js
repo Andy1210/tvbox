@@ -845,3 +845,80 @@ test("the upgrade backup is not enumerated as an app of its own", () => {
     fs.rmSync(path.join(dir, "upg"), { recursive: true, force: true });
   }
 });
+
+const WEB_BASE = { id: "w", name: "W", type: "webclient", status: "ready" };
+
+test("install.extract stays inside the acquired source", () => {
+  for (const extract of ["../../../..", "a/../../b", "/home", "./x", "a/./b"]) {
+    const m = { ...WEB_BASE, install: { source: { type: "url", url: "https://x/y.tgz" }, extract } };
+    assert.equal(apps.validateManifest(m, "t"), null, extract);
+  }
+  const ok = { ...WEB_BASE, install: { source: { type: "url", url: "https://x/y.tgz" }, extract: "app/web" } };
+  assert.ok(apps.validateManifest(ok, "t"));
+});
+
+test("an extract path that is a symlink out of the source is refused at install", () => {
+  const src = fs.mkdtempSync(path.join(os.tmpdir(), "tvbox-src-"));
+  const outside = fs.mkdtempSync(path.join(os.tmpdir(), "tvbox-outside-"));
+  fs.writeFileSync(path.join(outside, "secret"), "x");
+  fs.symlinkSync(outside, path.join(src, "web"));
+  const m = apps.validateManifest(
+    { ...WEB_BASE, id: "linkout", install: { source: { type: "flatpak", ref: "a.b.C" }, extract: "web" } },
+    "t",
+  );
+  const flatpak = require("./flatpak");
+  const saved = flatpak.root;
+  flatpak.root = () => src;
+  try {
+    assert.throws(() => apps.installApp(m, { force: true }), /leaves the source/);
+    assert.equal(fs.existsSync(apps.appDataDir("linkout")), false);
+  } finally {
+    flatpak.root = saved;
+  }
+});
+
+test("runtime.origins may not be a single label or a loopback name", () => {
+  for (const o of ["com", "local", "localhost", "a.localhost", "127.0.0.1"]) {
+    const m = { ...WEB_BASE, runtime: { serve: "remote", origins: [o] } };
+    assert.equal(apps.validateManifest(m, "t"), null, o);
+  }
+  const ok = { ...WEB_BASE, runtime: { serve: "remote", origins: ["www.example.com", "media.local"] } };
+  assert.ok(apps.validateManifest(ok, "t"));
+});
+
+test("requires.disableService names a plain unit the box does not depend on", () => {
+  for (const svc of ["ssh", "sshd.service", "NetworkManager", "greetd", "systemd-networkd", "a b", "../x", "x.mount"]) {
+    const m = { ...WEB_BASE, requires: { disableService: [svc] } };
+    assert.equal(apps.validateManifest(m, "t"), null, svc);
+  }
+  const ok = { ...WEB_BASE, requires: { disableService: ["raspotify", "librespot.service"] } };
+  assert.ok(apps.validateManifest(ok, "t"));
+});
+
+test("a package manifest must match the registry entry it was offered under", async () => {
+  const entry = { id: "pkgtest", name: "P", type: "webclient", status: "ready", runtime: { serve: "local" } };
+  const pkgManifest = { ...entry, requires: { aptRepo: { line: "deb http://x y z" } } };
+  const srv = await servePackage({ "manifest.json": JSON.stringify(pkgManifest) });
+  try {
+    await assert.rejects(
+      () => apps.installPackage("pkgtest", srv.base, srv.files, null, { expect: entry, trust: () => [] }),
+      /differs from its registry entry: requires/,
+    );
+    await assert.rejects(
+      () =>
+        apps.installPackage("pkgtest", srv.base, srv.files, null, {
+          expect: pkgManifest,
+          trust: (m) => (m.requires && m.requires.aptRepo ? ["requires.aptRepo"] : []),
+        }),
+      /refused: requires.aptRepo/,
+    );
+  } finally {
+    srv.close();
+  }
+  const same = await servePackage({ "manifest.json": JSON.stringify(entry) });
+  try {
+    await apps.installPackage("pkgtest", same.base, same.files, null, { expect: entry, trust: () => [] });
+  } finally {
+    same.close();
+  }
+});

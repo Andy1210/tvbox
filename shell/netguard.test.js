@@ -36,7 +36,9 @@ function fakeFetch(routes) {
 test("isAllowedFetchUrl: https anywhere, http only to LAN/loopback", () => {
   assert.equal(ng.isAllowedFetchUrl("https://example.com/x"), true);
   assert.equal(ng.isAllowedFetchUrl("http://192.168.1.5/x"), true); // LAN http ok
-  assert.equal(ng.isAllowedFetchUrl("http://box.local/x"), true);
+  // a name over http is whatever answered the lookup, so code is never fetched that way
+  assert.equal(ng.isAllowedFetchUrl("http://box.local/x"), false);
+  assert.equal(ng.isAllowedFetchUrl("http://localhost/x"), false);
   assert.equal(ng.isAllowedFetchUrl("http://127.0.0.1/x"), true); // self-hosted loopback trusted here
   assert.equal(ng.isAllowedFetchUrl("http://example.com/x"), false); // public http
   assert.equal(ng.isAllowedFetchUrl("http://169.254.169.254/latest/"), false); // cloud metadata
