@@ -253,8 +253,9 @@ function get(p, req, res, ctx) {
   }
   if (p === "/tvbox/api/ambient/photo") {
     const name = query(req).get("name") || "";
-    // serveStatic guards the root boundary (no traversal)
-    httpserver.serveStatic(res, ambient.PHOTO_DIR, name, null);
+    // serveStatic guards the root boundary (no traversal); the folder is a LAN
+    // share, so pictures only.
+    httpserver.serveStatic(res, ambient.PHOTO_DIR, name, null, { images: true });
     return true;
   }
   // TV powered off (from the CEC bridge) -> stop playback
