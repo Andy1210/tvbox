@@ -62,8 +62,22 @@ if shell_running; then
 fi
 
 if [ -f "$UPD/pending" ]; then
+  PREV=""
+  NEXT=""
   read -r PREV NEXT < "$UPD/pending"
+  # A marker with no target (emptied by a power cut) names nothing to roll back
+  # from, and left in place it would keep the boot watchdog below killing a shell
+  # that is fine. Drop it.
+  case "$NEXT" in
+    "" | *[!0-9A-Za-z._-]*)
+      echo "tvbox: unreadable update marker - clearing it" >&2
+      rm -f "$UPD/pending" "$UPD/attempts"
+      ;;
+  esac
+fi
+if [ -f "$UPD/pending" ]; then
   N=$(cat "$UPD/attempts" 2>/dev/null || echo 0)
+  case "$N" in "" | *[!0-9]*) N=0 ;; esac
   N=$((N + 1))
   echo "$N" > "$UPD/attempts"
   if [ "$N" -gt 3 ] && [ -n "$NEXT" ]; then

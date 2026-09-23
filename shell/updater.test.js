@@ -215,3 +215,19 @@ test("an answer the server meant is not retried", async () => {
   );
   assert.equal(calls, 1, "a 404 was retried");
 });
+
+test("a feed signature is ed25519 over the exact bytes, base64", () => {
+  const crypto = require("node:crypto");
+  const { publicKey, privateKey } = crypto.generateKeyPairSync("ed25519");
+  const body = Buffer.from('{"feedVersion":1,"version":"9.9.9"}\n');
+  const sig = crypto.sign(null, body, privateKey).toString("base64");
+  assert.equal(updater.feedSignatureOk(body, sig + "\n", [publicKey]), true);
+  assert.equal(
+    updater.feedSignatureOk(Buffer.from(body.toString().replace("9.9.9", "9.9.8")), sig, [publicKey]),
+    false,
+  );
+  assert.equal(updater.feedSignatureOk(body, "", [publicKey]), false);
+  assert.equal(updater.feedSignatureOk(body, "not base64 !!", [publicKey]), false);
+  const other = crypto.generateKeyPairSync("ed25519").publicKey;
+  assert.equal(updater.feedSignatureOk(body, sig, [other]), false, "only a pinned key verifies");
+});
