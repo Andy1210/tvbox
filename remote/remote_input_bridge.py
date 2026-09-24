@@ -816,14 +816,14 @@ class Bridge:
         self.emit(code, value)  # unmapped -> pass through unchanged
 
     def emit(self, code, value):
-        if self.native and code == e.KEY_HOMEPAGE:
+        if self.native and code == e.KEY_HOMEPAGE and value == 1:
             # A native app (RetroArch et al) owns the screen and the keyboard
             # focus, so no renderer of ours can see this key and turn it into
             # "go home". Ask the shell over HTTP instead; it ends the app and
-            # brings the launcher back. Fire on press, swallow press and release.
-            if value == 1:
-                self.shell_post(NAV_URL, {"dest": "home"})
-            return
+            # brings the launcher back. The key itself still goes out: the
+            # compositor sees every key, and holding Home is how it recovers a
+            # shell that did not answer that request.
+            self.shell_post(NAV_URL, {"dest": "home"})
         try:
             self.ui.write(e.EV_KEY, code, value)
             self.ui.syn()

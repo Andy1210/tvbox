@@ -56,6 +56,8 @@ let deps = {
   mediastate: null,
   audio: null,
   diag: null,
+  health: null, // ./health - rides on the diag payload
+  canaryReport: () => null, // updater.canaryReport
   identity: null,
   config: null,
   system: null,
@@ -176,15 +178,64 @@ function publishDiag() {
   // exception raised there would reach the Electron main process rather than here.
   try {
     deps.diag.collect({ system: deps.system, updater: deps.updater }, (payload) => {
+      const send = (h) => {
+        try {
+          if (h) payload.health = h;
+          if (ctl) ctl.publish("diag", payload, { retain: true });
+        } catch (e) {
+          console.warn("[diag] publish:", e.message);
+        }
+      };
+      if (!deps.health) return send(null);
       try {
-        if (ctl) ctl.publish("diag", payload, { retain: true });
+        deps.health.collect(send);
       } catch (e) {
-        console.warn("[diag] publish:", e.message);
+        send(null);
       }
     });
   } catch (e) {
     console.warn("[diag] collect:", e.message);
   }
+  publishCanary();
+}
+
+// The canary topic follows the same slow tick: nothing in it changes faster
+// than the soak, and a cleared one (role turned off) is restated here too.
+function publishCanary() {
+  if (!ctl || !ctl.publishCanary) return;
+  try {
+    ctl.publishCanary(deps.canaryReport());
+  } catch (e) {
+    console.warn("[canary] publish:", e.message);
+  }
+}
+
+// What the other boxes' canary topics say (updater.js asks at its nightly tick).
+function canaryVouches() {
+  return ctl && ctl.canaryVouches ? ctl.canaryVouches() : new Map();
+}
+
+// Remove this box from the broker and turn the bridge off (Settings -> Home
+// Assistant -> Forget). The config section goes too: with it left in place the
+// next start would announce the box again.
+function forget(cb) {
+  if (!ctl || !ctl.forget) return cb(new Error("not configured"));
+  const c = ctl;
+  c.forget((e) => {
+    // Not confirmed: keep the box as it was configured, connected again.
+    if (e) {
+      if (ctl === c) applyConfig();
+      return cb(e);
+    }
+    if (ctl === c) ctl = null;
+    lastMediaState = null;
+    try {
+      deps.config.setMqtt({ host: "" });
+    } catch (err) {
+      return cb(err);
+    }
+    cb(null);
+  });
 }
 
 // (Re)start the MQTT bridge from the saved config. mqtt.js stop() publishes a
@@ -195,7 +246,15 @@ function applyConfig() {
   deps.mqtt.stop();
   ctl = null;
   const mcfg = deps.config.rawMqtt();
-  if (mcfg) ctl = deps.mqtt.init(mcfg, { onNotify: deps.onNotify, onCommand: deps.onCommand, onConnect: restate });
+  if (mcfg)
+    ctl = deps.mqtt.init(mcfg, {
+      onNotify: deps.onNotify,
+      onCommand: deps.onCommand,
+      onConnect: restate,
+      // Read by every box, whatever its role: it is a few retained messages, and a
+      // role change then needs no reconnect.
+      followCanaries: true,
+    });
   // Seeded now as well as on connect: the client queues what it is given before
   // the first connect, and a caller reading `ctl` straight after expects it set up.
   restate();
@@ -267,6 +326,9 @@ module.exports = {
   publish,
   publishNowPlaying,
   publishDiag,
+  publishCanary,
+  canaryVouches,
+  forget,
   setBoxVolume,
   refreshSinkState,
   applyConfig,

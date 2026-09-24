@@ -33,14 +33,30 @@ export const rowKey = (page: string, id: string) => `${page}:${id}`;
 // Rounded card holding a run of rows, with hairline dividers. The focused row
 // fills edge to edge inside it, so the group is what gives the list its shape -
 // no per-row scale, which would be clipped here and re-rasterise the row anyway.
-export function Group({ title, hint, children }: { title?: string; hint?: string; children: ReactNode }) {
+// `notes` are lines about the group (a warning, why it is empty), drawn under its
+// title and outside the card, so they read as the group's and not as a row. A
+// group with no rows draws no card.
+export function Group({
+  title,
+  hint,
+  notes,
+  children,
+}: {
+  title?: string;
+  hint?: string;
+  notes?: ReactNode;
+  children?: ReactNode;
+}) {
   return (
     <section className="mb-[2.6vh]">
       {title && (
         <h3 className="text-[1.7vh] font-bold uppercase tracking-[0.12em] text-fg-dim mb-[1vh] px-[0.4vw]">{title}</h3>
       )}
       {hint && <p className="text-[1.8vh] text-fg-dim mb-[1.2vh] px-[0.4vw] max-w-[48vw] leading-snug">{hint}</p>}
-      <div className="rounded-[1.4vh] bg-white/[0.055] overflow-hidden divide-y divide-white/[0.07]">{children}</div>
+      {notes}
+      {children && (
+        <div className="rounded-[1.4vh] bg-white/[0.055] overflow-hidden divide-y divide-white/[0.07]">{children}</div>
+      )}
     </section>
   );
 }
@@ -50,12 +66,15 @@ function RowShell({
   onEnter,
   autoFocus,
   disabled,
+  warn,
   children,
 }: {
   id: string;
   onEnter: () => void;
   autoFocus?: boolean;
   disabled?: boolean;
+  // An action armed for a second, confirming press: drawn in the warning colour.
+  warn?: boolean;
   children: (focused: boolean) => ReactNode;
 }) {
   const page = usePageId();
@@ -77,7 +96,7 @@ function RowShell({
       data-sautofocus={autoFocus && !disabled ? "" : undefined}
       className={[
         "flex items-center gap-[1.6vw] px-[2vw] py-[1.9vh] min-h-[7.4vh]",
-        lit ? "bg-white text-[#06090d]" : "",
+        lit ? (warn ? "bg-warn text-[#06090d]" : "bg-white text-[#06090d]") : warn ? "text-warn" : "",
         disabled ? "opacity-40" : "",
       ].join(" ")}
     >
@@ -124,6 +143,7 @@ export function Row({
   onEnter,
   autoFocus,
   disabled,
+  warn,
 }: {
   id: string;
   label: string;
@@ -138,9 +158,10 @@ export function Row({
   onEnter: () => void;
   autoFocus?: boolean;
   disabled?: boolean;
+  warn?: boolean;
 }) {
   return (
-    <RowShell id={id} onEnter={onEnter} autoFocus={autoFocus} disabled={disabled}>
+    <RowShell id={id} onEnter={onEnter} autoFocus={autoFocus} disabled={disabled} warn={warn}>
       {() => (
         <>
           {leading && <span className="w-[2.8vh] h-[2.8vh] shrink-0 opacity-70">{leading}</span>}

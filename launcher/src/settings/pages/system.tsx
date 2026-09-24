@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useI18n, AVAILABLE_LOCALES } from "../../lib/i18n";
 import { useConfigStore } from "../../stores/config";
+import { useArmedConfirm } from "../../lib/armedConfirm";
 import { fetchSystemInfo, setHostname } from "../../lib/system";
 import { fetchRegion, type RegionInfo } from "../../lib/region";
 import {
@@ -12,6 +13,7 @@ import {
   type UpdateStatus,
 } from "../../lib/update";
 import { power } from "../../lib/power";
+import { fetchSnapshots, restoreSnapshot, type ConfigSnapshot } from "../../lib/snapshots";
 import { PinPad } from "@sdk/PinPad";
 import { PinGate } from "@sdk/PinGate";
 import { TimezonePicker } from "../../components/TimezonePicker";
@@ -28,6 +30,10 @@ import { useSummary, invalidateSummary } from "../summary";
 // the region, the box's name. They belong next to updates and the backup because
 // they are all things about the BOX rather than about what it is showing.
 const UPDATE_POLL_MS = 3000;
+const CANARY_WAIT_HOURS = [12, 24, 48, 72, 168];
+// The "no box" choice. A box id is a hostname and can never contain a space, so
+// this cannot collide with a box that happens to be called "none".
+const CANARY_NONE = " none";
 const DASH = "-";
 
 // Survive the pane remounting when the rail moves: what the box was renamed to, and
@@ -281,6 +287,38 @@ export function ParentalPage() {
   );
 }
 
+// Release notes are CHANGELOG markdown: "**bold**" for an entry's headline and
+// "- " for the entry itself. Only those two are drawn; the text is never parsed
+// as HTML, so a feed cannot put markup on the screen. The file is hard-wrapped,
+// so the lines of one entry are joined before the bold is found: a headline
+// that runs onto a second line is still one headline.
+export function ReleaseNotes({ text }: { text: string }) {
+  const BULLET = /^\s*[-*]\s+/;
+  const blocks: { bullet: boolean; text: string }[] = [];
+  let open = false; // whether the next line continues the last block
+  for (const line of text.split("\n")) {
+    if (!line.trim()) {
+      open = false;
+      continue;
+    }
+    const bullet = BULLET.test(line);
+    if (bullet || !open) blocks.push({ bullet, text: line.replace(BULLET, "").trim() });
+    else blocks[blocks.length - 1].text += " " + line.trim();
+    open = true;
+  }
+  return (
+    <>
+      {blocks.map((b, i) => (
+        <span key={i}>
+          {b.bullet ? "• " : ""}
+          {b.text.split(/\*\*/).map((part, j) => (j % 2 === 1 ? <strong key={j}>{part}</strong> : part))}
+          {i < blocks.length - 1 ? "\n" : ""}
+        </span>
+      ))}
+    </>
+  );
+}
+
 function UpdatePage() {
   const { t, locale } = useI18n();
   const nav = useSettingsNav();
@@ -297,6 +335,10 @@ function UpdatePage() {
       void fetchUpdateStatus().then((s) => s && alive.current && setSt(s));
     };
     refresh();
+    // The config store is loaded once and refreshed after the launcher's own
+    // writes, so a setting changed elsewhere (another client of the API, a
+    // restore) would show stale here. Opening the page reads it again.
+    void useConfigStore.getState().load();
     // Live while a download or install runs, and only while this page is open - it
     // used to tick for as long as anyone was anywhere in the System category.
     const iv = setInterval(refresh, UPDATE_POLL_MS);
@@ -315,6 +357,32 @@ function UpdatePage() {
   const working = (!!st && st.state !== "idle" && st.state !== "error") || sysBusy;
   const auto = config?.update.auto ?? true;
   const appsAuto = config?.update.appsAuto ?? true;
+  const canary = config?.update.canary;
+  const mqttConfigured = !!config?.mqtt.configured;
+  // Every box on the broker that publishes a canary topic, plus the one already
+  // chosen in case it is offline right now.
+  const canarySeen = [...new Set([...(st?.canary?.seen ?? []), ...(canary?.from ? [canary.from] : [])])];
+  // Two days and more read better in days.
+  const waitLabel = (h: number) =>
+    h >= 48 && h % 24 === 0 ? t("update.canaryDays", { n: h / 24 }) : t("update.canaryHours", { n: h });
+  const decision = st?.canary?.decision ?? null;
+  const until = (ms: number) =>
+    new Date(ms).toLocaleString(locale || undefined, { dateStyle: "medium", timeStyle: "short" });
+  // A follower that has not chosen a box follows nobody: it is waiting out the
+  // longest wait, and the note says what to do about it rather than "waiting".
+  const choosing = canary?.role === "follower" && !canary.from;
+  const canaryNote = !decision
+    ? ""
+    : decision.reason === "waiting" && decision.until && choosing
+      ? canarySeen.length === 1
+        ? t("update.canaryChooseOne", { box: canarySeen[0], date: until(decision.until) })
+        : t("update.canaryChoose", { date: until(decision.until) })
+      : decision.reason === "waiting" && decision.until
+        ? t("update.canaryWaiting", { version: decision.version, date: until(decision.until) })
+        : decision.reason === "canary-rolled-back"
+          ? t("update.canaryRolledBack", { version: decision.version })
+          : "";
+  const canaryTone: "warn" | "dim" = decision?.reason === "canary-rolled-back" ? "warn" : "dim";
 
   // The most relevant thing, in order.
   const statusLine = !st
@@ -351,7 +419,8 @@ function UpdatePage() {
     <SettingsPage id="update" title={t("update.title")} onBack={nav.pop} animate="push">
       <Note tone={st?.state === "error" ? "warn" : st?.available ? "accent" : "dim"}>{statusLine}</Note>
       {st?.state === "error" && st.error ? <Note>{st.error}</Note> : null}
-      {st?.failed && <Note tone="warn">{t("update.failedRollback", { version: st.failed.to })}</Note>}
+      {st?.failed && <Note tone="warn">{t("update.failedRollback", { version: st.failed.next })}</Note>}
+      {canaryNote && <Note tone={canaryTone}>{canaryNote}</Note>}
       {/* How the last system update ended. Only when it is news: a plain "ok" is
           already implied by the release becoming installable, and "idle" means
           this box has never asked for one. */}
@@ -366,10 +435,12 @@ function UpdatePage() {
       )}
       {sys?.rebootRequired && !sysBusy && <Note>{t("update.sysRebootHint")}</Note>}
       {notes && (
-        // Release notes are written as lines and can be long: without pre-line they
-        // collapse into a paragraph, and without a cap they push the rows off screen.
-        <p className="text-[1.8vh] text-fg-dim leading-snug mb-[1.6vh] px-[0.4vw] max-w-[52vw] whitespace-pre-line max-h-[24vh] overflow-y-auto no-scrollbar">
-          {notes}
+        // Release notes are written as lines: without pre-line they collapse into a
+        // paragraph. They are not capped in height, because a capped block has
+        // nothing focusable in it and could never be scrolled with the remote; the
+        // page scrolls instead, and the first row brings the top back (SettingsPage).
+        <p className="text-[1.8vh] text-fg-dim leading-snug mb-[1.6vh] px-[0.4vw] max-w-[52vw] whitespace-pre-line">
+          <ReleaseNotes text={notes} />
         </p>
       )}
 
@@ -466,6 +537,165 @@ function UpdatePage() {
           <InfoRow label={t("update.rebootNone")} value="" />
         )}
       </Group>
+      {/* Staged rollout. Only offered by a shell that knows it (older ones send no
+          `canary` in the config), and only usable with the broker set up, which is
+          where the boxes find each other. */}
+      {canary && !mqttConfigured && (
+        <Group
+          title={t("update.groupCanary")}
+          hint={t("update.canaryHint")}
+          notes={<Note>{t("update.canaryNeedsBroker")}</Note>}
+        />
+      )}
+      {canary && mqttConfigured && (
+        <Group title={t("update.groupCanary")} hint={t("update.canaryHint")}>
+          <Row
+            id="canary-role"
+            label={t("update.canaryRole")}
+            value={t("update.canaryRoles." + canary.role)}
+            onEnter={() =>
+              nav.push({
+                id: "canary-role",
+                title: t("update.canaryRoleTitle"),
+                render: () => (
+                  <ChoicePage
+                    id="canary-role"
+                    title={t("update.canaryRoleTitle")}
+                    note={t("update.canaryRoleNote")}
+                    failLabel={t("update.canarySaveFailed")}
+                    options={(["off", "canary", "follower"] as const).map((r) => ({
+                      id: r,
+                      label: t("update.canaryRoles." + r),
+                      hint: t("update.canaryRoleHints." + r),
+                    }))}
+                    value={canary.role}
+                    onPick={(r) => setUpdate({ canary: { role: r as "off" | "canary" | "follower" } })}
+                  />
+                ),
+              })
+            }
+          />
+          {canary.role === "follower" && (
+            <Row
+              id="canary-from"
+              label={t("update.canaryFrom")}
+              hint={t("update.canaryFromHint")}
+              value={canary.from || t("update.canaryFromNone")}
+              onEnter={() =>
+                nav.push({
+                  id: "canary-from",
+                  title: t("update.canaryFrom"),
+                  render: () => (
+                    <ChoicePage
+                      id="canary-from"
+                      title={t("update.canaryFrom")}
+                      note={canarySeen.length ? undefined : t("update.canaryFromEmpty")}
+                      failLabel={t("update.canarySaveFailed")}
+                      options={[
+                        { id: CANARY_NONE, label: t("update.canaryFromNone") },
+                        ...canarySeen.map((id) => ({ id, label: id })),
+                      ]}
+                      value={canary.from || CANARY_NONE}
+                      onPick={(id) => setUpdate({ canary: { from: id === CANARY_NONE ? "" : id } })}
+                    />
+                  ),
+                })
+              }
+            />
+          )}
+          {canary.role === "follower" && (
+            <Row
+              id="canary-wait"
+              label={t("update.canaryWait")}
+              hint={t("update.canaryWaitHint")}
+              value={waitLabel(canary.maxWaitHours)}
+              onEnter={() =>
+                nav.push({
+                  id: "canary-wait",
+                  title: t("update.canaryWait"),
+                  render: () => (
+                    <ChoicePage
+                      id="canary-wait"
+                      title={t("update.canaryWait")}
+                      failLabel={t("update.canarySaveFailed")}
+                      options={CANARY_WAIT_HOURS.map((h) => ({
+                        id: String(h),
+                        label: waitLabel(h),
+                      }))}
+                      value={String(canary.maxWaitHours)}
+                      onPick={(h) => setUpdate({ canary: { maxWaitHours: Number(h) } })}
+                    />
+                  ),
+                })
+              }
+            />
+          )}
+        </Group>
+      )}
+    </SettingsPage>
+  );
+}
+
+// The last few copies of the settings a working box ran on (shell/configsnap.js).
+// A restore restarts the shell, the same as restoring a backup, and RestoreWatcher
+// says so on screen.
+function SnapshotsPage() {
+  const { t, locale } = useI18n();
+  const nav = useSettingsNav();
+  const [list, setList] = useState<ConfigSnapshot[] | null>(null);
+  const confirm = useArmedConfirm();
+  const [busy, setBusy] = useState<string | null>(null);
+  const [failed, setFailed] = useState(false);
+
+  useEffect(() => {
+    let alive = true;
+    void fetchSnapshots().then((l) => alive && setList(l ?? []));
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  const fmt = (at: number) =>
+    new Date(at).toLocaleString(locale || undefined, { dateStyle: "medium", timeStyle: "short" });
+
+  return (
+    <SettingsPage id="snapshots" title={t("snapshots.title")} onBack={nav.pop} animate="push">
+      <Note>{t("snapshots.hint")}</Note>
+      {failed && <Note tone="warn">{t("snapshots.failed")}</Note>}
+      {list && list.length === 0 && <Note>{t("snapshots.none")}</Note>}
+      {list && list.length > 0 && (
+        <Group>
+          {/* No row takes the first focus: the OK that opened this page may still
+              be held, and a restore is one of the few things here that cannot be
+              undone. The page's watchdog puts the cursor on the first row. */}
+          {list.map((snap) => (
+            <Row
+              key={snap.id}
+              id={"snap-" + snap.id}
+              label={fmt(snap.at)}
+              hint={
+                busy === snap.id
+                  ? t("snapshots.restoring")
+                  : confirm.armed === snap.id
+                    ? t("snapshots.restoreSure")
+                    : t("snapshots.restore")
+              }
+              trailing="none"
+              warn={confirm.armed === snap.id}
+              disabled={busy !== null}
+              onEnter={async () => {
+                // First press arms that copy; a second, separate press restores it.
+                if (!confirm.press(snap.id)) return;
+                setBusy(snap.id);
+                setFailed(false);
+                const ok = await restoreSnapshot(snap.id);
+                setBusy(null);
+                if (!ok) setFailed(true);
+              }}
+            />
+          ))}
+        </Group>
+      )}
     </SettingsPage>
   );
 }
@@ -503,7 +733,8 @@ export function SystemPane() {
           hint={t("hostname.hint")}
           title={t("hostname.title")}
           value={hostname}
-          emptyLabel={DASH}
+          // Blank until the box has answered: a dash would claim it has no name.
+          emptyLabel={renamedTo == null && info === undefined ? "" : DASH}
           onSubmit={async (v) => {
             const next = cleanHostname(v);
             if (!next || next === hostname) return;
@@ -567,6 +798,12 @@ export function SystemPane() {
           label={t("backup.title")}
           hint={t("system.backupHint")}
           onEnter={() => nav.push({ id: "backup", title: t("backup.title"), render: () => <BackupPage /> })}
+        />
+        <Row
+          id="snapshots"
+          label={t("snapshots.title")}
+          hint={t("snapshots.rowHint")}
+          onEnter={() => nav.push({ id: "snapshots", title: t("snapshots.title"), render: () => <SnapshotsPage /> })}
         />
       </Group>
       {/* Last, and its own group: nothing behind this door is for someone

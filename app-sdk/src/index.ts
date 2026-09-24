@@ -17,3 +17,5 @@ export * from "./gamepad";
 export * from "./moveTo";
 export * from "./spatial-nav";
 export * from "./sounds";
+export * from "./focusGuard";
+export * from "./useLatestRequest";

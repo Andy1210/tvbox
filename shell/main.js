@@ -5,6 +5,11 @@
 // window driven over its JSON IPC. Apps get a capability-scoped bridge
 // (preload.js); the remote Home button returns to the launcher from anywhere.
 // Run: electron . --ozone-platform=wayland
+
+// First, before anything is loaded: SIGUSR2's default action ends the process,
+// and a recovery hold can send one while this is still starting. The real
+// handler (shell/recovery.js) is added once the launcher exists.
+process.on("SIGUSR2", () => {});
 const { app, BrowserWindow, ipcMain, screen, session, webContents } = require("electron");
 const { spawn, execFile } = require("child_process");
 const http = require("http");
@@ -70,6 +75,8 @@ const shares = require("./shares"); // network shares (SMB over rclone, no root)
 const miracast = require("./miracast"); // screen mirroring: the unprivileged half of a Wi-Fi Display sink
 const remotefinder = require("./remotefinder"); // make a lost remote ring (Remote Pro's buzzer)
 const diag = require("./diag"); // what this box says about itself to the fleet (version, rollback, link, heat)
+const health = require("./health"); // whether it is working: threadpool, stuck installs, OTA markers, crashes
+const configsnap = require("./configsnap"); // the last few good config.json copies, for "restore previous settings"
 const apps = require("./install"); // manifests + install-recipe runner (shared with the tvbox CLI)
 const appfetch = require("./appfetch"); // capability: scoped server-side fetch (data proxy), origin-locked + SSRF-guarded
 const netguard = require("./netguard"); // shared loopback/LAN/public host classification + lanIp
@@ -245,6 +252,9 @@ app.on("browser-window-created", (_event, w) => {
 let nowPlaying = null; // last launcher-reported now-playing (Spotify/Live TV) - gates auto-update idleness
 let nowPlayingAt = 0; // when it was last reported (nowplaying.stillPlaying)
 let restoredAt = null; // a backup restore just ran; the launcher polls this to show "restarting"
+let launcherCrashExpected = false; // the recovery hold is ending the launcher's renderer on purpose
+let launcherCrashExpectedTimer = null;
+let launcherUnresponsive = false; // Electron's hang detector says the launcher's renderer is stuck
 // The box counts as idle for a self-initiated restart (nightly auto-update)
 // only when nothing is on screen or audible: no mpv, launcher focused, and the
 // last now-playing report isn't "playing" (librespot audio has no mpv process
@@ -587,6 +597,11 @@ function serve() {
     },
     publishMediaState: mediapublish.publish,
     publishNowPlaying: mediapublish.publishNowPlaying,
+    forgetMqtt: mediapublish.forget,
+    restoredRestart: (why) => {
+      restoredAt = Date.now();
+      setTimeout(() => restartShell(why), 4000);
+    },
     remoteBridgeCmd: bridges.remoteBridgeCmd,
     setNowPlaying: (data) => {
       nowPlaying = data;
@@ -1524,11 +1539,21 @@ function readBridgeJson(name, fallback) {
 // question, so there is one answer (mediapublish.js), and a command that arrives
 // the other way is routed by tvcommand.js. Both are given the shell's own state
 // and its windows here; neither of them knows what a BrowserWindow is.
+health.init({
+  oldestInstallStart: maintenance.oldestInstallStart,
+  nowPlaying: () => (nowPlaying ? { state: nowPlaying.state, app: nowPlaying.app, at: nowPlayingAt } : null),
+  markers: updater.markers,
+  lastCrashAt: () => crashlog.lastCrashAt(),
+  boot: boothealth.state,
+});
+
 mediapublish.init({
   mqtt: mqttBridge,
   mediastate,
   audio,
   diag,
+  health,
+  canaryReport: updater.canaryReport,
   identity,
   config,
   system,
@@ -2363,7 +2388,11 @@ app.whenReady().then(async () => {
   // then, so the nightly would never retry) - and its 03-06h window is the same one
   // the nightly app auto-update runs in, whose download the `installing` set does
   // not cover.
-  updater.init({ isIdle: boxFree, restart: () => restartShell("update applied") });
+  updater.init({
+    isIdle: boxFree,
+    restart: () => restartShell("update applied"),
+    canaryVouches: mediapublish.canaryVouches,
+  });
   plugins.loadAll(); // require plugins + register their routes (deps-gated)
   apps.installAll((s) => console.log("[install]", s));
   serve();
@@ -2434,9 +2463,18 @@ app.whenReady().then(async () => {
   // that crashes as soon as it loads would otherwise spin here, and past the cap
   // the shell exits so the session's respawn loop (and its OTA rollback) takes over.
   const launcherCrashes = [];
+  win.webContents.on("unresponsive", () => (launcherUnresponsive = true));
+  win.webContents.on("responsive", () => (launcherUnresponsive = false));
   win.webContents.on("render-process-gone", (_e, details) => {
     const reason = (details && details.reason) || "?";
     const now = Date.now();
+    // A renderer the recovery hold ended on purpose, and reloads itself. One
+    // crash is expected, not a window of time: a real one right after is counted.
+    if (launcherCrashExpected) {
+      launcherCrashExpected = false;
+      launcherUnresponsive = false;
+      return;
+    }
     while (launcherCrashes.length && now - launcherCrashes[0] > 10 * 60 * 1000) launcherCrashes.shift();
     launcherCrashes.push(now);
     console.warn("[main] launcher render process gone (" + reason + "), crash", launcherCrashes.length);
@@ -2461,7 +2499,10 @@ app.whenReady().then(async () => {
     ensureStyle(win);
     setVideoMode(false, win);
     updater.onLauncherLoaded();
-    boothealth.markHealthy(pkg.version);
+    // The first healthy load of this process also keeps a copy of the config, a
+    // little later, so a setting that takes the box down within minutes of being
+    // saved is not the copy that gets kept.
+    if (boothealth.markHealthy(pkg.version)) setTimeout(() => configsnap.take(), configsnap.TAKE_DELAY_MS);
     noticeCrash();
   });
   // One line on the first launcher load after a crash, and then never again.
@@ -2658,3 +2699,18 @@ app.on("window-all-closed", shutdown);
 // leave an orphaned process holding port 8097 across a restart.
 process.on("SIGTERM", shutdown);
 process.on("SIGINT", shutdown);
+// A held Home key reaches the compositor even when no renderer of ours can act on
+// it; it asks for a launcher reload with SIGUSR2 (shell/recovery.js).
+require("./recovery").install({
+  getWindow: () => win,
+  showLauncher: () => showLauncher(),
+  // Expires on its own: a crash that never comes must not leave the next real
+  // one uncounted.
+  onDeliberateCrash: () => {
+    launcherCrashExpected = true;
+    clearTimeout(launcherCrashExpectedTimer);
+    launcherCrashExpectedTimer = setTimeout(() => (launcherCrashExpected = false), 5000);
+  },
+  isUnresponsive: () => launcherUnresponsive,
+  isStarted: () => !!win,
+});

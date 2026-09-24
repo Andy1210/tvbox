@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { FocusContext, useFocusable, setFocus } from "@noriginmedia/norigin-spatial-navigation";
 import { useBackspace } from "./useBackspace";
 import { FocusButton } from "./FocusButton";
+import { setFocusFallback } from "./focusGuard";
 
 // Shared on-screen keyboard (D-pad). Edits one string and calls onDone with the
 // result (or onCancel on remote Back). QWERTY-ish with a digits row and a row of
@@ -255,6 +256,8 @@ export function Osk({
     const id = setTimeout(() => setFocus("osk-1-0"), 0);
     return () => clearTimeout(id);
   }, []);
+  // While the keyboard is up, a lost cursor belongs on it, not behind it.
+  useEffect(() => setFocusFallback(() => ["osk-1-0", "osk-space"]), []);
   useBackspace(onCancel);
 
   const insert = (ch: string) => {

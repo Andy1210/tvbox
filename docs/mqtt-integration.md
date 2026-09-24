@@ -34,11 +34,38 @@ retained last-will on the status topic.
 | `tvbox/<id>/state`      | box → (retained)     | the whole player state (below)                      |
 | `tvbox/<id>/nowplaying` | box → (retained)     | `{ app, state, title?, artist?, image? }`           |
 | `tvbox/<id>/diag`       | box → (retained)     | the fleet payload ([fleet-view.md](fleet-view.md))  |
+| `tvbox/<id>/canary`     | box → (retained)     | staged rollout, see below                           |
 | `tvbox/<id>/cmd`        | → box                | `{ action, app? }` - control                        |
 | `tvbox/<id>/notify`     | → box                | `{ title?, message?, image?, duration?, raise? }`   |
 
 Inbound payloads must be JSON (a non-JSON payload is ignored as an unknown
 command).
+
+### Staged rollout (`canary`, retained)
+
+A box whose role is **Goes first** (Settings → System → Update → Staged rollout,
+`update.canary.role: "canary"`) publishes `{ version, healthy, failed, at }`
+here: `healthy` turns true once the running release has been committed and the
+shell has been up on it for an hour, and `failed` names a release it rolled
+back. Every other box clears the topic, so a box that stops being a canary stops
+vouching.
+
+A box set to **Waits for the first box** (`"follower"`) reads `tvbox/+/canary`
+and holds its nightly automatic update until some canary vouches for that exact
+version, or until `update.canary.maxWaitHours` (default 48) have passed since it
+first saw the release. A release a canary rolled back is not installed
+automatically at all; pressing Update still installs it. What is installed is
+always the signed feed's release, so anything able to publish on the broker can
+move a follower's update earlier or hold it back, never choose it.
+
+### Removing a box
+
+Settings → Network → Home Assistant → **Forget this box** clears every retained
+topic the box owns (status, announce, state, nowplaying, diag, canary and every
+discovery config), disconnects without publishing its will, and removes the
+broker settings from the box. Home Assistant then deletes the MQTT-discovered
+device by itself. A tvbox integration entry, if one was set up, is removed in
+Home Assistant.
 
 ### Player state (`state`, retained)
 

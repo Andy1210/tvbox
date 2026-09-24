@@ -16,10 +16,28 @@ export interface UpdateStatus {
   unmet?: string[];
   lastCheckAt: number | null;
   auto: boolean;
-  failed: { from: string; to: string } | null; // an update rolled back
+  // An update rolled back. The shell's marker is "<prev> <next>": `next` is the
+  // release that failed to start, `prev` the one the box went back to.
+  failed: { prev: string; next: string } | null;
+  // Staged rollout (shell/canary.js). Optional: an older shell does not send it.
+  canary?: CanaryStatus;
   last: { from: string; to: string; at: number } | null; // last successful update
   os: { rebootRequired: boolean; packages: string[] };
   system: SystemUpdate;
+}
+
+export interface CanaryStatus {
+  role: "off" | "canary" | "follower";
+  maxWaitHours: number;
+  from?: string;
+  // The boxes publishing a canary topic on the broker, to pick one to follow.
+  seen?: string[];
+  // For a follower with a release on offer: why it is or is not installing it.
+  decision: {
+    version: string;
+    reason: "waiting" | "vouched" | "max-wait" | "canary-rolled-back";
+    until: number | null;
+  } | null;
 }
 
 // The ROOT half of a release - the apt packages, grants and units an OTA cannot

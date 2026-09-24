@@ -3,6 +3,7 @@ import { FocusContext, useFocusable, setFocus } from "@noriginmedia/norigin-spat
 import { useBackspace } from "./useBackspace";
 import { KeyGlyph } from "./Osk";
 import { FocusButton } from "./FocusButton";
+import { setFocusFallback } from "./focusGuard";
 
 // D-pad numeric PIN entry (modal). Auto-submits at 4 digits. Remote Back cancels.
 // Used both to set a PIN and to unlock a locked category.
@@ -27,6 +28,8 @@ export function PinPad({
     const id = setTimeout(() => setFocus("pin-1"), 0);
     return () => clearTimeout(id);
   }, []);
+  // While the pad is up, a lost cursor belongs on it, not behind it.
+  useEffect(() => setFocusFallback(() => ["pin-1", "pin-0"]), []);
 
   useEffect(() => {
     if (pin.length === 4) {

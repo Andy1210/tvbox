@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach, afterAll } from "vites
 import { act, cleanup, render } from "@testing-library/react";
 import { createElement } from "react";
 import { useIdle } from "./useIdle";
+import { HEALED_KEY_EVENT } from "@sdk/focusGuard";
 
 // The ambient screen arms itself on an idle timer, and the launcher window is
 // hidden whenever another app holds the screen. The launcher's own view stays on
@@ -58,6 +59,14 @@ describe("useIdle", () => {
     const seen = mount();
     act(() => void vi.advanceTimersByTime(15000));
     expect(seen[0]).toBe(true);
+  });
+
+  it("counts a press the focus guard spent on healing as activity", () => {
+    const seen = mount();
+    act(() => void vi.advanceTimersByTime(8000));
+    act(() => void window.dispatchEvent(new CustomEvent(HEALED_KEY_EVENT, { detail: { key: "ArrowDown" } })));
+    act(() => void vi.advanceTimersByTime(7000));
+    expect(seen[0]).toBe(false);
   });
 
   it("never arms while the window is hidden", () => {

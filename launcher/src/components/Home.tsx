@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { FocusContext, doesFocusableExist, setFocus, useFocusable } from "@noriginmedia/norigin-spatial-navigation";
+import { setFocusFallback } from "@sdk/focusGuard";
 import type { AppManifest } from "../lib/types";
 import { fetchApps, quitApp } from "../lib/api";
 import { launchApp } from "../lib/shell";
@@ -193,6 +194,19 @@ export function Home() {
     }, 0);
     return () => clearTimeout(id);
   }, [loaded, sorted, getMoreHidden]);
+
+  // Where a lost cursor comes back to on HOME: the tile the rail was left on, then
+  // the start of the rail, then the settings gear, which is always there.
+  useEffect(
+    () =>
+      setFocusFallback(() => [
+        enteredIn("rail"),
+        ...sorted.map((a) => tileKey(a.id)),
+        getMoreHidden ? null : GET_MORE_KEY,
+        "home-settings",
+      ]),
+    [sorted, getMoreHidden],
+  );
 
   const showToast = useCallback((msg: string) => {
     setToast(msg);

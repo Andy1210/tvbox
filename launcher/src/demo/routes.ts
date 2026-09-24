@@ -50,7 +50,13 @@ function appsList(): AppManifest[] {
 }
 
 function updateStatus() {
-  return { ...data.UPDATE_STATUS, lastCheckAt: updateLastCheck, auto: config.update.auto };
+  const canary = config.update.canary ?? { role: "off" as const, maxWaitHours: 48 };
+  return {
+    ...data.UPDATE_STATUS,
+    lastCheckAt: updateLastCheck,
+    auto: config.update.auto,
+    canary: { ...canary, decision: null },
+  };
 }
 
 const POWER_MSG: Record<string, Record<string, string>> = {
@@ -78,7 +84,13 @@ function applyConfig(body: Record<string, unknown>): void {
     if (p.requirePin !== undefined) config.parental.requirePin = !!p.requirePin;
   }
   if (body.ambient && typeof body.ambient === "object") Object.assign(config.ambient, body.ambient);
-  if (body.update && typeof body.update === "object") Object.assign(config.update, body.update);
+  if (body.update && typeof body.update === "object") {
+    const u = body.update as Record<string, unknown>;
+    const { canary, ...rest } = u;
+    Object.assign(config.update, rest);
+    if (canary && typeof canary === "object")
+      config.update.canary = { role: "off", maxWaitHours: 48, ...config.update.canary, ...canary };
+  }
   if (body.ui && typeof body.ui === "object") Object.assign(config.ui, body.ui);
   if (body.player && typeof body.player === "object") Object.assign(config.player, body.player);
   if (body.wifi && typeof body.wifi === "object") Object.assign(config.wifi, body.wifi);
@@ -266,6 +278,16 @@ export async function handleApi(
       return ok;
     case "/tvbox/api/backup/status":
       return { restoredAt: null };
+    case "/tvbox/api/backup/snapshots":
+      return { snapshots: data.CONFIG_SNAPSHOTS };
+    case "/tvbox/api/backup/snapshots/restore":
+      // The real box restarts after this; the demo has nothing to put back.
+      return ok;
+    case "/tvbox/api/health":
+      return { ...data.HEALTH, at: new Date().toISOString() };
+    case "/tvbox/api/mqtt/forget":
+      config.mqtt = { ...config.mqtt, configured: false, host: "", username: "", hasPassword: false };
+      return ok;
     case "/tvbox/api/backup/context":
       return ok;
     case "/tvbox/api/backup/pending-localstorage":

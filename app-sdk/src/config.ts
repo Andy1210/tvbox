@@ -58,7 +58,7 @@ export interface PublicConfig {
   spotify: { deviceName: string; hasCredentials: boolean; enabled: boolean };
   ambient: { enabled: boolean; idleMinutes: number; city: string; sleepMinutes: number; bing: boolean };
   ui: { hourFormat: "auto" | "12" | "24"; navSounds: boolean };
-  update: { auto: boolean; appsAuto: boolean };
+  update: { auto: boolean; appsAuto: boolean; canary?: CanarySettings };
   wifi: { country: string };
   bluetooth: { disableErtm: boolean };
   player: { audioLang: string; subLang: string };
@@ -248,8 +248,23 @@ export async function saveIr(ir: IrInput): Promise<PublicConfig> {
   return postConfig({ ir });
 }
 
+// Staged rollout across boxes on one broker (shell/canary.js). Optional in the
+// config type because a shell older than the feature does not send it.
+export type CanaryRole = "off" | "canary" | "follower";
+export interface CanarySettings {
+  role: CanaryRole;
+  maxWaitHours: number;
+  /** The box id a follower follows; "" for none. Optional: older shells do not send it. */
+  from?: string;
+}
+export interface UpdateSettingsPatch {
+  auto?: boolean;
+  appsAuto?: boolean;
+  canary?: Partial<CanarySettings>;
+}
+
 // OTA auto-update toggle (the feed URL itself is box-local, not a UI concern).
-export async function saveUpdate(update: { auto?: boolean; appsAuto?: boolean }): Promise<PublicConfig> {
+export async function saveUpdate(update: UpdateSettingsPatch): Promise<PublicConfig> {
   return postConfig({ update });
 }
 

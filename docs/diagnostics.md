@@ -71,6 +71,36 @@ sudo tvbox-diag --logs        # also write tvbox-diag-logs.txt (journal + shell.
 `tvbox-diag-logs.txt` is a separate, bounded file so it can never push the report
 itself off a full partition. Safe mode writes it automatically.
 
+## Holding Home
+
+When the launcher is on screen but the remote does nothing there, or the screen is
+stuck on something no key reaches, hold the remote's Home button:
+
+- **3 seconds**: the launcher is reloaded and brought to the front. Whatever app was
+  in front is left the way Home leaves it. A launcher page that has stopped
+  responding is ended first, since a stuck page never runs a reload it is sent, and
+  this deliberate reload does not count towards the launcher's crash limit.
+- **10 seconds**: the shell is restarted, as a fresh start would. Every app window is
+  closed.
+
+A reload is not sent to a shell that started less than 3 seconds ago. The shell
+takes its reload signal from its first line of code, but before that line runs the
+signal's default action would end it, and nothing earlier can catch it: the
+Electron main process is started by a Node wrapper, which resets every signal to
+its default in the processes it starts.
+
+The hold is noticed by the compositor, below every window, so it works when the
+launcher's page has crashed, frozen or lost its cursor. The compositor runs
+`~/.tvbox/recover.sh` ([deploy/recover.sh](../deploy/recover.sh)); the thresholds and
+the key are set in its environment (see the tvbox-wc README). It needs a remote that
+reports how long a key is down, which Bluetooth and USB remotes do. A CEC remote's
+Home is two quick presses of Back and cannot be held.
+
+Separately, the launcher puts a lost cursor back by itself: a navigation key, or the
+window coming back to the front, finds the cursor pointing at something that is no
+longer on screen and moves it to where that screen's cursor belongs
+([app-sdk/src/focusGuard.ts](../app-sdk/src/focusGuard.ts)).
+
 ## Safe mode
 
 Safe mode stops one thing: **greetd**, which is what autologins into the session and

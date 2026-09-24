@@ -80,7 +80,21 @@ function setDebugPort(port, cb) {
   setTimeout(() => deps.restartShell("devtools port " + n), 1200);
 }
 
-const installing = new Set(); // app ids whose bundle is being installed on-demand (UI)
+// App ids whose bundle is being installed on-demand (UI), with when each started:
+// the health view reports the oldest, since an install that never ends holds
+// boxFree() false and with it every nightly job.
+const installStarted = new Map();
+class TimedSet extends Set {
+  add(v) {
+    if (!this.has(v)) installStarted.set(v, Date.now());
+    return super.add(v);
+  }
+  delete(v) {
+    installStarted.delete(v);
+    return super.delete(v);
+  }
+}
+const installing = new TimedSet();
 // A cli.js run that has not finished by then is killed, process group and all.
 // Generous, because a flatpak with its runtime is a multi-hundred-MB pull; the
 // point is that it ends, since `installing` holds boxFree() false until it does.
@@ -442,6 +456,13 @@ function installingIds() {
   return [...installing];
 }
 
+// When the longest-running install started, or null with none running.
+function oldestInstallStart() {
+  let min = null;
+  for (const t of installStarted.values()) if (min === null || t < min) min = t;
+  return min;
+}
+
 module.exports = {
   init,
   setDebugPort,
@@ -450,6 +471,7 @@ module.exports = {
   flatpakStatusFor,
   isInstalling,
   installingIds,
+  oldestInstallStart,
   provisionFull,
   startInstall,
   startDeps,

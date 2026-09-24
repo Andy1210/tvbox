@@ -102,3 +102,15 @@ test("a response body is abandoned as soon as it passes the cap", async () => {
   const declared = { headers: new Headers({ "content-length": "99999" }), body: new Response("x").body };
   await assert.rejects(updater.readCapped(declared, 10), /too large/);
 });
+
+test("a follower's wait keeps its start when a newer release arrives before it installed one", () => {
+  const wait = path.join(UPD, "canary-wait");
+  fs.mkdirSync(UPD, { recursive: true });
+  fs.writeFileSync(wait, JSON.stringify({ version: "999.0.0", since: 1000 }));
+  assert.strictEqual(updater.canaryWaitSince("999.1.0", 5000), 1000);
+  assert.deepStrictEqual(JSON.parse(fs.readFileSync(wait, "utf8")), { version: "999.1.0", since: 1000 });
+  // A record of a release this box already runs (or passed) starts a new wait.
+  fs.writeFileSync(wait, JSON.stringify({ version: "0.0.1", since: 1000 }));
+  assert.strictEqual(updater.canaryWaitSince("999.1.0", 5000), 5000);
+  fs.rmSync(UPD, { recursive: true, force: true });
+});

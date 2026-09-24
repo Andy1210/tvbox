@@ -120,6 +120,43 @@ describe("a settings page", () => {
     expect(getCurrentFocusKey()).toBe("late:one");
   });
 
+  it("brings the top of the page back when the first row is reached", async () => {
+    // What sits above the first row (a status, release notes) can take no focus, so
+    // only reaching that row can pull it back into view.
+    const { container } = render(
+      <SettingsPage id="top" title="Top">
+        <Note>status and notes above the rows</Note>
+        <Group>
+          <Row id="a" label="A" onEnter={() => {}} />
+          <Row id="b" label="B" onEnter={() => {}} />
+        </Group>
+      </SettingsPage>,
+    );
+    const scroller = container.querySelector(".overflow-y-auto") as HTMLElement;
+    let top = 0;
+    Object.defineProperty(scroller, "scrollTop", {
+      get: () => top,
+      set: (v: number) => (top = v),
+      configurable: true,
+    });
+    await setFocus("top:b");
+    top = 214;
+    await remote.up();
+    await act(async () => {
+      await new Promise((r) => requestAnimationFrame(() => r(null)));
+    });
+    expect(getCurrentFocusKey()).toBe("top:a");
+    expect(top).toBe(0);
+    // On any other row the scroll is left to the row's own scrollIntoView.
+    top = 214;
+    await remote.down();
+    await act(async () => {
+      await new Promise((r) => requestAnimationFrame(() => r(null)));
+    });
+    expect(getCurrentFocusKey()).toBe("top:b");
+    expect(top).toBe(214);
+  });
+
   it("scrolls itself with the arrows when it has nothing to focus", async () => {
     // The credits page is this: longer than the screen, nothing to press. Without the
     // fallback the D-pad would be dead and the bottom unreachable.

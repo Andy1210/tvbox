@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { HEALED_KEY_EVENT } from "@sdk/focusGuard";
 
 // Fires `idle` after idleMs with no key/pointer activity. `suppressed` (e.g.
 // playback is on, or we're not on Home) keeps resetting the timer so the ambient
@@ -39,6 +40,8 @@ export function useIdle(idleMs: number, suppressed: boolean): [boolean, () => vo
     };
     // capture phase so activity anywhere counts, even inside focused widgets
     window.addEventListener("keydown", bump, true);
+    // A press the focus guard spent on healing is stopped before this listener.
+    window.addEventListener(HEALED_KEY_EVENT, bump);
     window.addEventListener("pointermove", bump, true);
     // Both edges, and `bump` is already exactly right for both: going hidden
     // clears an overlay that is up (a launch brokered from voice or MQTT needs no
@@ -57,6 +60,7 @@ export function useIdle(idleMs: number, suppressed: boolean): [boolean, () => vo
     }, 5000);
     return () => {
       window.removeEventListener("keydown", bump, true);
+      window.removeEventListener(HEALED_KEY_EVENT, bump);
       window.removeEventListener("pointermove", bump, true);
       document.removeEventListener("visibilitychange", bump);
       clearInterval(iv);

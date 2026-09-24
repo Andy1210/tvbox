@@ -22,6 +22,7 @@ const MACHINERY = new Set([
   "apps-data", // extracted web bundles
   "bin", // no-root binaries (rclone, librespot)
   "cache",
+  "config-snapshots", // previous copies of config.json (configsnap.js): credentials, not content
   "current", // OTA symlink
   "fileserver", // where the share root used to live (boxes that ran an early build)
   "librespot-cache",
@@ -29,12 +30,11 @@ const MACHINERY = new Set([
   "pyenv",
   "__pycache__",
   "screenframe", // the phone remote's latest picture of the screen
-  "config-snapshots", // earlier copies of config.json
-  "update-keys", // extra keys the update feed may be signed with
   "shares", // network-share mount points; offered as sources in their own right
   "shell", // the dev tree
   "shell-userdata", // Chromium profile: app logins live here
   "update",
+  "update-keys", // extra keys a custom update feed is checked against
   "versions", // OTA releases
 ]);
 

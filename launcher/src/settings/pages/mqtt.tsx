@@ -1,8 +1,9 @@
 import { useState } from "react";
+import { useArmedConfirm } from "../../lib/armedConfirm";
 import { useI18n } from "../../lib/i18n";
 import { useConfigStore } from "../../stores/config";
 import { SettingsPage } from "../SettingsPage";
-import { Group, Note, TextRow, ToggleRow } from "../Rows";
+import { Group, Note, Row, TextRow, ToggleRow } from "../Rows";
 import { useSettingsNav } from "../nav";
 
 // Settings -> Network -> Home Assistant: the MQTT bridge (now-playing sensor,
@@ -20,10 +21,34 @@ export function MqttPage() {
   const nav = useSettingsNav();
   const mqtt = useConfigStore((s) => s.config?.mqtt);
   const setMqtt = useConfigStore((s) => s.setMqtt);
-  const [msg, setMsg] = useState("");
+  const load = useConfigStore((s) => s.load);
+  const [msg, setMsg] = useState<{ text: string; ok?: boolean } | null>(null);
+  // Forgetting is one press away from Home Assistant losing the device, so the
+  // first press only arms it and a second, separate press does it.
+  const confirm = useArmedConfirm();
+  const [forgetting, setForgetting] = useState(false);
+
+  const forget = async () => {
+    // The row stays focusable while this runs, so the cursor does not jump away
+    // from the line saying what is happening; presses meanwhile do nothing.
+    if (forgetting || !confirm.press("forget")) return;
+    setForgetting(true);
+    setMsg(null);
+    let ok = false;
+    try {
+      const res = await fetch("/tvbox/api/mqtt/forget", { method: "POST" });
+      ok = !!((await res.json()) as { ok?: boolean }).ok;
+    } catch {
+      ok = false;
+    }
+    setForgetting(false);
+    if (!ok) return setMsg({ text: t("mqtt.forgetFailed") });
+    setMsg({ text: t("mqtt.forgotten"), ok: true });
+    await load();
+  };
 
   const save = async (patch: Parameters<typeof setMqtt>[0]) => {
-    setMsg("");
+    setMsg(null);
     try {
       await setMqtt({
         host: mqtt?.host ?? "",
@@ -35,13 +60,13 @@ export function MqttPage() {
         ...patch,
       });
     } catch {
-      setMsg(t("mqtt.saveFailed"));
+      setMsg({ text: t("mqtt.saveFailed") });
     }
   };
 
   return (
     <SettingsPage id="mqtt" title={t("mqtt.title")} subtitle={t("mqtt.hint")} onBack={nav.pop} animate="push">
-      {msg && <Note tone="warn">{msg}</Note>}
+      {msg && <Note tone={msg.ok ? "ok" : "warn"}>{msg.text}</Note>}
       <Note>{t("mqtt.offHint")}</Note>
       <Group title={t("mqtt.groupBroker")}>
         <TextRow
@@ -106,6 +131,19 @@ export function MqttPage() {
           onSubmit={(v) => void save({ deviceId: v.trim() })}
         />
       </Group>
+      {mqtt?.configured && (
+        <Group title={t("mqtt.groupForget")} hint={t("mqtt.forgetHint")}>
+          <Row
+            id="forget"
+            label={
+              forgetting ? t("mqtt.forgetting") : confirm.armed === "forget" ? t("mqtt.forgetSure") : t("mqtt.forget")
+            }
+            trailing="none"
+            warn={confirm.armed === "forget" || forgetting}
+            onEnter={() => void forget()}
+          />
+        </Group>
+      )}
     </SettingsPage>
   );
 }
