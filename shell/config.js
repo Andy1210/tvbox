@@ -8,6 +8,7 @@ const os = require("os");
 const crypto = require("crypto");
 const identity = require("./identity"); // per-box identity: hostname-derived device names
 const fsutil = require("./fsutil");
+const canary = require("./canary");
 
 const FILE = path.join(os.homedir(), ".tvbox", "config.json");
 
@@ -119,6 +120,7 @@ function publicConfig() {
       // OTA self-update (updater.js); feed URL itself stays box-local
       auto: !(c.update && c.update.auto === false), // default on
       appsAuto: !(c.update && c.update.appsAuto === false), // nightly registry app updates, default on
+      canary: canary.settings(c.update && c.update.canary), // staged rollout role (canary.js)
     },
     wifi: {
       // Wi-Fi regulatory country (ISO 3166-1 alpha-2). Applied at boot by the
@@ -1031,6 +1033,7 @@ function replaceAll(cfg) {
 }
 
 module.exports = {
+  FILE,
   setFileserver,
   rawFileserver,
   setAppshares,

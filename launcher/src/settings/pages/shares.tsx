@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { useI18n } from "../../lib/i18n";
+import { useArmedConfirm } from "../../lib/armedConfirm";
 import {
   fetchShares,
   saveShare,
@@ -52,9 +53,10 @@ function ShareEditPage({ existing, onDone }: { existing?: ShareRow; onDone: () =
   });
   const [passSet, setPassSet] = useState(!!existing?.hasPass);
   const [busy, setBusy] = useState(false);
+  const [removing, setRemoving] = useState(false);
   const [error, setError] = useState("");
   const [found, setFound] = useState<{ shares?: string[]; dirs?: string[] }>({});
-  const [armRemove, setArmRemove] = useState(false);
+  const confirm = useArmedConfirm();
 
   const set = (patch: ShareInput) => {
     setDraft((d) => ({ ...d, ...patch }));
@@ -83,11 +85,11 @@ function ShareEditPage({ existing, onDone }: { existing?: ShareRow; onDone: () =
   };
 
   const remove = async () => {
-    if (!existing) return;
-    if (!armRemove) return setArmRemove(true); // a TV has one button: arm, then do it
-    setBusy(true);
+    if (!existing || removing) return;
+    if (!confirm.press("remove")) return; // a TV has one button: arm, then do it
+    setRemoving(true);
     await removeShare(existing.name);
-    setBusy(false);
+    setRemoving(false);
     invalidateSummary("shares");
     onDone();
     nav.pop();
@@ -203,7 +205,10 @@ function ShareEditPage({ existing, onDone }: { existing?: ShareRow; onDone: () =
         {existing && (
           <Row
             id="remove"
-            label={armRemove ? t("shares.removeSure") : t("shares.remove")}
+            label={
+              removing ? t("shares.removing") : confirm.armed === "remove" ? t("shares.removeSure") : t("shares.remove")
+            }
+            warn={confirm.armed === "remove"}
             trailing="none"
             onEnter={() => void remove()}
           />

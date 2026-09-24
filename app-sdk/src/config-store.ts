@@ -10,6 +10,7 @@ import {
   type IptvInput,
   type AmbientInput,
   type PublicConfig,
+  type UpdateSettingsPatch,
   type RemoteDeviceConfig,
   type RemotePower,
   saveUi,
@@ -36,7 +37,7 @@ interface ConfigState {
   setIptv: (iptv: IptvInput) => Promise<void>;
   setParental: (p: { pin?: string; lockedGroups?: string[]; requirePin?: boolean }) => Promise<void>;
   setAmbient: (ambient: AmbientInput) => Promise<void>;
-  setUpdate: (update: { auto?: boolean; appsAuto?: boolean }) => Promise<void>;
+  setUpdate: (update: UpdateSettingsPatch) => Promise<void>;
   setUi: (ui: UiInput) => Promise<void>;
   setPlayer: (player: PlayerInput) => Promise<void>;
   setWifi: (wifi: { country: string }) => Promise<void>;

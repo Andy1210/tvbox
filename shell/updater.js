@@ -28,6 +28,7 @@ const config = require("./config");
 const fsutil = require("./fsutil");
 const compositor = require("./compositor"); // a release may require it (see REQUIREMENTS)
 const sysupdate = require("./sysupdate"); // the root half a release may require (see REQUIREMENTS)
+const canary = require("./canary"); // staged rollout across boxes on one broker
 const { isLiteralLanUrl, isAllowedFetchUrl, guardedFetch } = require("./netguard"); // shared self-hosted trust rule (feed may be http to a LAN address)
 const pkg = require("./package.json");
 
@@ -40,6 +41,7 @@ const ATTEMPTS = path.join(UPDATE_DIR, "attempts");
 const FAILED = path.join(UPDATE_DIR, "failed");
 const LAST = path.join(UPDATE_DIR, "last");
 const SYNCED = path.join(UPDATE_DIR, "synced"); // the release whose infra files are in place
+const CANARY_WAIT = path.join(UPDATE_DIR, "canary-wait"); // {version, since}: when a follower first saw a release
 
 const DEFAULT_FEED = "https://github.com/Andy1210/tvbox/releases/latest/download/update.json";
 const FEED_TIMEOUT_MS = 15000;
@@ -73,6 +75,7 @@ const INFRA_FILES = [
   "firetv_tv_codes.example.json", // sample TV code set (LG NEC) for firetv_remote_ir.py
   "firetv_ir_plan.example.json", // a hand-written remote plan carrying real input codes
   "tvbox",
+  "recover.sh", // what the compositor runs when the remote's Home key is held
   "provision.sh",
   "install-libcec8.sh", // provision builds libcec >= 8 from it (no distro package yet)
   // The compositor: what installs it, the release it pins, and the wrapper greetd
@@ -137,6 +140,7 @@ const USER_UNITS = [
 ];
 const EXECUTABLE = [
   "run-shell.sh",
+  "recover.sh", // the compositor exec's it
   "session.sh", // the compositor exec's it
   "tvbox",
   "tvbox-diag.sh",
@@ -167,7 +171,9 @@ const UNIT_WANTS = {
   "tvbox-flatpak-update.timer": "timers.target.wants",
 };
 
-let hooks = { isIdle: () => true, restart: null }; // main.js provides both; the CLI neither
+// main.js provides these; the CLI none. `canaryVouches` is the other boxes'
+// canary topics (mqtt.js), a Map of box id -> canary.parseVouch().
+let hooks = { isIdle: () => true, restart: null, canaryVouches: () => new Map() };
 let state = "idle"; // idle | checking | downloading | installing | restarting | error
 let error = null;
 let latest = null; // validated feed object from the last successful check
@@ -340,6 +346,7 @@ function status() {
     available: !!(latest && cmpVer(latest.version, current) > 0 && !unmet.length),
     lastCheckAt,
     auto: autoEnabled(),
+    canary: canaryStatus(),
     failed: readPair(FAILED),
     last: readLast(),
     os: osStatus(),
@@ -487,6 +494,9 @@ async function check() {
       console.warn("[updater]", feed.version, "needs", unmet.join(", "), "- this box has to be re-provisioned first");
     }
     lastCheckAt = Date.now();
+    // A follower's wait starts when the release is first seen, not at the first
+    // nightly window after it.
+    if (cmpVer(feed.version, pkg.version || "0") > 0) canaryDecision(feed.version, true);
     // An apply that started while this check was in flight owns `state` now.
     if (!applying) state = "idle";
   } catch (e) {
@@ -768,6 +778,21 @@ function readSynced() {
     return null;
   }
 }
+// The on-disk OTA state, for the health view: a pending marker that outlives the
+// boot it was written for, a rollback, or a release whose infra sync never landed
+// are each a box that needs a look.
+function markers() {
+  const rel = runningRelease();
+  const synced = readSynced();
+  return {
+    release: rel,
+    pending: readPair(PENDING),
+    failed: readPair(FAILED),
+    synced,
+    syncBehind: !!(rel && committed && synced !== rel),
+  };
+}
+
 function syncInfraSafely(rel) {
   try {
     syncInfra(rel);
@@ -869,6 +894,89 @@ function applySystem() {
   return status();
 }
 
+// -- staged rollout (canary.js) ---------------------------------------------
+
+function canarySettings() {
+  return canary.settings((config.rawUpdate() || {}).canary);
+}
+
+function readCanaryWait() {
+  try {
+    const w = JSON.parse(fs.readFileSync(CANARY_WAIT, "utf8"));
+    return w && typeof w.version === "string" && Number.isFinite(w.since) ? w : null;
+  } catch (e) {
+    return null;
+  }
+}
+
+// When this box first saw a release on offer that it has not installed. The
+// record survives a restart, and a newer release arriving while one is still
+// waiting keeps the clock: otherwise releases that come faster than the maximum
+// wait would hold a follower back for ever.
+function canaryWaitSince(version, now) {
+  const w = readCanaryWait();
+  if (w && w.version === version) return w.since;
+  const since = w && cmpVer(w.version, pkg.version || "0") > 0 ? w.since : now;
+  try {
+    fs.mkdirSync(UPDATE_DIR, { recursive: true });
+    fsutil.writeJsonAtomic(CANARY_WAIT, { version, since }, { pretty: false });
+  } catch (e) {
+    console.warn("[updater] canary wait:", e.message);
+  }
+  return since;
+}
+
+function vouches() {
+  try {
+    const v = hooks.canaryVouches();
+    return v instanceof Map ? v : new Map();
+  } catch (e) {
+    return new Map();
+  }
+}
+
+// A follower's answer for the release on offer. Read-only unless `record`,
+// because the Settings poller must not start the clock; only the nightly tick does.
+function canaryDecision(version, record) {
+  const cs = canarySettings();
+  if (cs.role !== "follower" || !version) return null;
+  const now = Date.now();
+  const w = readCanaryWait();
+  const pending = w && (w.version === version || cmpVer(w.version, pkg.version || "0") > 0) ? w.since : now;
+  const since = record ? canaryWaitSince(version, now) : pending;
+  return canary.followerDecision({
+    vouches: vouches(),
+    from: cs.from,
+    version,
+    waitSince: since,
+    now,
+    maxWaitHours: cs.maxWaitHours,
+  });
+}
+
+function canaryStatus() {
+  const cs = canarySettings();
+  const offered = latest && cmpVer(latest.version, pkg.version || "0") > 0 ? latest.version : null;
+  const d = offered ? canaryDecision(offered, false) : null;
+  // The boxes publishing a canary topic, so the owner can pick which one to follow.
+  const seen = [...vouches().keys()].sort().slice(0, 32);
+  return { ...cs, seen, decision: d ? { version: offered, reason: d.reason, until: d.until } : null };
+}
+
+// What this box publishes on its canary topic (mqtt.js), or null to clear it.
+// Only an OTA-installed release is vouched for: a dev tree can carry any code
+// under the same version number.
+function canaryReport() {
+  const rel = runningRelease();
+  return canary.report({
+    role: canarySettings().role,
+    version: rel && rel === pkg.version ? rel : null,
+    committed: committed && !readPair(PENDING),
+    runningMs: Date.now() - bootAt,
+    failed: readPair(FAILED),
+  });
+}
+
 // update/failed is "<prev> <next>" (run-shell.sh writes it), so the release that
 // failed to boot is `next`.
 function rolledBack(failed, version) {
@@ -886,6 +994,9 @@ function autoTick() {
   const s = status();
   if (!s.available || s.state !== "idle") return;
   if (rolledBack(s.failed, latest.version)) return;
+  const gate = canaryDecision(latest.version, true);
+  if (gate && !gate.go) return;
+  if (gate) console.log("[updater] canary gate open for", latest.version + ":", gate.reason);
   console.log("[updater] nightly auto-update ->", latest.version);
   apply({ auto: true });
 }
@@ -907,6 +1018,10 @@ module.exports = {
   applySystem,
   clearFailed,
   onLauncherLoaded,
+  markers,
+  canaryReport,
+  canaryDecision, // exported for the test: the follower gate
+  canaryWaitSince, // same: the wait keeps its start across newer releases
   feedSignatureOk, // exported for the test: a non-default feed must be signed
   rolledBack, // exported for the test: a rolled-back release is not installed again
   readCapped, // same: a feed is not buffered past its cap

@@ -62,4 +62,9 @@ function readBootId() {
   }
 }
 
-module.exports = { markHealthy, MARKER };
+// Whether this boot has reached the launcher yet, for the health view.
+function state() {
+  return { reachedLauncher: marked };
+}
+
+module.exports = { markHealthy, state, MARKER };

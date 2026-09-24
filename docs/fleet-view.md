@@ -65,8 +65,29 @@ rather than showing a stale temperature.
     // Nothing on the box reboots itself, so OS updates leave this waiting for a person.
     "os": { "rebootRequired": false, "packages": [] },
   },
+  // Whether it is WORKING (shell/health.js), also at GET /tvbox/api/health.
+  "health": {
+    "status": "ok", // "warn" when `issues` is not empty
+    "issues": [], // threadpool, install-stuck, update-pending, rolled-back,
+    //               infra-sync, recent-crash, launcher-not-loaded
+    "pool": { "ms": 1, "saturated": false }, // one fs.stat through libuv's threadpool
+    "installAgeSec": null, // the oldest install still running
+    "nowPlaying": null, // { state, app, ageSec }: how old the playing claim is
+    "update": { "release": "2.3.0", "pending": false, "failed": null, "synced": "2.3.0" },
+    "lastCrashAt": null,
+    "reachedLauncher": true,
+  },
 }
 ```
+
+The `health` block is what a box looks like when something in it has stopped
+while the television still looks fine: every async fs call, DNS lookup and
+decompression in the shell shares a four-thread pool, and one stuck thread per
+blocked call is enough to freeze all of them; an install that never finished
+keeps the box "busy" and with it every nightly job. The box also publishes a
+**Health** sensor of its own from this topic (the status, with the whole block as
+attributes), under the same device as the now-playing sensor; the version and the
+CPU temperature come from the Home Assistant integration, as before.
 
 ## The three questions it exists for
 

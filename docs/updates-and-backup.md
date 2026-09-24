@@ -83,6 +83,17 @@ loop with no key at all can set `{"update": {"allowUnsigned": true}}`.
 `{"update": {"auto": false}}` disables auto-apply. A release that rolled back is
 not installed again by the nightly run; pressing Update is what retries it.
 
+**Staged rollout.** With several boxes on one MQTT broker, one of them can take
+each release first: Settings → System → Update → Staged rollout, "Goes first" on
+one box and "Waits for the first box" on the others. A follower's nightly
+auto-update then waits until the first box has run the release for an hour, or
+until the longest wait (48 hours by default) has passed since the follower first
+saw the release, so a fleet whose first box is gone still updates. A release the
+first box rolled back is held for up to the longest wait before it is
+auto-installed. Only the box chosen as the first one counts. Manual updates are
+never held.
+Topic and payload: [mqtt-integration.md](mqtt-integration.md).
+
 **Publishing a release:**
 
 ```sh
@@ -276,6 +287,17 @@ command line: any user on the box can read one out of `/proc` while it runs.
 > second box then finds nothing under its own key and mints or asks for its
 > own. Without this, two boxes restored from one backup registered as a
 > SINGLE Plex player, and the second box carried the first one's media login.
+
+### Previous settings (no phone needed)
+
+Settings → System → Previous settings lists copies of `config.json` the box
+kept by itself: one a couple of minutes after each start that reached the home
+screen, when the config differs from the newest copy, the last five kept
+(`~/.tvbox/config-snapshots/`, mode 0600). Restoring one keeps the current
+settings as a copy first, replaces `config.json` and restarts the shell. It is
+the settings only: apps, their data and the launcher's own preferences are not
+touched. The copies never leave the box; the route that lists them answers the
+launcher alone.
 
 ### Restore is a reconciliation, not a file copy
 

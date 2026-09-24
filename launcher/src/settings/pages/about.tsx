@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useI18n } from "../../lib/i18n";
 import { fetchSystemInfo, type SystemInfo } from "../../lib/system";
+import { fetchHealth, type HealthReport } from "../../lib/health";
 import { SettingsPage } from "../SettingsPage";
 import { Group, InfoRow, Note, Row } from "../Rows";
 import { useSettingsNav } from "../nav";
@@ -75,8 +76,14 @@ export function AboutPane() {
   const { t } = useI18n();
   const nav = useSettingsNav();
   const [info, setInfo] = useState<SystemInfo | null>(null);
+  const [health, setHealth] = useState<HealthReport | null>(null);
   const alive = useRef(true);
-  const refresh = useCallback(() => void fetchSystemInfo().then((i) => i && alive.current && setInfo(i)), []);
+  const refresh = useCallback(() => {
+    void fetchSystemInfo().then((i) => i && alive.current && setInfo(i));
+    // A failed read clears the row back to a dash rather than leaving the last
+    // answer on screen as if it were current.
+    void fetchHealth().then((h) => alive.current && setHealth(h));
+  }, []);
 
   useEffect(() => {
     alive.current = true;
@@ -95,6 +102,10 @@ export function AboutPane() {
   const wifi = info && info.wifi.ssid ? `${info.wifi.ssid} · ${info.wifi.signal ?? DASH}%` : DASH;
   const temp = info && info.cpuTempC != null ? `${info.cpuTempC.toFixed(1)} °C` : DASH;
   const mem = info ? `${fmtGb(info.mem.availableKb)} / ${fmtGb(info.mem.totalKb)} GB` : DASH;
+  // The row says whether anything is wrong; each issue then gets a line of its own
+  // under the group's title, in words, because a row's value is cut to one short line.
+  const healthLine = !health ? DASH : health.status === "ok" ? t("about.statusOk") : t("about.statusWarn");
+  const issues = health && health.status !== "ok" ? health.issues.map((i) => capitalise(t("health." + i))) : [];
   const disk = info?.disk
     ? `${(info.disk.freeBytes / 1e9).toFixed(1)} / ${(info.disk.totalBytes / 1e9).toFixed(1)} GB`
     : DASH;
@@ -114,7 +125,15 @@ export function AboutPane() {
         <InfoRow label={t("about.ip")} value={info?.ip || DASH} />
         <InfoRow label={t("about.wifi")} value={wifi} />
       </Group>
-      <Group title={t("about.groupHealth")}>
+      <Group
+        title={t("about.groupHealth")}
+        notes={issues.map((line) => (
+          <Note key={line} tone="warn">
+            {line}
+          </Note>
+        ))}
+      >
+        <InfoRow label={t("about.status")} value={healthLine} />
         <InfoRow label={t("about.cpuTemp")} value={temp} />
         <InfoRow label={t("about.memory")} value={mem} />
         <InfoRow label={t("about.storage")} value={disk} />
@@ -129,4 +148,8 @@ export function AboutPane() {
       </Group>
     </SettingsPage>
   );
+}
+
+function capitalise(text: string) {
+  return text ? text.charAt(0).toLocaleUpperCase() + text.slice(1) : text;
 }

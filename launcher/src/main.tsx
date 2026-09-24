@@ -1,6 +1,7 @@
 import { createRoot } from "react-dom/client";
 import { initSpatialNavigation } from "@sdk/spatial-nav";
 import { startGamepadNav } from "@sdk/gamepad";
+import { installFocusGuard } from "@sdk/focusGuard";
 import { App } from "./App";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 import "./index.css";
@@ -18,6 +19,11 @@ initSpatialNavigation({
 // one. Translate a pad into the same arrows/Enter/Back the bridges emit. Idle cost
 // is zero until a pad actually connects.
 startGamepadNav();
+
+// A cursor left pointing at a component that has gone is put back where the screen
+// on display says it belongs (see app-sdk/src/focusGuard.ts). Before the first
+// render, so its capture listener runs ahead of every other key handler.
+installFocusGuard();
 
 // Auto-hide the mouse cursor: hidden by default (D-pad UI), shown for ~2.5s when
 // a mouse actually moves - so a connected mouse works but an idle pointer never

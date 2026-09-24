@@ -14,6 +14,8 @@ const backup = require("./backup");
 const backupPairing = require("./pairing/backup");
 const bluetooth = require("./bluetooth");
 const config = require("./config");
+const configsnap = require("./configsnap");
+const canary = require("./canary");
 const firetvir = require("./firetvir");
 const httpserver = require("./httpserver");
 const ir = require("./ir");
@@ -68,6 +70,11 @@ function post(p, data, res, ctx, caller) {
       const upd = {};
       if (data.update.auto !== undefined) upd.auto = data.update.auto !== false;
       if (data.update.appsAuto !== undefined) upd.appsAuto = data.update.appsAuto !== false;
+      // The staged-rollout role, normalised: anything unknown is "off".
+      if (data.update.canary && typeof data.update.canary === "object") {
+        const prev = canary.settings((config.rawUpdate() || {}).canary);
+        upd.canary = canary.settings({ ...prev, ...data.update.canary });
+      }
       config.setUpdate(upd);
       changed.push("update");
     }
@@ -327,6 +334,17 @@ function post(p, data, res, ctx, caller) {
     // launcher hands over its localStorage snapshot right before the backup QR
     backupPairing.setContext(data);
     return httpserver.jsonRes(res, { ok: true });
+  }
+  if (p === "/tvbox/api/backup/snapshots/restore") {
+    const r = configsnap.restore(data.id, (cfg) => config.replaceAll(cfg));
+    // Plugins and the bridges read the config at start, so a restore is a restart,
+    // the same as restoring a backup.
+    if (r.ok) ctx.restoredRestart("settings snapshot restored");
+    return httpserver.jsonRes(res, r);
+  }
+  if (p === "/tvbox/api/mqtt/forget") {
+    ctx.forgetMqtt((e) => httpserver.jsonRes(res, e ? { ok: false, error: e.message } : { ok: true }));
+    return;
   }
   if (p === "/tvbox/api/backup/pending-localstorage/clear") {
     backup.clearPendingLocalStorage();

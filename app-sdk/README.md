@@ -47,3 +47,23 @@ the `window.tvbox` bridge, the box's HTTP routes and the host plugin API, is
 [docs/capabilities.md](../docs/capabilities.md), and
 [tvbox-apps/AUTHORING.md](https://github.com/Andy1210/tvbox-apps/blob/main/AUTHORING.md)
 covers the package layout and how to publish.
+
+## A cursor on nothing, and an answer to an old question
+
+Two helpers for the remote's two quiet failures:
+
+- `setFocusFallback(provider)` + `installFocusGuard()` (focusGuard.ts): when the
+  focused key no longer exists, the next navigation key (or the window becoming
+  visible) puts the cursor where the screen says it belongs.
+- `useLatestRequest(fn, deps)` and `useLatest()` (useLatestRequest.ts): a request
+  started from a changing input keeps only the newest answer. `fn` gets an
+  `AbortSignal` that is aborted when a newer request starts or the component
+  unmounts; `useLatest().start()` is the same guard for an event handler, with
+  `current()` to check before using an answer.
+
+```tsx
+const { data, error, loading, reload } = useLatestRequest(
+  (signal) => fetch("/api/item/" + id, { signal }).then((r) => r.json()),
+  [id],
+);
+```

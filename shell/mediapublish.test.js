@@ -256,3 +256,43 @@ test("a reconnect restates the retained topics, the unchanged state included", a
   assert.strictEqual(states(), before.states + 1, "the same state goes out again, forced");
   assert.ok(log.published.filter((p) => p[0] === "nowplaying").length >= 2);
 });
+
+test("the diag payload carries the health report and the canary topic is restated with it", async () => {
+  const log = boot();
+  const canary = [];
+  log.handlers = null;
+  mediapublish.init({
+    health: { collect: (cb) => cb({ status: "ok", issues: [] }) },
+    canaryReport: () => ({ version: "9.9.9", healthy: false }),
+  });
+  mediapublish.applyConfig();
+  const ctl = mediapublish.control();
+  ctl.publishCanary = (r) => canary.push(r);
+  log.published.length = 0;
+  mediapublish.publishDiag();
+  const diag = log.published.find(([t]) => t === "diag");
+  assert.deepStrictEqual(diag[1].health, { status: "ok", issues: [] });
+  assert.deepStrictEqual(canary, [{ version: "9.9.9", healthy: false }]);
+  mediapublish.init({ health: null, canaryReport: () => null });
+});
+
+test("forget turns the bridge off and removes the broker settings, but only once it is confirmed", () => {
+  const log = boot();
+  const cleared = [];
+  mediapublish.init({ config: { rawMqtt: () => ({ host: "h" }), setMqtt: (m) => cleared.push(m) } });
+  mediapublish.applyConfig();
+  let ctl = mediapublish.control();
+  ctl.forget = (cb) => cb(new Error("broker did not confirm"));
+  const stopsBefore = log.stops;
+  let answer;
+  mediapublish.forget((e) => (answer = e));
+  assert.ok(answer, "a failure is reported");
+  assert.deepStrictEqual(cleared, [], "and the settings are kept");
+  assert.ok(log.stops > stopsBefore, "the bridge is brought back up");
+  ctl = mediapublish.control();
+  ctl.forget = (cb) => cb(null);
+  mediapublish.forget((e) => (answer = e));
+  assert.strictEqual(answer, null);
+  assert.deepStrictEqual(cleared, [{ host: "" }]);
+  assert.strictEqual(mediapublish.control(), null);
+});

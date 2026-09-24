@@ -310,7 +310,10 @@
     "groupNetwork": "Network",
     "groupHealth": "Health",
     "refresh": "Refresh",
-    "irdbNotice": "Contains/accesses irdb by Simon Peter and contributors, used under permission. For licensing details and for information on how to contribute to the database, see https://github.com/probonopd/irdb"
+    "irdbNotice": "Contains/accesses irdb by Simon Peter and contributors, used under permission. For licensing details and for information on how to contribute to the database, see https://github.com/probonopd/irdb",
+    "status": "Status",
+    "statusOk": "Everything is working",
+    "statusWarn": "Needs a look"
   },
   "aboutCredits": {
     "electron": "app shell",
@@ -486,7 +489,36 @@
       "unsigned-feed": "This update is not signed, so the box will not install its system part.",
       "up-to-date": "The system part is up to date."
     },
-    "sysFeedMismatch": "The system part is up to date, but this version wants a newer one - the box and the update server disagree."
+    "sysFeedMismatch": "The system part is up to date, but this version wants a newer one - the box and the update server disagree.",
+    "groupCanary": "Staged rollout",
+    "canaryHint": "With several boxes on the same broker, one can try a release before the others take it overnight.",
+    "canaryRole": "This box",
+    "canaryRoleNote": "Manual updates are never held back. Only the nightly automatic update waits.",
+    "canaryRoles": {
+      "off": "Updates on its own",
+      "canary": "Goes first",
+      "follower": "Waits for the first box"
+    },
+    "canaryRoleHints": {
+      "off": "The usual nightly update, whatever other boxes do.",
+      "canary": "Takes each release first and tells the others once it has run on it for an hour.",
+      "follower": "Waits until a box that goes first has run the release, or until the waiting time is up."
+    },
+    "canaryWait": "Longest wait",
+    "canaryWaitHint": "After this the update goes ahead even if the box it follows did not vouch for it.",
+    "canaryHours": "{n} hours",
+    "canaryDays": "{n} days",
+    "canaryRoleTitle": "Role of this box",
+    "canaryFrom": "Box that goes first",
+    "canaryFromHint": "Only this box's word counts. With none chosen, the update waits the longest wait.",
+    "canaryFromNone": "None",
+    "canaryFromEmpty": "No box on the broker goes first yet. Set one to go first, then choose it here.",
+    "canaryNeedsBroker": "Needs the Home Assistant broker (MQTT), which is where the boxes find each other.",
+    "canaryChoose": "Choose the box that goes first. Until then an update waits until {date} at the latest.",
+    "canaryChooseOne": "{box} goes first on this broker: choose it under Box that goes first. Until then an update waits until {date} at the latest.",
+    "canaryWaiting": "Waiting for the first box before installing {version}, at the latest until {date}.",
+    "canaryRolledBack": "The box that goes first rolled {version} back, so it installs automatically only after the longest wait.",
+    "canarySaveFailed": "Could not save that. Try again."
   },
   "hostname": {
     "title": "Device name",
@@ -621,7 +653,14 @@
     "portDefault": "1883",
     "portDefaultTls": "8883",
     "tls": "Encrypted connection (TLS)",
-    "tlsHint": "mqtts://, with the broker's certificate checked. The broker has to offer TLS, usually on port 8883."
+    "tlsHint": "mqtts://, with the broker's certificate checked. The broker has to offer TLS, usually on port 8883.",
+    "groupForget": "Remove from Home Assistant",
+    "forgetHint": "Clears everything this box keeps on the broker, so Home Assistant drops its sensors and buttons, and turns the connection off. The tvbox integration entry, if you added one, is removed in Home Assistant itself.",
+    "forget": "Forget this box",
+    "forgetSure": "Forget it? Press again",
+    "forgetting": "Removing...",
+    "forgotten": "Removed from the broker. The connection is off.",
+    "forgetFailed": "Could not reach the broker. Nothing was removed."
   },
   "ir": {
     "title": "IR blaster (TV, soundbar)",
@@ -982,6 +1021,7 @@
     "save": "Save",
     "remove": "Remove this share",
     "removeSure": "Press again to remove",
+    "removing": "Removing…",
     "pickShare": "Pick a share",
     "pickFolder": "Step into a folder",
     "pickFolderHint": "Or leave the folder empty to mount the whole share.",
@@ -1079,5 +1119,25 @@
   "crash": {
     "restarted": "The box restarted",
     "restartedMsg": "Something went wrong and the box restarted itself. Anything that was playing has stopped."
+  },
+  "snapshots": {
+    "title": "Previous settings",
+    "rowHint": "Go back to how the box was set up earlier",
+    "hint": "The box keeps a copy of its settings from each of its last few starts. Restoring one restarts the box, and the current settings are kept as a copy first.",
+    "none": "No copies yet. The first one is kept a few minutes after the box starts.",
+    "restore": "Press to restore",
+    "restoreSure": "Restore these settings? Press again",
+    "restoring": "Restoring…",
+    "failed": "That copy could not be restored."
+  },
+  "health": {
+    "threadpool": "background work is stuck",
+    "install-stuck": "an install never finished",
+    "update-pending": "an update did not finish starting",
+    "rolled-back": "an update was rolled back",
+    "infra-sync": "an update is only partly installed",
+    "recent-crash": "restarted after a crash today",
+    "launcher-not-loaded": "the home screen did not load",
+    "report-failed": "the check could not run"
   }
 }

@@ -11,6 +11,7 @@ import type { DisplayStatus } from "../lib/display";
 import type { SystemInfo } from "../lib/system";
 import type { RegionInfo } from "../lib/region";
 import type { UpdateStatus } from "../lib/update";
+import type { HealthReport } from "../lib/health";
 import type { PublicConfig } from "../lib/config";
 import { FALLBACK_APPS, type StoreEntry } from "../lib/api";
 
@@ -48,7 +49,7 @@ export const CONFIG: PublicConfig = {
   parental: { pinSet: false, lockedGroups: [], requirePin: false },
   spotify: { deviceName: "tvbox demo", hasCredentials: true, enabled: true },
   ambient: { enabled: true, idleMinutes: 5, city: "Budapest", sleepMinutes: 0, bing: false },
-  update: { auto: true, appsAuto: true },
+  update: { auto: true, appsAuto: true, canary: { role: "off", maxWaitHours: 48 } },
   ui: { hourFormat: "auto", navSounds: true },
   wifi: { country: "" },
   bluetooth: { disableErtm: false },
@@ -316,6 +317,7 @@ export const UPDATE_STATUS: UpdateStatus = {
   available: false,
   lastCheckAt: null,
   auto: true,
+  canary: { role: "off", maxWaitHours: 48, decision: null },
   failed: null,
   last: { from: "2.0.3", to: "2.1.0", at: Date.now() - 3 * 24 * 3600 * 1000 },
   os: { rebootRequired: false, packages: [] },
@@ -503,4 +505,22 @@ export const REGION: RegionInfo = {
     "dvorak",
     "colemak",
   ],
+};
+
+// Two kept copies of the config, a day and a week old.
+export const CONFIG_SNAPSHOTS = [
+  { id: String(Date.now() - 24 * 3600 * 1000), at: Date.now() - 24 * 3600 * 1000 },
+  { id: String(Date.now() - 7 * 24 * 3600 * 1000), at: Date.now() - 7 * 24 * 3600 * 1000 },
+];
+
+export const HEALTH: HealthReport = {
+  at: "",
+  status: "ok",
+  issues: [],
+  pool: { ms: 1, saturated: false },
+  installAgeSec: null,
+  nowPlaying: null,
+  update: { release: "2.1.0", pending: false, failed: null, synced: "2.1.0" },
+  lastCrashAt: null,
+  reachedLauncher: true,
 };

@@ -272,6 +272,25 @@ export function SettingsPage({
     return () => window.removeEventListener("keydown", onKey, true);
   }, [focusPolicy]);
 
+  // Reaching the topmost row brings the whole top of the page back. The rows
+  // scroll with block:"nearest" plus a scroll padding, which is enough for a title,
+  // but a page may carry more than a title above its first row (the update page's
+  // status and release notes), and nothing above that row can take focus to pull
+  // it into view.
+  useEffect(() => {
+    if (focusPolicy !== "own") return;
+    const onKey = (ev: KeyboardEvent) => {
+      if (ev.key !== "ArrowUp") return;
+      requestAnimationFrame(() => {
+        const root = scrollRef.current;
+        const first = root?.querySelector<HTMLElement>("[data-sfocus]");
+        if (root && first && first.dataset.sfocus === getCurrentFocusKey() && root.scrollTop > 0) root.scrollTop = 0;
+      });
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [focusPolicy]);
+
   return (
     <div
       ref={scrollRef}
@@ -289,7 +308,9 @@ export function SettingsPage({
       // hides the title above it.
       style={{ scrollPaddingTop: "14vh", scrollPaddingBottom: "8vh" }}
     >
-      <div className={width === "list" ? "max-w-[58vw]" : undefined}>
+      {/* Room under the last row: scroll padding only applies where there is
+          content to scroll to, so without it the bottom row sits on the edge. */}
+      <div className={(width === "list" ? "max-w-[58vw] " : "") + "pb-[6vh]"}>
         {title && (
           <div className="pb-[2.4vh]">
             <h2 className="text-[3.1vh] font-bold leading-tight flex items-center gap-[0.8vw]">

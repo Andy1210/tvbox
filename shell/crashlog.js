@@ -100,6 +100,16 @@ function takeNotice(file) {
   }
 }
 
+// When the shell last crashed, from the log's mtime: the log is appended per
+// crash, so its last write is the newest one. Null with no crash on record.
+function lastCrashAt(file) {
+  try {
+    return fs.statSync(file || CRASH_LOG).mtimeMs;
+  } catch (e) {
+    return null;
+  }
+}
+
 let crashing = false;
 
 /**
@@ -211,6 +221,7 @@ module.exports = {
   writeCrashLog,
   markNotice,
   takeNotice,
+  lastCrashAt,
   CRASH_LOG,
   CRASH_LOG_MAX,
   CRASH_STACK_MAX,

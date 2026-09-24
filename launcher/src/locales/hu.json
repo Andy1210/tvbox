@@ -309,8 +309,11 @@
     "groupDevice": "Eszköz",
     "groupNetwork": "Hálózat",
     "groupHealth": "Állapot",
-    "refresh": "Frissítés",
-    "irdbNotice": "Contains/accesses irdb by Simon Peter and contributors, used under permission. For licensing details and for information on how to contribute to the database, see https://github.com/probonopd/irdb"
+    "refresh": "Adatok frissítése",
+    "irdbNotice": "Contains/accesses irdb by Simon Peter and contributors, used under permission. For licensing details and for information on how to contribute to the database, see https://github.com/probonopd/irdb",
+    "status": "Állapot",
+    "statusOk": "Minden rendben működik",
+    "statusWarn": "Figyelmet igényel"
   },
   "aboutCredits": {
     "electron": "alkalmazásváz",
@@ -486,7 +489,36 @@
       "unsigned-feed": "Ez a frissítés nincs aláírva, ezért a doboz nem telepíti a rendszer részét.",
       "up-to-date": "A rendszer része naprakész."
     },
-    "sysFeedMismatch": "A rendszer része naprakész, de ez a verzió újabbat kér - a doboz és a frissítési kiszolgáló nincs szinkronban."
+    "sysFeedMismatch": "A rendszer része naprakész, de ez a verzió újabbat kér - a doboz és a frissítési kiszolgáló nincs szinkronban.",
+    "groupCanary": "Lépcsőzetes frissítés",
+    "canaryHint": "Ha több box is ugyanazt a brokert használja, az egyik kipróbálhat egy kiadást, mielőtt a többi éjszaka megkapja.",
+    "canaryRole": "Ez a box",
+    "canaryRoleNote": "A kézi frissítést ez soha nem tartja vissza, csak az éjszakai automatikus frissítés vár.",
+    "canaryRoles": {
+      "off": "Önállóan frissül",
+      "canary": "Elsőként frissül",
+      "follower": "Megvárja az elsőt"
+    },
+    "canaryRoleHints": {
+      "off": "A szokásos éjszakai frissítés, a többi boxtól függetlenül.",
+      "canary": "Minden kiadást elsőként telepít, és egy óra hibátlan futás után szól a többieknek.",
+      "follower": "Addig vár, amíg egy elsőként frissülő box le nem futtatta a kiadást, vagy le nem telik a várakozási idő."
+    },
+    "canaryWait": "Leghosszabb várakozás",
+    "canaryWaitHint": "Ennyi idő után akkor is frissít, ha a követett box nem jelezte, hogy rendben van.",
+    "canaryHours": "{n} óra",
+    "canaryDays": "{n} nap",
+    "canaryRoleTitle": "A box szerepe",
+    "canaryFrom": "Elsőként frissülő box",
+    "canaryFromHint": "Csak ennek a boxnak a jelzése számít. Ha nincs kiválasztva, a frissítés kivárja a leghosszabb várakozást.",
+    "canaryFromNone": "Nincs",
+    "canaryFromEmpty": "A brokeren még egyik box sem frissül elsőként. Állíts be egyet elsőként frissülőnek, majd válaszd ki itt.",
+    "canaryNeedsBroker": "Ehhez a Home Assistant brokere (MQTT) kell, azon keresztül találják meg egymást a boxok.",
+    "canaryChoose": "Válaszd ki, melyik box frissüljön elsőként. Addig egy frissítés vár, legkésőbb eddig: {date}.",
+    "canaryChooseOne": "Ezen a brokeren a(z) {box} frissül elsőként: válaszd ki az Elsőként frissülő box alatt. Addig egy frissítés vár, legkésőbb eddig: {date}.",
+    "canaryWaiting": "A(z) {version} telepítése előtt az első boxra vár, legkésőbb eddig: {date}.",
+    "canaryRolledBack": "Az elsőként frissülő box visszaállt a(z) {version} kiadásról, ezért ez csak a leghosszabb várakozás után települ automatikusan.",
+    "canarySaveFailed": "Nem sikerült menteni. Próbáld újra."
   },
   "hostname": {
     "title": "Eszköz neve",
@@ -621,7 +653,14 @@
     "portDefault": "1883",
     "portDefaultTls": "8883",
     "tls": "Titkosított kapcsolat (TLS)",
-    "tlsHint": "mqtts://, a bróker tanúsítványának ellenőrzésével. A brókernek TLS-t kell kínálnia, általában a 8883-as porton."
+    "tlsHint": "mqtts://, a broker tanúsítványának ellenőrzésével. A brokernek TLS-t kell kínálnia, általában a 8883-as porton.",
+    "groupForget": "Eltávolítás a Home Assistantből",
+    "forgetHint": "Törli mindazt, amit ez a box a brokeren tart, így a Home Assistant eldobja a szenzorait és gombjait, a kapcsolatot pedig kikapcsolja. A tvbox integráció bejegyzését, ha felvetted, magában a Home Assistantben kell törölni.",
+    "forget": "Box elfelejtése",
+    "forgetSure": "Biztosan? Nyomd meg újra",
+    "forgetting": "Eltávolítás...",
+    "forgotten": "Eltávolítva a brokerről. A kapcsolat ki van kapcsolva.",
+    "forgetFailed": "Nem érhető el a broker. Semmi sem lett törölve."
   },
   "ir": {
     "title": "IR jeladó (TV, hangprojektor)",
@@ -982,6 +1021,7 @@
     "save": "Mentés",
     "remove": "Megosztás törlése",
     "removeSure": "Nyomd meg újra a törléshez",
+    "removing": "Törlés…",
     "pickShare": "Válassz megosztást",
     "pickFolder": "Lépj be egy mappába",
     "pickFolderHint": "Vagy hagyd üresen a mappát, és a teljes megosztás csatolódik.",
@@ -1079,5 +1119,25 @@
   "crash": {
     "restarted": "A doboz újraindult",
     "restartedMsg": "Hiba történt, és a doboz újraindította magát. Ami ment, az leállt."
+  },
+  "snapshots": {
+    "title": "Korábbi beállítások",
+    "rowHint": "Visszatérés a box egy korábbi beállításához",
+    "hint": "A box az utolsó néhány indításakor elment egy másolatot a beállításairól. Egy visszaállítás újraindítja a boxot, és előtte a mostani beállításokról is másolat készül.",
+    "none": "Még nincs másolat. Az első néhány perccel a box indulása után készül el.",
+    "restore": "Nyomd meg a visszaállításhoz",
+    "restoreSure": "Visszaállítod ezeket a beállításokat? Nyomd meg újra",
+    "restoring": "Visszaállítás…",
+    "failed": "Ezt a másolatot nem sikerült visszaállítani."
+  },
+  "health": {
+    "threadpool": "elakadt a háttérmunka",
+    "install-stuck": "egy telepítés nem fejeződött be",
+    "update-pending": "egy frissítés nem indult el teljesen",
+    "rolled-back": "egy frissítés vissza lett állítva",
+    "infra-sync": "egy frissítés csak részben települt",
+    "recent-crash": "ma hiba miatt újraindult",
+    "launcher-not-loaded": "a kezdőképernyő nem töltődött be",
+    "report-failed": "az ellenőrzés nem futott le"
   }
 }

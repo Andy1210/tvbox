@@ -69,4 +69,29 @@ describe("the Home Assistant (MQTT) form", () => {
     expect(sent.deviceId).toBe("gaming");
     expect(sent.password).toBe(""); // the shell's "keep the stored one"
   });
+
+  it("after a successful forget the old broker is gone even if the reload fails", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      vi.stubGlobal("fetch", (url: string) => {
+        if (String(url).includes("/mqtt/forget")) return Promise.resolve(new Response(JSON.stringify({ ok: true })));
+        return Promise.resolve(new Response("down", { status: 503 }));
+      });
+      const view = render(<MqttPage />);
+      await settle();
+      await setFocus("mqtt:forget");
+      await remote.ok(); // arms
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(700);
+      });
+      await remote.ok(); // confirms
+      await settle();
+      await settle();
+      expect(useConfigStore.getState().config?.mqtt.host).toBe("");
+      expect(useConfigStore.getState().config?.mqtt.configured).toBe(false);
+      expect(view.container.textContent).not.toContain("192.168.1.10");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });

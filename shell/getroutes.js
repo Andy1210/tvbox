@@ -22,6 +22,8 @@ const config = require("./config");
 const display = require("./display");
 const fileserver = require("./fileserver");
 const firetvir = require("./firetvir");
+const health = require("./health");
+const configsnap = require("./configsnap");
 const httpserver = require("./httpserver");
 const images = require("./images");
 const apps = require("./install");
@@ -187,6 +189,17 @@ function get(p, req, res, ctx) {
   }
   if (p === "/tvbox/api/update/status") {
     httpserver.jsonRes(res, updater.status());
+    return true;
+  }
+  // Answers within a couple of seconds even with the threadpool stuck, which is
+  // one of the things it reports.
+  if (p === "/tvbox/api/health") {
+    health.collect((r) => httpserver.jsonRes(res, r));
+    return true;
+  }
+  // Dates only; the copies themselves never leave the box. Launcher only (apigate).
+  if (p === "/tvbox/api/backup/snapshots") {
+    httpserver.jsonRes(res, { snapshots: configsnap.list() });
     return true;
   }
   if (p === "/tvbox/api/backup/status") {

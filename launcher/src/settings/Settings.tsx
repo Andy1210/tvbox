@@ -1,5 +1,6 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { setFocus } from "@noriginmedia/norigin-spatial-navigation";
+import { setFocusFallback } from "@sdk/focusGuard";
 import { useI18n } from "../lib/i18n";
 import { useBackspace } from "../lib/useBackspace";
 import { SettingsNavProvider } from "./nav";
@@ -45,6 +46,24 @@ export function Settings({ onExit }: { onExit: () => void }) {
     void setFocus("rail:" + CATEGORIES[0].id);
   }, []);
 
+  // A lost cursor comes back to the category on screen, else the first one. With a
+  // page pushed over the rail it goes to that page's first row instead, and a page
+  // with no rows at all (the credits) gets nothing: its arrows scroll it, and
+  // lighting up the rail behind it would both mislead and spend the press.
+  // Registered once (see Home): the category is read through a ref.
+  const depth = useRef(0);
+  const pane = useRef<HTMLDivElement>(null);
+  const catRef = useRef(cat);
+  catRef.current = cat;
+  useEffect(
+    () =>
+      setFocusFallback(() => {
+        if (depth.current === 0) return ["rail:" + catRef.current, "rail:" + CATEGORIES[0].id];
+        return pane.current?.querySelector<HTMLElement>("[data-sfocus]")?.dataset.sfocus || null;
+      }),
+    [],
+  );
+
   const current = CATEGORIES.find((c) => c.id === cat) || CATEGORIES[0];
 
   return (
@@ -52,6 +71,7 @@ export function Settings({ onExit }: { onExit: () => void }) {
       {(stack) => {
         const top = stack[stack.length - 1];
         const wide = !!top?.wide;
+        depth.current = stack.length;
         return (
           <div className="h-full flex flex-col px-[4.5vw] pt-[3.4vh]">
             <h1 className="text-[3.6vh] font-bold leading-none mb-[2.8vh] shrink-0">{t("settings.title")}</h1>
@@ -60,8 +80,19 @@ export function Settings({ onExit }: { onExit: () => void }) {
               {/* Only the top of the stack is mounted. A level below stays in the
                   spatial-nav tree if it is merely hidden, and the D-pad would then
                   reach rows nobody can see. */}
-              <div className="flex-1 min-w-0">
-                {top ? <div key={top.id}>{top.render()}</div> : <div key={cat}>{current.render()}</div>}
+              {/* Full height down to the page, so the page's own container is
+                  the one that scrolls: the title and the rail stay put, and its
+                  bottom padding is reachable. */}
+              <div ref={pane} className="flex-1 min-w-0 h-full">
+                {top ? (
+                  <div key={top.id} className="h-full">
+                    {top.render()}
+                  </div>
+                ) : (
+                  <div key={cat} className="h-full">
+                    {current.render()}
+                  </div>
+                )}
               </div>
             </div>
           </div>

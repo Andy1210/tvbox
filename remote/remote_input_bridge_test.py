@@ -426,6 +426,48 @@ try:
 finally:
     rib.log = real_log
 
+
+
+class FakeUi:
+    def __init__(self):
+        self.keys = []
+
+    def write(self, etype, code, value):
+        self.keys.append((code, value))
+
+    def syn(self):
+        pass
+
+
+class FakeEmit:
+    """Just enough of Bridge for emit."""
+
+    def __init__(self, native):
+        self.native = native
+        self.ui = FakeUi()
+        self.posts = []
+
+    def shell_post(self, url, payload):
+        self.posts.append((url, payload))
+
+
+# In front of a native app, Home asks the shell to come back AND still reaches the
+# compositor as a key, because holding it there is the recovery for a shell that
+# did not answer.
+fe = FakeEmit(native=True)
+rib.Bridge.emit(fe, rib.e.KEY_HOMEPAGE, 1)
+rib.Bridge.emit(fe, rib.e.KEY_HOMEPAGE, 2)
+rib.Bridge.emit(fe, rib.e.KEY_HOMEPAGE, 0)
+check("native Home asks the shell once", fe.posts, [(rib.NAV_URL, {"dest": "home"})])
+check(
+    "and the key still goes out, press, repeat and release",
+    fe.ui.keys,
+    [(rib.e.KEY_HOMEPAGE, 1), (rib.e.KEY_HOMEPAGE, 2), (rib.e.KEY_HOMEPAGE, 0)],
+)
+fe = FakeEmit(native=False)
+rib.Bridge.emit(fe, rib.e.KEY_HOMEPAGE, 1)
+check("outside a native app Home is only a key", (fe.posts, fe.ui.keys), ([], [(rib.e.KEY_HOMEPAGE, 1)]))
+
 if FAILED:
     print("\n%d FAILED: %s" % (len(FAILED), ", ".join(FAILED)))
     sys.exit(1)
