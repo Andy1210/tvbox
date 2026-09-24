@@ -203,16 +203,46 @@
       <p class="hint" id="msg"></p>
     </div>
 
+    <script src="/tvbox-seal.js" data-v="2"></script>
     <script>
-      // The token is this phone's, and it is the only thing that gets it in. It
+      // The key is this phone's, and it is the only thing that gets it in. It
       // lives in localStorage so the page is a bookmark rather than a pairing
       // ceremony every time - which is the whole point of adopting a phone
-      // instead of running a session.
-      var KEY = "tvbox-remote-token";
-      var token = null;
+      // instead of running a session. It never crosses the network after the
+      // adoption: every request is signed with it (tvboxSeal.lib).
+      var KEY = "tvbox-remote-v2";
+      var lib = tvboxSeal.lib;
+      var me = null; // { id, key: Uint8Array, skew }
+      var retired = false;
       try {
-        token = localStorage.getItem(KEY);
+        var saved = JSON.parse(localStorage.getItem(KEY) || "null");
+        if (saved && saved.id && lib.key(saved.key))
+          me = { id: saved.id, key: lib.key(saved.key), skew: saved.skew || 0, raw: saved.key };
+        // A phone paired before requests were signed holds a bare token, which the
+        // box no longer accepts: it pairs again.
+        if (localStorage.getItem("tvbox-remote-token")) {
+          localStorage.removeItem("tvbox-remote-token");
+          retired = !me;
+        }
       } catch (e) {}
+      // The one-time key and the code came in the fragment. Read, then taken out of
+      // the address bar, so a bookmark or a shared link does not carry them.
+      var oneTime = null;
+      var fromQr = tvboxSeal.code;
+      (function () {
+        var m = /[#&]k=([A-Za-z0-9_-]+)/.exec(location.hash || "");
+        if (m) oneTime = lib.key(m[1]);
+        if (location.hash) history.replaceState(null, "", location.pathname);
+      })();
+      function remember() {
+        try {
+          localStorage.setItem(KEY, JSON.stringify({ id: me.id, key: me.raw, skew: me.skew }));
+        } catch (e) {}
+      }
+      function signed(method, path, body) {
+        var url = path + (path.indexOf("?") < 0 ? "?" : "&") + "p=" + me.id + "&ts=" + (Date.now() + me.skew);
+        return lib.sign(me.key, method, url, body);
+      }
 
       var setup = document.getElementById("setup"),
         main = document.getElementById("main"),
@@ -228,11 +258,11 @@
         el.className = bad ? "hint bad" : "hint";
       }
 
-      async function post(path, body) {
-        var r = await fetch(path, {
+      async function send(url, text) {
+        var r = await fetch(url, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(body),
+          body: text,
         });
         var d = null;
         try {
@@ -240,36 +270,51 @@
         } catch (e) {}
         return { status: r.status, body: d || {} };
       }
+      // A signed request. A refusal for the clock carries the box's time; the
+      // page corrects by it and asks once more.
+      async function post(path, body) {
+        var text = JSON.stringify(body);
+        var r = await send(signed("POST", path, text), text);
+        if (r.status === 403 && r.body.error === "time" && r.body.now) {
+          me.skew = r.body.now - Date.now();
+          remember();
+          r = await send(signed("POST", path, text), text);
+        }
+        return r;
+      }
 
       // Pre-filled from the QR, so the usual path is one tap.
-      document.getElementById("code").value = new URLSearchParams(location.search).get("c") || "";
+      document.getElementById("code").value = fromQr || "";
 
       document.getElementById("pair").addEventListener("click", async function () {
         var code = document.getElementById("code").value.trim();
         var name = document.getElementById("name").value.trim();
         say(setupMsg, "Pairing…");
         var r;
+        var ask = { code: code, name: name };
         try {
-          r = await post("/adopt", { code: code, name: name });
+          r = await send("/adopt", JSON.stringify(oneTime ? { sealed: lib.seal(oneTime, ask) } : ask));
         } catch (e) {
           return say(setupMsg, "The box did not answer.", true);
         }
         if (r.status === 403) return say(setupMsg, "That code is not the one on the TV.", true);
-        if (!r.body.ok) return say(setupMsg, "This box cannot pair another phone.", true);
-        token = r.body.token;
-        try {
-          localStorage.setItem(KEY, token);
-        } catch (e) {}
+        var grant = r.body.ok ? (r.body.sealed ? lib.open(oneTime, r.body.sealed) : r.body) : null;
+        if (!grant || !grant.id || !lib.key(grant.key))
+          return say(setupMsg, "This box cannot pair another phone.", true);
+        me = { id: grant.id, key: lib.key(grant.key), raw: grant.key, skew: (grant.now || Date.now()) - Date.now() };
+        oneTime = null;
+        remember();
         say(setupMsg, "");
         show(true);
+        watch();
       });
 
       var busy = false;
       async function press(action) {
-        if (!token || busy) return;
+        if (!me || busy) return;
         busy = true; // one in flight: a fast tapper should not queue presses
         try {
-          var r = await post("/key", { token: token, action: action });
+          var r = await post("/key", { action: action });
           if (r.status === 403) {
             // The box forgot this phone (or was reset). Say so and ask again,
             // rather than leaving a pad that silently does nothing.
@@ -306,6 +351,7 @@
         if (screenTimer) clearInterval(screenTimer);
         screenTimer = null;
         screenBox.style.display = "none";
+        if (shot.src) URL.revokeObjectURL(shot.src);
         shot.removeAttribute("src");
         zoom = 1;
         panX = 0;
@@ -398,31 +444,44 @@
       frameBox.addEventListener("pointercancel", liftPointer);
 
       function startScreen() {
-        if (screenTimer || !token) return;
+        if (screenTimer || !me) return;
         screenBox.style.display = "flex";
         shotcap.textContent = "Pinch to zoom, double-tap to reset";
-        var tick = function () {
-          if (document.hidden) return; // a phone in a pocket should not keep asking
-          shot.src = "/screen?t=" + encodeURIComponent(token) + "&w=" + wantWidth + "&n=" + Date.now();
-        };
-        shot.onerror = function () {
+        var gone = function () {
           // The box stopped sharing (it runs out on its own), or it could not
           // take a picture. Either way there is nothing to show.
           stopScreen();
           say(msg, "The TV is no longer sharing its screen.");
         };
-        tick();
+        // The frame comes back sealed under this phone's key, so it is fetched,
+        // opened here and shown from memory.
+        var tick = async function () {
+          if (document.hidden || !screenTimer) return; // a phone in a pocket should not keep asking
+          try {
+            var r = await fetch(signed("GET", "/screen?w=" + wantWidth));
+            if (!r.ok) return gone();
+            var jpeg = lib.openBytes(me.key, new Uint8Array(await r.arrayBuffer()));
+            if (!jpeg || !screenTimer) return jpeg ? undefined : gone();
+            var old = shot.src;
+            shot.src = URL.createObjectURL(new Blob([jpeg], { type: "image/jpeg" }));
+            if (old) URL.revokeObjectURL(old);
+          } catch (e) {
+            gone();
+          }
+        };
         screenTimer = setInterval(tick, 2500);
+        tick();
       }
 
-      show(!!token);
+      show(!!me);
+      if (retired) say(setupMsg, "Pair this phone again: the box now asks for a new kind of key.", true);
 
       // Asked repeatedly, not once: the TV is where sharing is turned on, so a
       // page that only looked at startup would sit there showing nothing until
       // somebody thought to reload it. Also how a forgotten phone finds out.
       function watch() {
-        if (!token || document.hidden) return;
-        post("/ping", { token: token })
+        if (!me || document.hidden) return;
+        post("/ping", {})
           .then(function (r) {
             if (r.status === 403) return unpair();
             if (r.status !== 200) return;
@@ -435,15 +494,13 @@
         try {
           localStorage.removeItem(KEY);
         } catch (e) {}
-        token = null;
+        me = null;
         stopScreen();
         show(false);
         say(setupMsg, "This phone is no longer paired with the box.", true);
       }
-      if (token) {
-        watch();
-        setInterval(watch, 5000);
-      }
+      if (me) watch();
+      setInterval(watch, 5000);
     </script>
   </body>
 </html>

@@ -157,3 +157,26 @@ test("an older page gets the code in the query, and an empty code is not an atte
     pairing.stop();
   }
 });
+
+test("the page's own-key primitives match the server's (the phone remote uses them)", () => {
+  const page = pageSandbox("", "", true);
+  page.TextDecoder = TextDecoder;
+  const lib = page.tvboxSeal.lib;
+  const raw = seal.keyParam(seal.newKey());
+  const key = lib.key(raw);
+  assert.ok(key && key.length === 32);
+  assert.strictEqual(lib.key("short"), null);
+  const u = lib.sign(key, "POST", "/key?p=a&ts=1", '{"action":"up"}');
+  assert.strictEqual(
+    seal.macOk(new Uint8Array(Buffer.from(raw, "base64url")), "POST", u, Buffer.from('{"action":"up"}')),
+    true,
+  );
+  const k = new Uint8Array(Buffer.from(raw, "base64url"));
+  assert.deepStrictEqual(seal.open(lib.seal(key, { code: "1" }), k), { code: "1" });
+  assert.strictEqual(JSON.stringify(lib.open(key, seal.seal({ id: "x" }, k))), '{"id":"x"}');
+  const frame = Buffer.from("jpeg bytes");
+  assert.strictEqual(
+    Buffer.from(lib.openBytes(key, new Uint8Array(seal.sealBytes(frame, k)))).toString(),
+    "jpeg bytes",
+  );
+});

@@ -10,6 +10,7 @@ const assert = require("node:assert");
 const http = require("http");
 
 const phoneremote = require("./phoneremote");
+const seal = require("./pairing/seal");
 
 // A stand-in for the box: config that lives in memory, and a bridge that records
 // the lines it was asked to write instead of opening a FIFO.
@@ -59,6 +60,19 @@ const postTo = (p, path, body) =>
   });
 const post = (path, body) => postTo(port(), path, body);
 const arm = () => new Promise((res) => phoneremote.arm(res));
+
+// What the page does for every request once it holds a key: the phone's id and
+// clock in the query, then a nonce and an HMAC over the method, the URL and the
+// exact body (seal.js).
+let nonceSeq = 0;
+function signedUrl(g, method, path, body, opts) {
+  const o = opts || {};
+  const ts = o.ts != null ? o.ts : Date.now();
+  const u = path + (path.includes("?") ? "&" : "?") + "p=" + g.id + "&ts=" + ts + "&n=nonce" + ++nonceSeq + "xyz";
+  const key = new Uint8Array(Buffer.from(o.key || g.key, "base64url"));
+  return u + "&m=" + seal.mac(key, method, u, Buffer.from(body || ""));
+}
+const spost = (g, path, body, opts) => postTo(port(), signedUrl(g, "POST", path, JSON.stringify(body), opts), body);
 
 // Awaited: the listener is on a fixed port, so a test that started before the
 // previous one finished closing would race it for the bind.
@@ -157,26 +171,24 @@ test("the address is the socket's, not the one that was asked for", async () => 
 test("a phone is adopted with the code on the TV, and then keeps working", async () => {
   const b = await boxUp();
   const armed = await arm();
-  assert.match(armed.url, /^http:\/\/192\.168\.1\.50:\d+\/\?c=\d{4}$/);
+  assert.match(armed.url, /^http:\/\/192\.168\.1\.50:\d+\/#c=\d{4}&k=[\w-]{43}$/, "the code and key in the fragment");
 
   const wrong = await post("/adopt", { code: "0000", name: "Andy's phone" });
   assert.equal(wrong.status, 403);
   assert.equal(b.state.phones.length, 0, "a wrong code adopts nothing");
 
-  const ok = await post("/adopt", { code: armed.code, name: "Andy's phone" });
+  // Sealed with the one-time key from the fragment, and answered sealed.
+  const oneTime = new Uint8Array(Buffer.from(/k=([\w-]+)/.exec(armed.url)[1], "base64url"));
+  const ok = await post("/adopt", { sealed: seal.seal({ code: armed.code, name: "Kitchen phone" }, oneTime) });
   assert.equal(ok.status, 200);
-  assert.match(ok.body.token, /^[0-9a-f]{64}$/);
+  assert.equal(ok.body.key, undefined, "the key does not cross the network in clear");
+  const grant = seal.open(ok.body.sealed, oneTime);
+  assert.match(grant.key, /^[\w-]{43}$/);
   assert.equal(b.state.phones.length, 1);
-
-  // The token is never stored as itself: a readable config yields nothing that
-  // can be replayed.
-  const row = b.state.phones[0];
-  assert.ok(!JSON.stringify(row).includes(ok.body.token), "the token is not in the config");
-  assert.match(row.tokenHash, /^[0-9a-f]{64}$/);
-  assert.equal(row.name, "Andy's phone");
+  assert.equal(b.state.phones[0].name, "Kitchen phone");
 
   // And it works from then on, with no code anywhere.
-  const press = await post("/key", { token: ok.body.token, action: "up" });
+  const press = await spost(grant, "/key", { action: "up" });
   assert.equal(press.status, 200);
   assert.deepEqual(b.wrote, ["key up"]);
 });
@@ -230,37 +242,46 @@ test("an unnamed phone still gets a name", async () => {
 
 // ------------------------------------------------------------------- tokens
 
-test("a key needs a token this box issued", async () => {
+test("a press needs a signature under a key this box issued", async () => {
   const b = await boxUp();
   const armed = await arm();
-  const token = (await post("/adopt", { code: armed.code, name: "p" })).body.token;
+  const g = (await post("/adopt", { code: armed.code, name: "p" })).body;
 
-  // The near-miss has to differ from the token, and a fixed last character does
-  // not: one token in sixteen already ends in "0", and then this case handed the
-  // box its own valid token and expected a 403.
-  const nearMiss = token.slice(0, 63) + (token.endsWith("0") ? "1" : "0");
-  for (const bad of ["", "x", "0".repeat(64), nearMiss, null, 1234]) {
-    const r = await post("/key", { token: bad, action: "up" });
-    assert.equal(r.status, 403, JSON.stringify(bad));
-  }
+  const other = seal.keyParam(seal.newKey());
+  assert.equal((await post("/key", { action: "up" })).status, 403, "unsigned");
+  assert.equal((await spost(g, "/key", { action: "up" }, { key: other })).status, 403, "signed with another key");
+  assert.equal(
+    (await spost({ ...g, id: "nope" }, "/key", { action: "up" })).status,
+    403,
+    "an id this box never issued",
+  );
+  // The body is covered: a signature for one press does not carry another.
+  const url = signedUrl(g, "POST", "/key", JSON.stringify({ action: "up" }));
+  assert.equal((await postTo(port(), url, { action: "power" })).status, 403, "the body is covered");
   assert.deepEqual(b.wrote, [], "not one of them reached the bridge");
-  assert.equal((await post("/key", { token, action: "up" })).status, 200);
+  assert.equal((await postTo(port(), url, { action: "up" })).status, 200);
+  assert.equal((await postTo(port(), url, { action: "up" })).status, 403, "and the same request twice is a replay");
+  const late = await spost(g, "/key", { action: "up" }, { ts: Date.now() - phoneremote.CLOCK_SKEW_MS - 60000 });
+  assert.equal(late.status, 403);
+  assert.equal(late.body.error, "time");
+  assert.ok(Math.abs(late.body.now - Date.now()) < 5000, "with the box's clock, so the page can correct");
+  assert.deepEqual(b.wrote, ["key up"]);
 });
 
 test("a forgotten phone stops working immediately", async () => {
   const b = await boxUp();
   const armed = await arm();
-  const token = (await post("/adopt", { code: armed.code, name: "p" })).body.token;
-  assert.equal((await post("/key", { token, action: "ok" })).status, 200);
+  const g = (await post("/adopt", { code: armed.code, name: "p" })).body;
+  assert.equal((await spost(g, "/key", { action: "ok" })).status, 200);
 
   const id = phoneremote.list()[0].id;
   assert.equal(phoneremote.forget(id), true);
   assert.equal(phoneremote.forget(id), false, "and forgetting it twice is not an error");
-  assert.equal((await post("/key", { token, action: "ok" })).status, 403);
+  assert.equal((await spost(g, "/key", { action: "ok" })).status, 403);
   assert.equal(b.wrote.length, 1, "only the press from before it was forgotten");
 });
 
-test("what the launcher may see carries no token hash", async () => {
+test("what the launcher may see carries no key", async () => {
   await boxUp();
   const armed = await arm();
   await post("/adopt", { code: armed.code, name: "kitchen" });
@@ -274,9 +295,9 @@ test("what the launcher may see carries no token hash", async () => {
 test("a refused action never reaches the bridge", async () => {
   const b = await boxUp();
   const armed = await arm();
-  const token = (await post("/adopt", { code: armed.code, name: "p" })).body.token;
+  const g = (await post("/adopt", { code: armed.code, name: "p" })).body;
   for (const bad of ["up\nlearn 0", "reload", "", "app:!!"]) {
-    assert.equal((await post("/key", { token, action: bad })).status, 400, bad);
+    assert.equal((await spost(g, "/key", { action: bad })).status, 400, bad);
   }
   assert.deepEqual(b.wrote, []);
 });
@@ -284,7 +305,7 @@ test("a refused action never reaches the bridge", async () => {
 test("a body that is not JSON, or is enormous, is refused rather than parsed", async () => {
   await boxUp();
   const armed = await arm();
-  const token = (await post("/adopt", { code: armed.code, name: "p" })).body.token;
+  const g = (await post("/adopt", { code: armed.code, name: "p" })).body;
   // Sent raw, so it is not valid JSON at all.
   const raw = await new Promise((resolve) => {
     const req = http.request({ host: "127.0.0.1", port: port(), path: "/key", method: "POST" }, (res) =>
@@ -294,7 +315,7 @@ test("a body that is not JSON, or is enormous, is refused rather than parsed", a
     req.end("not json at all");
   });
   assert.equal(raw.status, 400);
-  const huge = await post("/key", { token, action: "up", pad: "x".repeat(20000) });
+  const huge = await spost(g, "/key", { action: "up", pad: "x".repeat(20000) });
   assert.ok(huge.status === 400 || huge.status === 0, "capped, not read: got " + huge.status);
 });
 
@@ -315,6 +336,7 @@ test("the page is served without a token, and carries none", async () => {
   assert.match(html.type, /text\/html/);
   assert.match(html.out, /<title>tvbox remote<\/title>/);
   assert.ok(!/[0-9a-f]{64}/.test(html.out), "no token is baked into the page");
+  assert.ok(html.out.includes('src="/tvbox-seal.js"'), "it signs with the shared helper");
 });
 
 // ------------------------------------------------------------------ the screen
@@ -326,7 +348,7 @@ test("the page is served without a token, and carries none", async () => {
 const getScreen = (q) =>
   new Promise((resolve) => {
     http
-      .get({ host: "127.0.0.1", port: port(), path: "/screen" + q }, (res) => {
+      .get({ host: "127.0.0.1", port: port(), path: q }, (res) => {
         res.resume();
         resolve(res.statusCode);
       })
@@ -336,24 +358,24 @@ const getScreen = (q) =>
 test("being able to press buttons does not mean being able to see the screen", async () => {
   const b = await boxUp();
   const armed = await arm();
-  const token = (await post("/adopt", { code: armed.code, name: "p" })).body.token;
+  const g = (await post("/adopt", { code: armed.code, name: "p" })).body;
   // The remote works...
-  assert.equal((await post("/key", { token, action: "up" })).status, 200);
+  assert.equal((await spost(g, "/key", { action: "up" })).status, 200);
   // ...and the screen does not, until it is asked for separately.
-  assert.equal(await getScreen("?t=" + token), 403);
+  assert.equal(await getScreen(signedUrl(g, "GET", "/screen")), 403);
   assert.equal(b.state.screenUntil, undefined);
 });
 
 test("the screen needs a token of its own, not just the switch", async () => {
   await boxUp();
   const armed = await arm();
-  const token = (await post("/adopt", { code: armed.code, name: "p" })).body.token;
+  const g = (await post("/adopt", { code: armed.code, name: "p" })).body;
   phoneremote.shareScreen(10);
-  assert.equal(await getScreen(""), 403, "no token");
-  assert.equal(await getScreen("?t=" + "0".repeat(64)), 403, "a token this box never issued");
+  assert.equal(await getScreen("/screen"), 403, "unsigned");
+  assert.equal(await getScreen(signedUrl(g, "GET", "/screen", "", { key: seal.keyParam(seal.newKey()) })), 403);
   // The real one gets PAST the gate: it fails on there being no compositor here,
   // which is a different answer and the one that proves the check let it through.
-  assert.notEqual(await getScreen("?t=" + token), 403, "a paired phone is not refused");
+  assert.notEqual(await getScreen(signedUrl(g, "GET", "/screen")), 403, "a paired phone is not refused");
 });
 
 test("sharing the screen runs out on its own", async () => {
@@ -386,16 +408,24 @@ test("a request for a wild number of minutes is clamped, not honoured", () => {
 test("forgetting a phone takes its view of the screen with it", async () => {
   await boxUp();
   const armed = await arm();
-  const token = (await post("/adopt", { code: armed.code, name: "p" })).body.token;
+  const g = (await post("/adopt", { code: armed.code, name: "p" })).body;
   phoneremote.shareScreen(10);
   const id = phoneremote.list()[0].id;
   phoneremote.forget(id);
-  assert.equal(await getScreen("?t=" + token), 403);
+  assert.equal(await getScreen(signedUrl(g, "GET", "/screen")), 403);
 });
 
 test("an unknown path answers nothing useful", async () => {
   await boxUp();
   const armed = await arm();
-  const token = (await post("/adopt", { code: armed.code, name: "p" })).body.token;
-  assert.equal((await post("/nope", { token })).status, 404);
+  const g = (await post("/adopt", { code: armed.code, name: "p" })).body;
+  assert.equal((await spost(g, "/nope", {})).status, 404);
+});
+
+test("a phone paired before requests were signed has no key, and is refused until it pairs again", async () => {
+  const b = await boxUp({ phones: [{ id: "old1", name: "old", tokenHash: "a".repeat(64), addedAt: 1 }] });
+  const g = { id: "old1", key: seal.keyParam(seal.newKey()) };
+  assert.equal((await spost(g, "/key", { action: "up" })).status, 403);
+  assert.deepEqual(b.wrote, []);
+  assert.equal(phoneremote.list().length, 1, "it is still listed, so it can be forgotten");
 });

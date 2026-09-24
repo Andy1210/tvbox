@@ -78,6 +78,13 @@ function seal(obj, key) {
   return Buffer.concat([Buffer.from(nonce), Buffer.from(box)]).toString("base64");
 }
 
+/** Seal raw bytes as nonce || box, for an answer the page opens (a screen frame). */
+function sealBytes(buf, key) {
+  const nonce = new Uint8Array(crypto.randomBytes(NONCE_BYTES));
+  const box = nacl.secretbox(new Uint8Array(buf), nonce, key);
+  return Buffer.concat([Buffer.from(nonce), Buffer.from(box)]);
+}
+
 /**
  * Open a sealed body. Answers the object, or null for anything that does not
  * authenticate - including a replay, when `seen` (a Set of nonces this session
@@ -174,7 +181,7 @@ const PAGE_HELPER = `
     return out;
   }
   // HMAC-SHA512 (RFC 2104) over nacl.hash, which is SHA-512; block size 128.
-  function hmac(msg) {
+  function hmac(key, msg) {
     var k = new Uint8Array(128);
     k.set(key);
     var ipad = new Uint8Array(128), opad = new Uint8Array(128);
@@ -191,28 +198,62 @@ const PAGE_HELPER = `
     if (body instanceof ArrayBuffer) return new Uint8Array(body);
     throw new Error("tvboxSeal.url: body must be the string or bytes that will be sent");
   }
+  function sign(key, method, url, body) {
+    var signed = url + (url.indexOf("?") < 0 ? "?" : "&") + "n=" + b64url(nacl.randomBytes(12));
+    var msg = String(method).toUpperCase() + "\\n" + signed + "\\n" + hex(nacl.hash(bytes(body)));
+    return signed + "&m=" + b64url(hmac(key, enc.encode(msg)).subarray(0, ${MAC_BYTES}));
+  }
+  function keyFrom(text) {
+    var s = String(text || "").replace(/-/g, "+").replace(/_/g, "/");
+    while (s.length % 4) s += "=";
+    var bin = atob(s);
+    var out = new Uint8Array(bin.length);
+    for (var i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+    return out.length === nacl.secretbox.keyLength ? out : null;
+  }
+  function sealWith(key, obj) {
+    var nonce = nacl.randomBytes(nacl.secretbox.nonceLength);
+    return b64(cat(nonce, nacl.secretbox(enc.encode(JSON.stringify(obj)), nonce, key)));
+  }
+  function openBytes(key, u8) {
+    var n = nacl.secretbox.nonceLength;
+    if (u8.length <= n) return null;
+    return nacl.secretbox.open(u8.subarray(n), u8.subarray(0, n), key);
+  }
+  function openWith(key, text) {
+    try {
+      var plain = openBytes(key, fromB64(text));
+      return plain ? JSON.parse(new TextDecoder().decode(plain)) : null;
+    } catch (e) {
+      return null;
+    }
+  }
+  function fromB64(text) {
+    var bin = atob(String(text || ""));
+    var out = new Uint8Array(bin.length);
+    for (var i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+    return out;
+  }
   self.tvboxSeal = {
     sealed: !!key,
     code: code,
     url: function (method, url, body) {
       url = String(url);
-      var sep = url.indexOf("?") < 0 ? "?" : "&";
-      if (!key) return url + sep + "c=" + encodeURIComponent(code);
-      var signed = url + sep + "n=" + b64url(nacl.randomBytes(12));
-      var msg = String(method).toUpperCase() + "\\n" + signed + "\\n" + hex(nacl.hash(bytes(body)));
-      return signed + "&m=" + b64url(hmac(enc.encode(msg)).subarray(0, ${MAC_BYTES}));
+      if (!key) return url + (url.indexOf("?") < 0 ? "?" : "&") + "c=" + encodeURIComponent(code);
+      return sign(key, method, url, body);
     },
     query: function () {
       if (key) throw new Error("tvboxSeal.query cannot authenticate a request that has the key; use tvboxSeal.url");
       return "c=" + encodeURIComponent(code);
     },
     body: function (obj) {
-      var json = JSON.stringify(obj);
-      if (!key) return json;
-      var nonce = nacl.randomBytes(nacl.secretbox.nonceLength);
-      var box = nacl.secretbox(enc.encode(json), nonce, key);
-      return JSON.stringify({ sealed: b64(cat(nonce, box)) });
+      if (!key) return JSON.stringify(obj);
+      return JSON.stringify({ sealed: sealWith(key, obj) });
     },
+    // The same primitives under a key of the page's own (the phone remote keeps
+    // one per phone): sign(key, method, url, body), seal(key, obj) -> base64,
+    // open(key, base64) -> obj, openBytes(key, Uint8Array) -> Uint8Array.
+    lib: { key: keyFrom, sign: sign, seal: sealWith, open: openWith, openBytes: openBytes },
   };
 })();
 `;
@@ -224,4 +265,4 @@ function script() {
   return pageScript;
 }
 
-module.exports = { newKey, keyParam, seal, open, script, mac, macOk, splitMac, KEY_BYTES };
+module.exports = { newKey, keyParam, seal, sealBytes, open, script, mac, macOk, splitMac, KEY_BYTES };

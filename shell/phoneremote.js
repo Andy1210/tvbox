@@ -12,11 +12,16 @@
 // exactly why it is opt-in and off until someone turns it on: a box nobody asked
 // gains no new surface.
 //
-// WHAT A TOKEN IS. 32 random bytes, given to the phone once and stored here only
-// as a sha256 - the same reasoning as the parental PIN, so a readable config
-// yields nothing that can be replayed. Compared in constant time. There is no
-// password to guess and no session to hijack; forgetting a phone is deleting its
-// row.
+// WHAT A PHONE HOLDS. A 32-byte key of its own, handed over once at adoption and
+// never sent again: every request carries an HMAC under it (seal.js) over the
+// method, the URL and the body, plus a time and a nonce, so a request read off
+// the air can neither be altered, replayed nor turned into a different one. The
+// adoption itself is sealed with a one-time key the TV's QR carries in its URL
+// fragment, and a screen frame goes back sealed under the phone's key. The box
+// keeps the key in config.json (0600, never served), because checking a MAC
+// needs it. Forgetting a phone is deleting its row. A phone that typed the short
+// address instead of scanning adopts without the one-time key, so ITS key crosses
+// the network once, in clear; that is the accepted limit.
 //
 // THE INJECTION THAT MATTERS. An action ends up on the remote bridge's command
 // FIFO as `key <action>\n`. That FIFO also carries `learn <id>` and `native on`,
@@ -31,6 +36,7 @@ const fs = require("fs");
 const path = require("path");
 
 const screenframe = require("./screenframe");
+const seal = require("./pairing/seal");
 
 const PORT = 8100;
 const PAGE = path.join(__dirname, "pairing", "pages", "remote.html");
@@ -47,6 +53,9 @@ const ADOPT_MAX_FAILS = 8;
 const FRAME_MAX_AGE_MS = 1500;
 
 const MAX_BODY = 4096; // a keypress is a few dozen bytes
+// A signed request carries the phone's clock; one further from the box's than
+// this is refused, with the box's time in the answer so the page can correct.
+const CLOCK_SKEW_MS = 10 * 60 * 1000;
 const MAX_PHONES = 16;
 const MAX_NAME = 40;
 // lastSeen is written to config, so it is not written per keypress: a remote
@@ -82,7 +91,6 @@ const APP_ACTION = /^app:[a-z0-9_-]{1,32}$/;
 
 const isAction = (a) => typeof a === "string" && (ACTIONS.has(a) || APP_ACTION.test(a));
 
-const sha = (s) => crypto.createHash("sha256").update(String(s)).digest("hex");
 function timingEq(a, b) {
   const x = Buffer.from(String(a || ""));
   const y = Buffer.from(String(b || ""));
@@ -105,7 +113,8 @@ function init(d) {
 
 let server = null;
 let adopt = null; // { code, expires, fails } while the TV is showing one
-let seenAt = new Map(); // token hash -> when its lastSeen was last written
+let seenAt = new Map(); // phone id -> when its lastSeen was last written
+let nonces = new Map(); // phone id -> Map(nonce -> when), the signed requests already answered
 
 // ------------------------------------------------------------------ the store
 
@@ -141,7 +150,7 @@ const phones = () => {
 };
 const enabled = () => !!deps.rawPhoneRemote().enabled;
 
-// What the launcher may show: names and times, never a token hash.
+// What the launcher may show: names and times, never a key.
 function list() {
   return phones().map((p) => ({ id: p.id, name: p.name, addedAt: p.addedAt, lastSeenAt: p.lastSeenAt || null }));
 }
@@ -159,14 +168,30 @@ function forgetAll() {
   return n;
 }
 
-// The phone this token belongs to, or null. Constant time against every row, so
-// a wrong token cannot be told from an unknown one by how long the answer took.
-function phoneFor(token) {
-  if (typeof token !== "string" || token.length !== 64) return null;
-  const h = sha(token);
-  let found = null;
-  for (const p of phones()) if (timingEq(h, p.tokenHash)) found = p;
-  return found;
+// The phone a signed request comes from, or a reason it is not one. A row
+// written before phones held keys has none, and such a phone pairs again.
+function signedBy(req, u, method, raw) {
+  const id = u.searchParams.get("p");
+  const row = typeof id === "string" && id ? phones().find((p) => p.id === id) : null;
+  const key = row && typeof row.key === "string" ? Buffer.from(row.key, "base64url") : null;
+  if (!key || key.length !== seal.KEY_BYTES || !seal.macOk(new Uint8Array(key), method, req.url, raw)) {
+    return { error: "token" };
+  }
+  const ts = Number(u.searchParams.get("ts"));
+  if (!Number.isFinite(ts) || Math.abs(Date.now() - ts) > CLOCK_SKEW_MS) return { error: "time" };
+  const n = u.searchParams.get("n");
+  if (!n || !/^[A-Za-z0-9_-]{8,32}$/.test(n)) return { error: "token" };
+  let seen = nonces.get(row.id);
+  if (!seen) nonces.set(row.id, (seen = new Map()));
+  if (seen.has(n)) return { error: "replay" };
+  // Kept for twice the clock window, which is as long as a copy could be accepted.
+  const now = Date.now();
+  for (const [k, at] of seen) {
+    if (now - at <= 2 * CLOCK_SKEW_MS && seen.size < 20000) break;
+    seen.delete(k);
+  }
+  seen.set(n, now);
+  return { phone: row, key: new Uint8Array(key) };
 }
 
 // ---------------------------------------------------------------- the listener
@@ -241,8 +266,16 @@ function arm(cb) {
       console.warn("[phoneremote] not arming: no LAN address yet");
       return void (cb && cb(null));
     }
-    adopt = { code: String(crypto.randomInt(1000, 10000)), expires: Date.now() + ADOPT_TTL_MS, fails: 0 };
-    cb && cb({ url: `http://${ip}:${p}/?c=${adopt.code}`, shortUrl: `http://${ip}:${p}`, code: adopt.code, port: p });
+    adopt = {
+      code: String(crypto.randomInt(1000, 10000)),
+      key: seal.newKey(),
+      expires: Date.now() + ADOPT_TTL_MS,
+      fails: 0,
+    };
+    // Both in the fragment, which a browser never sends: the code and the one-time
+    // key that seals the adoption reach the phone without crossing the network.
+    const frag = `#c=${adopt.code}&k=${seal.keyParam(adopt.key)}`;
+    cb && cb({ url: `http://${ip}:${p}/${frag}`, shortUrl: `http://${ip}:${p}`, code: adopt.code, port: p });
   });
 }
 
@@ -282,7 +315,8 @@ function codeOk(presented) {
 function adoptPhone(name) {
   const list = phones();
   if (list.length >= MAX_PHONES) throw new Error("full");
-  const token = crypto.randomBytes(32).toString("hex");
+  const id = crypto.randomBytes(6).toString("hex");
+  const key = crypto.randomBytes(seal.KEY_BYTES).toString("base64url");
   // The name is the phone's own, so it is somebody else's string: control
   // characters out (it ends up in a log line and in config.json), whitespace
   // collapsed, length capped, and never empty - a blank row in the Settings list
@@ -294,19 +328,16 @@ function adoptPhone(name) {
       .trim()
       .slice(0, MAX_NAME) || "phone";
   deps.setPhoneRemote({
-    phones: [
-      ...list,
-      { id: crypto.randomBytes(6).toString("hex"), name: safe, tokenHash: sha(token), addedAt: Date.now() },
-    ],
+    phones: [...list, { id, name: safe, key, addedAt: Date.now() }],
   });
-  // The one time this value exists outside the phone. Nothing logs it.
-  return token;
+  // The one time this value leaves the box. Nothing logs it.
+  return { id, key };
 }
 
 function touch(p) {
   const now = Date.now();
-  if (seenAt.get(p.tokenHash) && now - seenAt.get(p.tokenHash) < SEEN_WRITE_MS) return;
-  seenAt.set(p.tokenHash, now);
+  if (seenAt.get(p.id) && now - seenAt.get(p.id) < SEEN_WRITE_MS) return;
+  seenAt.set(p.id, now);
   deps.setPhoneRemote({ phones: phones().map((x) => (x.id === p.id ? { ...x, lastSeenAt: now } : x)) });
 }
 
@@ -317,25 +348,36 @@ function json(res, code, obj) {
   res.end(JSON.stringify(obj));
 }
 
+// The body as parsed JSON and as the exact bytes, which the MAC covers.
 function readBody(req, cb) {
-  let body = "";
+  const chunks = [];
+  let size = 0;
   let over = false;
   req.on("data", (c) => {
-    body += c;
-    if (body.length > MAX_BODY) {
+    size += c.length;
+    if (size > MAX_BODY) {
       over = true;
-      req.destroy();
+      return req.destroy();
     }
+    chunks.push(c);
   });
   req.on("end", () => {
     if (over) return cb(null);
+    const raw = Buffer.concat(chunks);
     try {
-      cb(JSON.parse(body || "{}"));
+      const body = JSON.parse(raw.toString("utf8") || "{}");
+      cb(body && typeof body === "object" && !Array.isArray(body) ? body : null, raw);
     } catch (e) {
       cb(null);
     }
   });
   req.on("error", () => {});
+}
+
+// A refusal of a signed request. "time" carries the box's clock, so a phone whose
+// clock is off can correct and ask again rather than stop working.
+function refuseSigned(res, why) {
+  return json(res, 403, why === "time" ? { ok: false, error: "time", now: Date.now() } : { ok: false, error: why });
 }
 
 function handle(req, res) {
@@ -348,13 +390,15 @@ function handle(req, res) {
   } catch (e) {
     return json(res, 400, { ok: false });
   }
-  // The frame is a GET so the phone can point an <img> at it. That puts the token
-  // in a URL rather than a body, which is the trade: a query string is the only
-  // thing an <img> can carry, and the alternative - base64 in a POST answer - is
-  // the same secret through a worse pipe. It never leaves the LAN and the phone
-  // builds it from its own storage each time.
+  if (req.method === "GET" && u.pathname === "/tvbox-seal.js") {
+    res.writeHead(200, { "Content-Type": "application/javascript; charset=utf-8", "Cache-Control": "no-store" });
+    return res.end(seal.script());
+  }
+  // The frame is sealed under the phone's key: it shows whatever is on the TV, a
+  // password on the on-screen keyboard included. The page opens it and shows it.
   if (req.method === "GET" && u.pathname === "/screen") {
-    if (!phoneFor(u.searchParams.get("t"))) return json(res, 403, { ok: false, error: "token" });
+    const who = signedBy(req, u, "GET", Buffer.alloc(0));
+    if (!who.phone) return refuseSigned(res, who.error);
     if (!screenOn()) return json(res, 403, { ok: false, error: "off" });
     // `w` is what the phone is showing it at: pinching into a 960-wide JPEG
     // magnifies its artefacts rather than the screen, so a zoomed page asks for
@@ -366,16 +410,12 @@ function handle(req, res) {
       // window can close - by hand or by running out - inside it; a frame that
       // arrives after that is exactly the picture nobody agreed to send.
       if (!screenOn()) return json(res, 403, { ok: false, error: "off" });
-      // Never cached: the whole point is that the next request is a new picture.
-      res.writeHead(200, { "Content-Type": "image/jpeg", "Cache-Control": "no-store" });
-      const stream = fs.createReadStream(file);
-      stream.on("error", () => {
-        try {
-          res.end();
-        } catch (e) {}
+      fs.readFile(file, (e, jpeg) => {
+        if (e) return json(res, 503, { ok: false, error: "frame" });
+        // Never cached: the whole point is that the next request is a new picture.
+        res.writeHead(200, { "Content-Type": "application/octet-stream", "Cache-Control": "no-store" });
+        res.end(seal.sealBytes(jpeg, who.key));
       });
-      res.on("close", () => stream.destroy());
-      stream.pipe(res);
     });
   }
   if (req.method === "GET" && (u.pathname === "/" || u.pathname === "/index.html")) {
@@ -390,25 +430,36 @@ function handle(req, res) {
   }
   if (req.method !== "POST") return json(res, 404, { ok: false });
 
-  readBody(req, (body) => {
+  readBody(req, (body, raw) => {
     if (!body) return json(res, 400, { ok: false });
 
     if (u.pathname === "/adopt") {
-      if (!codeOk(body.code)) return json(res, 403, { ok: false, error: "code" });
-      let token;
+      // Sealed with the one-time key from the QR, or plain from a phone that typed
+      // the address. The answer goes back the way the question came.
+      const oneTime = adopt && adopt.key;
+      let ask = body;
+      if (typeof body.sealed === "string") {
+        ask = oneTime ? seal.open(body.sealed, oneTime) : null;
+        if (!ask) return json(res, 400, { ok: false, error: "sealed" });
+      }
+      if (!codeOk(ask.code)) return json(res, 403, { ok: false, error: "code" });
+      let issued;
       try {
-        token = adoptPhone(body.name);
+        issued = adoptPhone(ask.name);
       } catch (e) {
         return json(res, 507, { ok: false, error: e.message });
       }
       // One adoption per code. The phone has what it needs; leaving the window
       // open would let a second device onto the same four digits.
       adopt = null;
-      return json(res, 200, { ok: true, token });
+      const grant = { ...issued, now: Date.now() };
+      if (ask !== body) return json(res, 200, { ok: true, sealed: seal.seal(grant, oneTime) });
+      return json(res, 200, { ok: true, ...grant });
     }
 
-    const phone = phoneFor(body.token);
-    if (!phone) return json(res, 403, { ok: false, error: "token" });
+    const who = signedBy(req, u, "POST", raw);
+    if (!who.phone) return refuseSigned(res, who.error);
+    const phone = who.phone;
 
     if (u.pathname === "/key") {
       // Checked against the vocabulary, never sanitised into it: this string is
@@ -444,6 +495,5 @@ module.exports = {
   list,
   forget,
   forgetAll,
-  // exported for tests
-  _phoneFor: phoneFor,
+  CLOCK_SKEW_MS,
 };

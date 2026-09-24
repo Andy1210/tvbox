@@ -40,10 +40,15 @@ tvbox is a LAN device with no cloud account. The interesting boundaries:
   which is the accepted limit, and so do app pages that predate the sealing
   (their provider did not register as `v2`, so their QR carries the code in the
   query as well).
-- **The phone remote** (`:8100`, LAN) - a paired phone holds a token of its own
-  (stored hashed on the box). Its traffic, text typed into on-screen fields
-  included, is plain http and not sealed; do not type a password through it on a
-  network you do not trust.
+- **The phone remote** (`:8100`, LAN) - a paired phone holds a key of its own,
+  handed over once in an adoption sealed with a one-time key from the QR's URL
+  fragment. Every request after that carries an HMAC under it with a time and a
+  nonce, so one read off the air cannot be altered, replayed or turned into
+  another press, and a shared screen frame goes back sealed under the same key.
+  The box stores the key in `config.json` (0600), since checking a MAC needs it.
+  The same passive-only limit as pairing applies, and a phone that typed the
+  short address adopts in clear. A phone paired by a version before this holds a
+  bare token and has to pair again.
 - **The local API** (`:8097`, loopback-only) - reachable by local processes, and
   it answers only to `localhost`/`127.0.0.1` as a Host (DNS rebinding). Every
   local app is served from the same origin as the API, so the origin cannot tell
