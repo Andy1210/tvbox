@@ -47,6 +47,18 @@ test("updater INFRA_FILES matches deploy/infra.list (basename set)", () => {
   );
 });
 
+test("every script in infra.list ships executable or is named as run by an interpreter", () => {
+  const unit = /\.(service|timer|socket|path|conf|rules|json|list|version|c|py)$/;
+  const scripts = infraListBasenames().filter((f) => f.endsWith(".sh") || (!unit.test(f) && !f.includes(".")));
+  for (const f of scripts) {
+    assert.ok(
+      updater.EXECUTABLE.includes(f) || updater.RUN_BY_INTERPRETER.includes(f),
+      f + " is a script in infra.list but neither EXECUTABLE nor RUN_BY_INTERPRETER",
+    );
+  }
+  for (const f of updater.RUN_BY_INTERPRETER) assert.ok(!updater.EXECUTABLE.includes(f), f + " is in both lists");
+});
+
 test("every USER_UNIT is an INFRA_FILE (a unit must ship to be installable)", () => {
   for (const unit of updater.USER_UNITS) {
     assert.ok(updater.INFRA_FILES.includes(unit), unit + " is in USER_UNITS but not INFRA_FILES");

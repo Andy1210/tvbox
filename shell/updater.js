@@ -146,6 +146,12 @@ const EXECUTABLE = [
   "tvbox-miracast", // provision copies it to /usr/local/sbin; systemd exec's it
   "tvbox-radio", // same: /usr/local/sbin, exec'd by tvbox-radio@.service
   "tvbox-sysupdate", // same: /usr/local/sbin, exec'd by tvbox-sysupdate.service
+  "install-libcec8.sh", // provision runs it with `sh`, a person may run it directly
+];
+// Scripts that ship but are always started through an interpreter, so their
+// mode does not matter. Every other script in infra.list must be in EXECUTABLE.
+const RUN_BY_INTERPRETER = [
+  "provision.sh", // `sudo bash ~/.tvbox/provision.sh`, and tvbox-sysupdate runs it with bash
 ];
 // Where each shipped user unit gets its "enable" symlink (its [Install]
 // WantedBy). syncInfra creates these directly - same trick as the image build:
@@ -914,4 +920,5 @@ module.exports = {
   USER_UNITS,
   UNIT_WANTS,
   EXECUTABLE,
+  RUN_BY_INTERPRETER,
 };
