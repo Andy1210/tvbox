@@ -149,8 +149,6 @@ const RESERVED_STATE_FILES = new Set([
   "update-keys",
   "shell-userdata",
   "firetv-ir.sock",
-  "voice-notes",
-  "native-sleeper.log",
   "librespot-cache",
   "recover.sh",
   // And the files a release lays down flat in ~/.tvbox (deploy/infra.list):
