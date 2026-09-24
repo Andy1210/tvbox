@@ -60,29 +60,43 @@ function list() {
 
 /**
  * Keep a copy of the current config if it parses and differs from the newest
- * copy. Returns the new id, or null when nothing was written.
+ * copy. Returns { id } for a new copy, { skipped: true } when there was nothing
+ * to keep (no config, one that does not parse, or the newest copy already holds
+ * it), and { error } when a copy was needed and could not be written.
  */
-function take(now) {
+function keep(now) {
+  let bytes;
+  let parsed;
   try {
-    const bytes = fs.readFileSync(configFile());
-    const parsed = JSON.parse(bytes.toString("utf8"));
-    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return null;
+    bytes = fs.readFileSync(configFile());
+    parsed = JSON.parse(bytes.toString("utf8"));
+  } catch (e) {
+    return { skipped: true };
+  }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return { skipped: true };
+  try {
     ensureDir();
     const newest = list()[0];
     if (newest) {
       try {
-        if (fs.readFileSync(fileOf(newest.id)).equals(bytes)) return null;
+        if (fs.readFileSync(fileOf(newest.id)).equals(bytes)) return { skipped: true };
       } catch (e) {}
     }
     let id = String(now || Date.now());
     if (newest && Number(id) <= newest.at) id = String(newest.at + 1);
     fsutil.writeFileAtomic(fileOf(id), bytes, { mode: 0o600, mkdir: false });
     prune();
-    return id;
+    return { id };
   } catch (e) {
-    if (e.code !== "ENOENT") console.warn("[configsnap] could not keep a copy:", e.message);
-    return null;
+    console.warn("[configsnap] could not keep a copy:", e.message);
+    return { error: e.message || "write failed" };
   }
+}
+
+/** keep() for callers that only want the new id (null when nothing was written). */
+function take(now) {
+  const r = keep(now);
+  return r.id || null;
 }
 
 function prune() {
@@ -109,7 +123,8 @@ function restore(id, replaceAll) {
     return { ok: false, error: "unreadable" };
   }
   if (!cfg || typeof cfg !== "object" || Array.isArray(cfg)) return { ok: false, error: "unreadable" };
-  take();
+  // Without a copy of what is there now, a restore could not itself be undone.
+  if (keep().error) return { ok: false, error: "could not keep the current settings" };
   try {
     replaceAll(cfg);
   } catch (e) {

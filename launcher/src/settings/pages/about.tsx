@@ -80,7 +80,9 @@ export function AboutPane() {
   const alive = useRef(true);
   const refresh = useCallback(() => {
     void fetchSystemInfo().then((i) => i && alive.current && setInfo(i));
-    void fetchHealth().then((h) => h && alive.current && setHealth(h));
+    // A failed read clears the row back to a dash rather than leaving the last
+    // answer on screen as if it were current.
+    void fetchHealth().then((h) => alive.current && setHealth(h));
   }, []);
 
   useEffect(() => {

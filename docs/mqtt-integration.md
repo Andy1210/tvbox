@@ -51,10 +51,12 @@ back. Every other box clears the topic, so a box that stops being a canary stops
 vouching.
 
 A box set to **Waits for the first box** (`"follower"`) reads `tvbox/+/canary`
-and holds its nightly automatic update until some canary vouches for that exact
-version, or until `update.canary.maxWaitHours` (default 48) have passed since it
-first saw the release. A release a canary rolled back is not installed
-automatically at all; pressing Update still installs it. What is installed is
+and holds its nightly automatic update until the box it follows
+(`update.canary.from`) vouches for that exact version, or until
+`update.canary.maxWaitHours` (default 48) have passed since it first saw the
+release. A release that box rolled back is held for the same maximum wait;
+pressing Update still installs it at once. Vouches from any other box are
+ignored. What is installed is
 always the signed feed's release, so anything able to publish on the broker can
 move a follower's update earlier or hold it back, never choose it.
 

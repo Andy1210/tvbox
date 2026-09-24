@@ -5,6 +5,14 @@ import { HEALED_KEY_EVENT } from "@sdk/focusGuard";
 
 // A destructive press-twice action must take two separate presses.
 
+function pointerOn(row: string) {
+  const el = document.createElement("div");
+  el.setAttribute("data-sfocus", row);
+  document.body.appendChild(el);
+  act(() => void el.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true })));
+  el.remove();
+}
+
 function key(k: string, repeat = false) {
   window.dispatchEvent(new KeyboardEvent("keydown", { key: k, repeat }));
 }
@@ -64,6 +72,34 @@ describe("useArmedConfirm", () => {
     act(() => void result.current.press("x"));
     act(() => key("ArrowDown"));
     expect(result.current.armed).toBe(null);
+  });
+
+  it("lets go when a pointer presses a different row in between", () => {
+    vi.useFakeTimers();
+    const { result } = renderHook(() => useArmedConfirm());
+    pointerOn("row-a");
+    act(() => void result.current.press("x"));
+    expect(result.current.armed).toBe("x");
+    act(() => void vi.advanceTimersByTime(600));
+    pointerOn("row-b");
+    expect(result.current.armed).toBe(null);
+    pointerOn("row-a");
+    let done = true;
+    act(() => void (done = result.current.press("x")));
+    expect(done).toBe(false);
+    expect(result.current.armed).toBe("x");
+  });
+
+  it("a second pointer press on the same row confirms", () => {
+    vi.useFakeTimers();
+    const { result } = renderHook(() => useArmedConfirm());
+    pointerOn("row-a");
+    act(() => void result.current.press("x"));
+    act(() => void vi.advanceTimersByTime(600));
+    pointerOn("row-a");
+    let done = false;
+    act(() => void (done = result.current.press("x")));
+    expect(done).toBe(true);
   });
 
   it("lets go when the cursor was moved to heal a lost focus", () => {

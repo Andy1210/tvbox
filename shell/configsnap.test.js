@@ -83,3 +83,45 @@ test("a copy that was replaced by a symlink is not followed", () => {
   assert.strictEqual(r.ok, false);
   assert.strictEqual(wrote, false);
 });
+
+test("restore stops when the config it would replace cannot be kept first", () => {
+  const t = tmp();
+  fs.writeFileSync(t.cfg, JSON.stringify({ good: true }));
+  const id = configsnap.take(1_700_000_000_000);
+  fs.writeFileSync(t.cfg, JSON.stringify({ good: false }));
+  const fsutil = require("./fsutil");
+  const real = fsutil.writeFileAtomic;
+  fsutil.writeFileAtomic = () => {
+    throw Object.assign(new Error("no space left"), { code: "ENOSPC" });
+  };
+  let wrote = false;
+  try {
+    const r = configsnap.restore(id, () => (wrote = true));
+    assert.strictEqual(r.ok, false);
+    assert.strictEqual(wrote, false);
+  } finally {
+    fsutil.writeFileAtomic = real;
+  }
+});
+
+test("restore goes ahead when the current config is already the newest copy", () => {
+  const t = tmp();
+  fs.writeFileSync(t.cfg, JSON.stringify({ v: 1 }));
+  const older = configsnap.take(1_700_000_000_000);
+  fs.writeFileSync(t.cfg, JSON.stringify({ v: 2 }));
+  configsnap.take(1_700_000_001_000);
+  // Nothing needs writing, so a failing write must not block the restore.
+  const fsutil = require("./fsutil");
+  const real = fsutil.writeFileAtomic;
+  fsutil.writeFileAtomic = () => {
+    throw new Error("should not be called");
+  };
+  try {
+    let written = null;
+    const r = configsnap.restore(older, (cfg) => (written = cfg));
+    assert.deepStrictEqual(r, { ok: true });
+    assert.deepStrictEqual(written, { v: 1 });
+  } finally {
+    fsutil.writeFileAtomic = real;
+  }
+});

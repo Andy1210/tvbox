@@ -187,6 +187,23 @@ describe("focus guard", () => {
     pad.unmount();
   });
 
+  it("an overlay keeps winning when the screen under it refreshes", async () => {
+    stop = installFocusGuard();
+    await draw();
+    const pad = render(<PinPad title="PIN" onSubmit={() => {}} onCancel={() => {}} />);
+    await settle();
+    // HOME re-renders with a different tile set while the pad is up.
+    await act(async () => {
+      useAppPrefsStore.setState({ getMoreHidden: true });
+    });
+    await settle();
+    await loseFocus();
+    await remote.down();
+    await settle();
+    expect(getCurrentFocusKey()).toBe("pin-1");
+    pad.unmount();
+  });
+
   it("stops after uninstall", async () => {
     installFocusGuard()();
     await draw();

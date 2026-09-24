@@ -89,7 +89,9 @@ one box and "Waits for the first box" on the others. A follower's nightly
 auto-update then waits until the first box has run the release for an hour, or
 until the longest wait (48 hours by default) has passed since the follower first
 saw the release, so a fleet whose first box is gone still updates. A release the
-first box rolled back is never auto-installed. Manual updates are never held.
+first box rolled back is held for up to the longest wait before it is
+auto-installed. Only the box chosen as the first one counts. Manual updates are
+never held.
 Topic and payload: [mqtt-integration.md](mqtt-integration.md).
 
 **Publishing a release:**

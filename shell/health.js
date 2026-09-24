@@ -49,10 +49,22 @@ let last = null; // { ms, at }
 
 // Time one threadpool round trip. Concurrent callers share the probe in flight,
 // and a probe that never answers stays in flight: its age is then the answer.
+// Returns a function that withdraws `cb`, so a caller that gave up waiting is not
+// kept for as long as the probe is stuck.
 function probePool(cb) {
   const now = deps.now();
-  if (!probe && last && now - last.at < POOL_REUSE_MS) return cb(last.ms);
-  if (probe) return probe.waiters.push(cb);
+  const withdraw = (p) => () => {
+    const i = p.waiters.indexOf(cb);
+    if (i >= 0) p.waiters.splice(i, 1);
+  };
+  if (!probe && last && now - last.at < POOL_REUSE_MS) {
+    cb(last.ms);
+    return () => {};
+  }
+  if (probe) {
+    probe.waiters.push(cb);
+    return withdraw(probe);
+  }
   probe = { started: now, waiters: [cb] };
   const mine = probe;
   try {
@@ -66,6 +78,7 @@ function probePool(cb) {
     if (probe === mine) probe = null;
     for (const w of mine.waiters) w(null);
   }
+  return withdraw(mine);
 }
 
 // The pool latency, or how long the unanswered probe has been waiting.
@@ -77,11 +90,13 @@ function poolLatency(cb) {
     clearTimeout(timer);
     cb({ ms, saturated });
   };
+  let withdraw = () => {};
   const timer = setTimeout(() => {
+    withdraw();
     const started = probe ? probe.started : deps.now() - POOL_WAIT_MS;
     finish(deps.now() - started, true);
   }, POOL_WAIT_MS);
-  probePool((ms) => finish(ms, ms === null ? true : ms >= POOL_SLOW_MS));
+  withdraw = probePool((ms) => finish(ms, ms === null ? true : ms >= POOL_SLOW_MS));
 }
 
 function safe(fn, dflt) {
@@ -161,5 +176,5 @@ module.exports = {
   POOL_SLOW_MS,
   POOL_WAIT_MS,
   INSTALL_STUCK_MS,
-  _test: { resetForTest },
+  _test: { resetForTest, waiting: () => (probe ? probe.waiters.length : 0) },
 };

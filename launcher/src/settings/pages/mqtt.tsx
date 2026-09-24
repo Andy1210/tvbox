@@ -44,6 +44,27 @@ export function MqttPage() {
     setForgetting(false);
     if (!ok) return setMsg({ text: t("mqtt.forgetFailed") });
     setMsg({ text: t("mqtt.forgotten"), ok: true });
+    // The box has dropped the section. Drop it here too before reloading, so a
+    // failed reload cannot leave the old broker in the form, where the next edit
+    // would send it straight back.
+    useConfigStore.setState((st) =>
+      st.config
+        ? {
+            config: {
+              ...st.config,
+              mqtt: {
+                ...st.config.mqtt,
+                configured: false,
+                host: "",
+                port: null,
+                username: "",
+                hasPassword: false,
+                tls: false,
+              },
+            },
+          }
+        : {},
+    );
     await load();
   };
 

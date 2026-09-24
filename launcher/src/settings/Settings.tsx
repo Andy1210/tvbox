@@ -50,15 +50,18 @@ export function Settings({ onExit }: { onExit: () => void }) {
   // page pushed over the rail it goes to that page's first row instead, and a page
   // with no rows at all (the credits) gets nothing: its arrows scroll it, and
   // lighting up the rail behind it would both mislead and spend the press.
+  // Registered once (see Home): the category is read through a ref.
   const depth = useRef(0);
   const pane = useRef<HTMLDivElement>(null);
+  const catRef = useRef(cat);
+  catRef.current = cat;
   useEffect(
     () =>
       setFocusFallback(() => {
-        if (depth.current === 0) return ["rail:" + cat, "rail:" + CATEGORIES[0].id];
+        if (depth.current === 0) return ["rail:" + catRef.current, "rail:" + CATEGORIES[0].id];
         return pane.current?.querySelector<HTMLElement>("[data-sfocus]")?.dataset.sfocus || null;
       }),
-    [cat],
+    [],
   );
 
   const current = CATEGORIES.find((c) => c.id === cat) || CATEGORIES[0];

@@ -42,6 +42,14 @@ test("a threadpool that never answers is reported saturated, not waited on", { t
   assert.strictEqual(r.status, "warn");
 });
 
+test("reports that gave up on a stuck probe are not kept waiting on it", { timeout: 10000 }, async () => {
+  setup({ stat: () => {} });
+  await collect();
+  await collect();
+  await collect();
+  assert.strictEqual(health._test.waiting(), 0);
+});
+
 test("concurrent reports share one probe", async () => {
   let stats = 0;
   setup({
