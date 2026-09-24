@@ -48,8 +48,19 @@ fi
 # A Chromium child (zygote, GPU, renderer) rewrites its argv into one
 # space-joined string, so its --type= is not a separate argument; look for it
 # anywhere in the command line rather than at the start of one.
-shell_running() {
+#
+# And only a process whose EXECUTABLE is electron counts: the command line alone
+# would also match any process that merely mentions the path, an ssh session
+# grepping for it included, and a shell would then wait on, or kill, that.
+electron_pids() {
   for pid in $(pgrep -f 'electron[/]dist/electron' 2>/dev/null); do
+    case "$(readlink "/proc/$pid/exe" 2>/dev/null)" in
+      */electron/dist/electron | */electron/dist/electron" (deleted)") echo "$pid" ;;
+    esac
+  done
+}
+shell_running() {
+  for pid in $(electron_pids); do
     tr '\0' ' ' < "/proc/$pid/cmdline" 2>/dev/null | grep -q -e ' --type=' || return 0
   done
   return 1
@@ -111,7 +122,7 @@ if [ -f "$UPD/pending" ]; then
     done
     if [ -f "$UPD/pending" ]; then
       echo "tvbox: boot watchdog - update not committed in ${t}s, killing the shell for retry/rollback" >&2
-      pkill -f 'electron[/]dist'
+      for pid in $(electron_pids); do kill "$pid" 2>/dev/null; done
     fi
   ) &
 fi

@@ -144,6 +144,7 @@ app.commandLine.appendSwitch("enable-features", "UseOzonePlatform");
 const CONSOLE_TAG = { debug: "log", info: "info", warning: "warn", error: "error" };
 
 let win = null;
+let swCleared = Promise.resolve(); // the service-worker clear at start, see below
 let currentAppId = null; // which app is FOREGROUND (null = launcher); drives focus + video-mode targeting
 // The app to return to when the screensaver it asked for is dismissed (see
 // showAmbient, far below). Declared up here because setForegroundApp clears it,
@@ -1610,15 +1611,17 @@ function closePopups(id) {
 function windowAppId(sender) {
   // A window of the default session is only who it says while it shows OUR page:
   // the navigation lock keeps it there, and this is the second half of that.
-  if (win && !win.isDestroyed() && sender === win.webContents) return ownPage(sender) ? null : undefined;
+  if (win && !win.isDestroyed() && sender === win.webContents) return ownPage(sender, "/tvbox/") ? null : undefined;
   for (const [, w] of appwins.all()) {
-    if (sender === w.webContents) return !w.tvboxLocal || ownPage(sender) ? w.tvboxAppId : undefined;
+    if (sender === w.webContents) return !w.tvboxLocal || ownPage(sender, w.tvboxPrefix) ? w.tvboxAppId : undefined;
   }
   return undefined;
 }
-function ownPage(wc) {
+// Whether a window shows a page of its own: the shell's origin and, for the
+// launcher and a local app, its own path under it.
+function ownPage(wc, prefix) {
   try {
-    return sessionpolicy.localNavAllowed(wc.getURL(), BASE, null);
+    return sessionpolicy.localNavAllowed(wc.getURL(), BASE, prefix || null);
   } catch (e) {
     return false;
   }
@@ -1626,6 +1629,7 @@ function ownPage(wc) {
 // Keep a launcher or local-app window on the shell's own pages (see
 // sessionpolicy.localNavAllowed), and let none of them open windows.
 function lockToOwnPages(w, prefix) {
+  w.tvboxPrefix = prefix;
   const guard = (e, u) => {
     if (sessionpolicy.localNavAllowed(u, BASE, prefix)) return;
     console.warn("[nav] blocked navigation out of a local window:", String(u).slice(0, 80));
@@ -2202,7 +2206,13 @@ app.whenReady().then(async () => {
   // Every page of the shell's origin shares this session, and a service worker
   // registered by one page outlives it (a reboot, the app's removal). None may
   // carry over: the request gate below decides which may register again.
-  session.defaultSession.clearStorageData({ storages: ["serviceworkers"] }).catch(() => {});
+  // Awaited before the launcher loads (below), or a worker left from last time
+  // could still answer its first navigation. Bounded, so a storage layer that
+  // never answers cannot keep the TV blank.
+  swCleared = Promise.race([
+    session.defaultSession.clearStorageData({ storages: ["serviceworkers"] }).catch(() => {}),
+    new Promise((r) => setTimeout(r, 3000)),
+  ]);
   try {
     // Reap an mpv left by a previous run. The pattern is the OPTION, not the
     // socket file name: the socket carries a per-launch sequence number now
@@ -2405,7 +2415,7 @@ app.whenReady().then(async () => {
     },
   });
   win.setAlwaysOnTop(true, "screen-saver");
-  lockToOwnPages(win, null);
+  lockToOwnPages(win, "/tvbox/");
   // Surface the renderer console (launcher + local app pages: livetv/spotify/plex)
   // in the shell log, so an app that fails to render/init is diagnosable over ssh
   // (~/.tvbox/shell.log) instead of showing only a black screen.
@@ -2416,7 +2426,7 @@ app.whenReady().then(async () => {
       ev.sourceId ? "(" + ev.sourceId + ":" + ev.lineNumber + ")" : "",
     );
   });
-  win.loadURL(BASE + "/tvbox/"); // boot into the HOME launcher
+  swCleared.then(() => win.loadURL(BASE + "/tvbox/")); // boot into the HOME launcher
   win.focus();
   // The launcher's renderer crashing leaves a transparent window with nothing in
   // it and no key handling at all. Reload it, a bounded number of times: a page

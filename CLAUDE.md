@@ -285,7 +285,7 @@ access X before initialization`) - it passed `node --check`, eslint and every
   inside the function that uses it anyway; the check is a net, not a licence. What
   it still cannot see is the bootstrap, the windows, the timers and the server, so
   after any deploy that touched main.js: `pkill -f 'electron[/]dist'`, wait ~20s,
-  then `curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8097/tvbox/api/apps` -
+  then `curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8097/tvbox/api/config` -
   a 000 means it never came up, and `~/.tvbox/shell.log` says why. The test SKIPS
   unless `shell/node_modules` is installed (`cd shell && npm ci --ignore-scripts`,
   which is what CI does - no Electron binary).
@@ -293,7 +293,9 @@ access X before initialization`) - it passed `node --check`, eslint and every
   `ssh <pi-ssh-host> pkill -f 'electron[/]dist'` (the autostart respawn loop restarts it; note:
   a bare `pkill -f "electron ."` also matches your own ssh command line and
   kills the connection - hence the `[/]` character class).
-- Verify (on the box, via ssh): `curl -s http://127.0.0.1:8097/tvbox/api/apps`,
+- Verify (on the box, via ssh): `curl -s -H "X-Tvbox-Local: $(cat ~/.tvbox/local-token)"
+http://127.0.0.1:8097/tvbox/api/apps` (a request with no browser headers and no
+  token is an unidentified caller, which gets only `/config` and `/system/region`),
   `systemctl --user status tvbox-cec`, `journalctl --user -u tvbox-cec` for CEC
   traffic/keypress logs.
   A screenshot of the running UI, from the compositor itself:

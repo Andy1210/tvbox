@@ -187,7 +187,8 @@ connected`. Only a button press brings it back.
 **Holding the link changes who can fire IR, and that is worth stating.** Before it,
 a blast needed the remote awake, so in practice somebody had to have picked it up -
 a physical gate on every remote trigger. Now the box holds the link, so anything that
-can reach `POST /tvbox/api/ir/send` (loopback, and any process on the box) or publish
+can reach `POST /tvbox/api/ir/send` (the launcher, or a process on the box that sends
+the per-boot `X-Tvbox-Local` token from `~/.tvbox/local-token`) or publish
 to `tvbox/<id>/cmd` on the broker (no box-side authentication - see
 [SECURITY.md](../SECURITY.md)) can fire IR at the room for as long as the link lasts.
 That is the point of the feature; it is also a capability that used to be gated by a
@@ -280,7 +281,8 @@ crosses the internet in cleartext; use `https://` (e.g. Nabu Casa) otherwise.
   the launcher only ever sees `has*` flags). Saving from the UI reconnects
   the backend and reloads the remote bridge immediately.
 - `POST /tvbox/api/ir/send` `{ action, steps? }` - what the bridge and the
-  Test buttons call; answers `{ ok: false, error }` instead of a 500 when the
+  Test buttons call (from a shell on the box:
+  `curl -H "X-Tvbox-Local: $(cat ~/.tvbox/local-token)" -d '{"action":"..."}' ...`); answers `{ ok: false, error }` instead of a 500 when the
   blaster is down. `GET /tvbox/api/ir/status` - backend health + last error.
 - Bridge-side log lines (`journalctl --user -u tvbox-remote`) show
   `ir send failed: …` when the shell/blaster is unreachable; the shell log
