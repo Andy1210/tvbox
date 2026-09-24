@@ -306,6 +306,20 @@ function appClosed(id) {
   call(id, "appClosed", () => plugin.appClosed());
 }
 
+/**
+ * Tell an app's plugin that its app's WINDOW is gone, however it went: a quit, the
+ * LRU cap, the memory guard, a crashed renderer. It is the plugin's one chance to
+ * let go of what it holds on the page's behalf (a claim the page would release
+ * from a cleanup that a destroyed window never runs). It says nothing about the
+ * app being put away - that is appClosed - so it must not stop sound: a window
+ * dropped for the cap keeps a plugin's daemon playing on purpose.
+ */
+function windowGone(id) {
+  const plugin = loadedPlugins.get(id);
+  if (!plugin || typeof plugin.windowGone !== "function") return;
+  call(id, "windowGone", () => plugin.windowGone());
+}
+
 module.exports = {
   init,
   guardList,
@@ -323,4 +337,5 @@ module.exports = {
   startAll,
   stopAll,
   appClosed,
+  windowGone,
 };

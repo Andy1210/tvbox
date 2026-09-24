@@ -298,6 +298,26 @@ test("appClosed reaches a plugin that has one, and nothing else", () => {
   plugins.unload("plain2");
 });
 
+test("windowGone reaches a plugin that has one, and is not appClosed", () => {
+  const log = path.join(root, "gone.log");
+  process.env.TVBOX_TEST_LOG = log;
+  fs.writeFileSync(log, "");
+  const m = pkg(
+    "wg",
+    'const fs = require("fs"); return { appClosed(){ fs.appendFileSync(process.env.TVBOX_TEST_LOG, "closed\\n"); }, windowGone(){ fs.appendFileSync(process.env.TVBOX_TEST_LOG, "gone\\n"); } };',
+  );
+  const weird = pkg("wg2", "return { windowGone: 1 };");
+  boot([m, weird]);
+  plugins.loadOne(m);
+  plugins.loadOne(weird);
+  plugins.windowGone("wg");
+  plugins.windowGone("wg2"); // a truthy non-function: not called, not thrown
+  plugins.windowGone("never-loaded");
+  assert.equal(fs.readFileSync(log, "utf8").trim(), "gone");
+  plugins.unload("wg");
+  plugins.unload("wg2");
+});
+
 test("a truthy non-function appClosed is not called", () => {
   // A plugin is somebody's JavaScript object; calling a truthy non-function would
   // throw out of here into the route that asked for the quit.

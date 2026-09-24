@@ -957,6 +957,7 @@ function appWindowGone(id) {
   cards.clearSoundWidget(id);
   if (oursWasPlaying) clearNowPlayingFor(id);
   cards.appsChanged();
+  plugins.windowGone(id);
 }
 
 // The now-playing claim, dropped when the app that made it is QUIT.
