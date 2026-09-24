@@ -7,3 +7,4 @@ launcher/dist/
 launcher/dist-demo/
 package-lock.json
 image/stage-tvbox/01-tvbox/files/
+shell/pairing/vendor/

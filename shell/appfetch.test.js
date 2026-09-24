@@ -259,3 +259,52 @@ test("realTransport: fetches a local server pinned to 127.0.0.1", async () => {
     server.close();
   }
 });
+
+test("requests in flight are capped per owner and released when they finish", { timeout: 5000 }, async () => {
+  const af = require("./appfetch");
+  const releases = [];
+  const deps = {
+    lookup: async () => [{ address: "93.184.216.34", family: 4 }],
+    transport: () => new Promise((resolve) => releases.push(() => resolve({ status: 200, headers: {}, body: "x" }))),
+  };
+  const req = () => af.proxy({ origins: ["example.com"], url: "https://example.com/", owner: "a" }, deps);
+  const pending = [];
+  for (let i = 0; i < af.MAX_IN_FLIGHT_PER_OWNER; i++) pending.push(req());
+  await new Promise((r) => setImmediate(r));
+  const over = await req();
+  assert.equal(over.ok, false);
+  assert.match(over.error, /in flight/);
+  releases.forEach((f) => f());
+  await Promise.all(pending);
+  const again = req();
+  await new Promise((r) => setImmediate(r));
+  releases[releases.length - 1]();
+  assert.equal((await again).ok, true);
+});
+
+test("a server that trickles bytes is cut off by the deadline, not only the idle timeout", async () => {
+  const http = require("node:http");
+  const af = require("./appfetch");
+  const server = http.createServer((req, res) => {
+    res.writeHead(200);
+    const t = setInterval(() => res.write("."), 50);
+    res.on("close", () => clearInterval(t));
+  });
+  await new Promise((r) => server.listen(0, "127.0.0.1", r));
+  const port = server.address().port;
+  const started = Date.now();
+  await assert.rejects(
+    () =>
+      af.realTransport("http://127.0.0.1:" + port + "/", {
+        method: "GET",
+        headers: {},
+        addresses: [{ address: "127.0.0.1", family: 4 }],
+        maxBytes: 1e6,
+        timeoutMs: 200,
+        deadlineMs: 400,
+      }),
+    /timeout/,
+  );
+  assert.ok(Date.now() - started < 2000);
+  server.close();
+});

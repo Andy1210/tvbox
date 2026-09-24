@@ -19,6 +19,7 @@
 //
 // PiP switches nothing: the browse UI owns the screen there, and the compositor
 // places the small window (a Wayland client cannot place itself).
+const apigate = require("./apigate"); // the names and addresses this box answers to
 const { spawn } = require("child_process");
 const fs = require("fs");
 const net = require("net");
@@ -103,7 +104,7 @@ const QUEUE_MAX = 32;
  */
 function playableUrl(u) {
   if (typeof u !== "string" || u.length > 4096) return false;
-  return /^https?:\/\//i.test(u);
+  return /^https?:\/\//i.test(u) && !apigate.pointsAtThisBox(u);
 }
 
 // What mpv is doing right now. Kept here rather than read on demand: the observer
@@ -197,7 +198,9 @@ function mpvCmd(obj) {
 }
 // keepMode: launchMpv's own pre-launch stop, where releasing the display claim
 // would put the UI mode back for a second only for the new file to claim again.
+let stops = 0; // how many times the player was stopped, for launches waiting on audio
 function stopMpv(keepMode) {
+  stops += 1;
   // (mpvOwnerId is NOT cleared here: launchMpv calls this on relaunch right
   // after "play" set the owner. Every play re-assigns it, and without a running
   // mpv no first-frame reveal can consume a stale value.)
@@ -208,20 +211,43 @@ function stopMpv(keepMode) {
   clearMpvMedia(); // the clock stops with the process (see clearMpvMedia)
   mpvStartPending = false; // no paused-start handshake outlives the process
   if (mpv) {
-    const pid = mpv.pid;
-    mpv.removeAllListeners("exit"); // our own kill must NOT signal "finished" to the app
-    try {
-      process.kill(-pid, "SIGTERM");
-    } catch (e) {
-      try {
-        mpv.kill("SIGTERM");
-      } catch (e2) {}
-    }
+    const child = mpv;
+    const pid = child.pid;
+    const sock = ipc;
+    child.removeAllListeners("exit"); // our own kill must NOT signal "finished" to the app
+    signalGroup(child, "SIGTERM");
+    // An mpv stuck in a network read can ignore SIGTERM, and the next launch
+    // would then run beside it: two players on one audio device and one
+    // display. Escalate, and remove its socket once it is really gone.
+    const hard = setTimeout(() => {
+      if (child.exitCode === null && child.signalCode === null) {
+        console.warn("[player] mpv pid", pid, "ignored SIGTERM, killing");
+        signalGroup(child, "SIGKILL");
+      }
+    }, deps.mpvKillAfterMs || MPV_KILL_AFTER_MS);
+    if (hard.unref) hard.unref();
+    child.once("exit", () => {
+      clearTimeout(hard);
+      unlinkQuiet(sock);
+    });
     console.log("[player] stopMpv pid", pid);
     mpv = null;
   }
+  unlinkQuiet(ipc);
+}
+const MPV_KILL_AFTER_MS = 3000;
+function signalGroup(child, sig) {
   try {
-    fs.unlinkSync(ipc);
+    process.kill(-child.pid, sig);
+  } catch (e) {
+    try {
+      child.kill(sig);
+    } catch (e2) {}
+  }
+}
+function unlinkQuiet(p) {
+  try {
+    fs.unlinkSync(p);
   } catch (e) {}
 }
 // mpv logs its own COMMAND LINE, and the file it plays is on it - so this file
@@ -410,6 +436,7 @@ function launchMpv(url, startPos, pip, rect, streams, opts) {
   }
   mpv.on("exit", (code, sig) => {
     console.log("[player] mpv exited code", code, "sig", sig);
+    unlinkQuiet(ipcFor(seq));
     emit({ type: "finished" });
     mpv = null;
     playingUrl = null;
@@ -560,6 +587,8 @@ function startMpvPlayback(seq) {
   adaptMpvMode(seq, go);
 }
 
+// 900 ms before the first try, then 400 ms apart: just past the 8 s start gate.
+const OBSERVER_TRIES = 18;
 function observeMpv(seq, tries) {
   // Its own launch's socket: a retry chain from a dead launch then cannot attach to
   // the next mpv and emit a second stream of playing/position/duration events.
@@ -572,7 +601,9 @@ function observeMpv(seq, tries) {
     // that isn't up yet must be retried rather than dropped - but only for the
     // launch it was started for, or a dead launch's retry chain would attach a
     // second observer to the NEXT mpv.
-    if (!connected && mpv && mpvSeq === seq && (tries || 0) < 5)
+    // Retried for as long as the start gate waits, so a slow socket still gets
+    // its first-frame reveal instead of a film that plays behind the UI.
+    if (!connected && mpv && mpvSeq === seq && (tries || 0) < OBSERVER_TRIES)
       setTimeout(() => observeMpv(seq, (tries || 0) + 1), 400);
   });
   s.on("connect", () => {
@@ -792,6 +823,7 @@ module.exports = {
   clearQueue: clearMpvQueue,
   playableUrl,
   stop: stopMpv,
+  stopCount: () => stops,
   cmd: mpvCmd,
   query: mpvQuery,
   emit,
@@ -805,4 +837,8 @@ module.exports = {
   setPlaying,
   owner,
   setOwner,
+  // Tests only: hand the module a child to treat as the running mpv.
+  _adopt: (child) => {
+    mpv = child;
+  },
 };

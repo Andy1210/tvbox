@@ -7,6 +7,7 @@
 // size-capped so a manifest can't fill the SD card. Values are strings, like
 // localStorage. Pure-ish (fs only); the id/size guards are the security surface.
 const fs = require("fs");
+const fsutil = require("./fsutil");
 const path = require("path");
 const os = require("os");
 
@@ -25,7 +26,9 @@ function readAll(id) {
   const sid = safeId(id);
   if (!sid) return {};
   try {
-    const parsed = JSON.parse(fs.readFileSync(fileFor(sid), "utf8"));
+    // A file that does not parse is set aside rather than read as empty, so the
+    // next write cannot replace an app's whole store with one key.
+    const parsed = fsutil.readJsonGuarded(fileFor(sid)).value;
     if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return {};
     // null-prototype copy so keys like "__proto__"/"constructor" are plain data,
     // never touch Object.prototype, and `in`/quota checks aren't fooled by
@@ -34,7 +37,7 @@ function readAll(id) {
     for (const k of Object.keys(parsed)) obj[k] = parsed[k];
     return obj;
   } catch (e) {
-    return {}; // missing / corrupt -> empty
+    return {};
   }
 }
 
@@ -45,7 +48,7 @@ function writeAll(id, obj) {
   if (Buffer.byteLength(json, "utf8") > MAX_BYTES) return { ok: false, error: "storage quota exceeded" };
   try {
     fs.mkdirSync(DIR, { recursive: true });
-    fs.writeFileSync(fileFor(sid), json, { mode: 0o600 });
+    fsutil.writeFileAtomic(fileFor(sid), json, { mode: 0o600 });
     return { ok: true };
   } catch (e) {
     return { ok: false, error: "write failed" };

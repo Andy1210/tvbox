@@ -318,3 +318,25 @@ test("launch opens the app it names, and nothing without one", () => {
   tvcommand.handle({ action: "open" });
   assert.deepEqual(log, [["navTo", "plex", null]]);
 });
+
+test("a play_media waiting on a load that fails is dropped, not replayed on the next load", () => {
+  const { EventEmitter } = require("node:events");
+  const sent = [];
+  const wc = new EventEmitter();
+  wc.isLoading = () => true;
+  wc.send = (c, p) => sent.push([c, p]);
+  const w = { isDestroyed: () => false, webContents: wc };
+  boot({ manifests: { media: { id: "media", status: "ready", runtime: {} } } });
+  tvcommand.init({ appWindow: () => w });
+  tvcommand.playMediaIn({ action: "play_media", app: "media", query: "old request" });
+  wc.emit("did-fail-load");
+  wc.emit("did-finish-load"); // a later, unrelated load
+  assert.deepEqual(sent, []);
+  assert.strictEqual(wc.listenerCount("did-finish-load"), 0);
+
+  tvcommand.playMediaIn({ action: "play_media", app: "media", query: "new request" });
+  wc.emit("did-finish-load");
+  assert.strictEqual(sent.length, 1);
+  assert.strictEqual(sent[0][1].query, "new request");
+  assert.strictEqual(wc.listenerCount("did-fail-load"), 0);
+});

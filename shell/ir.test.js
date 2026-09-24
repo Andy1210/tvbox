@@ -311,3 +311,38 @@ test("an action nothing is mapped to is refused, not guessed", async () => {
   await assert.rejects(() => ir.send("soundbar_power"), /unknown IR action/);
   assert.deepEqual(ir.status().actions, ["input_hdmi2"]);
 });
+
+test("a flood of sends is refused past a short queue instead of holding the blaster for hours", async () => {
+  let release;
+  const gate = new Promise((r) => (release = r));
+  let sent = 0;
+  ir._test.setBackendForTest(
+    {
+      name: "fake",
+      connected: () => true,
+      send: async () => {
+        sent += 1;
+        await gate;
+      },
+      close() {},
+    },
+    { mute: "S" },
+  );
+  try {
+    const results = [];
+    for (let i = 0; i < 30; i++)
+      results.push(
+        ir.send("mute").then(
+          () => "ok",
+          (e) => e.message,
+        ),
+      );
+    release();
+    const out = await Promise.all(results);
+    assert.ok(out.filter((r) => r === "IR queue full").length >= 20, "most of the flood is refused");
+    assert.ok(sent <= 9, "only what was queued goes out");
+    assert.strictEqual(await ir.send("mute").then(() => "ok"), "ok", "and the queue works again after");
+  } finally {
+    ir._test.setBackendForTest(null, {});
+  }
+});

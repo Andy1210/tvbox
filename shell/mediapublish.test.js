@@ -242,3 +242,17 @@ test("no broker means nothing to declare", () => {
   mediapublish.publishIrDiscovery();
   assert.deepEqual(log.discovery, []);
 });
+
+test("a reconnect restates the retained topics, the unchanged state included", async () => {
+  const log = boot({ nowPlaying: { app: "x", state: "playing", title: "t" } });
+  mediapublish.applyConfig();
+  await settle();
+  const states = () => log.published.filter((p) => p[0] === "state").length;
+  const before = { announced: log.announced.length, states: states() };
+  assert.ok(log.handlers && typeof log.handlers.onConnect === "function");
+  log.handlers.onConnect(); // the broker came back without its retained store
+  await settle();
+  assert.strictEqual(log.announced.length, before.announced + 1);
+  assert.strictEqual(states(), before.states + 1, "the same state goes out again, forced");
+  assert.ok(log.published.filter((p) => p[0] === "nowplaying").length >= 2);
+});

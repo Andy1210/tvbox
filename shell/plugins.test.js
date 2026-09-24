@@ -62,6 +62,19 @@ test("a guard that names no route in the table throws, rather than guarding noth
   assert.throws(() => plugins.guardList({ guard: ["GET /state"] }, undefined), /names no route/);
 });
 
+test("a plugin that declares no public routes is a legacy table; an empty list closes all of them", () => {
+  const table = { "GET /auth/callback": () => {}, "POST /event": () => {} };
+  assert.strictEqual(plugins.publicList(undefined, table), null);
+  assert.strictEqual(plugins.publicList({ guard: [] }, table), null);
+  assert.deepEqual(plugins.publicList({ public: [] }, table), []);
+  assert.deepEqual(plugins.publicList({ public: ["GET /auth/callback", "POST /event"] }, table), [
+    "GET /auth/callback",
+    "POST /event",
+  ]);
+  assert.throws(() => plugins.publicList({ public: ["GET /auth/Callback"] }, table), /names no route/);
+  assert.throws(() => plugins.publicList({ public: "GET /auth/callback" }, table), /must be an array/);
+});
+
 test("a guard has to be an array, and may only name a GET", () => {
   const table = { "GET /a": () => {}, "POST /b": () => {} };
   assert.throws(() => plugins.guardList({ guard: "GET /a" }, table), /must be an array/);
@@ -283,6 +296,26 @@ test("appClosed reaches a plugin that has one, and nothing else", () => {
   assert.equal(fs.readFileSync(log, "utf8").trim(), "closed");
   plugins.unload("cl");
   plugins.unload("plain2");
+});
+
+test("windowGone reaches a plugin that has one, and is not appClosed", () => {
+  const log = path.join(root, "gone.log");
+  process.env.TVBOX_TEST_LOG = log;
+  fs.writeFileSync(log, "");
+  const m = pkg(
+    "wg",
+    'const fs = require("fs"); return { appClosed(){ fs.appendFileSync(process.env.TVBOX_TEST_LOG, "closed\\n"); }, windowGone(){ fs.appendFileSync(process.env.TVBOX_TEST_LOG, "gone\\n"); } };',
+  );
+  const weird = pkg("wg2", "return { windowGone: 1 };");
+  boot([m, weird]);
+  plugins.loadOne(m);
+  plugins.loadOne(weird);
+  plugins.windowGone("wg");
+  plugins.windowGone("wg2"); // a truthy non-function: not called, not thrown
+  plugins.windowGone("never-loaded");
+  assert.equal(fs.readFileSync(log, "utf8").trim(), "gone");
+  plugins.unload("wg");
+  plugins.unload("wg2");
 });
 
 test("a truthy non-function appClosed is not called", () => {

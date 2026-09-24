@@ -43,6 +43,7 @@ import asyncio
 import collections
 import ctypes
 import glob
+import ipaddress
 import json
 import logging
 import os
@@ -105,6 +106,15 @@ MAX_QUEUED = 256
 # Generously above a real turn, which is seconds even with a local model.
 RUN_TIMEOUT = 60.0
 WATCHDOG_INTERVAL = 5.0
+# One write may take this long. A peer whose receive window is shut never lets
+# one finish, and the single writer below would then hold every later
+# connection's events behind it.
+WRITE_TIMEOUT = 5.0
+# Who may connect when the config names nobody: the addresses a home network is
+# made of. The port carries the remote's microphone and plays audio into the
+# room, and it has no authentication of its own.
+DEFAULT_ALLOW_FROM = ("127.0.0.0/8", "10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16",
+                      "169.254.0.0/16", "::1/128", "fc00::/7", "fe80::/10")
 
 # What counts as this run making progress, i.e. what clears the debt the watchdog
 # collects on. Everything here is Home Assistant handing over something it
@@ -151,10 +161,49 @@ def load_config():
         # both. A toast is the one that does not interrupt a film, which is why it
         # is part of the default.
         "answer": str(cfg.get("answer") or "both").lower(),
+        # Which addresses may connect: a list of IPs or CIDR ranges, Home
+        # Assistant's own address being the tight choice.
+        "allow_from": _networks(cfg.get("allowFrom")),
     }
 
 
+def _networks(value):
+    """The allowFrom list as networks. Unreadable entries are dropped with a warning;
+    a list that ends up empty falls back to the default rather than to nobody, so a
+    typo cannot silently lock Home Assistant out."""
+    items = value if isinstance(value, list) else list(DEFAULT_ALLOW_FROM)
+    out = []
+    for item in items:
+        try:
+            out.append(ipaddress.ip_network(str(item).strip(), strict=False))
+        except ValueError:
+            LOG.warning("voice.allowFrom: ignoring %r", item)
+    if not out:
+        out = [ipaddress.ip_network(n) for n in DEFAULT_ALLOW_FROM]
+    return out
+
+
+def address_allowed(host, networks):
+    try:
+        addr = ipaddress.ip_address(str(host).split("%")[0])
+    except ValueError:
+        return False
+    if isinstance(addr, ipaddress.IPv6Address) and addr.ipv4_mapped:
+        addr = addr.ipv4_mapped
+    return any(addr in n for n in networks)
+
+
 # ---------------------------------------------------------------- Wyoming wire
+
+
+def _abort(writer):
+    try:
+        writer.transport.abort()
+    except (AttributeError, OSError):
+        try:
+            writer.close()
+        except OSError:
+            pass
 
 
 async def read_event(reader):
@@ -369,6 +418,24 @@ class RemoteMic:
 SHELL_NOTIFY_URL = "http://127.0.0.1:8097/tvbox/api/notify"
 
 
+LOCAL_TOKEN_FILE = os.path.expanduser("~/.tvbox/local-token")
+
+
+def shell_headers(extra=None):
+    """Headers for a call to the shell's API. The token the shell writes at start
+    is what tells it this request comes from a process of the box's own, and it
+    changes with every shell start, so it is read per call."""
+    headers = dict(extra or {})
+    try:
+        with open(LOCAL_TOKEN_FILE, encoding="utf-8") as f:
+            token = f.read().strip()
+        if token:
+            headers["X-Tvbox-Local"] = token
+    except OSError:
+        pass
+    return headers
+
+
 # How long to wait for the shell to take a note.
 #
 # **The reply says the shell's main loop reached the request, not that anything
@@ -401,7 +468,7 @@ def show_toast(text):
     if not text:
         return
     body = json.dumps({"message": text, "duration": 8000}).encode("utf-8")
-    req = urllib.request.Request(SHELL_NOTIFY_URL, data=body, headers={"Content-Type": "application/json"})
+    req = urllib.request.Request(SHELL_NOTIFY_URL, data=body, headers=shell_headers({"Content-Type": "application/json"}))
     try:
         urllib.request.urlopen(req, timeout=NOTIFY_TIMEOUT).read()
     except Exception as e:  # the shell may be restarting; an answer is not worth a crash
@@ -1029,6 +1096,10 @@ class Satellite:
     async def handle_client(self, reader, writer):
         peer = writer.get_extra_info("peername")
         host = peer[0] if peer else "?"
+        if not address_allowed(host, self.config.get("allow_from") or _networks(None)):
+            LOG.warning("refusing a connection from %s (not in voice.allowFrom)", host)
+            _abort(writer)
+            return
         if self.writer is not None:
             if host != self._peer_host:
                 # One session at a time, and a STRANGER never takes it. The port
@@ -1104,10 +1175,9 @@ class Satellite:
         # throw away a correct answer - which on `answer: "toast"` is the whole
         # of it.
         if writer is not None:
-            try:
-                writer.close()
-            except OSError:
-                pass
+            # abort, not close: close waits to flush, and a peer that stopped
+            # reading never lets that finish.
+            _abort(writer)
 
     async def watchdog(self):
         """Drop a connection that owes an answer and has gone quiet.
@@ -1148,10 +1218,15 @@ class Satellite:
         elif etype == "pause-satellite":
             LOG.info("pipeline paused")
         elif etype == "transcript":
-            LOG.info("heard: %s", data.get("text", ""))
+            # What was said stays out of the log at the default level: the log is
+            # copied into the diagnostics report on the boot partition.
+            text = data.get("text", "")
+            LOG.info("heard %d characters", len(str(text)))
+            LOG.debug("heard: %s", text)
         elif etype == "synthesize":
             text = data.get("text", "")
-            LOG.info("answer: %s", text)
+            LOG.info("answer: %d characters", len(str(text)))
+            LOG.debug("answer: %s", text)
             if self.config["answer"] in ("toast", "both"):
                 self.toaster.show(text)
         elif etype == "audio-start":
@@ -1244,7 +1319,13 @@ class Satellite:
             if writer is None:
                 continue
             try:
-                await write_event(writer, etype, data, payload)
+                await asyncio.wait_for(write_event(writer, etype, data, payload), WRITE_TIMEOUT)
+            except asyncio.TimeoutError:
+                LOG.warning("a write to Home Assistant stalled - dropping the connection")
+                if self.writer is writer:
+                    self._end_session()
+                else:
+                    _abort(writer)
             except (ConnectionResetError, BrokenPipeError, OSError):
                 # The whole session goes, not just the writer: a half-dropped one
                 # leaves a run open that nothing will ever close. Unless the write

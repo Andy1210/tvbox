@@ -28,6 +28,9 @@ const MACHINERY = new Set([
   "photoshare", // photos a phone cast at the viewer; emptied when it closes, not a folder
   "pyenv",
   "__pycache__",
+  "screenframe", // the phone remote's latest picture of the screen
+  "config-snapshots", // earlier copies of config.json
+  "update-keys", // extra keys the update feed may be signed with
   "shares", // network-share mount points; offered as sources in their own right
   "shell", // the dev tree
   "shell-userdata", // Chromium profile: app logins live here
@@ -40,6 +43,17 @@ function isDir(p) {
     return fs.statSync(p).isDirectory();
   } catch (e) {
     return false;
+  }
+}
+
+// A directory nobody but its owner may enter was made private on purpose, which
+// is the same rule the file server applies to a share of ~/.tvbox itself: a folder
+// the shell or an app keeps to itself is not user content, listed or not.
+function isPrivate(p) {
+  try {
+    return (fs.statSync(p).mode & 0o077) === 0;
+  } catch (e) {
+    return true;
   }
 }
 
@@ -61,7 +75,7 @@ function subdirs(dir) {
 function userDirs() {
   const out = [];
   for (const d of subdirs(TVBOX)) {
-    if (MACHINERY.has(d) || d.startsWith(".")) continue;
+    if (MACHINERY.has(d) || d.startsWith(".") || isPrivate(path.join(TVBOX, d))) continue;
     out.push({ id: "tvbox:" + d, path: path.join(TVBOX, d), name: d });
   }
   for (const d of subdirs(HOME)) {
@@ -71,4 +85,4 @@ function userDirs() {
   return out;
 }
 
-module.exports = { HOME, TVBOX, MACHINERY, isDir, subdirs, userDirs };
+module.exports = { HOME, TVBOX, MACHINERY, isDir, isPrivate, subdirs, userDirs };

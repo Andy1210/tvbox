@@ -222,3 +222,24 @@ test("what we advertise stays inside what this box can actually decode", () => {
   assert.strictEqual((parseInt(cea, 16) & 0x100) === 0, true, "1080p60 must stay out of the CEA bitmap");
   assert.strictEqual(caps.wfd_video_formats.split(" ").length, 13, "all thirteen fields, or the source rejects it");
 });
+
+test("a Content-Length that is not a plain in-range number drops the peer instead of looping", () => {
+  for (const bad of ["-100000", "-1", "1e3", "0x10", " 12x", "999999"]) {
+    const session = wfd.createSession({ sourceIp: "192.0.2.1", rtpPort: 1028, log: () => {} });
+    const text = "OPTIONS * RTSP/1.0\r\nCSeq: 1\r\nContent-Length: " + bad + "\r\n\r\nabc";
+    assert.deepStrictEqual(session.feed(text), [], bad);
+    assert.strictEqual(session.state.torndown, true, bad);
+  }
+  assert.deepStrictEqual(wfd.parseMessage("X\r\nContent-Length: -5\r\n\r\n"), { error: "bad content-length" });
+});
+
+test("an IDR request is a SET_PARAMETER naming wfd_idr_request, on the session", () => {
+  const s = wfd.createSession({ sourceIp: "10.0.0.2" });
+  s.state.session = "abc";
+  const text = s.idrRequest();
+  const parsed = wfd.parseMessage(text);
+  assert.ok(parsed && parsed.message, "parses as one message");
+  assert.match(parsed.message.start, /^SET_PARAMETER rtsp:\/\/10\.0\.0\.2\/wfd1\.0\/streamid=0 RTSP\/1\.0$/);
+  assert.strictEqual(parsed.message.headers.session, "abc");
+  assert.strictEqual(parsed.message.body, "wfd_idr_request\r\n");
+});

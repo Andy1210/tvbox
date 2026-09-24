@@ -1300,6 +1300,70 @@ async def test_a_shell_that_refuses_the_note_is_survivable():
         urllib.request.urlopen = real_urlopen
 
 
+async def test_an_address_outside_allow_from_never_gets_the_session():
+    import ipaddress
+    satellite = vs.Satellite({**CONFIG, "allow_from": [ipaddress.ip_network(HA + "/32")]})
+    outsider = FakeWriter(host="10.0.0.77")
+    await satellite.handle_client(BlockingReader(), outsider)
+    assert outsider.closed and satellite.writer is None, "an address not listed may not connect at all"
+    ha = FakeWriter()
+    task = asyncio.create_task(satellite.handle_client(BlockingReader(), ha))
+    for _ in range(5):
+        await asyncio.sleep(0)
+    assert satellite.writer is ha
+    await stop(task)
+
+
+async def test_the_default_allow_list_is_the_home_network():
+    nets = vs._networks(None)
+    for ok in ("192.168.0.5", "10.1.2.3", "172.16.0.9", "127.0.0.1", "::ffff:192.168.0.5", "fe80::1%eth0"):
+        assert vs.address_allowed(ok, nets), ok
+    for bad in ("8.8.8.8", "2001:db8::1", "not an ip"):
+        assert not vs.address_allowed(bad, nets), bad
+    assert vs._networks(["nonsense"]) == nets, "a list of typos falls back rather than locking everyone out"
+
+
+class StalledWriter(FakeWriter):
+    """A peer whose receive window has shut: nothing it is sent ever drains."""
+
+    def __init__(self, host=HA):
+        super().__init__(host)
+        self.aborted = False
+        self.transport = self
+
+    def write(self, data):
+        pass
+
+    async def drain(self):
+        await asyncio.Event().wait()
+
+    def abort(self):
+        self.aborted = True
+
+
+async def test_a_write_that_never_drains_drops_the_connection():
+    saved = vs.WRITE_TIMEOUT
+    vs.WRITE_TIMEOUT = 0.05
+    try:
+        satellite = vs.Satellite(CONFIG)
+        stalled = StalledWriter()
+        satellite.writer = stalled
+        satellite._peer_host = HA
+        task = asyncio.create_task(satellite.drain())
+        satellite.send("pong", {})
+        satellite.send("info", {})
+        await asyncio.sleep(0.3)
+        assert satellite.writer is None, "the session must go, or every later connection queues behind it"
+        assert stalled.aborted, "aborted, because a graceful close waits for the same drain"
+        fresh = StalledWriter()
+        fresh.drain = lambda: asyncio.sleep(0)
+        satellite.writer = fresh
+        assert satellite.send("pong", {}), "a new connection is written to again"
+        await stop(task)
+    finally:
+        vs.WRITE_TIMEOUT = saved
+
+
 async def main():
     tests = [value for name, value in sorted(globals().items()) if name.startswith("test_")]
     for test in tests:

@@ -38,7 +38,7 @@ const builtinradio = require("./builtinradio");
 // dep and OTA can never add an apt package), so removable.js asks before it runs.
 const browseDeps = { onPath: apps.onPath };
 
-function post(p, data, res, ctx) {
+function post(p, data, res, ctx, caller) {
   // The body is whatever the caller sent, and a literal `null` is valid JSON. Every
   // route below reads a field off `data` straight away, so one such request would
   // throw a TypeError, and what is behind that is a restart of the television, not
@@ -420,7 +420,11 @@ function post(p, data, res, ctx) {
     );
   }
   if (p === "/tvbox/api/parental/verify") {
-    return httpserver.jsonRes(res, { ok: config.verifyPin(String(data.pin || "")) });
+    // Counted per caller: an app guessing cannot lock the owner out.
+    const who = caller ? caller.kind + (caller.id ? ":" + caller.id : "") : "launcher";
+    const ok = config.verifyPin(String(data.pin || ""), who);
+    const wait = ok ? 0 : config.pinLockedFor(who);
+    return httpserver.jsonRes(res, wait ? { ok, locked: true, retryInMs: wait } : { ok });
   }
   if (p === "/tvbox/api/pairing/start") {
     return httpserver.jsonRes(res, pairing.start(data.locale, data.kind)); // kind: "iptv" (default) | "spotify"
@@ -692,7 +696,7 @@ function post(p, data, res, ctx) {
     const on = !!data.enabled;
     config.setPhoneRemote({ enabled: on });
     if (!on) phoneremote.forgetAll(); // off means the paired phones go too
-    phoneremote.apply();
+    phoneremote.apply((err) => err && console.warn("[phoneremote] could not listen:", err.message || err));
     return httpserver.jsonRes(res, { ok: true, enabled: on, phones: phoneremote.list() });
   }
   // Show a code on the TV so a phone can be adopted. Returns what the QR carries.

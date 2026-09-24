@@ -268,3 +268,55 @@ test("a guard that names no route is a plugin that does not load", () => {
   routes[0].guard = ["GET /waittime"];
   assert.strictEqual(httpserver.pluginRouteGuarded(routes, "GET", "/tvbox/api/x/waittime"), true);
 });
+
+test("a second JSON answer to one request is dropped, not thrown", () => {
+  const { jsonRes } = require("./httpserver");
+  const calls = [];
+  const res = {
+    headersSent: false,
+    writableEnded: false,
+    writeHead(code) {
+      if (this.headersSent) throw new Error("ERR_HTTP_HEADERS_SENT");
+      this.headersSent = true;
+      calls.push(code);
+    },
+    end(body) {
+      this.writableEnded = true;
+      calls.push(body);
+    },
+  };
+  jsonRes(res, { a: 1 });
+  jsonRes(res, { a: 2 });
+  assert.deepStrictEqual(calls, [200, '{"a":1}']);
+});
+
+test("an images-only root serves a picture, sandboxed, and nothing that could run", async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "tvbox-http-img-"));
+  fs.writeFileSync(path.join(dir, "x.html"), "<script>fetch('/tvbox/api/power')</script>");
+  fs.writeFileSync(path.join(dir, "x.svg"), "<svg onload='alert(1)'/>");
+  fs.writeFileSync(path.join(dir, "a.JPG"), "jpeg");
+  for (const name of ["x.html", "x.svg"]) {
+    const res = fakeRes();
+    httpserver.serveStatic(res, dir, name, null, { images: true });
+    await res.done;
+    assert.strictEqual(res.status, 404, name);
+  }
+  const res = fakeRes();
+  httpserver.serveStatic(res, dir, "a.JPG", null, { images: true });
+  await res.done;
+  assert.strictEqual(res.status, 200);
+  assert.strictEqual(res.headers["Content-Type"], "image/jpeg");
+  assert.strictEqual(res.headers["X-Content-Type-Options"], "nosniff");
+  assert.match(res.headers["Content-Security-Policy"], /sandbox/);
+});
+
+test("a route says whether an unidentified caller may reach it", () => {
+  const fn = () => {};
+  const routes = [
+    { id: "a", prefix: "/tvbox/api/a", table: { "GET /cb": fn, "GET /list": fn }, open: ["GET /cb"] },
+    { id: "b", prefix: "/tvbox/api/b", table: { "POST /event": fn } },
+  ];
+  assert.strictEqual(httpserver.resolvePluginRoute(routes, "GET", "/tvbox/api/a/cb").open, true);
+  assert.strictEqual(httpserver.resolvePluginRoute(routes, "GET", "/tvbox/api/a/list").open, false);
+  assert.strictEqual(httpserver.resolvePluginRoute(routes, "POST", "/tvbox/api/b/event").open, "legacy");
+});

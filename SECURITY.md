@@ -26,9 +26,54 @@ tvbox is a LAN device with no cloud account. The interesting boundaries:
   that lets a manifest smuggle extra privileges past the validators
   (package-name/URL/path checks, sha256 verification) is a vulnerability.
 - **The pairing server** (`:8099`, LAN, only while pairing) - gated by an
-  on-screen code with lockout + TTL; bypasses matter.
-- **The local API** (`:8097`, loopback-only) - assumed reachable only by local
-  processes; anything that exposes it beyond loopback matters.
+  on-screen code with lockout + TTL; bypasses matter. The QR code carries the
+  code and a per-session key in its URL fragment, which a browser never sends, so
+  a phone that scanned it never puts the code on the air: what it writes is
+  sealed (XSalsa20-Poly1305) together with the route it is meant for, its reads and bulk uploads (a photo, a ROM chunk)
+  carry an HMAC under the key over the method, the URL and the body (a write
+  also a nonce, so it cannot be replayed), and once the phone has proved the key
+  the session refuses unauthenticated writes. A read that verifies does not keep
+  the session open (anyone who saw it could replay it), and a MAC that does not
+  verify is not counted as a guess at the code. What the box sends back (a list, a
+  thumbnail) is not sealed. This protects against a **passive** observer on
+  the same network only. The page itself is served over plain http, so someone
+  who can rewrite traffic can serve a page without the sealing. A phone that
+  typed the short URL has no key and sends the code and its bodies in clear,
+  which is the accepted limit, and so do app pages that predate the sealing
+  (their provider did not register as `v2`, so their QR carries the code in the
+  query as well).
+- **The phone remote** (`:8100`, LAN) - a paired phone holds a key of its own,
+  handed over once in an adoption sealed with a one-time key from the QR's URL
+  fragment. Every request after that carries an HMAC under it with a time and a
+  nonce, so one read off the air cannot be altered, replayed or turned into
+  another press, and a shared screen frame goes back sealed under the same key.
+  The box stores the key in `config.json` (0600), since checking a MAC needs it.
+  The same passive-only limit as pairing applies, and a phone that typed the
+  short address adopts in clear. A phone paired by a version before this holds a
+  bare token and has to pair again.
+- **The local API** (`:8097`, loopback-only) - reachable by local processes, and
+  it answers only to `localhost`/`127.0.0.1` as a Host (DNS rebinding). Every
+  local app is served from the same origin as the API, so the origin cannot tell
+  them apart: each request a page makes is stamped by the browser session with
+  the window that made it ([shell/apigate.js](shell/apigate.js)). The launcher
+  reaches everything, an app window reaches the app routes in
+  [docs/app-api.md](docs/app-api.md) and its own plugin's routes. The box's own
+  processes (the CEC and remote bridges, the voice satellite, a plugin's daemon)
+  prove themselves with a per-boot token the shell writes to
+  `~/.tvbox/local-token` (0600) and reach reads, plugin routes and the few writes
+  they make; a request with no headers at all (mpv fetching a URL, a sandboxed
+  program without access to `~/.tvbox`) gets only the public reads. A stream
+  URL an app hands the player is refused when it points at one of the shell's
+  own servers, but only the URL as written is checked: a redirect or a playlist
+  that leads there later lands as such a header-less request. A service
+  worker may be registered only by a local app, inside its own `/<id>/`, and none
+  survive a shell start. An app may change the parental PIN, or whether it is
+  asked for, only by presenting the current one, and every PIN check is rate
+  limited. An app reaching a launcher-only route (store sources, installs, power,
+  another app's pairing code) is a vulnerability.
+- **Browser permissions** - every session refuses permissions it has not listed
+  (microphone, camera, clipboard reads, device choosers), in
+  [shell/sessionpolicy.js](shell/sessionpolicy.js).
 - **The IR link service** (`~/.tvbox/firetv-ir.sock`, mode 0600) - a resident
   process holding the BLE link to a paired Fire TV remote, so the box can fire
   that remote's own infrared LED. Same assumption as the local API: reachable by
@@ -56,7 +101,7 @@ tvbox is a LAN device with no cloud account. The interesting boundaries:
 Shell-side **plugins are trusted code by design** (they run in the host
 process) - "a malicious plugin can do X" is expected, not a vulnerability;
 review plugins before installing them. The same goes for an app package's
-**bridge** (`runtime.bridge: "./bridge.js"`), which runs in the app's own
-non-isolated renderer: it reaches only the capabilities that app declared, so
-it is strictly less than a plugin, but it is still code the package ships and
-review is what gates it.
+**bridge** (`runtime.bridge: "./bridge.js"`): it is `require()`d by the
+Node-capable preload of the app's non-isolated window, so it has Node itself
+(`child_process`, `fs`) and the raw IPC channel. Treat it as full host trust, the
+same as a plugin, and review it the same way.

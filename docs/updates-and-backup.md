@@ -74,8 +74,14 @@ booted healthy - a broken release can never replace the rollback machinery.
 
 Default feed URL: `https://github.com/Andy1210/tvbox/releases/latest/download/update.json`.
 Self-host override on the box: `~/.tvbox/config.json` →
-`{"update": {"feed": "http://<lan-host>/update.json"}}` (plain http allowed on
-RFC1918/LAN only). `{"update": {"auto": false}}` disables auto-apply.
+`{"update": {"feed": "http://<lan-ip>/update.json"}}`. Plain http is allowed only
+to a literal private or loopback address, never to a name: a `.local` or DNS name
+over http is whatever answered the lookup. Any feed other than the default must
+come with `update.json.sig` signed by a release key: the one the shell ships
+with, or a `*.pem` you put in `~/.tvbox/update-keys/` for your own builds. A test
+loop with no key at all can set `{"update": {"allowUnsigned": true}}`.
+`{"update": {"auto": false}}` disables auto-apply. A release that rolled back is
+not installed again by the nightly run; pressing Update is what retries it.
 
 **Publishing a release:**
 

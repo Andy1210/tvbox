@@ -225,3 +225,20 @@ test("an unusable snapshot is not parked even on a same-box restore", () => {
     assert.strictEqual(backup.ownStorageOnly(junk, true), "", junk);
   }
 });
+
+test("a clone starts with no paired phones; a same-box restore keeps them", () => {
+  const config = require("./config");
+  const phones = [{ id: "a1", name: "p", key: "k".repeat(43), addedAt: 1 }];
+  const cfg = { phoneRemote: { enabled: true, phones, screenUntil: Date.now() + 60000 } };
+  backup.apply({ format: "tvbox-backup", version: 1, machineId: "0000deadbeef", clone: true, config: cfg });
+  const cloned = config.rawPhoneRemote();
+  assert.deepStrictEqual(cloned.phones, [], "the source box's phone keys stay behind");
+  assert.strictEqual(cloned.screenUntil, 0);
+  assert.strictEqual(cloned.enabled, true, "the setting itself carries over");
+  backup.apply({ format: "tvbox-backup", version: 1, machineId: "0000deadbeef", clone: false, config: cfg });
+  assert.deepStrictEqual(config.rawPhoneRemote().phones, phones);
+  // A clone file restored onto the very box that made it keeps that box's phones.
+  const identity = require("./identity");
+  backup.apply({ format: "tvbox-backup", version: 1, machineId: identity.machineId(), clone: true, config: cfg });
+  assert.deepStrictEqual(config.rawPhoneRemote().phones, phones);
+});

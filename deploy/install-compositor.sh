@@ -121,9 +121,13 @@ command -v cargo >/dev/null 2>&1 || {
 
 # A 4 GB Pi 5 runs out of memory with a job per core.
 say "building tvbox-wc from $SRC (this takes a few minutes)"
-if ! su - "$BOX_USER" -c "cd '$SRC' && cargo build --release -j3" >/tmp/tvbox-wc-build.log 2>&1; then
-	echo "  build failed - see /tmp/tvbox-wc-build.log" >&2
-	tail -20 /tmp/tvbox-wc-build.log >&2
+# A fresh name rather than a fixed one in /tmp: root writes this file, and a fixed
+# path is one the box user could have created first.
+buildlog=$(mktemp /tmp/tvbox-wc-build.XXXXXX.log) || exit 1
+chmod 644 "$buildlog"
+if ! su - "$BOX_USER" -c "cd '$SRC' && cargo build --release -j3" >"$buildlog" 2>&1; then
+	echo "  build failed - see $buildlog" >&2
+	tail -20 "$buildlog" >&2
 	exit 1
 fi
 
@@ -131,15 +135,22 @@ fi
 # the box user: a planted target/release/tvbox-wc -> /etc/shadow would be copied
 # out as mode 755 root:root by the root that runs this. Refuse anything that is not
 # a regular file.
+# The check is made on a root-owned copy, not on the box user's file: that one can
+# be swapped for a link between the test and the install. `cp -P` copies a link as
+# a link, so a planted one fails the test instead of being followed.
 BUILT="$SRC/target/release/tvbox-wc"
-if [ -L "$BUILT" ] || [ ! -f "$BUILT" ]; then
+staged=$(mktemp -d) || exit 1
+if ! cp -P "$BUILT" "$staged/tvbox-wc" 2>/dev/null || [ -L "$staged/tvbox-wc" ] || [ ! -f "$staged/tvbox-wc" ]; then
+	rm -rf "$staged"
 	echo "  $BUILT is not a regular file - refusing to install it" >&2
 	exit 1
 fi
-if ! install -m 755 -o root -g root "$BUILT" "$DEST"; then
+if ! install -m 755 -o root -g root "$staged/tvbox-wc" "$DEST"; then
+	rm -rf "$staged"
 	echo "  could not install to $DEST" >&2
 	exit 1
 fi
+rm -rf "$staged"
 # The exit status of this script is what provision.sh decides on, and `say` is an
 # echo: without this the last word would always be "success".
 [ -x "$DEST" ] || {

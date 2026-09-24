@@ -131,24 +131,24 @@ Top level:
 `requires` - dependencies; a missing binary greys the tile with "needs X",
 nothing crash-loops:
 
-| Field            | What                                                                                                                                                                                                                                               |
-| ---------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `bin`            | Binaries that must resolve on PATH (`~/.tvbox/bin` is on PATH).                                                                                                                                                                                    |
-| `flatpak`        | **No-root install** of flathub app ids (`flatpak install --user`), so a missing one is installable from the UI like `download`. The box's own arch is used, and the install is retried: an app plus its runtime is a large pull that can time out. |
-| `download`       | **No-root install** for `tvbox deps`: per-arch (`arm64`/`x64`) `{ url, sha256, extract? }`, verified and placed in `~/.tvbox/bin`. Prefer this whenever upstream ships static binaries.                                                            |
-| `apt`            | Debian packages for `tvbox deps` - the one step that asks for sudo. Names are validated against Debian package-name policy.                                                                                                                        |
-| `aptRepo`        | **Forbidden** in the registry - a third-party root APT source is risky and avoidable. Ship a `download` binary instead. (CI rejects it.)                                                                                                           |
-| `disableService` | System services to disable after the apt install (when the shell supervises the daemon itself).                                                                                                                                                    |
+| Field            | What                                                                                                                                                                                                                                                                                                 |
+| ---------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `bin`            | Binaries that must resolve on PATH (`~/.tvbox/bin` is on PATH).                                                                                                                                                                                                                                      |
+| `flatpak`        | **No-root install** of flathub app ids (`flatpak install --user`), so a missing one is installable from the UI like `download`. The box's own arch is used, and the install is retried: an app plus its runtime is a large pull that can time out.                                                   |
+| `download`       | **No-root install** for `tvbox deps`: per-arch (`arm64`/`x64`) `{ url, sha256, extract? }`, verified and placed in `~/.tvbox/bin`. Prefer this whenever upstream ships static binaries.                                                                                                              |
+| `apt`            | Debian packages for `tvbox deps` - the one step that asks for sudo. Names are validated against Debian package-name policy.                                                                                                                                                                          |
+| `aptRepo`        | **Forbidden** in the registry - a third-party root APT source is risky and avoidable. Ship a `download` binary instead. (CI rejects it.)                                                                                                                                                             |
+| `disableService` | System services to disable after the apt install (when the shell supervises the daemon itself). Only a unit of one of the app's own `apt` packages (`<package>`, `<package>-...`, `<package>@...`), and never one the box depends on (ssh, NetworkManager, greetd, systemd-\*, a firewall, tvbox\*). |
 
 `install` - the bundle recipe for `type: webclient` + `serve: static` (runs
 user-space from the UI or `tvbox install <id>`):
 
-| Field                             | What                                                                                                                                                                                                                                         |
-| --------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `source.type`                     | `flatpak` (ref installed `--user` from flathub) \| `url` (.tar.gz/.zip) \| `git` (shallow clone).                                                                                                                                            |
-| `source.sha256` / `source.commit` | Optional but recommended pins: `url` sources may carry the archive's sha256 (verified before extraction); `git` sources a full commit sha (checked out after clone). `url`/`git` sources must be https, or plain http to a private/LAN host. |
-| `extract`                         | Subpath inside the source that holds the web client.                                                                                                                                                                                         |
-| `patch`                           | `[{ "op": "strip-script", "match": … }]` - remove `<script>` tags matching a substring from the entry HTML (e.g. Plex's Qt-only qwebchannel loader).                                                                                         |
+| Field                             | What                                                                                                                                                                                                                                                                 |
+| --------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `source.type`                     | `flatpak` (ref installed `--user` from flathub) \| `url` (.tar.gz/.zip) \| `git` (shallow clone).                                                                                                                                                                    |
+| `source.sha256` / `source.commit` | Optional but recommended pins: `url` sources may carry the archive's sha256 (verified before extraction); `git` sources a full commit sha (checked out after clone). `url`/`git` sources must be https, or plain http to a literal private/LAN address (not a name). |
+| `extract`                         | Relative subpath inside the source that holds the web client; no `..`, and it must resolve inside the source.                                                                                                                                                        |
+| `patch`                           | `[{ "op": "strip-script", "match": … }]` - remove `<script>` tags matching a substring from the entry HTML (e.g. Plex's Qt-only qwebchannel loader).                                                                                                                 |
 
 `runtime` - how it's served and what it may touch:
 
@@ -157,7 +157,7 @@ user-space from the UI or `tvbox install <id>`):
 | `native`              | A program to launch: `{ flatpak }` or `{ bin }`, plus `args`. Required on `type: native` (the app IS that program) and allowed on a `webclient` app that launches one per item, which is RetroArch. Validated at manifest load AND at launch, with no shell involved. See [native-apps.md](native-apps.md). |
 | `serve`               | `local` (own web/ bundle at /<id>/) \| `static` (legacy root bundle) \| `remote` (live site).                                                                                                                                                                                                               |
 | `url` / `urlConfig`   | remote: literal URL, or the config section holding `baseUrl`.                                                                                                                                                                                                                                               |
-| `origins`             | remote: allowed hostnames (+subdomains). Defaults to the URL's host.                                                                                                                                                                                                                                        |
+| `origins`             | remote: allowed hostnames (+subdomains), at least two labels and never a loopback name. Defaults to the URL's host.                                                                                                                                                                                         |
 | `userAgent`           | remote: UA override (e.g. smart-TV UA for youtube.com/tv).                                                                                                                                                                                                                                                  |
 | `entry`, `mount`      | static: entry file (default `index.html`); `"mount": "root"` serves at `/`.                                                                                                                                                                                                                                 |
 | `textInput`           | `auto` (default) raises the box's typing screen when a text field takes focus; `off` for an app that ships its own on-screen keyboard.                                                                                                                                                                      |
@@ -175,7 +175,7 @@ custom HTTP routes - declares `"service": "<name>"` and ships `plugin.js` in its
 package, next to its `manifest.json` (`~/.tvbox/apps/<id>/plugin.js`). There is
 no separate in-shell plugin location: the plugin ships with the app package.
 
-A plugin is a factory `(host) => ({ start?, stop?, appClosed? })`; the `host`
+A plugin is a factory `(host) => ({ start?, stop?, appClosed?, windowGone? })`; the `host`
 surface (routes, config, pairing, supervised children, `onConfigChange`,
 `navTo`, …) and a worked example are in
 **[tvbox-apps/AUTHORING.md](https://github.com/Andy1210/tvbox-apps/blob/main/AUTHORING.md)**.
@@ -186,6 +186,13 @@ exists for state the shell cannot see: the shell ends its own shared player when
 an app closes, but a plugin's daemon is invisible to it, and Spotify's music
 went on playing out of a box with nothing left to reach it. Any of the three may
 be async; a rejection is logged, never rethrown.
+`windowGone()` is the other half: it is called whenever the app's WINDOW goes,
+for any reason - a close, the LRU cap, the memory guard, a crashed renderer. A
+destroyed window runs none of its page's cleanup, so this is where a plugin lets
+go of what it holds for the page (a claim the page would otherwise release on
+unmount). It must not stop sound: a window dropped for the cap keeps a plugin's
+daemon playing on purpose, and `appClosed()` is what says the app was put away.
+On a close both are called.
 Plugins load at shell boot, and only when the app's `requires.bin` all resolve.
 An install or an update hot-loads one straight away (replacing the old code if it
 is still loaded), so a package fix takes effect without a reboot - but only for

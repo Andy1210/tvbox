@@ -3,6 +3,7 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <meta name="referrer" content="no-referrer" />
     <title>{{title}}</title>
     <style>
       :root {
@@ -139,8 +140,9 @@
     <h2 id="existingTitle" style="display: none">{{existing}}</h2>
     <div id="existing"></div>
 
+    <script src="/tvbox-seal.js" data-v="2" data-ask-code></script>
     <script>
-      document.getElementById("code").value = new URLSearchParams(location.search).get("c") || "";
+      document.getElementById("code").value = tvboxSeal.code;
       var $ = function (id) {
         return document.getElementById(id);
       };
@@ -150,14 +152,16 @@
       function code() {
         return $("code").value;
       }
+      // A scanned page signs its reads with its key; a typed one sends the code.
       function q(p) {
+        if (tvboxSeal.sealed) return tvboxSeal.url("GET", p);
         return p + (p.indexOf("?") < 0 ? "?" : "&") + "c=" + encodeURIComponent(code());
       }
       async function post(path, body) {
         var r = await fetch(path, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(Object.assign({ code: code() }, body)),
+          body: tvboxSeal.body(Object.assign({ code: code() }, body), path),
         });
         return await r.json();
       }

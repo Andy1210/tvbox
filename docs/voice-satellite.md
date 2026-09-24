@@ -40,9 +40,18 @@ has no authentication). Turn it on in `~/.tvbox/config.json`:
   "area": "Living room", // only a hint for the setup dialog; the real room is the device's area
   "pipeline": null, // a named Assist pipeline, or null for the preferred one
   "answer": "both", // both | toast | speak
-  "duck": 0.3 // how far to pull a playing film down while the answer plays
+  "duck": 0.3, // how far to pull a playing film down while the answer plays
+  "allowFrom": ["192.168.0.10"] // who may connect; see below
 }
 ```
+
+`allowFrom` takes addresses and CIDR ranges. Left out, it is the private,
+link-local and loopback ranges (`10/8`, `172.16/12`, `192.168/16`, `169.254/16`,
+`fc00::/7`, `fe80::/10`), which covers a Home Assistant on the same home network.
+Two setups fall outside that default and need an entry: a Home Assistant that
+reaches the box over a global IPv6 address, and one behind a carrier-grade NAT or
+a VPN that hands out `100.64.0.0/10`. Home Assistant's own address is the tightest
+setting.
 
 Then restart the service and add the box in Home Assistant:
 

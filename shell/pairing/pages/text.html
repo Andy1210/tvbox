@@ -3,6 +3,7 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <meta name="referrer" content="no-referrer" />
     <title>{{title}}</title>
     <style>
       :root {
@@ -83,8 +84,9 @@
     <button class="btn" id="go">{{send}}</button>
     <div class="warn" id="secretWarn" style="display: none">{{secret}}</div>
     <div id="st"></div>
+    <script src="/tvbox-seal.js" data-v="2" data-ask-code></script>
     <script>
-      document.getElementById("code").value = new URLSearchParams(location.search).get("c") || "";
+      document.getElementById("code").value = tvboxSeal.code;
       function code() {
         return document.getElementById("code").value;
       }
@@ -114,10 +116,10 @@
         go.disabled = true;
         st.textContent = "…";
         try {
-          var r = await fetch("/text?c=" + encodeURIComponent(code()), {
+          var r = await fetch("/text", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ text: text }),
+            body: tvboxSeal.body({ code: code(), text: text }, "/text"),
           });
           var j = await r.json();
           if (j.ok) {

@@ -281,9 +281,11 @@ function stop() {
   stopping = true;
   const child = proc;
   const ref = flatpakRef;
-  // The app processes, plus the launcher itself as the fallback for a plain `bin`
-  // app that has no descendants.
+  // The app processes. For a flatpak the spawned process is only the launcher,
+  // so its descendants are the app; a plain `bin` app IS the spawned process, and
+  // it is signalled along with any children it started.
   const appPids = descendants(child.pid, MAX_PROC_DEPTH).map(stamped);
+  if (!ref && appPids.length) appPids.unshift(stamped(child.pid));
   // `mine` is this teardown's OWN list, and the escalation below closes over it
   // rather than reading the shared `targets`. Two stops can overlap: leaving one
   // native app for another calls stop() and then start(), so an older call's grace

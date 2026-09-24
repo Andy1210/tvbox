@@ -90,11 +90,20 @@ function applyConfig(body: Record<string, unknown>): void {
       port?: number | null;
       username?: string;
       password?: string;
+      tls?: boolean;
       deviceId?: string;
     };
     const host = (m.host ?? "").trim();
     if (!host) {
-      config.mqtt = { configured: false, host: "", port: null, username: "", hasPassword: false, deviceId: "" };
+      config.mqtt = {
+        configured: false,
+        host: "",
+        port: null,
+        username: "",
+        hasPassword: false,
+        tls: false,
+        deviceId: "",
+      };
     } else {
       const port = Number(m.port);
       config.mqtt.host = host;
@@ -102,6 +111,7 @@ function applyConfig(body: Record<string, unknown>): void {
       config.mqtt.username = (m.username ?? "").trim();
       config.mqtt.deviceId = (m.deviceId ?? "").trim().replace(/[^a-zA-Z0-9_-]/g, "_");
       if (m.password) config.mqtt.hasPassword = true;
+      if (typeof m.tls === "boolean") config.mqtt.tls = m.tls;
       config.mqtt.configured = !!(config.mqtt.host && config.mqtt.username);
     }
   }

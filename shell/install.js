@@ -3,11 +3,12 @@
 // is Homebrew-like: a source (flatpak / url tarball / git), an extract subpath,
 // and patches. The acquired files land in apps-data/<id>.
 const fs = require("fs");
+const fsutil = require("./fsutil");
 const path = require("path");
 const os = require("os");
 const crypto = require("crypto");
 const { execFileSync } = require("child_process");
-const { isLanUrl, guardedFetch } = require("./netguard"); // shared self-hosted trust rule (plain http only to LAN hosts)
+const { isLiteralLanUrl, guardedFetch } = require("./netguard"); // shared self-hosted trust rule (plain http only to literal LAN addresses)
 const nativeapp = require("./native"); // runtime.native parser, shared with the launch path so the rules can't drift
 const flatpak = require("./flatpak"); // the one place that knows flatpak: refs, versions, commits, installing
 
@@ -135,6 +136,51 @@ const RESERVED_STATE_FILES = new Set([
   // `backup.state` could name it and a restore would write it - handing the next
   // boot a debug endpoint. Same pair of gates as every other shell-owned path.
   "debug-port",
+  // Every other name the shell itself keeps in ~/.tvbox that an app id could
+  // prefix. They carry a hyphen, so `<id>-` alone does not close them: an app
+  // called "local" could otherwise name local-token, one called "remote" the
+  // remote bridge's device list.
+  "local-token",
+  "remote-devices.json",
+  "remote-learned.json",
+  "mqtt-last-id",
+  "crash-notice",
+  "config-snapshots",
+  "update-keys",
+  "shell-userdata",
+  "firetv-ir.sock",
+  "librespot-cache",
+  "recover.sh",
+  // And the files a release lays down flat in ~/.tvbox (deploy/infra.list):
+  // install.test.js checks every one of them is here.
+  "run-shell.sh",
+  "tvbox-diag.sh",
+  "tvbox-safemode.sh",
+  "install-libcec8.sh",
+  "install-compositor.sh",
+  "tvbox-session",
+  "tvbox-cec.service",
+  "tvbox-remote.service",
+  "tvbox-gamepad.service",
+  "tvbox-voice.service",
+  "tvbox-flatpak-update.service",
+  "tvbox-flatpak-update.timer",
+  "tvbox-diag.service",
+  "tvbox-diag.timer",
+  "tvbox-safemode.service",
+  "tvbox-safemode-screen.service",
+  "tvbox-miracast",
+  "tvbox-miracast.service",
+  "52-tvbox-miracast.rules",
+  "tvbox-radio",
+  "tvbox-radio@.service",
+  "tvbox-sysupdate",
+  "tvbox-sysupdate.service",
+  "54-tvbox-sysupdate.rules",
+  "release-key.pem",
+  "greetd-tvbox-safemode.conf",
+  "coredump-tvbox-runtimemax.conf",
+  "journald-tvbox-persistent.conf",
 ]);
 
 // A ~/.tvbox/ sidecar an app may claim as its own in `backup.state`: one flat file
@@ -153,6 +199,89 @@ function stateFileOk(id, name) {
 // Reject (skip with a warning) anything that would confuse the shell or the
 // launcher instead of half-rendering it. Formal schema: docs/app-manifest.md +
 // docs/app-manifest.schema.json (CI validates the shipped manifests against it).
+// A relative path with no `..`, no empty and no `.` segment, and not absolute.
+function relativeInside(rel) {
+  if (!rel) return true;
+  if (path.isAbsolute(rel)) return false;
+  return !rel.split(/[\\/]/).some((seg) => seg === ".." || seg === ".");
+}
+
+// An origin is matched as the host itself or any subdomain of it, so a single
+// label ("com", "local") or a loopback name would admit whole namespaces or the
+// box itself. Two labels at least, and never a loopback address.
+function originHostOk(host) {
+  const h = String(host).toLowerCase();
+  if (!h.includes(".")) return false;
+  if (h === "localhost" || h.endsWith(".localhost")) return false;
+  if (/^127\.\d+\.\d+\.\d+$/.test(h) || h === "0.0.0.0") return false;
+  return true;
+}
+
+// Units a package may ask `tvbox deps` to disable: a plain unit name, and never
+// one the box needs to stay reachable, bootable or itself.
+const PROTECTED_UNITS = [
+  /^ssh/,
+  /^networkmanager/,
+  /^systemd-/,
+  /^dbus/,
+  /^polkit/,
+  /^greetd/,
+  /^getty/,
+  /^wpa_supplicant/,
+  /^bluetooth/,
+  /^udisks/,
+  /^avahi/,
+  /^cron/,
+  /^unattended-upgrades/,
+  /^apt-/,
+  /^tvbox/,
+  /^user@/,
+  /^pipewire/,
+  /^wireplumber/,
+  /^ufw/,
+  /^nftables/,
+  /^iptables/,
+  /^firewalld/,
+  /^apparmor/,
+  /^fail2ban/,
+  /^dhcpcd/,
+  /^modemmanager/,
+  // What keeps the box itself running: the seat the compositor sits on, the
+  // clock, the hardware watchdog, the firmware updater and the logs.
+  /^seatd/,
+  /^rpi-/,
+  /^raspberrypi/,
+  /^watchdog/,
+  /^chrony/,
+  /^ntp/,
+  /^openntpd/,
+  /^fake-hwclock/,
+  /^rsyslog/,
+  /^syslog/,
+  /^logrotate/,
+  /^dphys-swapfile/,
+  /^zram/,
+  /^rng-tools/,
+];
+// What disableService is for: a package the app has apt install ships a daemon
+// the shell supervises itself, and that package's own unit has to be stopped. So
+// a unit is allowed only when it belongs to one of the app's own apt packages
+// (named after it, or `<package>-...`/`<package>@...`), and never one the box
+// depends on even then.
+function disableServiceOk(svc, aptPackages) {
+  if (typeof svc !== "string" || !/^[a-z0-9][a-z0-9@._-]{0,63}$/i.test(svc)) return false;
+  const name = svc.toLowerCase();
+  if (!/^[^.]+(\.(service|socket|timer))?$/.test(name)) return false;
+  if (PROTECTED_UNITS.some((re) => re.test(name))) return false;
+  const base = name.replace(/\.(service|socket|timer)$/, "");
+  return (Array.isArray(aptPackages) ? aptPackages : []).some((pkg) => {
+    const p = String(pkg || "")
+      .toLowerCase()
+      .replace(/[=:].*$/, "");
+    return !!p && (base === p || base.startsWith(p + "-") || base.startsWith(p + "@"));
+  });
+}
+
 function validateManifest(m, src) {
   const bad = (msg) => {
     console.warn("[apps] skip", src + ":", msg);
@@ -391,6 +520,21 @@ function validateManifest(m, src) {
       }
     }
   }
+  // install.extract is joined onto the acquired source and COPIED into a
+  // directory the box serves over HTTP, so it must stay inside that source.
+  const ext = m.install && m.install.extract;
+  if (ext !== undefined && ext !== null) {
+    if (typeof ext !== "string" || ext.length > 200 || !relativeInside(ext))
+      return bad("install.extract must be a relative path inside the source: " + JSON.stringify(ext));
+  }
+  // requires.disableService reaches `sudo systemctl disable --now` in `tvbox deps`.
+  const dis = m.requires && m.requires.disableService;
+  if (dis !== undefined) {
+    if (!Array.isArray(dis) || dis.length > 4) return bad("requires.disableService must be an array of at most 4");
+    for (const svc of dis)
+      if (!disableServiceOk(svc, m.requires.apt))
+        return bad("requires.disableService may name only a unit of its own apt packages: " + JSON.stringify(svc));
+  }
   const CAPS = ["nav", "player", "config", "fetch", "storage", "display", "input", "shares", "system"];
   const caps = m.runtime && m.runtime.capabilities;
   if (caps != null) {
@@ -404,6 +548,7 @@ function validateManifest(m, src) {
       // a bare hostname only: no scheme, port, path, wildcard, whitespace, or blanks
       if (typeof o !== "string" || !/^[a-z0-9.-]+$/i.test(o) || o.startsWith(".") || o.endsWith("."))
         return bad("runtime.origins entries must be bare hostnames: " + JSON.stringify(o));
+      if (!originHostOk(o)) return bad("runtime.origins entry is too broad or local: " + JSON.stringify(o));
     }
   }
   if (m.accent && !/^#[0-9a-fA-F]{3,8}$/.test(m.accent)) {
@@ -656,7 +801,31 @@ async function fetchPackageFile(url, baseOrigin, rel) {
   }
 }
 
-async function installPackage(id, baseUrl, files, log) {
+// Fields of a package's own manifest that decide what the app may do. The store
+// vets the REGISTRY entry, and the manifest inside the package becomes the one
+// the box runs, so the two must agree on every one of these.
+const TRUST_FIELDS = ["type", "requires", "install", "runtime", "service", "pairing", "switches", "backup", "shares"];
+function canonical(v) {
+  if (Array.isArray(v)) return "[" + v.map(canonical).join(",") + "]";
+  if (v && typeof v === "object")
+    return (
+      "{" +
+      Object.keys(v)
+        .sort()
+        .map((k) => JSON.stringify(k) + ":" + canonical(v[k]))
+        .join(",") +
+      "}"
+    );
+  return JSON.stringify(v === undefined ? null : v);
+}
+function manifestMismatch(pkgManifest, entry) {
+  return TRUST_FIELDS.filter((k) => canonical(pkgManifest[k]) !== canonical(entry[k]));
+}
+
+// opts.expect: the registry entry this package was offered under. When given,
+// the package's manifest must validate, pass opts.trust (a function returning
+// a list of refusals) and match the entry on every TRUST_FIELDS key.
+async function installPackage(id, baseUrl, files, log, opts = {}) {
   log = log || (() => {});
   if (!/^[a-z0-9_-]+$/.test(String(id || ""))) throw new Error("bad app id");
   if (!Array.isArray(files) || files.length === 0) throw new Error("empty package file list");
@@ -721,6 +890,14 @@ async function installPackage(id, baseUrl, files, log) {
       throw new Error("package manifest.json missing or invalid JSON", { cause: e });
     }
     if (pm.id !== id) throw new Error("package manifest id '" + pm.id + "' != install id '" + id + "'");
+    if (opts.expect) {
+      const valid = validateManifest(JSON.parse(JSON.stringify(pm)), "package:" + id);
+      if (!valid) throw new Error("package manifest.json is not a valid manifest");
+      const refused = typeof opts.trust === "function" ? opts.trust(valid) : [];
+      if (refused.length) throw new Error("package manifest refused: " + refused.join("; "));
+      const differs = manifestMismatch(pm, opts.expect);
+      if (differs.length) throw new Error("package manifest differs from its registry entry: " + differs.join(", "));
+    }
     // Swap in: move any existing install aside first so a crash mid-rename can be
     // recovered rather than losing the app; drop the backup once the swap lands.
     if (bak) fs.renameSync(dst, bak);
@@ -785,10 +962,10 @@ function installUiDeps(m, log) {
 }
 
 // An install source may be fetched over https from anywhere, or plain http
-// only from the owner's own LAN/loopback infrastructure - the same
-// self-hosted trust rule as the updater feed (netguard.isLanUrl).
+// only from a literal LAN/loopback address - the same self-hosted trust rule as
+// the updater feed (netguard.isLiteralLanUrl).
 function sourceUrlOk(u) {
-  return /^https:\/\//i.test(u || "") || isLanUrl(u);
+  return /^https:\/\//i.test(u || "") || isLiteralLanUrl(u);
 }
 
 // Acquire the app's source and return a local directory that contains its files
@@ -812,7 +989,7 @@ function acquireSource(source, log) {
     // tarball) is https + sha256-pinned; hold url sources to the same bar:
     // https anywhere, plain http only to the owner's own LAN host, and an
     // optional (recommended) sha256 pin verified before extraction.
-    if (!sourceUrlOk(source.url)) throw new Error("url source must be https (or LAN http)");
+    if (!sourceUrlOk(source.url)) throw new Error("url source must be https (or http to a LAN address)");
     if (source.sha256 != null && !/^[0-9a-f]{64}$/i.test(source.sha256))
       throw new Error("url source sha256 must be 64 hex chars");
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "tvbox-"));
@@ -823,7 +1000,11 @@ function acquireSource(source, log) {
     // sha256 pin here is optional, so a downgraded/redirected fetch could hand
     // us arbitrary bundle bytes). Only redirects are constrained - a direct
     // https or LAN-http source still downloads fine.
-    execFileSync("curl", ["-fsSL", "--proto-redir", "=https", source.url, "-o", file], { stdio: "inherit" });
+    execFileSync(
+      "curl",
+      ["-fsSL", "--proto-redir", "=https", "--connect-timeout", "20", "--max-time", "900", source.url, "-o", file],
+      { stdio: "inherit" },
+    );
     if (source.sha256) {
       const sum = crypto.createHash("sha256").update(fs.readFileSync(file)).digest("hex");
       if (sum !== source.sha256.toLowerCase()) throw new Error("url source sha256 mismatch (got " + sum + ")");
@@ -839,19 +1020,28 @@ function acquireSource(source, log) {
   }
   if (source.type === "git") {
     if (!source.url) throw new Error("git source needs a url");
-    if (!sourceUrlOk(source.url)) throw new Error("git source must be https (or LAN http)");
+    if (!sourceUrlOk(source.url)) throw new Error("git source must be https (or http to a LAN address)");
     if (source.commit != null && !/^[0-9a-f]{40}$/i.test(source.commit))
       throw new Error("git source commit must be a full 40-hex sha");
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "tvbox-"));
     log("git clone " + source.url + " …");
+    // A repository that answers 401 makes git ask for credentials on the
+    // terminal, which blocks for ever and, from the shell's process group,
+    // stops the session. No prompts, no askpass, and a bound on the whole clone.
+    const gitOpts = {
+      stdio: "inherit",
+      timeout: 15 * 60 * 1000,
+      killSignal: "SIGKILL",
+      env: { ...process.env, GIT_TERMINAL_PROMPT: "0", GIT_ASKPASS: "/bin/false", SSH_ASKPASS: "/bin/false" },
+    };
     if (source.commit) {
       // Pinned: full clone + detached checkout of exactly that commit. The
       // checkout fails when the sha isn't in the repo, so its success IS the
       // verification (a sha names its content, like the sha256 on url sources).
-      execFileSync("git", ["clone", source.url, tmp], { stdio: "inherit" });
-      execFileSync("git", ["-C", tmp, "checkout", "--detach", source.commit.toLowerCase()], { stdio: "inherit" });
+      execFileSync("git", ["clone", source.url, tmp], gitOpts);
+      execFileSync("git", ["-C", tmp, "checkout", "--detach", source.commit.toLowerCase()], gitOpts);
     } else {
-      execFileSync("git", ["clone", "--depth", "1", source.url, tmp], { stdio: "inherit" });
+      execFileSync("git", ["clone", "--depth", "1", source.url, tmp], gitOpts);
     }
     return tmp;
   }
@@ -877,7 +1067,7 @@ function applyPatches(m, dir, log) {
     }
   }
   if (changed) {
-    fs.writeFileSync(idx, html);
+    fsutil.writeFileAtomic(idx, html);
     log(m.id + ": patched " + entry);
   }
 }
@@ -905,7 +1095,7 @@ function writeSourceState(id, ident) {
   if (!ident) return;
   try {
     fs.mkdirSync(SOURCES_DIR, { recursive: true });
-    fs.writeFileSync(sourceStatePath(id), JSON.stringify(ident));
+    fsutil.writeJsonAtomic(sourceStatePath(id), ident, { pretty: false });
   } catch (e) {
     console.warn("[install]", id, "could not record its source:", e.message);
   }
@@ -976,6 +1166,12 @@ function installApp(m, opts) {
   const srcRoot = acquireSource(m.install.source, log);
   const src = path.join(srcRoot, m.install.extract || "");
   if (!fs.existsSync(src)) throw new Error("extract path not found: " + src);
+  // The validator refuses `..`; a symlink inside the source could still point out
+  // of it, so the REAL path is held to the real root as well.
+  const realRoot = fs.realpathSync(srcRoot);
+  const realSrc = fs.realpathSync(src);
+  if (realSrc !== realRoot && !realSrc.startsWith(realRoot + path.sep))
+    throw new Error("extract path leaves the source: " + (m.install.extract || ""));
   fs.mkdirSync(APPS_DATA, { recursive: true });
   // A refresh replaces rather than merges: a file the new version dropped would
   // otherwise linger from the old one.

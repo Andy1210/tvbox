@@ -225,3 +225,45 @@ test("a button can be bound to an IR action", () => {
   assert.deepEqual(km["ir:soundbar_power"], [640], "the headphone button's usage, 0x0280");
   assert.ok(!("ir:nope!" in km), "but the charset is still the charset");
 });
+
+test("a config.json that does not parse is kept aside, and a save does not erase it", () => {
+  fs.mkdirSync(path.dirname(FILE), { recursive: true });
+  fs.writeFileSync(FILE, '{"mqtt":{"host":"broker","pass');
+  assert.strictEqual(config.publicConfig().setup.done, false);
+  const kept = fs.readdirSync(path.dirname(FILE)).filter((n) => n.startsWith("config.json.corrupt-"));
+  assert.equal(kept.length, 1, "the unreadable file is set aside");
+  config.setSetupDone();
+  assert.equal(
+    fs.readFileSync(path.join(path.dirname(FILE), kept[0]), "utf8"),
+    '{"mqtt":{"host":"broker","pass',
+    "the next save does not touch the only copy",
+  );
+});
+
+test("a wrong PIN locks further checks after a few tries, and the right one clears it", () => {
+  const lim = config._pinLimitForTest;
+  let t = 1e12;
+  lim.now = () => t;
+  config.setParental({ pin: "4321" });
+  for (let i = 0; i < 5; i++) assert.strictEqual(config.verifyPin("0000"), false);
+  assert.ok(config.pinLockedFor() > 0, "locked after five misses");
+  assert.strictEqual(config.verifyPin("4321"), false, "even the right PIN waits out the lock");
+  t += 31 * 1000;
+  assert.strictEqual(config.verifyPin("4321"), true);
+  assert.strictEqual(config.pinLockedFor(), 0);
+  assert.strictEqual(config.verifyPin("0000"), false);
+  assert.strictEqual(config.pinLockedFor(), 0, "the count starts over after a success");
+  config.setParental({ pin: "" });
+  lim.now = () => Date.now();
+});
+
+test("an app's wrong PINs lock that app, not the owner's PIN pad", () => {
+  config.setParental({ pin: "4321" });
+  for (let i = 0; i < 5; i++) assert.strictEqual(config.verifyPin("0000", "app:x"), false);
+  assert.ok(config.pinLockedFor("app:x") > 0);
+  assert.strictEqual(config.pinLockedFor("launcher"), 0);
+  assert.strictEqual(config.verifyPin("4321"), true, "the launcher is counted on its own");
+  assert.strictEqual(config.verifyPin("4321", "app:x"), false, "the app waits out its own lock");
+  config.setParental({ pin: "" });
+  config._pinLimitForTest.by.clear();
+});

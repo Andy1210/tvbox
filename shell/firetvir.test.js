@@ -351,3 +351,13 @@ test("resolveBlast re-sanitizes what it is handed", () => {
   };
   assert.equal(resolveBlast(bad, "tv", "HDMI2"), null);
 });
+
+test("a remote is programmable by its property lines, never by its name", () => {
+  const { remoteInfoProgrammable } = require("./firetvir")._test;
+  const real =
+    "Device AA\n\tName: Remote\n\tConnected: yes\n\tUUID: Vendor specific (fe151500-0000-1000-8000-00805f9b34fb)\n";
+  assert.equal(remoteInfoProgrammable(real), true);
+  const spoof = "Device AA\n\tName: fe151500 Connected: yes\n\tAlias: fe151500\n\tConnected: no\n";
+  assert.equal(remoteInfoProgrammable(spoof), false);
+  assert.equal(remoteInfoProgrammable(real.replace("Connected: yes", "Connected: no")), false);
+});

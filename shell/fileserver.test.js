@@ -223,6 +223,48 @@ test("serving passes the credentials through the environment, never argv", () =>
   assert.ok(argv.includes(":8098"));
 });
 
+test("sharing ~/.tvbox itself leaves its secrets out of what rclone serves", () => {
+  const tv = path.join(HOME, ".tvbox");
+  fs.writeFileSync(path.join(tv, "config.json"), "{}");
+  fs.writeFileSync(path.join(tv, "app-token[1].json"), "{}", { mode: 0o600 });
+  fs.chmodSync(path.join(tv, "app-token[1].json"), 0o600);
+  mk(".tvbox", "vault");
+  fs.chmodSync(path.join(tv, "vault"), 0o700);
+  fs.writeFileSync(path.join(tv, "notes.txt"), "hi", { mode: 0o644 });
+  fs.chmodSync(path.join(tv, "notes.txt"), 0o644);
+  const d = deps(true);
+  const r = fileserver.start({ pass: "goodenough", folders: ["tvbox:.", "tvbox:roms"] }, d);
+  assert.strictEqual(r.ok, true);
+  const argv = d.supervisor.spawned[0].spec.argv();
+  const excludes = [];
+  for (let i = 0; i < argv.length; i++) if (argv[i] === "--exclude") excludes.push(argv[i + 1]);
+  for (const p of [
+    "/tvbox/config.json",
+    "/tvbox/config.json.*",
+    "/tvbox/config-snapshots/**",
+    "/tvbox/local-token",
+    "/tvbox/update-keys/**",
+    "/tvbox/appdata/**",
+    "/tvbox/shell-userdata/**",
+  ])
+    assert.ok(excludes.includes(p), p + " must be excluded");
+  // private entries are found by their mode, not by a list, and named literally
+  assert.ok(excludes.includes("/tvbox/app-token\\[1\\].json"), "a 0600 file is excluded, its name escaped");
+  assert.ok(excludes.includes("/tvbox/vault/**"), "a 0700 folder is excluded");
+  assert.ok(!excludes.some((e) => e.includes("notes.txt")), "an ordinary file is still served");
+  assert.ok(!excludes.some((e) => e.startsWith("/games/")), "other shares are untouched");
+  fileserver.stop(d);
+  for (const n of ["config.json", "app-token[1].json", "notes.txt"]) fs.rmSync(path.join(tv, n));
+  fs.rmSync(path.join(tv, "vault"), { recursive: true });
+});
+
+test("no secret exclusions when ~/.tvbox itself is not shared", () => {
+  const d = deps(true);
+  fileserver.start({ pass: "goodenough", folders: ["tvbox:roms"] }, d);
+  assert.ok(!d.supervisor.spawned[0].spec.argv().includes("--exclude"));
+  fileserver.stop(d);
+});
+
 test("stopping takes the view of the box's folders away with it", () => {
   const d = deps(true);
   fileserver.start({ pass: "goodenough", folders: ["tvbox:roms"] }, d);

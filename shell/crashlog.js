@@ -111,6 +111,23 @@ let crashing = false;
  */
 function install(deps) {
   const d = deps || {};
+  // A rejected promise nobody awaited is logged, not fatal: the work it stood for
+  // has already failed, and restarting the shell over it would take the screen
+  // with it. Counted and cut off so a rejection in a timer cannot fill the log.
+  let rejections = 0;
+  process.on("unhandledRejection", (reason) => {
+    rejections++;
+    if (rejections > 50) return;
+    let text;
+    try {
+      text = String((reason && reason.stack) || reason);
+      text = require("./redact").redact(text);
+    } catch (e) {
+      text = "(a rejection whose reason could not be read)";
+    }
+    console.warn("[shell] unhandled promise rejection:", text.slice(0, 2000));
+    if (rejections === 50) console.warn("[shell] further unhandled rejections are not logged");
+  });
   process.on("uncaughtException", (err) => {
     if (crashing) return; // a throw from the handling below must not recurse
     crashing = true;

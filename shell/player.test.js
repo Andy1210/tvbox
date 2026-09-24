@@ -163,3 +163,21 @@ test.after(() => {
   if (REAL_SOCKET === undefined) delete process.env.TVBOX_WC_SOCKET;
   else process.env.TVBOX_WC_SOCKET = REAL_SOCKET;
 });
+
+test("an mpv that ignores SIGTERM is killed, and its socket removed", async () => {
+  const { spawn } = require("child_process");
+  const sock = "/tmp/tvbox-mpv-0.sock";
+  const child = spawn(process.execPath, ["-e", "process.on('SIGTERM',()=>{});setInterval(()=>{},1000)"], {
+    detached: true,
+    stdio: "ignore",
+  });
+  await new Promise((r) => setTimeout(r, 150));
+  player.init({ dmode: { claim: () => {}, release: () => {} }, publishMediaState: () => {}, mpvKillAfterMs: 200 });
+  player._adopt(child);
+  player.stop(); // drops the child's exit listeners, so listen after it
+  const exited = new Promise((resolve) => child.once("exit", (_code, sig) => resolve(sig)));
+  fs.writeFileSync(sock, ""); // what an mpv leaves behind
+  assert.strictEqual(await exited, "SIGKILL");
+  await new Promise((r) => setImmediate(r));
+  assert.strictEqual(fs.existsSync(sock), false);
+});

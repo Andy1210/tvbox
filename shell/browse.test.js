@@ -23,6 +23,9 @@ const touch = (p, body) => fs.writeFileSync(p, body || "x");
 mk(HOME, "Videos", "Sorozat");
 mk(HOME, ".tvbox", "ambient");
 mk(HOME, ".tvbox", "shell"); // machinery: not a source
+mk(HOME, ".tvbox", "screenframe"); // the phone remote's picture of the screen
+mk(HOME, ".tvbox", "keeps-to-itself"); // private by its mode, whatever its name
+fs.chmodSync(path.join(HOME, ".tvbox", "keeps-to-itself"), 0o700);
 mk(TMP, "outside"); // nothing under a root
 mk(TMP, "stick", "Filmek"); // stands in for a mounted USB stick
 touch(path.join(HOME, "Videos", "film.mkv"));
@@ -90,6 +93,8 @@ test("the sources are the user's own folders plus what is plugged in", async () 
   assert.ok(ids.includes("home:Videos"), "the home folders are offered");
   assert.ok(ids.includes("tvbox:ambient"), "so is user content under ~/.tvbox");
   assert.ok(!ids.includes("tvbox:shell"), "and the box's machinery is not");
+  assert.ok(!ids.includes("tvbox:screenframe"), "nor the screen the phone remote saw");
+  assert.ok(!ids.includes("tvbox:keeps-to-itself"), "nor a folder made private");
   const stick = s.sources.find((x) => x.kind === "removable");
   assert.strictEqual(stick.name, "FILMEK");
   assert.strictEqual(stick.mounted, false, "plugged in is not mounted");

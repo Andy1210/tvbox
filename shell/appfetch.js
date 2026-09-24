@@ -42,6 +42,11 @@ const MAX_RES_BYTES = 5 * 1024 * 1024; // 5 MB response cap
 const MAX_REQ_BYTES = 256 * 1024; // 256 KB request-body cap
 const TIMEOUT_MS = 10000;
 const MAX_REDIRECTS = 3;
+// Requests in flight at once, over all apps and per app. Each can buffer up to
+// MAX_RES_BYTES in the main process, so an app issuing them in a loop against a
+// slow endpoint would otherwise grow the shell without bound.
+const MAX_IN_FLIGHT = 24;
+const MAX_IN_FLIGHT_PER_OWNER = 6;
 const METHODS = ["GET", "POST", "HEAD"];
 
 // Request headers an app may set. Everything else (Cookie, Host, Referer,
@@ -215,7 +220,12 @@ function realTransport(reqUrl, o, deps) {
       },
     );
     req.on("error", (e) => reject(e));
+    // setTimeout on the request is an IDLE timeout: a server that sends a byte
+    // every few seconds never trips it. The deadline bounds the whole exchange.
     req.setTimeout(o.timeoutMs, () => req.destroy(new Error("timeout")));
+    const deadline = setTimeout(() => req.destroy(new Error("timeout")), o.deadlineMs || o.timeoutMs * 3);
+    if (deadline.unref) deadline.unref();
+    req.on("close", () => clearTimeout(deadline));
     if (o.body != null && o.method === "POST") req.write(o.body);
     req.end();
   });
@@ -224,7 +234,30 @@ function realTransport(reqUrl, o, deps) {
 // Perform the guarded request. `opts`: { origins, url, method?, headers?, body? }.
 // `deps` (tests): { lookup, transport }. Returns { ok, status, headers, body }
 // or { ok:false, error }.
+let inFlight = 0;
+const inFlightBy = new Map();
+
+// opts.owner (optional): who is asking, for the per-app cap.
 async function proxy(opts, deps) {
+  const owner = opts && opts.owner != null ? String(opts.owner) : null;
+  if (inFlight >= MAX_IN_FLIGHT) return { ok: false, error: "too many requests in flight" };
+  if (owner && (inFlightBy.get(owner) || 0) >= MAX_IN_FLIGHT_PER_OWNER)
+    return { ok: false, error: "too many requests in flight" };
+  inFlight++;
+  if (owner) inFlightBy.set(owner, (inFlightBy.get(owner) || 0) + 1);
+  try {
+    return await proxyOnce(opts, deps);
+  } finally {
+    inFlight--;
+    if (owner) {
+      const n = (inFlightBy.get(owner) || 1) - 1;
+      if (n > 0) inFlightBy.set(owner, n);
+      else inFlightBy.delete(owner);
+    }
+  }
+}
+
+async function proxyOnce(opts, deps) {
   const lookup = (deps && deps.lookup) || lookupAll;
   const transport = (deps && deps.transport) || realTransport;
   const origins = opts.origins || [];
@@ -300,5 +333,7 @@ module.exports = {
   MAX_REQ_BYTES,
   TIMEOUT_MS,
   MAX_REDIRECTS,
+  MAX_IN_FLIGHT,
+  MAX_IN_FLIGHT_PER_OWNER,
   METHODS,
 };

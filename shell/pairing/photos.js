@@ -44,6 +44,7 @@ module.exports = {
     // Upload one resized photo (base64). Large body: full-frame 1080p JPEG.
     "POST /photo": {
       maxBody: 12e6,
+      bulk: true, // plain body, authenticated by the query (see pairing/index.js)
       handler: (req, res, ctx) => {
         try {
           const name = ambient.savePhoto(ctx.body.name, ctx.body.data);

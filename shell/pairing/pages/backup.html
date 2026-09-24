@@ -3,6 +3,7 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <meta name="referrer" content="no-referrer" />
     <title>{{title}}</title>
     <style>
       :root {
@@ -152,8 +153,9 @@
       <div class="st" id="rst"></div>
     </div>
 
+    <script src="/tvbox-seal.js" data-v="2" data-ask-code></script>
     <script>
-      var code = new URLSearchParams(location.search).get("c") || "";
+      var code = tvboxSeal.code;
       function st(el, msg, cls) {
         el.textContent = msg;
         el.className = "st" + (cls ? " " + cls : "");
@@ -173,7 +175,7 @@
           var r = await fetch("/backup-file", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ code: code, password: pw, clone: clone }),
+            body: tvboxSeal.body({ code: code, password: pw, clone: clone }, "/backup-file"),
           });
           var d = await r.json();
           if (!d.ok) throw 0;
@@ -222,7 +224,7 @@
           var r = await fetch("/restore", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ code: code, password: pw, envelope: envelope, hostname: host }),
+            body: tvboxSeal.body({ code: code, password: pw, envelope: envelope, hostname: host }, "/restore"),
           });
           var d = await r.json();
           if (d.ok) {

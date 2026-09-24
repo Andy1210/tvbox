@@ -74,6 +74,22 @@ done
 [ -n "$BOX_HOME" ] || BOX_HOME="$ROOT/home/tv"
 TVBOX_DIR="$BOX_HOME/.tvbox"
 
+# Everything under $BOX_HOME belongs to the box user, and this runs as root and
+# writes onto a partition anyone can read. A shell.log that is a link to
+# /etc/shadow would be copied there. So those files are read WITH THE BOX USER'S
+# identity: whatever they point at, the read gets no more than that user could.
+BOX_UID="$(stat -c %u "$BOX_HOME" 2> /dev/null || echo "")"
+BOX_GID="$(stat -c %g "$BOX_HOME" 2> /dev/null || echo "")"
+as_box_user() {
+  if [ "$(id -u)" != 0 ]; then
+    "$@"
+  elif [ -n "$BOX_UID" ] && [ "$BOX_UID" != 0 ] && command -v setpriv > /dev/null 2>&1; then
+    setpriv --reuid="$BOX_UID" --regid="$BOX_GID" --clear-groups -- "$@"
+  else
+    return 1
+  fi
+}
+
 # Problems are hoisted above the detail: the person reading this file wants the
 # answer, not a tour. They are emitted INTO the report stream behind a marker and
 # split back out afterwards, because the report is generated in a subshell and a
@@ -144,7 +160,7 @@ RAW="$(
     VERSION_SRC="$TVBOX_DIR/current/shell/package.json"
     VERSION_KIND="release $(basename "$(readlink "$TVBOX_DIR/current" 2> /dev/null || echo unknown)")"
   fi
-  VERSION="$(sed -n 's/.*"version"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$VERSION_SRC" 2> /dev/null | head -n1)"
+  VERSION="$(as_box_user sed -n 's/.*"version"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$VERSION_SRC" 2> /dev/null | head -n1)"
   echo "tvbox:        ${VERSION:-unknown} ($VERSION_KIND, user ${BOX_USER:-unknown})"
   echo "written:      $(date '+%Y-%m-%d %H:%M:%S %Z' 2> /dev/null || echo unknown), up $(fmt_dur "$UPSEC")"
 
@@ -283,7 +299,7 @@ RAW="$(
   echo "sshd:         $(unit_state ssh) / port 22 $(listening "$SSH_PORT_HEX" && echo listening || echo "not listening")"
   AK="$BOX_HOME/.ssh/authorized_keys"
   if [ -f "$AK" ]; then
-    echo "authorized:   $(grep -c '^[^#]' "$AK" 2> /dev/null || echo 0) key(s) for ${BOX_USER:-the box user}"
+    echo "authorized:   $(as_box_user grep -c '^[^#]' "$AK" 2> /dev/null || echo 0) key(s) for ${BOX_USER:-the box user}"
   else
     echo "authorized:   none (no $AK)"
   fi
@@ -464,7 +480,7 @@ fi
   # a box that keeps crashing is a box whose other logs are at their longest, so this
   # section is the one that would be cut. It exists at all because shell.log below is
   # truncated at every start, which after a restart is the session that explains it.
-  tail -c 8192 "$TVBOX_DIR/shell.crash.log" 2> /dev/null || echo "(no crash since this box was set up)"
+  as_box_user tail -c 8192 "$TVBOX_DIR/shell.crash.log" 2> /dev/null || echo "(no crash since this box was set up)"
   echo
   echo "===== previous boot, last 200 lines ====="
   journalctl -b -1 -n 200 --no-pager 2> /dev/null || echo "(no previous boot in the journal - it may be volatile)"
@@ -474,7 +490,7 @@ fi
   echo
   echo "===== $TVBOX_DIR/shell.log, last 200 lines ====="
   # Truncated by run-shell.sh at every start, so this is the CURRENT session only.
-  tail -n 200 "$TVBOX_DIR/shell.log" 2> /dev/null || echo "(no shell.log)"
+  as_box_user tail -n 200 "$TVBOX_DIR/shell.log" 2> /dev/null || echo "(no shell.log)"
 } 2> /dev/null | head -c 262144 > "$BOOT/.tvbox-diag-logs.tmp" 2> /dev/null || {
   rm -f "$BOOT/.tvbox-diag-logs.tmp" 2> /dev/null
   echo "tvbox-diag: cannot write the log dump" >&2

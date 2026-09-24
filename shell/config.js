@@ -7,24 +7,28 @@ const path = require("path");
 const os = require("os");
 const crypto = require("crypto");
 const identity = require("./identity"); // per-box identity: hostname-derived device names
+const fsutil = require("./fsutil");
 
 const FILE = path.join(os.homedir(), ".tvbox", "config.json");
 
+// Set while the file exists but could not be read (EIO, EACCES). A save in that
+// state would replace the whole store with the one field being changed.
+let unreadable = false;
+
 function load() {
-  try {
-    return JSON.parse(fs.readFileSync(FILE, "utf8"));
-  } catch (e) {
-    return {};
-  }
+  const r = fsutil.readJsonGuarded(FILE);
+  unreadable = !!r.error;
+  if (r.corrupt) console.warn("[config] config.json did not parse; kept it as", r.movedTo || "(could not move it)");
+  if (r.error) console.warn("[config] config.json unreadable:", r.error.code || r.error.message);
+  return r.value && typeof r.value === "object" ? r.value : {};
 }
 function save(cfg) {
+  if (unreadable) throw new Error("config.json is unreadable; refusing to overwrite it");
   const dir = path.dirname(FILE);
   fs.mkdirSync(dir, { recursive: true });
-  fs.writeFileSync(FILE, JSON.stringify(cfg, null, 2), { mode: 0o600 });
-  // enforce perms on every write (mode only applies at creation, and masks by umask)
+  fsutil.writeJsonAtomic(FILE, cfg, { mode: 0o600 });
   try {
     fs.chmodSync(dir, 0o700);
-    fs.chmodSync(FILE, 0o600);
   } catch (e) {
     /* best effort */
   }
@@ -95,6 +99,7 @@ function publicConfig() {
       port: (c.mqtt && c.mqtt.port) || null, // null = the default (1883)
       username: (c.mqtt && c.mqtt.username) || "",
       hasPassword: !!(c.mqtt && c.mqtt.password), // whether one is stored, never the value
+      tls: !!(c.mqtt && c.mqtt.tls), // mqtts:// (default port 8883)
       // The id the bridge ACTUALLY uses, derived from the hostname when unset -
       // it is the topic segment every message travels under, so showing "" here
       // would hide the one field that must differ between two boxes.
@@ -106,7 +111,9 @@ function publicConfig() {
       // /tvbox/api/phoneremote, never from here: a token hash has no business in
       // the config the launcher reads.
       enabled: !!(c.phoneRemote && c.phoneRemote.enabled),
-      paired: Array.isArray(c.phoneRemote && c.phoneRemote.phones) ? c.phoneRemote.phones.length : 0,
+      paired: Array.isArray(c.phoneRemote && c.phoneRemote.phones)
+        ? c.phoneRemote.phones.filter((p) => p && typeof p.key === "string" && p.key).length
+        : 0,
     },
     update: {
       // OTA self-update (updater.js); feed URL itself stays box-local
@@ -254,12 +261,58 @@ function setParental({ pin, lockedGroups, requirePin }) {
   save(c);
 }
 
-function verifyPin(pin) {
+// A four-digit PIN is ten thousand guesses, so every check goes through a
+// limiter: after PIN_FREE_TRIES wrong answers in a row, checks are refused for a
+// wait that doubles with each further miss (capped), and a correct answer resets
+// it. The count is kept per caller ("launcher", "app:<id>"), so an app spending
+// its own guesses cannot lock the owner out of the PIN pad.
+const PIN_FREE_TRIES = 5;
+const PIN_BASE_WAIT_MS = 30 * 1000;
+const PIN_MAX_WAIT_MS = 15 * 60 * 1000;
+const pinLimit = { by: new Map(), now: () => Date.now() };
+
+function pinState(who) {
+  const key = String(who || "launcher");
+  let st = pinLimit.by.get(key);
+  if (!st) {
+    // Bounded: an id only comes from an installed app, but the map outlives none.
+    if (pinLimit.by.size >= 64) pinLimit.by.clear();
+    pinLimit.by.set(key, (st = { misses: 0, until: 0 }));
+  }
+  return st;
+}
+
+function pinLockedFor(who) {
+  return Math.max(0, pinState(who).until - pinLimit.now());
+}
+
+function hasPin() {
+  const p = load().parental;
+  return !!(p && p.pinHash);
+}
+
+function verifyPin(pin, who) {
+  if (pinLockedFor(who) > 0) return false;
   const p = load().parental;
   if (!p || !p.pinHash) return false;
+  const st = pinState(who);
   // pre-salt configs stored sha(pin) - still verified; re-saving the PIN upgrades
   const h = p.pinSalt ? sha(p.pinSalt + pin) : sha(pin);
-  return timingEq(h, p.pinHash);
+  const ok = timingEq(h, p.pinHash);
+  if (ok) {
+    st.misses = 0;
+    st.until = 0;
+  } else if (++st.misses >= PIN_FREE_TRIES) {
+    const wait = PIN_BASE_WAIT_MS * 2 ** (st.misses - PIN_FREE_TRIES);
+    st.until = pinLimit.now() + Math.min(wait, PIN_MAX_WAIT_MS);
+  }
+  return ok;
+}
+
+/** The groups the lock currently holds, for deciding whether a write removes one. */
+function lockedGroups() {
+  const p = load().parental;
+  return (p && Array.isArray(p.lockedGroups) && p.lockedGroups) || [];
 }
 
 // Raw IPTV (incl. credentials) for the Live TV provider only.
@@ -344,8 +397,12 @@ function setMqtt(mqtt) {
   if (deviceId && deviceId === identity.defaultDeviceId()) deviceId = "";
   const password =
     mqtt && typeof mqtt.password === "string" && mqtt.password ? mqtt.password.slice(0, 200) : prev.password;
+  // Omitted keeps what was stored, so a caller that predates the field cannot
+  // turn encryption off by saving another one.
+  const tls = mqtt && typeof mqtt.tls === "boolean" ? mqtt.tls : !!prev.tls;
   c.mqtt = {
     host,
+    ...(tls ? { tls: true } : {}),
     ...(Number.isInteger(port) && port >= 1 && port <= 65535 ? { port } : {}),
     ...(username ? { username } : {}),
     ...(password ? { password } : {}),
@@ -494,8 +551,8 @@ function rawKeyboard() {
 }
 
 // The phone remote (phoneremote.js): whether the LAN listener runs at all, and
-// the adopted phones. Raw because the rows carry a token HASH - publicConfig
-// below shows names and times only.
+// the adopted phones. Raw because each row carries the phone's signing KEY -
+// publicConfig below shows names and times only.
 function setPhoneRemote(patch) {
   const c = load();
   c.phoneRemote = { ...c.phoneRemote, ...patch };
@@ -989,6 +1046,10 @@ module.exports = {
   setIptv,
   setParental,
   verifyPin,
+  hasPin,
+  pinLockedFor,
+  lockedGroups,
+  _pinLimitForTest: pinLimit,
   rawIptv,
   setSpotify,
   rawSpotify,

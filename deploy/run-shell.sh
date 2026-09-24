@@ -45,9 +45,23 @@ fi
 # A main process is any electron whose argv carries no --type= (every child -
 # renderer, GPU, utility - does). Matching argv ORDER instead would be brittle: the
 # app path and the flags trade places depending on how electron is invoked.
-shell_running() {
+# A Chromium child (zygote, GPU, renderer) rewrites its argv into one
+# space-joined string, so its --type= is not a separate argument; look for it
+# anywhere in the command line rather than at the start of one.
+#
+# And only a process whose EXECUTABLE is electron counts: the command line alone
+# would also match any process that merely mentions the path, an ssh session
+# grepping for it included, and a shell would then wait on, or kill, that.
+electron_pids() {
   for pid in $(pgrep -f 'electron[/]dist/electron' 2>/dev/null); do
-    tr '\0' '\n' < "/proc/$pid/cmdline" 2>/dev/null | grep -q '^--type=' || return 0
+    case "$(readlink "/proc/$pid/exe" 2>/dev/null)" in
+      */electron/dist/electron | */electron/dist/electron" (deleted)") echo "$pid" ;;
+    esac
+  done
+}
+shell_running() {
+  for pid in $(electron_pids); do
+    tr '\0' ' ' < "/proc/$pid/cmdline" 2>/dev/null | grep -q -e ' --type=' || return 0
   done
   return 1
 }
@@ -62,8 +76,22 @@ if shell_running; then
 fi
 
 if [ -f "$UPD/pending" ]; then
+  PREV=""
+  NEXT=""
   read -r PREV NEXT < "$UPD/pending"
+  # A marker with no target (emptied by a power cut) names nothing to roll back
+  # from, and left in place it would keep the boot watchdog below killing a shell
+  # that is fine. Drop it.
+  case "$NEXT" in
+    "" | *[!0-9A-Za-z._-]*)
+      echo "tvbox: unreadable update marker - clearing it" >&2
+      rm -f "$UPD/pending" "$UPD/attempts"
+      ;;
+  esac
+fi
+if [ -f "$UPD/pending" ]; then
   N=$(cat "$UPD/attempts" 2>/dev/null || echo 0)
+  case "$N" in "" | *[!0-9]*) N=0 ;; esac
   N=$((N + 1))
   echo "$N" > "$UPD/attempts"
   if [ "$N" -gt 3 ] && [ -n "$NEXT" ]; then
@@ -94,7 +122,7 @@ if [ -f "$UPD/pending" ]; then
     done
     if [ -f "$UPD/pending" ]; then
       echo "tvbox: boot watchdog - update not committed in ${t}s, killing the shell for retry/rollback" >&2
-      pkill -f 'electron[/]dist'
+      for pid in $(electron_pids); do kill "$pid" 2>/dev/null; done
     fi
   ) &
 fi

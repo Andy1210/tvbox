@@ -64,6 +64,31 @@ function guardList(opts, table) {
   return g;
 }
 
+/**
+ * Which of a plugin's routes a caller the shell cannot identify may reach, from
+ * `opts.public`. Such a caller is a window no app owns (an OAuth sign-in popup
+ * landing on its callback) or a process with no token (a daemon the plugin
+ * started that has not learned to send one, mpv, a sandboxed program on
+ * loopback).
+ *
+ * Absent means the plugin predates the declaration, and keeps the answer it had:
+ * every route open to such a caller, so its callback and its daemon keep
+ * working. An array - empty included - means everything not listed is refused.
+ * Every entry has to name a route in the same table, for the reason guardList
+ * gives.
+ */
+function publicList(opts, table) {
+  const g = opts && opts.public;
+  if (g === undefined || g === null) return null;
+  if (!Array.isArray(g)) throw new Error("registerRoutes: public must be an array of route keys");
+  for (const key of g) {
+    if (typeof key !== "string" || typeof (table || {})[key] !== "function") {
+      throw new Error("registerRoutes: public names no route in this table: " + JSON.stringify(key));
+    }
+  }
+  return g;
+}
+
 // Notify plugins that config sections changed (host.onConfigChange). A package
 // plugin can't reach the shell config write directly, so this is how e.g. the
 // Live TV plugin invalidates its channel/EPG cache when the IPTV source changes.
@@ -84,7 +109,7 @@ function onConfigChange(cb) {
   if (typeof cb === "function") configListeners.push({ id: null, cb });
 }
 function registerRoutes(prefix, table, opts) {
-  pluginRoutes.push({ id: null, prefix, table, guard: guardList(opts, table) });
+  pluginRoutes.push({ id: null, prefix, table, guard: guardList(opts, table), open: publicList(opts, table) });
 }
 
 function routes() {
@@ -158,8 +183,14 @@ function loadOne(m) {
           if (typeof cb === "function") configListeners.push({ id: m.id, cb });
         },
         registerRoutes: (prefix, table, opts) => {
-          pluginRoutes.push({ id: m.id, prefix, table, guard: guardList(opts, table) });
+          pluginRoutes.push({ id: m.id, prefix, table, guard: guardList(opts, table), open: publicList(opts, table) });
         },
+        // A pairing kind is registered as this app's, so only this app's screen
+        // can open it (apigate.js).
+        pairing:
+          deps.host && deps.host.pairing
+            ? { ...deps.host.pairing, register: (kind, prov) => deps.host.pairing.register(kind, prov, m.id) }
+            : undefined,
       }) || {};
     loadedPlugins.set(m.id, plugin);
     console.log("[plugin] loaded", m.id, "(" + name + ")");
@@ -275,9 +306,24 @@ function appClosed(id) {
   call(id, "appClosed", () => plugin.appClosed());
 }
 
+/**
+ * Tell an app's plugin that its app's WINDOW is gone, however it went: a quit, the
+ * LRU cap, the memory guard, a crashed renderer. It is the plugin's one chance to
+ * let go of what it holds on the page's behalf (a claim the page would release
+ * from a cleanup that a destroyed window never runs). It says nothing about the
+ * app being put away - that is appClosed - so it must not stop sound: a window
+ * dropped for the cap keeps a plugin's daemon playing on purpose.
+ */
+function windowGone(id) {
+  const plugin = loadedPlugins.get(id);
+  if (!plugin || typeof plugin.windowGone !== "function") return;
+  call(id, "windowGone", () => plugin.windowGone());
+}
+
 module.exports = {
   init,
   guardList,
+  publicList,
   emitConfigChange,
   onConfigChange,
   registerRoutes,
@@ -291,4 +337,5 @@ module.exports = {
   startAll,
   stopAll,
   appClosed,
+  windowGone,
 };

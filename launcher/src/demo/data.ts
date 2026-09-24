@@ -60,6 +60,7 @@ export const CONFIG: PublicConfig = {
     port: null,
     username: "tvbox",
     hasPassword: true,
+    tls: false,
     deviceId: "tvbox-demo",
   },
   apps: { background: true },

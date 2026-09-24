@@ -293,6 +293,10 @@ function main() {
       if (badPkg.length) throw new Error("invalid apt package name(s): " + badPkg.join(", "));
       // Optional third-party APT repo (e.g. raspotify for librespot). Validation
       // + orchestration live in installAptRepo/aptRepoPlan (unit-tested).
+      // The store refuses aptRepo; a store-installed app that carries one anyway
+      // (installed before that check existed) does not get a root apt source.
+      if (req.aptRepo && require("./store").pinnedRegistry(m.id))
+        throw new Error("requires.aptRepo is not allowed for an app installed from the store");
       if (req.aptRepo) installAptRepo(m, req.aptRepo, log);
       // polkit-safety: human-terminal. Everything from here can ask for a password
       // (`sudo` deliberately has no `-n`), and that is safe only because of the

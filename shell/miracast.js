@@ -125,6 +125,65 @@ function pairingGate(paired, now, deadline) {
  * @param {function} [deps.onEvent]  ({type, ...}) - "armed" | "peer" | "streaming" | "stopped" | "error"
  * @param {string}   [deps.fifo]
  */
+
+/**
+ * Open the write end of a FIFO without blocking a thread on it. O_NONBLOCK
+ * makes open() fail with ENXIO while nobody reads, so this retries on a timer
+ * until a reader is there, the caller says the attempt is stale, or the time
+ * is up. The fd becomes a net.Socket, which libuv drives as a non-blocking
+ * pipe: writes queue, and a reader that goes away surfaces as an error.
+ */
+function openFifoWriter(fifoPath, opts) {
+  const o = opts || {};
+  const log = o.log || (() => {});
+  const every = o.retryMs || 200;
+  const deadline = Date.now() + (o.timeoutMs || 15000);
+  const attempt = () => {
+    if (o.isCurrent && !o.isCurrent()) return;
+    fs.open(fifoPath, fs.constants.O_WRONLY | fs.constants.O_NONBLOCK, (err, fd) => {
+      if (o.isCurrent && !o.isCurrent()) {
+        if (!err) fs.close(fd, () => {});
+        return;
+      }
+      if (!err) return o.onReady(new net.Socket({ fd, readable: false, writable: true }));
+      if (err.code !== "ENXIO" || Date.now() > deadline) {
+        log("fifo: no reader:", err.code || err.message);
+        if (o.onFail) o.onFail(err);
+        return;
+      }
+      setTimeout(attempt, every);
+    });
+  };
+  attempt();
+}
+
+/**
+ * What arrives while the player is still opening its end of the FIFO. The start
+ * of a stream is where a source puts its first key frame, so it is kept rather
+ * than dropped - the oldest bytes, up to `max` - and written out the moment the
+ * writer is ready.
+ */
+function createEarlyQueue(max) {
+  let chunks = [];
+  let bytes = 0;
+  return {
+    push(chunk) {
+      if (bytes + chunk.length > max) return;
+      chunks.push(chunk);
+      bytes += chunk.length;
+    },
+    drainInto(stream) {
+      for (const chunk of chunks) stream.write(chunk);
+      this.clear();
+    },
+    clear() {
+      chunks = [];
+      bytes = 0;
+    },
+    size: () => bytes,
+  };
+}
+
 function create(deps) {
   const d = deps || {};
   const run = d.run || execFile;
@@ -225,9 +284,56 @@ function create(deps) {
     run("mkfifo", [fifoPath], { timeout: 5000 }, (err) => cb(err));
   }
 
+  // A session's writer into the FIFO. Opened only once the session's first
+  // frames have told main to start the player, and non-blocking: a blocking
+  // open(O_WRONLY) on a FIFO waits in a libuv pool thread until a reader
+  // arrives, and one that never arrives keeps that thread for good.
+  let writerGen = 0;
+  let streaming = false;
+  const early = createEarlyQueue(MAX_QUEUED_BYTES);
+
+  function closeWriter() {
+    writerGen += 1;
+    streaming = false;
+    early.clear();
+    if (fifo) {
+      try {
+        fifo.destroy();
+      } catch (e) {}
+      fifo = null;
+    }
+  }
+
+  function startWriter() {
+    const gen = ++writerGen;
+    openFifoWriter(fifoPath, {
+      isCurrent: () => gen === writerGen,
+      log,
+      onReady: (stream) => {
+        fifo = stream;
+        early.drainInto(stream);
+        // Whatever did not fit is gone, key frame included; a fresh one costs
+        // the source nothing and saves a grey picture until its next periodic IDR.
+        if (socket && session) {
+          try {
+            socket.write(session.idrRequest());
+          } catch (e) {}
+        }
+        // The player went away (a Stop, a crash): stop writing into a pipe
+        // nobody reads. The next session opens a writer of its own.
+        stream.on("error", (e) => {
+          log("fifo:", e.message);
+          if (fifo === stream) fifo = null;
+        });
+        stream.on("close", () => {
+          if (fifo === stream) fifo = null;
+        });
+      },
+    });
+  }
+
   function startRtp() {
     rtp = dgram.createSocket("udp4");
-    let bytes = 0;
     rtp.on("message", (packet, from) => {
       // Frames from anywhere else are not this session's. The port is open on
       // every interface, and a box mirroring over ethernet keeps its LAN - so
@@ -235,13 +341,15 @@ function create(deps) {
       // someone's television.
       if (!peerIp || from.address !== peerIp) return;
       const payload = wfd.rtpPayload(packet);
-      if (!payload || !fifo) return;
+      if (!payload) return;
       lastRtp = now();
-      if (!bytes) {
+      if (!streaming) {
+        streaming = true;
         log("first frames arrived");
         emit({ type: "streaming", fifo: fifoPath });
+        startWriter();
       }
-      bytes += payload.length;
+      if (!fifo) return early.push(payload); // the player is still opening its end
       // This is live: a player that has gone away, or is reading slowly, must
       // cost us frames rather than memory. So watch the queue and DROP when it
       // is over the mark. (Emitting "drain" by hand, which is what this did
@@ -256,8 +364,18 @@ function create(deps) {
 
   function dial(ip) {
     const s = net.connect({ host: ip, port: RTSP_PORT });
+    dialing = s;
+    const settled = () => {
+      if (dialing === s) dialing = null;
+    };
     s.setTimeout(15000);
     s.on("connect", () => {
+      settled();
+      if (socket || !armed) {
+        // Another lease answered first, or the radio was given back meanwhile.
+        s.destroy();
+        return;
+      }
       s.setTimeout(0);
       log("connected to source", ip);
       socket = s;
@@ -273,10 +391,12 @@ function create(deps) {
     s.on("timeout", () => s.destroy());
     s.on("error", () => {});
     s.on("close", () => {
+      settled();
       if (socket === s) {
         socket = null;
         peerIp = null;
         session = null;
+        closeWriter();
         log("source closed the session");
         emit({ type: "peer-gone" });
         // The phone may simply have walked out of range. Re-open the window
@@ -296,6 +416,7 @@ function create(deps) {
       socket = null;
     }
     session = null;
+    closeWriter();
   }
 
   /** Bring the radio up as a sink and start waiting for a phone. */
@@ -331,10 +452,6 @@ function create(deps) {
           emit({ type: "error", message: "no fifo: " + err2.message });
           return done(err2);
         }
-        // Opening a FIFO for writing blocks until a reader arrives, so this must
-        // not be on the path that answers the caller.
-        fifo = fs.createWriteStream(fifoPath, { flags: "a" });
-        fifo.on("error", (e) => log("fifo:", e.message));
         startRtp();
         openPairing();
         every(KEEPALIVE_MS, () => {
@@ -377,11 +494,7 @@ function create(deps) {
           if (!list.length) return;
           const ip = list[next % list.length];
           next += 1;
-          dialing = ip;
-          dial(ip);
-          setTimeout(() => {
-            dialing = null;
-          }, 3000);
+          dial(ip); // `dialing` holds the attempt until it connects or fails
         });
         done(null, s);
       });
@@ -394,7 +507,12 @@ function create(deps) {
     clearTimers();
     stopSession();
     lastRtp = 0;
-    dialing = null;
+    if (dialing) {
+      try {
+        dialing.destroy();
+      } catch (e) {}
+      dialing = null;
+    }
     peerIp = null;
     pairDeadline = 0;
     if (rtp) {
@@ -403,12 +521,7 @@ function create(deps) {
       } catch (e) {}
       rtp = null;
     }
-    if (fifo) {
-      try {
-        fifo.end();
-      } catch (e) {}
-      fifo = null;
-    }
+    closeWriter();
     armed = false;
     run("systemctl", ["--no-ask-password", "stop", UNIT], { timeout: 45000 }, (err) => {
       emit({ type: "stopped" });
@@ -430,6 +543,8 @@ function create(deps) {
 
 module.exports = {
   create,
+  openFifoWriter,
+  createEarlyQueue,
   parseState,
   peersFromLeases,
   pairingGate,

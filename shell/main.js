@@ -5,7 +5,7 @@
 // window driven over its JSON IPC. Apps get a capability-scoped bridge
 // (preload.js); the remote Home button returns to the launcher from anywhere.
 // Run: electron . --ozone-platform=wayland
-const { app, BrowserWindow, ipcMain, screen, session } = require("electron");
+const { app, BrowserWindow, ipcMain, screen, session, webContents } = require("electron");
 const { spawn, execFile } = require("child_process");
 const http = require("http");
 const fs = require("fs");
@@ -88,6 +88,9 @@ const pkg = require("./package.json"); // shell version (About/diagnostics)
 const appinfo = require("./appinfo"); // what the shell knows about an installed app
 const cards = require("./widgets"); // the cards on the HOME screen
 const getroutes = require("./getroutes"); // the box's read API
+const apigate = require("./apigate"); // who is calling the API, and what they may reach
+const nowplaying = require("./nowplaying"); // the shape a now-playing claim may take
+const sessionpolicy = require("./sessionpolicy"); // browser permissions every session is held to
 const mediapublish = require("./mediapublish"); // the box as one media_player, on the wire
 const notify = require("./notify"); // the note that appears over everything
 const playerapi = require("./playerapi"); // what an app's page may do to the shared mpv
@@ -107,29 +110,24 @@ const WL_ENV = {
   WAYLAND_DISPLAY: process.env.WAYLAND_DISPLAY || "wayland-0",
 };
 
-// Auto-route audio: detect the present HDMI sink at runtime (TV/port-independent),
-// set it as default, AND remember its node.name so we can pass it to mpv as an
-// explicit --audio-device (mpv's "default" resolves to "no target node" here).
-let audioSink = null;
-function ensureAudio(done) {
-  // Pass the manual override (if the user picked a sink in Settings); the script
-  // uses it when present and otherwise auto-detects the HDMI sink.
-  const pref = (config.rawAudio() && config.rawAudio().sink) || "";
-  try {
+// The HDMI sink is detected at runtime (TV/port-independent) and its node.name is
+// handed to mpv as an explicit --audio-device (mpv's "default" resolves to "no
+// target node" here).
+const audioRoute = require("./audioroute").create({
+  stopCount: () => player.stopCount(),
+  preferredSink: () => (config.rawAudio() && config.rawAudio().sink) || "",
+  log: (...a) => console.log(...a),
+  // A wedged PipeWire must not hold a play for ever: past the timeout the previous
+  // sink is kept and the launch goes ahead.
+  run: (pref, cb) =>
     execFile(
       "sh",
       [path.join(__dirname, "audio-default.sh"), pref],
-      { env: { ...process.env, ...WL_ENV } },
-      (_e, stdout) => {
-        const name = ((stdout || "").trim().split("\n").pop() || "").trim();
-        if (name) audioSink = name;
-        if (done) done();
-      },
-    );
-  } catch (e) {
-    if (done) done();
-  }
-}
+      { env: { ...process.env, ...WL_ENV }, timeout: 5000, killSignal: "SIGKILL" },
+      (_e, stdout) => cb(stdout),
+    ),
+});
+const ensureAudio = audioRoute.ensure;
 
 // Pin userData to a name-independent path so renaming the package never loses
 // app state (each web-client app's login lives in localStorage there).
@@ -146,6 +144,7 @@ app.commandLine.appendSwitch("enable-features", "UseOzonePlatform");
 const CONSOLE_TAG = { debug: "log", info: "info", warning: "warn", error: "error" };
 
 let win = null;
+let swCleared = Promise.resolve(); // the service-worker clear at start, see below
 let currentAppId = null; // which app is FOREGROUND (null = launcher); drives focus + video-mode targeting
 // The app to return to when the screensaver it asked for is dismissed (see
 // showAmbient, far below). Declared up here because setForegroundApp clears it,
@@ -199,7 +198,26 @@ function foregroundWindow() {
 // exactly the windows this has to cover. The rule itself is notify.js's, which owns
 // the name; the note's own window sets its title deliberately rather than taking one
 // from a page, and refuses every update besides.
+// Who a request to the API came from, by the window that made it (apigate.js).
+function callerOf(webContentsId) {
+  const wc = webContentsId == null ? null : webContents.fromId(webContentsId);
+  if (!wc) return "unknown";
+  const id = windowAppId(wc);
+  if (id === null) return "launcher";
+  return typeof id === "string" ? "app:" + id : "unknown";
+}
+function hardenSession(ses) {
+  sessionpolicy.harden(ses, { port: PORT, identityOf: callerOf, log: (...a) => console.warn("[session]", ...a) });
+}
+// Partitions (one per remote app) are created later; each is held to the same policy.
+app.on("session-created", hardenSession);
+
 app.on("browser-window-created", (_event, w) => {
+  // Web Bluetooth's chooser is a webContents event, not a session one.
+  w.webContents.on("select-bluetooth-device", (e, _list, cb) => {
+    e.preventDefault();
+    cb("");
+  });
   // A window can be BORN holding the name as well as renamed into it, and only one
   // of the two raises an event to refuse: `window.open`'s feature string reaches the
   // BrowserWindow constructor unfiltered - `title=` included - and a page that never
@@ -225,6 +243,7 @@ app.on("browser-window-created", (_event, w) => {
   }));
 });
 let nowPlaying = null; // last launcher-reported now-playing (Spotify/Live TV) - gates auto-update idleness
+let nowPlayingAt = 0; // when it was last reported (nowplaying.stillPlaying)
 let restoredAt = null; // a backup restore just ran; the launcher polls this to show "restarting"
 // The box counts as idle for a self-initiated restart (nightly auto-update)
 // only when nothing is on screen or audible: no mpv, launcher focused, and the
@@ -238,7 +257,9 @@ function boxIdle() {
   // gates the sleep timer and the nightly update. Nothing is coming out of the
   // speakers and nobody is watching anything; that is idle.
   const playerBusy = player.running() && !(player.isAudioOnly() && player.media.paused);
-  return !playerBusy && !currentAppId && !(nowPlaying && nowPlaying.state === "playing");
+  const claimed =
+    !!nowPlaying && nowplaying.stillPlaying(nowPlaying, nowPlayingAt, Date.now(), !!appWindow(nowPlaying.app));
+  return !playerBusy && !currentAppId && !claimed;
 }
 // Is the box free to start something substantial? Idle as above, no install in
 // flight, and none of the shell's OWN background maintenance running. The last
@@ -313,7 +334,7 @@ const mirroring = miracast.create({
       // A mirrored phone is live: there is no seeking and nothing to resume, so
       // it starts at zero and fullscreen like any other film. mpv reads the FIFO
       // as an ordinary file, which is what keeps this out of player.js entirely.
-      ensureAudio(() => player.launch(ev.fifo, 0, false, null, null));
+      ensureAudio(() => player.launch(ev.fifo, 0, false, null, null), { launch: true });
       // Get the launcher out of the way. mpv plays BEHIND this window, so
       // whatever page started mirroring - the Settings one, in practice - is
       // drawn straight over the phone's screen until the page is dropped and
@@ -527,7 +548,7 @@ function serve() {
     applyMqttConfig: mediapublish.applyConfig,
     publishIrDiscovery: mediapublish.publishIrDiscovery,
     irFailed: tvcommand.irFailed,
-    audioSink: () => audioSink,
+    audioSink: () => audioRoute.sink(),
     childEnv: () => ({ ...process.env, ...WL_ENV }),
     destroyAppWindow,
     // For the two paths that REMOVE an app rather than tear its window down: an
@@ -569,6 +590,7 @@ function serve() {
     remoteBridgeCmd: bridges.remoteBridgeCmd,
     setNowPlaying: (data) => {
       nowPlaying = data;
+      nowPlayingAt = Date.now();
       cards.soundWidget(data);
     },
     setSleepTimer: powermenu.setSleepTimer,
@@ -622,9 +644,60 @@ function serve() {
       res.end("bad request");
       return;
     }
+    // A name that is not ours is DNS rebinding: a page on it is same-origin
+    // with itself, so none of the origin checks below would see it.
+    if (!apigate.hostAllowed(req, ["localhost", "127.0.0.1"], PORT)) {
+      res.writeHead(421, { "Content-Type": "text/plain" });
+      res.end("misdirected request");
+      return;
+    }
+    // A service worker answers navigations inside its scope with whatever it
+    // likes, and a window showing that is still "our page" by its URL. So only a
+    // local package app may register one, and only inside its own /<id>/ - never
+    // the root-mounted web client, whose scope would cover the launcher.
+    if (String(req.headers["service-worker"] || "").toLowerCase() === "script") {
+      const localApp = (id) => {
+        const m = apps.manifestById(id);
+        return !!(m && m._dir && m.runtime && m.runtime.serve === "local");
+      };
+      if (!apigate.serviceWorkerAllowed(p, localApp)) {
+        console.warn("[main] refused a service worker script:", p.slice(0, 80));
+        res.writeHead(403, { "Content-Type": "text/plain" });
+        res.end("not permitted");
+        return;
+      }
+    }
+    const caller = apigate.identify(req);
+    const refuse = (why) => {
+      console.warn("[main] refused", req.method, p, "for", caller.kind + (caller.id ? ":" + caller.id : ""), "-", why);
+      res.writeHead(403, { "Content-Type": "text/plain" });
+      res.end("not permitted");
+    };
+    const gateFor = (method, route, body) =>
+      apigate.decide({
+        caller,
+        method,
+        path: p,
+        pluginOwner: route ? route.owner : undefined,
+        pluginOpen: route ? route.open : undefined,
+        caps: caller.kind === "app" ? capsFor(caller.id) : [],
+        body,
+        pairingOwner: pairing.ownerOf,
+        foreground: currentAppId,
+        lockedGroups: config.lockedGroups(),
+        parentalPinOk: (pin) =>
+          !config.hasPin() || config.verifyPin(String(pin || ""), caller.kind + (caller.id ? ":" + caller.id : "")),
+      });
     // Which plugin route, if any, this GET would reach. Resolved before the gate
-    // because the gate consults it, and reused when dispatching.
-    const pluginGet = req.method === "GET" ? httpserver.resolvePluginRoute(plugins.routes(), "GET", p) : null;
+    // because the gate consults it, and reused when dispatching. A HEAD is the
+    // same read without a body (node drops the body for it), so it resolves the
+    // same way.
+    const pluginGet =
+      req.method === "GET" || req.method === "HEAD" ? httpserver.resolvePluginRoute(plugins.routes(), "GET", p) : null;
+    if (req.method !== "POST") {
+      const why = gateFor(req.method, pluginGet, null);
+      if (why) return refuse(why);
+    }
     // Same-origin gate for everything state-changing: every non-GET (the POST
     // API + plugin POST routes) plus the GETs that have side effects
     // (getroutes.guardedGet says which, and why) - and whatever a plugin
@@ -661,7 +734,14 @@ function serve() {
         try {
           d = JSON.parse(body || "{}");
         } catch (e) {}
-        const route = httpserver.matchPluginRoute(plugins.routes(), "POST", p);
+        if (!d || typeof d !== "object" || Array.isArray(d)) d = {};
+        const hit = httpserver.resolvePluginRoute(plugins.routes(), "POST", p);
+        const why = gateFor("POST", hit, d);
+        if (why) return refuse(why);
+        // An app's now-playing is a claim about ITSELF: the app field is taken from
+        // who sent it, not from the body.
+        if (p === "/tvbox/api/nowplaying") d = nowplaying.sanitize(d, caller.kind === "app" ? caller.id : null);
+        const route = hit && hit.fn;
         if (route) {
           try {
             route(req, res, { body: d });
@@ -674,7 +754,7 @@ function serve() {
         // origin, so a route that throws is a "restart the television" primitive
         // reachable from any page on the box. A 500 is the honest answer instead.
         try {
-          routes.post(p, d, res, routeCtx);
+          routes.post(p, d, res, routeCtx, caller);
         } catch (e) {
           console.warn("[api] route failed:", p, redact(e.message));
           endWith500(res);
@@ -790,14 +870,18 @@ function showLauncher(hash) {
   nativeHostApp = null; // Home means HOME, not back into the UI the game was started from
   nativeapp.stop();
   // The launcher page stays loaded permanently now (apps run in their own
-  // windows), so returning home is a show(), not a reload. A hash still forces
-  // a load (plugins use it to open a view, e.g. host.showLauncher("#spotify")),
-  // and a stray non-launcher URL in this window gets reset defensively.
-  if (hash || !String(win.webContents.getURL() || "").startsWith(BASE + "/tvbox/")) {
+  // windows), so returning home is a show(), not a reload; a stray non-launcher
+  // URL in this window gets reset defensively.
+  // A hash on a page that is already the launcher is a same-document navigation,
+  // which remounts nothing, so the view it names is asked for over the nav
+  // channel instead - the path the launcher already answers while it is up.
+  const onLauncher = String(win.webContents.getURL() || "").startsWith(BASE + "/tvbox/");
+  if (!onLauncher) {
     win.loadURL(BASE + "/tvbox/" + (hash || ""));
   } else {
     try {
-      win.webContents.send("tvbox-nav", { dest: "home" }); // reset a lingering Settings/Catalog view
+      // "home" also resets a lingering Settings/Catalog view.
+      win.webContents.send("tvbox-nav", { dest: hash === "#settings" ? "settings" : "home" });
     } catch (e) {}
   }
   raiseWindow();
@@ -873,6 +957,7 @@ function appWindowGone(id) {
   cards.clearSoundWidget(id);
   if (oursWasPlaying) clearNowPlayingFor(id);
   cards.appsChanged();
+  plugins.windowGone(id);
 }
 
 // The now-playing claim, dropped when the app that made it is QUIT.
@@ -1248,11 +1333,19 @@ function openRemoteApp(m, url) {
       showLauncher();
     }
   });
-  // If this window goes away for ANY reason while it's still the active app
-  // (the site called window.close(), a top-level Back exited it, a crash), the
-  // launcher is currently hidden, so recover it instead of dropping to the bare
-  // desktop. An intentional return (showLauncher) sets currentAppId=null first,
-  // so this is a no-op there; likewise when switching straight to another app.
+  // If this window goes away while it's still the active app (the site called
+  // window.close(), a top-level Back exited it), the launcher is currently hidden,
+  // so recover it instead of dropping to the bare desktop. An intentional return
+  // (showLauncher) sets currentAppId=null first, so this is a no-op there; likewise
+  // when switching straight to another app.
+  //
+  // A crashed renderer does NOT close its window: the dead page stays fullscreen
+  // and always-on-top, and the Home key it would have caught in before-input-event
+  // never arrives. So a crash destroys the window, which runs the close path below.
+  wc.on("render-process-gone", (_e, details) => {
+    console.warn("[remote:" + m.id + "] render process gone (" + ((details && details.reason) || "?") + ")");
+    if (!w.isDestroyed()) w.destroy();
+  });
   const thisAppId = m.id;
   w.on("closed", () => {
     dmode.releaseIfHolder(appClaimId(thisAppId)); // a gone window can't hold the mode
@@ -1361,6 +1454,8 @@ function openLocalApp(m) {
     },
   });
   appwins.register(m.id, w);
+  w.tvboxLocal = true;
+  lockToOwnPages(w, rt.mount === "root" ? null : "/" + m.id + "/");
   w.setAlwaysOnTop(true, "screen-saver");
   w.webContents.on("console-message", (ev) => {
     console.log(
@@ -1445,7 +1540,7 @@ mediapublish.init({
   currentApp: () => currentAppId,
   sources: mediaSources,
   soundWidget: cards.soundWidget,
-  onNotify: notify.handleTvNotify,
+  onNotify: (n) => notify.handleTvNotify(notify.sanitizeRemote(n)),
   onCommand: (cmd) => tvcommand.handle(cmd),
   // What the blaster can send becomes a Home Assistant button each, so anything there -
   // a dashboard, an automation, a voice assistant - can reach a TV input or a soundbar
@@ -1515,9 +1610,38 @@ function closePopups(id) {
 }
 
 function windowAppId(sender) {
-  if (win && !win.isDestroyed() && sender === win.webContents) return null;
-  for (const [, w] of appwins.all()) if (sender === w.webContents) return w.tvboxAppId;
+  // A window of the default session is only who it says while it shows OUR page:
+  // the navigation lock keeps it there, and this is the second half of that.
+  if (win && !win.isDestroyed() && sender === win.webContents) return ownPage(sender, "/tvbox/") ? null : undefined;
+  for (const [, w] of appwins.all()) {
+    if (sender === w.webContents) return !w.tvboxLocal || ownPage(sender, w.tvboxPrefix) ? w.tvboxAppId : undefined;
+  }
   return undefined;
+}
+// Whether a window shows a page of its own: the shell's origin and, for the
+// launcher and a local app, its own path under it.
+function ownPage(wc, prefix) {
+  try {
+    return sessionpolicy.localNavAllowed(wc.getURL(), BASE, prefix || null);
+  } catch (e) {
+    return false;
+  }
+}
+// Keep a launcher or local-app window on the shell's own pages (see
+// sessionpolicy.localNavAllowed), and let none of them open windows.
+function lockToOwnPages(w, prefix) {
+  w.tvboxPrefix = prefix;
+  const guard = (e, u) => {
+    if (sessionpolicy.localNavAllowed(u, BASE, prefix)) return;
+    console.warn("[nav] blocked navigation out of a local window:", String(u).slice(0, 80));
+    e.preventDefault();
+  };
+  w.webContents.on("will-navigate", guard);
+  w.webContents.on("will-redirect", guard);
+  w.webContents.setWindowOpenHandler(({ url }) => {
+    console.warn("[nav] blocked window.open from a local window:", String(url).slice(0, 80));
+    return { action: "deny" };
+  });
 }
 
 // Which app a POPUP belongs to. Deliberately separate from windowAppId: that one feeds
@@ -1762,6 +1886,15 @@ ipcMain.on("nav", (e, dest) => {
   // "exit" is app-initiated teardown, so it targets the SENDER's app rather than
   // whatever is foreground - a background app's exit must not close the visible one.
   if (dest === "exit") return exitApp(windowAppId(e.sender));
+  // Anything else moves the screen, which only the launcher or the app in front
+  // may do: a hidden app's page keeps running, and a launch from it would stop
+  // the player or end a native program somebody is using. The one exception is
+  // a hidden app bringing ITSELF forward, which is what answering a cast is.
+  const from = windowAppId(e.sender);
+  if (from === undefined || (from !== null && from !== currentAppId && dest !== from)) {
+    console.warn("[nav] refused from a background window:", from, String(dest).slice(0, 40));
+    return;
+  }
   navTo(dest);
 });
 
@@ -1853,7 +1986,14 @@ ipcMain.handle("app:fetch", async (e, req) => {
   if (!m || !capsFor(id).includes("fetch")) return { ok: false, error: "no fetch capability" };
   const origins = (m.runtime && m.runtime.origins) || [];
   req = req || {};
-  return appfetch.proxy({ origins, url: req.url, method: req.method, headers: req.headers, body: req.body });
+  return appfetch.proxy({
+    origins,
+    url: req.url,
+    method: req.method,
+    headers: req.headers,
+    body: req.body,
+    owner: id, // the in-flight cap is per app
+  });
 });
 
 // ---- capability: per-app key/value storage ----
@@ -1951,7 +2091,7 @@ const host = {
   // shell's own), so a plugin's background work waits for the same moment the shell
   // considers free instead of inventing its own test from process lists.
   idle: boxFree,
-  audioSink: () => audioSink, // detected HDMI sink node.name (set by ensureAudio)
+  audioSink: () => audioRoute.sink(), // detected HDMI sink node.name (set by ensureAudio)
   showLauncher, // (hash) -> stop other playback + bring launcher forward
   navTo, // (id, {query}) -> open an app by id (a plugin foregrounds its app on a cast)
   // Is that app alive, and is it the one on screen? A plugin that answers a
@@ -1996,6 +2136,7 @@ notify.init({
   compositor,
   sendToLauncher,
   raiseWindow,
+  boxNames: apigate.boxNames,
 });
 
 remotepolicy.init({
@@ -2013,6 +2154,7 @@ playerapi.init({
   setVideoMode,
   ensureAudio,
   clearSoundWidget: cards.clearSoundWidget,
+  localFile: getroutes.localPlayable,
 });
 
 // Everything the shell holds on behalf of something else, on the way out. The
@@ -2050,6 +2192,28 @@ app.whenReady().then(async () => {
     console.warn("[shell] another shell already holds the storage lock - standing down");
     return app.exit(EXIT_ALREADY_RUNNING);
   }
+  hardenSession(session.defaultSession);
+  try {
+    apigate.setLocalToken(require("./localtoken").create());
+    apigate.setOwnPorts(() => [
+      fileserver.portOf(config.rawFileserver().port),
+      appshares.portOf(config.rawAppshares().port),
+      // The DevTools port, when run-shell.sh started us with one.
+      Number((process.argv.find((a) => a.startsWith("--remote-debugging-port=")) || "").split("=")[1]) || 0,
+    ]);
+  } catch (e) {
+    console.warn("[main] could not write the local token:", e.message);
+  }
+  // Every page of the shell's origin shares this session, and a service worker
+  // registered by one page outlives it (a reboot, the app's removal). None may
+  // carry over: the request gate below decides which may register again.
+  // Awaited before the launcher loads (below), or a worker left from last time
+  // could still answer its first navigation. Bounded, so a storage layer that
+  // never answers cannot keep the TV blank.
+  swCleared = Promise.race([
+    session.defaultSession.clearStorageData({ storages: ["serviceworkers"] }).catch(() => {}),
+    new Promise((r) => setTimeout(r, 3000)),
+  ]);
   try {
     // Reap an mpv left by a previous run. The pattern is the OPTION, not the
     // socket file name: the socket carries a per-launch sequence number now
@@ -2090,7 +2254,8 @@ app.whenReady().then(async () => {
     setPhoneRemote: config.setPhoneRemote,
   });
   try {
-    phoneremote.apply(); // off unless the setting says otherwise
+    // off unless the setting says otherwise; a port that will not bind is reported, not fatal
+    phoneremote.apply((err) => err && console.warn("[phoneremote] could not listen:", err.message || err));
   } catch (e) {
     console.warn("[phoneremote] start:", e.message);
   }
@@ -2251,6 +2416,7 @@ app.whenReady().then(async () => {
     },
   });
   win.setAlwaysOnTop(true, "screen-saver");
+  lockToOwnPages(win, "/tvbox/");
   // Surface the renderer console (launcher + local app pages: livetv/spotify/plex)
   // in the shell log, so an app that fails to render/init is diagnosable over ssh
   // (~/.tvbox/shell.log) instead of showing only a black screen.
@@ -2261,8 +2427,28 @@ app.whenReady().then(async () => {
       ev.sourceId ? "(" + ev.sourceId + ":" + ev.lineNumber + ")" : "",
     );
   });
-  win.loadURL(BASE + "/tvbox/"); // boot into the HOME launcher
+  swCleared.then(() => win.loadURL(BASE + "/tvbox/")); // boot into the HOME launcher
   win.focus();
+  // The launcher's renderer crashing leaves a transparent window with nothing in
+  // it and no key handling at all. Reload it, a bounded number of times: a page
+  // that crashes as soon as it loads would otherwise spin here, and past the cap
+  // the shell exits so the session's respawn loop (and its OTA rollback) takes over.
+  const launcherCrashes = [];
+  win.webContents.on("render-process-gone", (_e, details) => {
+    const reason = (details && details.reason) || "?";
+    const now = Date.now();
+    while (launcherCrashes.length && now - launcherCrashes[0] > 10 * 60 * 1000) launcherCrashes.shift();
+    launcherCrashes.push(now);
+    console.warn("[main] launcher render process gone (" + reason + "), crash", launcherCrashes.length);
+    if (launcherCrashes.length > 3) {
+      console.warn("[main] launcher keeps crashing - restarting the shell");
+      app.exit(1);
+      return;
+    }
+    setTimeout(() => {
+      if (win && !win.isDestroyed()) win.webContents.reload();
+    }, 1000);
+  });
   // Keep a black backdrop behind the page by default (only removed during active
   // video) so the transparent window never reveals the desktop. insertCSS is
   // per-document, so re-arm on every navigation (launcher <-> app).
@@ -2405,7 +2591,7 @@ app.whenReady().then(async () => {
     dmode,
     panelHdr: () => panelHdr,
     outputSize: () => outputSize,
-    audioSink: () => audioSink,
+    audioSink: () => audioRoute.sink(),
     childEnv: () => ({ ...process.env, ...WL_ENV }),
   });
   // The background jobs need to know whether the box is free and how to reach the

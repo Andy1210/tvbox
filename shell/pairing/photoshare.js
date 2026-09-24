@@ -51,6 +51,7 @@ module.exports = {
     // the session cap is in photoshare.js; this route only reports which was hit.
     "POST /pshare": {
       maxBody: 12e6,
+      bulk: true, // plain body, authenticated by the query (see pairing/index.js)
       handler: (req, res, ctx) => {
         try {
           ctx.json(res, { ok: true, name: photoshare.save(ctx.body.name, ctx.body.data) });

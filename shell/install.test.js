@@ -369,6 +369,24 @@ test("every shell sidecar the backup carries is reserved against apps", () => {
   }
 });
 
+test("every file a release lays down in ~/.tvbox is reserved against apps", () => {
+  const list = fs.readFileSync(path.join(__dirname, "..", "deploy", "infra.list"), "utf8");
+  const names = list
+    .split("\n")
+    .map((l) => l.trim())
+    .filter((l) => l && !l.startsWith("#"))
+    .map((l) => path.basename(l));
+  assert.ok(names.length > 10, "infra.list parsed short");
+  for (const name of names) {
+    // A name with no hyphen cannot satisfy the `<id>-` prefix at all.
+    if (!name.includes("-")) continue;
+    assert.ok(apps.RESERVED_STATE_FILES.has(name), name + " ships in ~/.tvbox but is not reserved in install.js");
+  }
+  for (const name of ["local-token", "remote-devices.json", "mqtt-last-id", "crash-notice", "config-snapshots"]) {
+    assert.strictEqual(apps.stateFileOk(name.split("-")[0], name), false, name);
+  }
+});
+
 // backup.state names files in ~/.tvbox/ next to config.json, so the id prefix is
 // the whole boundary: without it a manifest could ask for the shell's secrets.
 test("backup.state may only name the app's own id-prefixed sidecars", () => {
@@ -843,5 +861,103 @@ test("the upgrade backup is not enumerated as an app of its own", () => {
   } finally {
     fs.rmSync(bak, { recursive: true, force: true });
     fs.rmSync(path.join(dir, "upg"), { recursive: true, force: true });
+  }
+});
+
+const WEB_BASE = { id: "w", name: "W", type: "webclient", status: "ready" };
+
+test("install.extract stays inside the acquired source", () => {
+  for (const extract of ["../../../..", "a/../../b", "/home", "./x", "a/./b"]) {
+    const m = { ...WEB_BASE, install: { source: { type: "url", url: "https://x/y.tgz" }, extract } };
+    assert.equal(apps.validateManifest(m, "t"), null, extract);
+  }
+  const ok = { ...WEB_BASE, install: { source: { type: "url", url: "https://x/y.tgz" }, extract: "app/web" } };
+  assert.ok(apps.validateManifest(ok, "t"));
+});
+
+test("an extract path that is a symlink out of the source is refused at install", () => {
+  const src = fs.mkdtempSync(path.join(os.tmpdir(), "tvbox-src-"));
+  const outside = fs.mkdtempSync(path.join(os.tmpdir(), "tvbox-outside-"));
+  fs.writeFileSync(path.join(outside, "secret"), "x");
+  fs.symlinkSync(outside, path.join(src, "web"));
+  const m = apps.validateManifest(
+    { ...WEB_BASE, id: "linkout", install: { source: { type: "flatpak", ref: "a.b.C" }, extract: "web" } },
+    "t",
+  );
+  const flatpak = require("./flatpak");
+  const saved = flatpak.root;
+  flatpak.root = () => src;
+  try {
+    assert.throws(() => apps.installApp(m, { force: true }), /leaves the source/);
+    assert.equal(fs.existsSync(apps.appDataDir("linkout")), false);
+  } finally {
+    flatpak.root = saved;
+  }
+});
+
+test("runtime.origins may not be a single label or a loopback name", () => {
+  for (const o of ["com", "local", "localhost", "a.localhost", "127.0.0.1"]) {
+    const m = { ...WEB_BASE, runtime: { serve: "remote", origins: [o] } };
+    assert.equal(apps.validateManifest(m, "t"), null, o);
+  }
+  const ok = { ...WEB_BASE, runtime: { serve: "remote", origins: ["www.example.com", "media.local"] } };
+  assert.ok(apps.validateManifest(ok, "t"));
+});
+
+test("requires.disableService names only a unit of the app's own apt packages", () => {
+  const apt = ["raspotify", "librespot", "ssh", "ufw"];
+  for (const svc of [
+    "ssh",
+    "sshd.service",
+    "NetworkManager",
+    "greetd",
+    "systemd-networkd",
+    "ufw",
+    "a b",
+    "../x",
+    "x.mount",
+  ]) {
+    const m = { ...WEB_BASE, requires: { apt, disableService: [svc] } };
+    assert.equal(apps.validateManifest(m, "t"), null, svc);
+  }
+  // What keeps the box itself running, even when a package of the app's own is
+  // named after it.
+  for (const unit of ["seatd", "rpi-eeprom-update", "watchdog", "chrony", "rsyslog", "fake-hwclock"]) {
+    const m = { ...WEB_BASE, requires: { apt: [unit], disableService: [unit + ".service"] } };
+    assert.equal(apps.validateManifest(m, "t"), null, unit);
+  }
+  const stranger = { ...WEB_BASE, requires: { apt: ["raspotify"], disableService: ["nginx"] } };
+  assert.equal(apps.validateManifest(stranger, "t"), null, "a unit no package of its own ships");
+  const none = { ...WEB_BASE, requires: { disableService: ["raspotify"] } };
+  assert.equal(apps.validateManifest(none, "t"), null, "no apt packages, nothing to disable");
+  const ok = { ...WEB_BASE, requires: { apt, disableService: ["raspotify", "librespot.service", "librespot@x"] } };
+  assert.ok(apps.validateManifest(ok, "t"));
+});
+
+test("a package manifest must match the registry entry it was offered under", async () => {
+  const entry = { id: "pkgtest", name: "P", type: "webclient", status: "ready", runtime: { serve: "local" } };
+  const pkgManifest = { ...entry, requires: { aptRepo: { line: "deb http://x y z" } } };
+  const srv = await servePackage({ "manifest.json": JSON.stringify(pkgManifest) });
+  try {
+    await assert.rejects(
+      () => apps.installPackage("pkgtest", srv.base, srv.files, null, { expect: entry, trust: () => [] }),
+      /differs from its registry entry: requires/,
+    );
+    await assert.rejects(
+      () =>
+        apps.installPackage("pkgtest", srv.base, srv.files, null, {
+          expect: pkgManifest,
+          trust: (m) => (m.requires && m.requires.aptRepo ? ["requires.aptRepo"] : []),
+        }),
+      /refused: requires.aptRepo/,
+    );
+  } finally {
+    srv.close();
+  }
+  const same = await servePackage({ "manifest.json": JSON.stringify(entry) });
+  try {
+    await apps.installPackage("pkgtest", same.base, same.files, null, { expect: entry, trust: () => [] });
+  } finally {
+    same.close();
   }
 });

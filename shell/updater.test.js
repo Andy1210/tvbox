@@ -47,6 +47,18 @@ test("updater INFRA_FILES matches deploy/infra.list (basename set)", () => {
   );
 });
 
+test("every script in infra.list ships executable or is named as run by an interpreter", () => {
+  const unit = /\.(service|timer|socket|path|conf|rules|json|list|version|c|py)$/;
+  const scripts = infraListBasenames().filter((f) => f.endsWith(".sh") || (!unit.test(f) && !f.includes(".")));
+  for (const f of scripts) {
+    assert.ok(
+      updater.EXECUTABLE.includes(f) || updater.RUN_BY_INTERPRETER.includes(f),
+      f + " is a script in infra.list but neither EXECUTABLE nor RUN_BY_INTERPRETER",
+    );
+  }
+  for (const f of updater.RUN_BY_INTERPRETER) assert.ok(!updater.EXECUTABLE.includes(f), f + " is in both lists");
+});
+
 test("every USER_UNIT is an INFRA_FILE (a unit must ship to be installable)", () => {
   for (const unit of updater.USER_UNITS) {
     assert.ok(updater.INFRA_FILES.includes(unit), unit + " is in USER_UNITS but not INFRA_FILES");
@@ -214,4 +226,20 @@ test("an answer the server meant is not retried", async () => {
     /HTTP 404/,
   );
   assert.equal(calls, 1, "a 404 was retried");
+});
+
+test("a feed signature is ed25519 over the exact bytes, base64", () => {
+  const crypto = require("node:crypto");
+  const { publicKey, privateKey } = crypto.generateKeyPairSync("ed25519");
+  const body = Buffer.from('{"feedVersion":1,"version":"9.9.9"}\n');
+  const sig = crypto.sign(null, body, privateKey).toString("base64");
+  assert.equal(updater.feedSignatureOk(body, sig + "\n", [publicKey]), true);
+  assert.equal(
+    updater.feedSignatureOk(Buffer.from(body.toString().replace("9.9.9", "9.9.8")), sig, [publicKey]),
+    false,
+  );
+  assert.equal(updater.feedSignatureOk(body, "", [publicKey]), false);
+  assert.equal(updater.feedSignatureOk(body, "not base64 !!", [publicKey]), false);
+  const other = crypto.generateKeyPairSync("ed25519").publicKey;
+  assert.equal(updater.feedSignatureOk(body, sig, [other]), false, "only a pinned key verifies");
 });

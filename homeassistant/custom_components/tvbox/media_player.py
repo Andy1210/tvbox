@@ -23,10 +23,12 @@ What the entity deliberately does NOT do:
 
 from __future__ import annotations
 
+import ipaddress
 import json
 import logging
 import math
 from typing import Any
+from urllib.parse import urlsplit
 
 from homeassistant.components import mqtt
 from homeassistant.components.media_player import (
@@ -109,6 +111,7 @@ class TvboxMediaPlayer(MediaPlayerEntity):
         self._attr_available = False
         self._attr_state = MediaPlayerState.IDLE
         self._attr_supported_features = _features(_LEGACY_COMMANDS)
+        self._seekable = False  # the last state's say; an announce must not undo it
         self._sources: dict[str, str] = {}  # display name -> app id
         self._attr_device_info = DeviceInfo(
             identifiers={(DOMAIN, self._device_id)},
@@ -141,6 +144,8 @@ class TvboxMediaPlayer(MediaPlayerEntity):
         commands = data.get("commands")
         if isinstance(commands, list):
             self._attr_supported_features = _features(commands)
+            if self._seekable:
+                self._attr_supported_features |= MediaPlayerEntityFeature.SEEK
         # The box's version is in the announce payload but deliberately not pushed
         # into the device registry here: device_info is read once, when the entity is
         # added, so assigning to it later is a no-op that only looks like it works.
@@ -155,7 +160,7 @@ class TvboxMediaPlayer(MediaPlayerEntity):
         self._attr_media_title = _text(data.get("title"))
         self._attr_media_artist = _text(data.get("artist"))
         self._attr_media_album_name = _text(data.get("album"))
-        self._attr_media_image_url = _text(data.get("image"))
+        self._attr_media_image_url = _image_url(data.get("image"))
         self._attr_media_duration = _int(data.get("duration"))
         position = _int(data.get("position"))
         self._attr_media_position = position
@@ -181,7 +186,8 @@ class TvboxMediaPlayer(MediaPlayerEntity):
         # Seeking is offered only while the box holds the clock (its own mpv); an app
         # playing its own audio has no position for it to move.
         feature = MediaPlayerEntityFeature.SEEK
-        if data.get("seekable"):
+        self._seekable = bool(data.get("seekable"))
+        if self._seekable:
             self._attr_supported_features |= feature
         else:
             self._attr_supported_features &= ~feature
@@ -258,6 +264,34 @@ def _json(payload: Any) -> dict[str, Any] | None:
 
 def _text(value: Any) -> str | None:
     return value if isinstance(value, str) and value else None
+
+
+# Home Assistant fetches the artwork itself and proxies it to the frontend, so the
+# URL a broker message names is a request made FROM the Home Assistant host. Only
+# http(s) and inline images, and never a loopback or link-local address: those are
+# Home Assistant's own services and the host's metadata, not artwork.
+def _image_url(value: Any) -> str | None:
+    text = _text(value)
+    if text is None or len(text) > 256 * 1024:
+        return None
+    if text.startswith("data:image/"):
+        return text
+    try:
+        parts = urlsplit(text)
+    except ValueError:
+        return None
+    if parts.scheme not in ("http", "https") or not parts.hostname or parts.username or parts.password:
+        return None
+    host = parts.hostname.lower()
+    if host == "localhost" or host.endswith(".localhost"):
+        return None
+    try:
+        addr = ipaddress.ip_address(host)
+    except ValueError:
+        return text  # a name; resolution is Home Assistant's
+    if addr.is_loopback or addr.is_link_local or addr.is_unspecified or addr.is_multicast:
+        return None
+    return text
 
 
 # json.loads accepts Infinity and NaN, so "is it a number" is not enough: int(inf)

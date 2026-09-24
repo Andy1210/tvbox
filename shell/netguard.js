@@ -114,8 +114,27 @@ function isLanUrl(u) {
   }
 }
 
+// A literal loopback/private/link-local address. The plain-http rule for
+// anything that delivers CODE (feed, registry, package, install source) takes
+// only these: a NAME over http is resolved by whatever answers the query - an
+// mDNS `.local` reply, a resolver the box user can point anywhere - so it proves
+// nothing about which host the bytes came from. Same rule as the root applier.
+function isLiteralLanHost(host) {
+  const h = normHost(host);
+  const cat = classifyIp(h);
+  return cat === "loopback" || cat === "private" || cat === "linklocal";
+}
+function isLiteralLanUrl(u) {
+  try {
+    const x = new URL(u);
+    return x.protocol === "http:" && isLiteralLanHost(x.hostname);
+  } catch (e) {
+    return false;
+  }
+}
+
 // The self-hosted fetcher trust rule as a URL predicate: https to ANY host, or
-// plain http only to the owner's own LAN/loopback infra. The updater feed, the
+// plain http only to a literal LAN/loopback address. The updater feed, the
 // app registry and package/download fetches all share this one rule instead of
 // each re-deriving it from a local regex. Parses the URL (not a prefix test) so
 // a malformed override like "https://" is rejected here - and falls back to the
@@ -128,7 +147,7 @@ function isAllowedFetchUrl(u) {
     return false;
   }
   if (x.protocol === "https:") return true; // https to any host
-  if (x.protocol === "http:") return isLanHost(x.hostname); // plain http only to LAN/loopback
+  if (x.protocol === "http:") return isLiteralLanHost(x.hostname); // plain http only to a literal LAN address
   return false;
 }
 
@@ -200,4 +219,15 @@ function lanIp() {
   return fallback;
 }
 
-module.exports = { normHost, classifyIp, isPrivateName, isLanHost, isLanUrl, isAllowedFetchUrl, guardedFetch, lanIp };
+module.exports = {
+  normHost,
+  classifyIp,
+  isPrivateName,
+  isLanHost,
+  isLanUrl,
+  isLiteralLanHost,
+  isLiteralLanUrl,
+  isAllowedFetchUrl,
+  guardedFetch,
+  lanIp,
+};

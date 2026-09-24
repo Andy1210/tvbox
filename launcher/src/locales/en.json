@@ -618,7 +618,10 @@
     "groupAuth": "Sign-in",
     "groupIdentity": "Identity",
     "deviceIdHint": "The topic segment this box publishes under. Two boxes must never share one.",
-    "portDefault": "1883"
+    "portDefault": "1883",
+    "portDefaultTls": "8883",
+    "tls": "Encrypted connection (TLS)",
+    "tlsHint": "mqtts://, with the broker's certificate checked. The broker has to offer TLS, usually on port 8883."
   },
   "ir": {
     "title": "IR blaster (TV, soundbar)",
@@ -826,7 +829,7 @@
     "shared": "shared",
     "notShared": "no",
     "noFolders": "Nothing to share.",
-    "warnTvbox": "holds the box's settings and the apps' logins",
+    "warnTvbox": "the box's own files: settings and logins stay hidden, but anything written here changes the box",
     "installRclone": "Install rclone (it does the serving)",
     "installing": "installing...",
     "err": {

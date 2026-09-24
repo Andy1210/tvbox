@@ -28,7 +28,14 @@ const MIME = {
   ".map": "application/json",
 };
 
+// A second answer to one request throws from writeHead, and an uncaught throw
+// restarts the shell, so a handler whose callback fires twice only loses the
+// second answer.
 function jsonRes(res, obj) {
+  if (res.headersSent || res.writableEnded) {
+    console.warn("[http] dropped a second response to", res.req ? res.req.url : "a request");
+    return;
+  }
   res.writeHead(200, { "Content-Type": "application/json" });
   res.end(JSON.stringify(obj));
 }
@@ -38,10 +45,27 @@ function jsonRes(res, obj) {
 // The boundary is root + separator rather than a startsWith on root alone
 // (`/apps/plexi` starts with `/apps/plex` and is a different app's directory), and
 // it is checked on the resolved path - see underRoot.
-function serveStatic(res, root, p, spaFallback) {
+//
+// `opts.images`: the root holds files other people put there (the screensaver
+// folder is a writable share on the LAN file server), so only a picture is
+// served, and inside a sandbox: anything served from here runs on the API's own
+// origin, and an HTML or SVG file there would pass every same-origin check.
+const IMAGE_EXT = new Set([".jpg", ".jpeg", ".png", ".webp", ".gif"]);
+function serveStatic(res, root, p, spaFallback, opts) {
   const fp = path.join(root, p);
+  const images = !!(opts && opts.images);
+  if (images && !IMAGE_EXT.has(path.extname(fp).toLowerCase())) {
+    res.writeHead(404, { "Content-Type": "text/plain" });
+    res.end("not found");
+    return;
+  }
   if (underRoot(root, fp) && isFile(fp)) {
-    res.writeHead(200, { "Content-Type": MIME[path.extname(fp)] || "application/octet-stream" });
+    const headers = {
+      "Content-Type": MIME[path.extname(fp).toLowerCase()] || "application/octet-stream",
+      "X-Content-Type-Options": "nosniff",
+    };
+    if (images) headers["Content-Security-Policy"] = "sandbox; default-src 'none'";
+    res.writeHead(200, headers);
     // A read that fails halfway (the file went away, an I/O error, a permission
     // change) emits `error` on the stream, and an unhandled one takes the whole
     // shell down with it. The headers are already out by then, so the only thing
@@ -53,6 +77,9 @@ function serveStatic(res, root, p, spaFallback) {
         res.end();
       } catch (e2) {}
     });
+    // A client that goes away mid-file leaves the read stream open, and its fd
+    // with it, unless the stream is torn down with the response.
+    res.on("close", () => stream.destroy());
     stream.pipe(res);
   } else if (spaFallback && isFile(spaFallback)) {
     res.writeHead(200, { "Content-Type": "text/html" });
@@ -162,13 +189,19 @@ function originOf(url) {
 // route is one the same-origin gate applies to. Asking them separately let the
 // gate be decided against one route and the request served by another.
 function resolvePluginRoute(routes, method, pathname) {
-  for (const { prefix, table, guard } of routes) {
+  for (const { id, prefix, table, guard, open } of routes) {
     if (!pathname.startsWith(prefix)) continue;
     const sub = pathname.slice(prefix.length);
     if (sub && sub[0] !== "/") continue; // don't let "/spotify" match "/spotifyX"
     const key = method + " " + sub;
-    const fn = table[key];
-    if (fn) return { fn, guarded: !!(guard && guard.includes(key)) };
+    const fn = Object.prototype.hasOwnProperty.call(table, key) ? table[key] : null;
+    // `owner`: the app whose plugin registered the table (null for the bare host).
+    // `open`: may a caller the shell cannot identify reach it - true, false, or
+    // "legacy" for a table that declared nothing (plugins.publicList).
+    if (typeof fn === "function") {
+      const reach = Array.isArray(open) ? open.includes(key) : "legacy";
+      return { fn, guarded: !!(guard && guard.includes(key)), owner: id ?? null, open: reach };
+    }
   }
   return null;
 }

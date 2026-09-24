@@ -53,6 +53,7 @@ function boot(opts) {
   playerapi.queued.startPos = 0;
   playerapi.queued.streams = null;
   playerapi.queued.kind = null;
+  playerapi.queued.local = false;
   return { log, state };
 }
 
@@ -88,7 +89,7 @@ test("the app that OWNS what is loaded keeps driving it off screen", () => {
 
 test("...and NOT gated on the player still running - the gap between two tracks is exactly when mpv is gone", () => {
   boot({ currentApp: null, owner: "media", running: false });
-  assert.deepEqual(playerapi.handle("media", "queue", { url: "next.mp3", kind: "audio" }), { ok: true });
+  assert.deepEqual(playerapi.handle("media", "queue", { url: "http://h/next.mp3", kind: "audio" }), { ok: true });
 });
 
 test("the launcher is never a background owner", () => {
@@ -101,7 +102,7 @@ test("the launcher is never a background owner", () => {
 
 test("a background owner may queue sound", () => {
   boot({ currentApp: null, owner: "media" });
-  assert.deepEqual(playerapi.handle("media", "queue", { url: "a.mp3", kind: "audio" }), { ok: true });
+  assert.deepEqual(playerapi.handle("media", "queue", { url: "http://h/a.mp3", kind: "audio" }), { ok: true });
   assert.equal(playerapi.queued.kind, "audio");
 });
 
@@ -109,37 +110,37 @@ test("a background owner may not queue a picture", () => {
   // `queued` is one object shared by every app, so what it writes here is what the
   // FOREGROUND app's next play launches.
   boot({ currentApp: null, owner: "media" });
-  assert.ok(refused(playerapi.handle("media", "queue", { url: "film.mkv" })));
+  assert.ok(refused(playerapi.handle("media", "queue", { url: "http://h/film.mkv" })));
   assert.equal(playerapi.queued.url, null);
 });
 
 test("a background owner may not START a picture either", () => {
   const { log } = boot({ currentApp: "plex", owner: "media" });
-  playerapi.handle("plex", "queue", { url: "film.mkv" }); // the foreground app staged a film
+  playerapi.handle("plex", "queue", { url: "http://h/film.mkv" }); // the foreground app staged a film
   assert.ok(refused(playerapi.handle("media", "play")));
   assert.equal(log.filter((l) => l[0] === "launch").length, 0);
 });
 
 test("a background owner may start sound", () => {
   const { log } = boot({ currentApp: null, owner: "media" });
-  playerapi.handle("media", "queue", { url: "a.mp3", kind: "audio" });
+  playerapi.handle("media", "queue", { url: "http://h/a.mp3", kind: "audio" });
   assert.deepEqual(playerapi.handle("media", "play"), { ok: true });
   assert.deepEqual(
     log.find((l) => l[0] === "launch"),
-    ["launch", "a.mp3", 0, false, true],
+    ["launch", "http://h/a.mp3", 0, false, true],
   );
 });
 
 test("PiP is refused from the background outright - it relaunches WITH video", () => {
-  boot({ currentApp: null, owner: "media", running: true, playingUrl: "a.mp3" });
+  boot({ currentApp: null, owner: "media", running: true, playingUrl: "http://h/a.mp3" });
   assert.ok(refused(playerapi.handle("media", "pip", { on: true })));
 });
 
 // ---- starting, resuming and taking the player ----
 
 test("a play with the same url and kind resumes rather than relaunching", () => {
-  const { log } = boot({ currentApp: "plex", running: true, playingUrl: "film.mkv", owner: "plex" });
-  playerapi.handle("plex", "queue", { url: "film.mkv" });
+  const { log } = boot({ currentApp: "plex", running: true, playingUrl: "http://h/film.mkv", owner: "plex" });
+  playerapi.handle("plex", "queue", { url: "http://h/film.mkv" });
   playerapi.handle("plex", "play");
   assert.deepEqual(
     log.filter((l) => l[0] === "launch"),
@@ -149,8 +150,14 @@ test("a play with the same url and kind resumes rather than relaunching", () => 
 });
 
 test("the same file asked for as SOUND after being played as a picture is a fresh launch", () => {
-  const { log } = boot({ currentApp: "plex", running: true, playingUrl: "x.mkv", owner: "plex", audioOnly: false });
-  playerapi.handle("plex", "queue", { url: "x.mkv", kind: "audio" });
+  const { log } = boot({
+    currentApp: "plex",
+    running: true,
+    playingUrl: "http://h/x.mkv",
+    owner: "plex",
+    audioOnly: false,
+  });
+  playerapi.handle("plex", "queue", { url: "http://h/x.mkv", kind: "audio" });
   playerapi.handle("plex", "play");
   assert.ok(
     log.find((l) => l[0] === "launch"),
@@ -162,11 +169,11 @@ test("a play during the start handshake is left to finish", () => {
   const { log } = boot({
     currentApp: "plex",
     running: true,
-    playingUrl: "film.mkv",
+    playingUrl: "http://h/film.mkv",
     owner: "plex",
     pending: true,
   });
-  playerapi.handle("plex", "queue", { url: "film.mkv" });
+  playerapi.handle("plex", "queue", { url: "http://h/film.mkv" });
   playerapi.handle("plex", "play");
   assert.equal(
     log.filter((l) => l[1] === "set_property pause false").length,
@@ -177,7 +184,7 @@ test("a play during the start handshake is left to finish", () => {
 
 test("taking the player from another app tells THAT app, and takes its card down", () => {
   const { log } = boot({ currentApp: "livetv", owner: "media", running: true, windows: ["media"] });
-  playerapi.handle("livetv", "queue", { url: "stream.ts" });
+  playerapi.handle("livetv", "queue", { url: "http://h/stream.ts" });
   playerapi.handle("livetv", "play");
   assert.deepEqual(
     log.find((l) => l[0] === "send"),
@@ -191,14 +198,30 @@ test("taking the player from another app tells THAT app, and takes its card down
 
 test("nothing is said when the player was not somebody else's", () => {
   const { log } = boot({ currentApp: "plex", owner: "plex", running: true, windows: ["plex"] });
-  playerapi.handle("plex", "queue", { url: "a.mkv" });
+  playerapi.handle("plex", "queue", { url: "http://h/a.mkv" });
   playerapi.handle("plex", "play");
   assert.equal(log.filter((l) => l[0] === "send").length, 0);
 });
 
 test("a play with nothing queued launches nothing", () => {
   const { log } = boot({ currentApp: "plex" });
-  assert.deepEqual(playerapi.handle("plex", "play"), { ok: true });
+  assert.deepEqual(playerapi.handle("plex", "play"), { ok: false, error: "nothing queued" });
+  assert.equal(log.filter((l) => l[0] === "launch").length, 0);
+});
+
+test("a refused url does not take the player from the app that is playing", () => {
+  const { log, state } = boot({
+    currentApp: "livetv",
+    owner: "music",
+    running: true,
+    playingUrl: "http://h/song.mp3",
+    audioOnly: true,
+    windows: ["music"],
+  });
+  assert.equal(playerapi.handle("livetv", "queue", { url: "http://127.0.0.1:8097/x" }).ok, false);
+  assert.equal(playerapi.handle("livetv", "play").ok, false);
+  assert.equal(state.owner, "music", "the music keeps its owner");
+  assert.equal(log.filter((l) => l[0] === "setOwner" || l[0] === "send" || l[0] === "clearCard").length, 0);
   assert.equal(log.filter((l) => l[0] === "launch").length, 0);
 });
 
@@ -234,7 +257,7 @@ test("a property outside the allowlist is REPORTED, not swallowed", () => {
 
 test("a stream selection is remembered as well as applied - PiP relaunches from it", () => {
   boot({ currentApp: "plex" });
-  playerapi.handle("plex", "queue", { url: "f.mkv", streams: { audio: 0, sub: 1 } });
+  playerapi.handle("plex", "queue", { url: "http://h/f.mkv", streams: { audio: 0, sub: 1 } });
   playerapi.handle("plex", "select", { sub: -1 });
   assert.equal(
     playerapi.queued.streams.audio,
@@ -292,4 +315,68 @@ test("the log records where a stream plays FROM, never the url", () => {
     said.some((l) => l.includes("pass")),
     false,
   );
+});
+
+test("only network streams and absolute paths may be queued", () => {
+  for (const ok of ["http://h/a.mkv", "https://h/a", "rtsp://cam/1", "udp://239.0.0.1:1234", "/media/stick/a.mkv"])
+    assert.ok(playerapi.queueTarget(ok), ok);
+  for (const bad of ["file:///etc/passwd", "av://v4l2:/dev/video0", "lavfi://sine", "relative.mkv", "", null])
+    assert.strictEqual(playerapi.queueTarget(bad), null, String(bad));
+  boot();
+  assert.deepEqual(playerapi.handle("plex", "queue", { url: "file:///etc/passwd" }), {
+    ok: false,
+    error: "not a playable url",
+  });
+});
+
+test("a local path is launched only once the shell has placed it inside a root", () => {
+  const { log } = boot();
+  const asked = [];
+  let answer;
+  playerapi.init({
+    localFile: (p, cb) => {
+      asked.push(p);
+      answer = cb;
+    },
+  });
+  playerapi.handle("plex", "queue", { url: "/media/stick/../x.mkv" });
+  playerapi.handle("plex", "play");
+  assert.deepEqual(asked, ["/media/stick/../x.mkv"]);
+  assert.ok(!log.some((l) => l[0] === "launch"), "nothing starts before the answer");
+  answer({ ok: true, path: "/media/x.mkv" });
+  assert.ok(log.some((l) => l[0] === "launch" && l[1] === "/media/x.mkv"));
+});
+
+test("a sidecar subtitle has to be a network URL", () => {
+  const { log } = boot();
+  playerapi.handle("plex", "queue", { url: "http://h/a.mkv", streams: { sub: 0, subFile: "file:///etc/shadow" } });
+  assert.strictEqual(playerapi.queued.streams.subFile, undefined);
+  assert.strictEqual(playerapi.queued.streams.sub, 0);
+  assert.ok(log);
+});
+
+test("a stream aimed at the box itself is refused, since mpv would fetch it as the box", () => {
+  const os = require("os");
+  for (const bad of [
+    "http://127.0.0.1:8097/tvbox/api/tv/standby",
+    "http://localhost:8097/x",
+    "http://[::1]:8097/x",
+    "http://[::ffff:127.0.0.1]:8097/x",
+    "http://0.0.0.0:8099/",
+    "http://" + os.hostname().toLowerCase() + ".local:8100/",
+  ])
+    assert.strictEqual(playerapi.queueTarget(bad), null, bad);
+  assert.strictEqual(playerapi.queueTarget("http://media.example/a.mkv"), "net");
+});
+
+test("a refused url empties the queue, so the next play launches nothing stale", () => {
+  const { log } = boot();
+  playerapi.handle("plex", "queue", { url: "http://media.example/a.mkv" });
+  assert.deepEqual(playerapi.handle("plex", "queue", { url: "http://127.0.0.1:8097/x" }), {
+    ok: false,
+    error: "not a playable url",
+  });
+  playerapi.handle("plex", "play");
+  assert.ok(!log.some((l) => l[0] === "launch"), "the earlier item must not start");
+  assert.strictEqual(playerapi.queued.url, null);
 });

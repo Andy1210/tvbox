@@ -25,9 +25,10 @@ const path = require("path");
 const crypto = require("crypto");
 const { execFile } = require("child_process");
 const config = require("./config");
+const fsutil = require("./fsutil");
 const compositor = require("./compositor"); // a release may require it (see REQUIREMENTS)
 const sysupdate = require("./sysupdate"); // the root half a release may require (see REQUIREMENTS)
-const { isLanUrl, isAllowedFetchUrl, guardedFetch } = require("./netguard"); // shared LAN/loopback trust rule (feed may be self-hosted http)
+const { isLiteralLanUrl, isAllowedFetchUrl, guardedFetch } = require("./netguard"); // shared self-hosted trust rule (feed may be http to a LAN address)
 const pkg = require("./package.json");
 
 const TVBOX = path.join(os.homedir(), ".tvbox");
@@ -38,6 +39,7 @@ const PENDING = path.join(UPDATE_DIR, "pending");
 const ATTEMPTS = path.join(UPDATE_DIR, "attempts");
 const FAILED = path.join(UPDATE_DIR, "failed");
 const LAST = path.join(UPDATE_DIR, "last");
+const SYNCED = path.join(UPDATE_DIR, "synced"); // the release whose infra files are in place
 
 const DEFAULT_FEED = "https://github.com/Andy1210/tvbox/releases/latest/download/update.json";
 const FEED_TIMEOUT_MS = 15000;
@@ -144,6 +146,12 @@ const EXECUTABLE = [
   "tvbox-miracast", // provision copies it to /usr/local/sbin; systemd exec's it
   "tvbox-radio", // same: /usr/local/sbin, exec'd by tvbox-radio@.service
   "tvbox-sysupdate", // same: /usr/local/sbin, exec'd by tvbox-sysupdate.service
+  "install-libcec8.sh", // provision runs it with `sh`, a person may run it directly
+];
+// Scripts that ship but are always started through an interpreter, so their
+// mode does not matter. Every other script in infra.list must be in EXECUTABLE.
+const RUN_BY_INTERPRETER = [
+  "provision.sh", // `sudo bash ~/.tvbox/provision.sh`, and tvbox-sysupdate runs it with bash
 ];
 // Where each shipped user unit gets its "enable" symlink (its [Install]
 // WantedBy). syncInfra creates these directly - same trick as the image build:
@@ -166,6 +174,7 @@ let latest = null; // validated feed object from the last successful check
 let lastCheckAt = null;
 let bootAt = Date.now();
 let committed = false;
+let applying = false; // one apply at a time, whatever `state` says meanwhile
 
 function init(h) {
   hooks = { ...hooks, ...(h || {}) };
@@ -348,20 +357,116 @@ function status() {
   };
 }
 
-async function fetchJson(url, timeoutMs) {
+const MAX_FEED_BYTES = 64 * 1024;
+
+// Reads a response body, giving up as soon as it passes `maxBytes` instead of
+// buffering whatever the server chose to send first.
+async function readCapped(res, maxBytes, ctl) {
+  const declared = Number(res.headers && res.headers.get && res.headers.get("content-length"));
+  if (declared > maxBytes) throw new Error("response too large");
+  if (!res.body || typeof res.body.getReader !== "function") {
+    const buf = Buffer.from(await res.arrayBuffer());
+    if (buf.length > maxBytes) throw new Error("response too large");
+    return buf;
+  }
+  const reader = res.body.getReader();
+  const chunks = [];
+  let total = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    total += value.length;
+    if (total > maxBytes) {
+      if (ctl) ctl.abort();
+      throw new Error("response too large");
+    }
+    chunks.push(Buffer.from(value));
+  }
+  return Buffer.concat(chunks);
+}
+
+async function fetchBytes(url, timeoutMs, maxBytes) {
   const ctl = new AbortController();
   const t = setTimeout(() => ctl.abort(), timeoutMs);
   try {
     const res = await guardedFetch(url, { signal: ctl.signal, cache: "no-store" });
     if (!res.ok) throw new Error("HTTP " + res.status);
-    return await res.json();
+    return await readCapped(res, maxBytes, ctl);
   } finally {
     clearTimeout(t);
   }
 }
 
+// Keys a feed signature is checked against: the release key this shell shipped
+// with (infra/ beside an OTA release, ~/.tvbox for a dev deploy, deploy/ in a
+// checkout), plus any the owner put in ~/.tvbox/update-keys for their own builds.
+function releaseKeys() {
+  const files = [
+    path.join(__dirname, "..", "infra", "release-key.pem"),
+    path.join(TVBOX, "release-key.pem"),
+    path.join(__dirname, "..", "deploy", "release-key.pem"),
+  ];
+  const extra = path.join(TVBOX, "update-keys");
+  try {
+    for (const n of fs.readdirSync(extra)) if (n.endsWith(".pem")) files.push(path.join(extra, n));
+  } catch (e) {
+    /* optional */
+  }
+  const keys = [];
+  const seen = new Set();
+  for (const f of files) {
+    try {
+      const pem = fs.readFileSync(f, "utf8");
+      if (seen.has(pem)) continue;
+      seen.add(pem);
+      keys.push(crypto.createPublicKey(pem));
+    } catch (e) {
+      /* absent or not a key */
+    }
+  }
+  return keys;
+}
+
+// Detached ed25519 over the exact feed bytes, base64 - what make-release.sh writes
+// as update.json.sig and what the root applier checks.
+function feedSignatureOk(bytes, sigText, keys) {
+  const b64 = String(sigText || "").trim();
+  if (!/^[A-Za-z0-9+/=]{16,4096}$/.test(b64)) return false;
+  const sig = Buffer.from(b64, "base64");
+  return (keys || releaseKeys()).some((k) => {
+    try {
+      return crypto.verify(null, bytes, k, sig);
+    } catch (e) {
+      return false;
+    }
+  });
+}
+
+// The default feed is https to the project's own releases. Any other feed has to
+// be signed by a release key, because an owner-set feed is also what an attacker
+// on the LAN would answer for; `update.allowUnsigned` is the opt-out for a
+// self-hosted build with no key.
+function signatureRequired(url) {
+  const u = config.rawUpdate() || {};
+  return url !== DEFAULT_FEED && u.allowUnsigned !== true;
+}
+
+async function fetchFeed(url) {
+  const raw = await fetchBytes(url, FEED_TIMEOUT_MS, MAX_FEED_BYTES);
+  if (signatureRequired(url)) {
+    let sig;
+    try {
+      sig = await fetchBytes(url + ".sig", FEED_TIMEOUT_MS, 8192);
+    } catch (e) {
+      throw new Error("feed signature: " + String(e.message || e), { cause: e });
+    }
+    if (!feedSignatureOk(raw, sig.toString("utf8"))) throw new Error("feed signature does not verify");
+  }
+  return JSON.parse(raw.toString("utf8"));
+}
+
 async function check() {
-  if (state === "downloading" || state === "installing" || state === "restarting") return status();
+  if (applying || state === "downloading" || state === "installing" || state === "restarting") return status();
   state = "checking";
   error = null;
   try {
@@ -370,11 +475,11 @@ async function check() {
     // six-hourly check, and autoTick refuses to run unless the state is idle - so
     // a single flake costs a whole night's auto-update and paints a red line on
     // the television meanwhile.
-    const feed = await withRetries(() => fetchJson(feedUrl(), FEED_TIMEOUT_MS), 3, 2000, transient);
+    const feed = await withRetries(() => fetchFeed(feedUrl()), 3, 2000, transient);
     if (!feed || feed.feedVersion !== 1) throw new Error("bad feed shape");
     if (!versionOk(feed.version)) throw new Error("bad feed version");
-    if (!/^https:\/\//.test(feed.url || "") && !isLanUrl(feed.url))
-      throw new Error("feed url must be https (or LAN http)");
+    if (!/^https:\/\//.test(feed.url || "") && !isLiteralLanUrl(feed.url))
+      throw new Error("feed url must be https (or http to a LAN address)");
     if (!/^[0-9a-f]{64}$/i.test(feed.sha256 || "")) throw new Error("feed needs a sha256");
     latest = feed;
     const unmet = unmetRequirements(feed);
@@ -382,11 +487,14 @@ async function check() {
       console.warn("[updater]", feed.version, "needs", unmet.join(", "), "- this box has to be re-provisioned first");
     }
     lastCheckAt = Date.now();
-    state = "idle";
+    // An apply that started while this check was in flight owns `state` now.
+    if (!applying) state = "idle";
   } catch (e) {
-    state = "error";
-    error = "check: " + String(e.message || e).slice(0, 120);
-    console.warn("[updater]", error);
+    if (!applying) {
+      state = "error";
+      error = "check: " + String(e.message || e).slice(0, 120);
+    }
+    console.warn("[updater] check:", String(e.message || e).slice(0, 120));
   }
   return status();
 }
@@ -500,9 +608,12 @@ async function download(url, dest) {
 // Download + verify + extract + node_modules + atomic flip. Runs in the
 // background; the UI polls status(). The actual restart is main.js's hook
 // (app.quit -> the autostart respawn loop restarts run-shell.sh, which starts `current`).
-async function apply() {
-  if (state === "downloading" || state === "installing" || state === "restarting") return status();
+// opts.auto: the nightly run. It must not clear the record of a rolled-back
+// release, which is the one thing that stops it installing that release again.
+async function apply(opts = {}) {
+  if (applying || state === "downloading" || state === "installing" || state === "restarting") return status();
   if (!latest) await check();
+  if (applying) return status();
   const cur = pkg.version || "0";
   if (!latest || cmpVer(latest.version, cur) <= 0) return status();
   // The same gate the offer runs on. `available` already folds this in, so the UI
@@ -518,11 +629,13 @@ async function apply() {
   const v = latest.version;
   const stage = path.join(UPDATE_DIR, "stage");
   const tarball = path.join(UPDATE_DIR, "release.tar.gz");
+  let flipped = false;
+  applying = true;
   try {
     const free = freeBytes();
     if (free != null && free < MIN_FREE_BYTES) throw new Error("not enough free disk space");
     fs.mkdirSync(UPDATE_DIR, { recursive: true });
-    fs.rmSync(FAILED, { force: true }); // an explicit apply is the retry
+    if (!opts.auto) fs.rmSync(FAILED, { force: true }); // an explicit apply is the retry
     state = "downloading";
     error = null;
     console.log("[updater] downloading", v, "from", latest.url);
@@ -569,19 +682,22 @@ async function apply() {
         run("node", ["node_modules/electron/install.js"], { cwd: path.join(stage, "shell"), timeout: 5 * 60 * 1000 }),
       );
     }
-    // move into place + atomic-ish symlink flip, with the rollback marker
-    // written FIRST so a crash between the two steps still rolls back cleanly
+    // Move into place, then the symlink flip. The rollback marker is written
+    // durably right before the rename that flips, so a power cut can leave it
+    // only next to a flip that happened, and a failure before the flip removes it.
     fs.mkdirSync(VERSIONS, { recursive: true });
     const dest = path.join(VERSIONS, v);
     fs.rmSync(dest, { recursive: true, force: true });
     fs.renameSync(stage, dest);
     const prev = runningRelease() || "-"; // "-" = dev tree (run-shell.sh removes `current` on rollback)
-    fs.writeFileSync(PENDING, prev + " " + v + "\n");
-    fs.rmSync(ATTEMPTS, { force: true });
     const tmp = CURRENT + ".new";
     fs.rmSync(tmp, { force: true });
     fs.symlinkSync(dest, tmp);
+    fs.rmSync(ATTEMPTS, { force: true });
+    fsutil.writeFileAtomic(PENDING, prev + " " + v + "\n");
     fs.renameSync(tmp, CURRENT);
+    flipped = true;
+    fsutil.fsyncDir(TVBOX);
     state = "restarting";
     console.log("[updater] flipped to", v, "- restarting shell");
     if (hooks.restart) setTimeout(() => hooks.restart(), 1500); // let the HTTP response out first
@@ -591,6 +707,15 @@ async function apply() {
     console.warn("[updater]", error);
     fs.rmSync(stage, { recursive: true, force: true });
     fs.rmSync(tarball, { force: true });
+    if (!flipped) {
+      // Left behind, the marker would have run-shell.sh count the boots of the
+      // release that is still running and roll it back.
+      fs.rmSync(PENDING, { force: true });
+      fs.rmSync(ATTEMPTS, { force: true });
+      fs.rmSync(CURRENT + ".new", { force: true });
+    }
+  } finally {
+    applying = false;
   }
   return status();
 }
@@ -603,23 +728,32 @@ async function apply() {
 function onLauncherLoaded() {
   if (committed) return;
   committed = true;
-  const pending = readPair(PENDING);
-  if (!pending) return;
   const rel = runningRelease();
+  const pending = readPair(PENDING);
+  if (!pending) {
+    // A marker that exists but cannot be read (empty after a power cut) would
+    // keep run-shell.sh's boot watchdog killing a healthy shell for ever.
+    if (fs.existsSync(PENDING)) {
+      console.warn("[updater] removing an unreadable pending marker");
+      fs.rmSync(PENDING, { force: true });
+      fs.rmSync(ATTEMPTS, { force: true });
+    }
+    // An infra sync that did not finish (power cut, full disk) is retried on
+    // the next healthy boot of the same release.
+    if (rel && readSynced() !== rel) syncInfraSafely(rel);
+    return;
+  }
   if (pending.next !== rel) return; // not us - run-shell.sh owns this state
   fs.rmSync(PENDING, { force: true });
   fs.rmSync(ATTEMPTS, { force: true });
   try {
-    fs.writeFileSync(LAST, JSON.stringify({ from: pending.prev, to: rel, at: Date.now() }));
+    fsutil.writeJsonAtomic(LAST, { from: pending.prev, to: rel, at: Date.now() }, { pretty: false });
   } catch (e) {
     /* cosmetic */
   }
   console.log("[updater] committed", pending.prev, "->", rel);
-  try {
-    syncInfra(rel);
-  } catch (e) {
-    console.warn("[updater] infra sync:", e.message);
-  }
+  clearSupersededFailure(rel);
+  syncInfraSafely(rel);
   try {
     prune(rel, pending.prev);
   } catch (e) {
@@ -627,14 +761,32 @@ function onLauncherLoaded() {
   }
 }
 
+function readSynced() {
+  try {
+    return fs.readFileSync(SYNCED, "utf8").trim();
+  } catch (e) {
+    return null;
+  }
+}
+function syncInfraSafely(rel) {
+  try {
+    syncInfra(rel);
+    fsutil.writeFileAtomic(SYNCED, rel + "\n");
+  } catch (e) {
+    console.warn("[updater] infra sync:", e.message);
+  }
+}
+
 function syncInfra(rel) {
   const src = path.join(VERSIONS, rel, "infra");
   if (!fs.existsSync(src)) return;
+  // Each file replaces its predecessor by rename, never by rewriting it in place:
+  // run-shell.sh and session.sh are running while this copies, and run-shell.sh
+  // is the rollback path, so a half-written copy must never be what is there.
   for (const name of INFRA_FILES) {
     const f = path.join(src, name);
     if (!fs.existsSync(f)) continue;
-    fs.copyFileSync(f, path.join(TVBOX, name));
-    if (EXECUTABLE.includes(name)) fs.chmodSync(path.join(TVBOX, name), 0o755);
+    fsutil.copyFileAtomic(f, path.join(TVBOX, name), { mode: EXECUTABLE.includes(name) ? 0o755 : 0o644 });
   }
   // Copying does not retire, and a box that has been through the labwc era carries
   // that compositor's patch set and session files in ~/.tvbox. The build script
@@ -663,7 +815,7 @@ function syncInfra(rel) {
   for (const name of USER_UNITS) {
     const f = path.join(src, name);
     if (fs.existsSync(f)) {
-      fs.copyFileSync(f, path.join(unitDir, name));
+      fsutil.copyFileAtomic(f, path.join(unitDir, name), { mode: 0o644 });
       // "enable" = the WantedBy symlink; keep whatever `systemctl enable`
       // (deploy.sh) or the image build already created, add it if missing.
       const wants = UNIT_WANTS[name];
@@ -693,6 +845,13 @@ function prune(keep, alsoKeep) {
   }
 }
 
+// A rollback record describes the release that did not boot. Once a release at
+// or past it has committed, the record is history and no longer a warning.
+function clearSupersededFailure(rel) {
+  const failed = readPair(FAILED);
+  if (failed && cmpVer(rel, failed.next) >= 0) fs.rmSync(FAILED, { force: true });
+}
+
 function clearFailed() {
   fs.rmSync(FAILED, { force: true });
   return status();
@@ -710,6 +869,12 @@ function applySystem() {
   return status();
 }
 
+// update/failed is "<prev> <next>" (run-shell.sh writes it), so the release that
+// failed to boot is `next`.
+function rolledBack(failed, version) {
+  return !!(failed && failed.next === version);
+}
+
 // Nightly auto-apply: only in the 3-6h window, only when the box is idle
 // (nothing playing, no app open), never right after boot, and never a version
 // that already rolled back once (that needs a human + a fixed release).
@@ -720,9 +885,9 @@ function autoTick() {
   if (!hooks.isIdle()) return;
   const s = status();
   if (!s.available || s.state !== "idle") return;
-  if (s.failed && s.failed.to === latest.version) return;
+  if (rolledBack(s.failed, latest.version)) return;
   console.log("[updater] nightly auto-update ->", latest.version);
-  apply();
+  apply({ auto: true });
 }
 
 function startSchedulers() {
@@ -742,6 +907,11 @@ module.exports = {
   applySystem,
   clearFailed,
   onLauncherLoaded,
+  feedSignatureOk, // exported for the test: a non-default feed must be signed
+  rolledBack, // exported for the test: a rolled-back release is not installed again
+  readCapped, // same: a feed is not buffered past its cap
+  clearSupersededFailure, // same: a rollback record outlived by a newer committed release
+  readPair, // same: the format run-shell.sh writes
   startSchedulers,
   cmpVer,
   DEFAULT_FEED,
@@ -750,4 +920,5 @@ module.exports = {
   USER_UNITS,
   UNIT_WANTS,
   EXECUTABLE,
+  RUN_BY_INTERPRETER,
 };

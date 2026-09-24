@@ -3,6 +3,7 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <meta name="referrer" content="no-referrer" />
     <title>{{title}}</title>
     <style>
       :root {
@@ -98,15 +99,19 @@
     <h2>{{current}}</h2>
     <div id="empty" style="display: none">{{empty}}</div>
     <div id="grid"></div>
+    <script src="/tvbox-seal.js" data-v="2" data-ask-code></script>
     <script>
-      document.getElementById("code").value = new URLSearchParams(location.search).get("c") || "";
+      document.getElementById("code").value = tvboxSeal.code;
       function code() {
         return document.getElementById("code").value;
       }
       var st = document.getElementById("st"),
         grid = document.getElementById("grid"),
         empty = document.getElementById("empty");
-      function q(p) {
+      // A scanned page signs its reads and uploads with its key, so the code never
+      // crosses the network; a typed one sends the code it was given.
+      function q(p, method, body) {
+        if (tvboxSeal.sealed) return tvboxSeal.url(method || "GET", p, body);
         return p + (p.indexOf("?") < 0 ? "?" : "&") + "c=" + encodeURIComponent(code());
       }
       async function load() {
@@ -122,7 +127,7 @@
           var cell = document.createElement("div");
           cell.className = "cell";
           var img = document.createElement("img");
-          img.src = q("/photo-img") + "&name=" + encodeURIComponent(n);
+          img.src = q("/photo-img?name=" + encodeURIComponent(n));
           img.loading = "lazy";
           var b = document.createElement("button");
           b.textContent = "✕";
@@ -133,7 +138,7 @@
               await fetch("/photo-delete", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ code: code(), name: n }),
+                body: tvboxSeal.body({ code: code(), name: n }, "/photo-delete"),
               });
             } catch (_) {}
             load();
@@ -182,10 +187,11 @@
           var data = await resize(files[i]);
           if (!data) continue;
           try {
-            var r = await fetch("/photo" + location.search, {
+            var body = JSON.stringify({ name: files[i].name, data: data });
+            var r = await fetch(q("/photo", "POST", body), {
               method: "POST",
               headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ code: code(), name: files[i].name, data: data }),
+              body: body,
             });
             if (r.ok) ok++;
           } catch (_) {}

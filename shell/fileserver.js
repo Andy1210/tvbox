@@ -12,8 +12,9 @@
 // filtered out by name, so a folder a future app introduces shows up on its own),
 // the home directory's own folders, and each installed flatpak app's data dir -
 // which is how an emulator's BIOS folder becomes reachable at all. ~/.tvbox itself
-// is offered too, with a warning, because it holds the box's settings and the apps'
-// logins.
+// is offered too, with a warning: its settings, tokens and app logins are excluded
+// from what it serves (SECRET_PATTERNS), but it can still be written to, and it holds
+// the box's own code.
 //
 // A password is mandatory: this binds to the LAN on purpose, and there is no
 // sensible "just for a minute" version of exposing someone's home directory.
@@ -55,6 +56,69 @@ const MIN_PASSWORD = 8;
 // lists, untranslated: the picker names the folder someone will go looking for in a
 // file manager, so a localized label there would name something that isn't served.
 const SHARE_NAMES = { ambient: "screensaver", roms: "games" };
+
+// What is never served, even when ~/.tvbox itself is shared: the box's settings and
+// their snapshots, the per-boot local token, the update keys, the apps' stores and
+// logins, and the restore files a backup leaves behind. Patterns are rclone globs
+// relative to the shared ~/.tvbox. On top of these, every top-level entry the box
+// keeps private (no group or other bits, which is how secrets are written here) is
+// excluded by name, so a token file an app adds later is covered without a list.
+const SECRET_PATTERNS = [
+  "config.json",
+  "config.json.*",
+  ".config.json.*",
+  ".*.tmp",
+  "config-snapshots/**",
+  "local-token",
+  "update-keys/**",
+  "appdata/**",
+  "shell-userdata/**",
+  "restore-localstorage.json",
+  "restore-appfiles.json",
+  "librespot-cache/**",
+  "spotify-accounts.json",
+  "spotify-token",
+  "xcloud-tokens.json",
+  "iptv.conf",
+];
+
+// rclone reads these as glob metacharacters; a name is matched literally.
+function globEscape(s) {
+  return String(s).replace(/[\\*?[\]{}]/g, (c) => "\\" + c);
+}
+
+function privateEntries(dir) {
+  const out = [];
+  let names;
+  try {
+    names = fs.readdirSync(dir);
+  } catch (e) {
+    return out;
+  }
+  for (const name of names) {
+    try {
+      const st = fs.lstatSync(path.join(dir, name));
+      if ((st.mode & 0o077) !== 0) continue;
+      if (st.isDirectory()) out.push(globEscape(name) + "/**");
+      else if (st.isFile()) out.push(globEscape(name));
+    } catch (e) {}
+  }
+  return out;
+}
+
+// The --exclude arguments for a share that is ~/.tvbox itself, under the name it is
+// served as. rclone applies them to listings and reads; they do not stop a client
+// from WRITING a file of that name, which is why the share carries its warning.
+function secretExcludes(shared) {
+  const args = [];
+  for (const s of shared || []) {
+    if (s.id !== "tvbox:.") continue;
+    const base = "/" + globEscape(s.name) + "/";
+    const patterns = new Set([...SECRET_PATTERNS, ...privateEntries(s.path)]);
+    for (const p of patterns) args.push("--exclude", base + p);
+  }
+  return args;
+}
 
 // rclone is the same pinned build the RetroArch package installs, so a box that has
 // it already needs no second download. Kept here as well because the file server
@@ -201,6 +265,7 @@ function start(cfg, deps) {
       "10s", // the box writes into these folders too, so don't hold a stale listing
       "--realm",
       "tvbox",
+      ...secretExcludes(shared),
     ],
     stdio: ["ignore", "ignore", "pipe"],
     log: (m) => console.log("[fileserver]", m),
@@ -246,6 +311,7 @@ module.exports = {
   candidates,
   buildRoot,
   lanUrl,
+  secretExcludes,
   start,
   stop,
   status,

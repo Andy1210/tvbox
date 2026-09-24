@@ -3,6 +3,7 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <meta name="referrer" content="no-referrer" />
     <title>{{title}}</title>
     <style>
       :root {
@@ -123,8 +124,9 @@
     <div id="count"></div>
     <div id="grid"></div>
     <button class="btn ghost" id="clear" style="display: none">{{clear}}</button>
+    <script src="/tvbox-seal.js" data-v="2" data-ask-code></script>
     <script>
-      document.getElementById("code").value = new URLSearchParams(location.search).get("c") || "";
+      document.getElementById("code").value = tvboxSeal.code;
       function code() {
         return document.getElementById("code").value;
       }
@@ -132,7 +134,10 @@
         countEl = document.getElementById("count"),
         grid = document.getElementById("grid"),
         clearBtn = document.getElementById("clear");
-      function q(p) {
+      // A scanned page signs its reads and uploads with its key, so the code never
+      // crosses the network; a typed one sends the code it was given.
+      function q(p, method, body) {
+        if (tvboxSeal.sealed) return tvboxSeal.url(method || "GET", p, body);
         return p + (p.indexOf("?") < 0 ? "?" : "&") + "c=" + encodeURIComponent(code());
       }
       function say(text, bad) {
@@ -164,7 +169,7 @@
           var img = document.createElement("img");
           // A tile, not the photo: the box renders these small, and the phone is
           // on wifi looking at thirty of them.
-          img.src = q("/pshare-img") + "&name=" + encodeURIComponent(n);
+          img.src = q("/pshare-img?name=" + encodeURIComponent(n));
           img.loading = "lazy";
           var b = document.createElement("button");
           b.textContent = "✕";
@@ -174,7 +179,7 @@
               await fetch("/pshare-delete", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ code: code(), name: n }),
+                body: tvboxSeal.body({ code: code(), name: n }, "/pshare-delete"),
               });
             } catch (_) {}
             refresh();
@@ -228,10 +233,11 @@
           var data = await resize(files[i]);
           if (!data) continue;
           try {
-            var r = await fetch("/pshare" + location.search, {
+            var body = JSON.stringify({ name: files[i].name, data: data });
+            var r = await fetch(q("/pshare", "POST", body), {
               method: "POST",
               headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ code: code(), name: files[i].name, data: data }),
+              body: body,
             });
             if (r.ok) ok++;
             else if (r.status === 507) full = true;
@@ -252,7 +258,7 @@
           await fetch("/pshare-clear", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ code: code() }),
+            body: tvboxSeal.body({ code: code() }, "/pshare-clear"),
           });
         } catch (_) {}
         say("");
