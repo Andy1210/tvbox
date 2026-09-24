@@ -255,7 +255,6 @@ test("a read with the code does not hold the session open; a keepalive does", as
   const s = pairing.start("en", "ttltest");
   try {
     await listening();
-    const key = new Uint8Array(Buffer.from(fromFragment(s.url, "k"), "base64url"));
     // Seven wrong codes, then reads with the right one: the count is not reset by a read.
     for (let i = 0; i < 7; i++) await get("/list?c=0000");
     assert.strictEqual((await get("/list?c=" + s.code)).status, 200);
