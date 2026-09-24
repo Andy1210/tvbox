@@ -68,10 +68,25 @@ sh "$AUDIO_SH" >/dev/null 2>&1 &
 # shape reachable. Back off to half a minute instead, and reset as soon as one run
 # lasted longer than a start: a box that works between crashes keeps restarting
 # promptly, and a box that cannot come up at all stays quiet enough to ssh into.
+#
+# The shell and the pause run in the background and are waited for, so a TERM or
+# HUP to this script (the session ending) is acted on at once and passed on to
+# the shell, instead of waiting for the shell to exit by itself. The compositor
+# also signals the whole process group when it goes; this covers an ending that
+# reaches only this script.
+child=""
+stop() {
+	[ -n "$child" ] && kill -TERM "$child" 2> /dev/null
+	exit 0
+}
+trap stop TERM HUP INT
 delay=1
 while :; do
 	started=$(date +%s 2> /dev/null || echo 0)
-	"$HOME/.tvbox/run-shell.sh"
+	"$HOME/.tvbox/run-shell.sh" &
+	child=$!
+	wait "$child"
+	child=""
 	ended=$(date +%s 2> /dev/null || echo 0)
 	if [ "$((ended - started))" -ge 60 ]; then
 		delay=1
@@ -79,5 +94,8 @@ while :; do
 		delay=$((delay * 3))
 		[ "$delay" -gt 30 ] && delay=30
 	fi
-	sleep "$delay"
+	sleep "$delay" &
+	child=$!
+	wait "$child"
+	child=""
 done
