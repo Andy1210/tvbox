@@ -1,6 +1,6 @@
 {
   "name": "tvbox-shell",
-  "version": "3.11.5",
+  "version": "3.12.0",
   "tvboxRequires": [
     "compositor",
     "system:3"

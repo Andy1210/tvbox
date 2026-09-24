@@ -5,6 +5,66 @@ updates). `scripts/make-release.sh` lifts the current version's `hu`/`en`
 blocks into the OTA feed's `notes` - keep both languages, keep it short, and
 write for the person on the couch (what changes for THEM), not for developers.
 
+## 3.12.0
+
+### hu
+
+- **Ha elveszik a kijelölés, a távirányító visszahozza.** Ha egy app bezárása után
+  a Kezdőlapon semmi nem volt kijelölve, eddig a távirányító nem csinált semmit.
+  Mostantól az első gombnyomás visszateszi a kijelölést egy értelmes helyre.
+- **A Kezdőlap gomb nyomva tartása helyreállít.** 3 másodperc tartás újratölti a
+  menüt, 10 másodperc újraindítja a doboz felületét. Ez akkor is működik, ha a
+  képernyő lefagyott (Bluetooth távirányítóval; a tévé saját távirányítóján a
+  Kezdőlap két Vissza nyomás, azt nem lehet nyomva tartani).
+- **Egy hibás frissítés nem települ újra minden éjjel.** Ha egy frissítés után a
+  doboz visszaállt az előző verzióra, eddig a következő éjjel újra feltette, és
+  ez így ment tovább. Most vár a következő javított verzióra.
+- **Áramszünet után is megmaradnak a beállítások.** Ha az áram épp mentés közben
+  ment el, a beállítások elveszhettek, és a doboz újra a kezdeti beállítással
+  indult. A doboz mostantól az utolsó néhány jó beállítást is megőrzi, és a
+  Rendszer menüben vissza lehet állni egy korábbira.
+- **Több doboz esetén az egyik frissülhet elsőként** (Beállítások → Frissítések,
+  Home Assistant brókerrel). A többi csak akkor frissül, ha az első rendben
+  elindult az új verzióval.
+- **Az Állapot sor a Névjegyben** megmondja, ha valami figyelmet igényel, a Home
+  Assistant pedig egy szenzorban látja ugyanezt.
+- **A doboz törölhető a Home Assistantból** a Home Assistant beállításoknál.
+- **Biztonságosabb lett a doboz.** A telefonos párosítás titkosítva küldi, amit a
+  telefonon beírsz, az appok nem tudják kikapcsolni a szülői zárat PIN nélkül, és
+  a doboz több helyen nem fogad el kéréseket olyantól, akinek nincs hozzá köze.
+- **Egy dolgot újra kell csinálni:** a telefonos távirányítót újra kell párosítani.
+- **Sok kisebb javítás**: a tükrözés újracsatlakozás után is ad képet, egy
+  összeomlott app nem hagyja lefagyva a képernyőt, és a lejátszó nem ragad be.
+
+### en
+
+- **If the highlight is lost, the remote brings it back.** When nothing on Home
+  was highlighted after closing an app, the remote used to do nothing. The first
+  press now puts the highlight back somewhere sensible.
+- **Holding Home recovers the box.** Hold it for 3 seconds to reload the menu,
+  10 seconds to restart the box's interface. It works even when the screen has
+  frozen (with a Bluetooth remote; on the TV's own remote Home is two presses of
+  Back, which cannot be held).
+- **A broken update is no longer installed again every night.** If the box went
+  back to the previous version after an update, it used to put the update back
+  the next night, and the night after. It now waits for the next fixed version.
+- **Settings survive a power cut.** If the power went while settings were being
+  saved, they could be lost and the box started from scratch. The box now also
+  keeps the last few good copies, and System lets you go back to one.
+- **With several boxes, one can update first** (Settings → Updates, with a Home
+  Assistant broker). The others follow only once it has started fine on the new
+  version.
+- **A Status row in About** says when something needs a look, and Home Assistant
+  sees the same in a sensor.
+- **The box can be removed from Home Assistant** from the Home Assistant settings.
+- **The box is safer.** Phone pairing encrypts what you type on the phone, apps
+  cannot turn the parental lock off without the PIN, and the box refuses requests
+  from places that have no business making them.
+- **One thing to redo:** pair the phone remote again.
+- **Lots of smaller fixes**: screen mirroring shows a picture after a reconnect, a
+  crashed app no longer leaves the screen frozen, and the player no longer gets
+  stuck.
+
 ## 3.11.5
 
 ### hu
