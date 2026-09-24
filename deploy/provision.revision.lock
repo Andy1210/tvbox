@@ -1,5 +1,5 @@
 {
-  "revision": 5,
+  "revision": 6,
   "files": [
     "deploy/52-tvbox-miracast.rules",
     "deploy/54-tvbox-sysupdate.rules",
@@ -24,5 +24,5 @@
     "deploy/tvbox-sysupdate.service",
     "scripts/install-libcec8.sh"
   ],
-  "sha256": "d11c6d185641ab4a271acf12746481ee4132bf6de0024152ec7328afba1f0703"
+  "sha256": "3fe34787f6906e131956feb679a03ee836bd42a730d85b182cf2137c9690c004"
 }
