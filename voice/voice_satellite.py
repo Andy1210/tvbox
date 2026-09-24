@@ -418,6 +418,24 @@ class RemoteMic:
 SHELL_NOTIFY_URL = "http://127.0.0.1:8097/tvbox/api/notify"
 
 
+LOCAL_TOKEN_FILE = os.path.expanduser("~/.tvbox/local-token")
+
+
+def shell_headers(extra=None):
+    """Headers for a call to the shell's API. The token the shell writes at start
+    is what tells it this request comes from a process of the box's own, and it
+    changes with every shell start, so it is read per call."""
+    headers = dict(extra or {})
+    try:
+        with open(LOCAL_TOKEN_FILE, encoding="utf-8") as f:
+            token = f.read().strip()
+        if token:
+            headers["X-Tvbox-Local"] = token
+    except OSError:
+        pass
+    return headers
+
+
 # How long to wait for the shell to take a note.
 #
 # **The reply says the shell's main loop reached the request, not that anything
@@ -450,7 +468,7 @@ def show_toast(text):
     if not text:
         return
     body = json.dumps({"message": text, "duration": 8000}).encode("utf-8")
-    req = urllib.request.Request(SHELL_NOTIFY_URL, data=body, headers={"Content-Type": "application/json"})
+    req = urllib.request.Request(SHELL_NOTIFY_URL, data=body, headers=shell_headers({"Content-Type": "application/json"}))
     try:
         urllib.request.urlopen(req, timeout=NOTIFY_TIMEOUT).read()
     except Exception as e:  # the shell may be restarting; an answer is not worth a crash

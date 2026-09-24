@@ -658,8 +658,18 @@ store, installs, power, Wi-Fi) gets a 403. Three routes are narrower still:
 `parental` and `player`; `POST /tvbox/api/nav` works only for the app on screen,
 except `{dest:"app", app:<its own id>}`, which is how a hidden app answers a cast;
 and `POST /tvbox/api/pairing/start` opens only a pairing kind the app's own plugin
-registered, or the shared `photoshare` and `text` kinds. The `app` field of a
+registered, or the shared `photoshare` and `text` kinds. In a `parental` patch, an
+app may set `lockedGroups` freely, but `pin` and `requirePin` need the current PIN
+as `currentPin` (the SDK's `saveParental` sends the one `verifyPin` last proved;
+none is needed while no PIN is set), and `parental/verify` locks out after a few
+wrong answers (`{ ok: false, locked: true, retryInMs }`). The `app` field of a
 now-playing report is set from the sender, whatever the body says.
+
+A process of your own that calls the API (a daemon your plugin started, a hook
+script) is recognised by the per-boot token in `~/.tvbox/local-token`: send it as
+`X-Tvbox-Local`, read fresh for each request, since it changes with every shell
+start. A request with neither a browser's headers nor the token is answered like
+an unknown caller.
 
 | Route                                                                                                   | For                                                                                                                                                                          |
 | ------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -777,6 +787,20 @@ first - which takes its config listeners, its routes and the require cache for
 its whole package directory with it. So write `stop()` as the thing that
 releases what the shell cannot see for you: a daemon, a supervised child, a
 listening socket. A `stop` that throws leaves whatever it held until a restart.
+
+### A phone pairing page
+
+The QR code opens `http://<box>:8099/#c=<code>&k=<key>`: the code and a
+per-session key travel in the fragment, which never reaches the network. A page
+loads `<script src="/tvbox-seal.js" data-v="2"></script>` and then uses
+`tvboxSeal.code` for the code, `tvboxSeal.body({ code, ... })` in place of
+`JSON.stringify` for every write (it seals the body when the page has the key),
+and `tvboxSeal.query()` as the query string of a data GET or a bulk upload
+(`t=<token>` with the key, `c=<code>` without). Mark a route that takes large
+plain bodies (a photo, a file chunk) `{ bulk: true }`: it accepts the query token,
+while every other write in a session that has sent one sealed body must be sealed
+too. A page without `data-v="2"` gets the code copied into `?c=` so it keeps
+working, and keeps sending the code in clear.
 
 ## App lifecycle
 

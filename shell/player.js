@@ -19,6 +19,7 @@
 //
 // PiP switches nothing: the browse UI owns the screen there, and the compositor
 // places the small window (a Wayland client cannot place itself).
+const apigate = require("./apigate"); // the names and addresses this box answers to
 const { spawn } = require("child_process");
 const fs = require("fs");
 const net = require("net");
@@ -103,7 +104,7 @@ const QUEUE_MAX = 32;
  */
 function playableUrl(u) {
   if (typeof u !== "string" || u.length > 4096) return false;
-  return /^https?:\/\//i.test(u);
+  return /^https?:\/\//i.test(u) && !apigate.pointsAtThisBox(u);
 }
 
 // What mpv is doing right now. Kept here rather than read on demand: the observer

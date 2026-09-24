@@ -135,6 +135,24 @@ IR_ACTION_NAME_RE = re.compile(r"[a-z0-9_]{1,32}")
 NAV_URL = "http://127.0.0.1:8097/tvbox/api/nav"
 RESET_URL = "http://127.0.0.1:8097/tvbox/api/remote/reset"
 
+
+LOCAL_TOKEN_FILE = os.path.expanduser("~/.tvbox/local-token")
+
+
+def shell_headers(extra=None):
+    """Headers for a call to the shell's API. The token the shell writes at start
+    is what tells it this request comes from a process of the box's own, and it
+    changes with every shell start, so it is read per call."""
+    headers = dict(extra or {})
+    try:
+        with open(LOCAL_TOKEN_FILE, encoding="utf-8") as f:
+            token = f.read().strip()
+        if token:
+            headers["X-Tvbox-Local"] = token
+    except OSError:
+        pass
+    return headers
+
 # Learn mode arms in reaction to a UI press (Enter on the learn row), over
 # HTTP + FIFO - so the tail of that same interaction (a fast double-press, a
 # late autorepeat) can still be in flight when we arm. Captures inside this
@@ -940,7 +958,7 @@ class Bridge:
         while True:
             url, payload = q.get()
             body = json.dumps(payload).encode()
-            req = urllib.request.Request(url, data=body, headers={"Content-Type": "application/json"})
+            req = urllib.request.Request(url, data=body, headers=shell_headers({"Content-Type": "application/json"}))
             try:
                 with urllib.request.urlopen(req, timeout=timeout) as resp:
                     out = json.loads(resp.read() or b"{}")

@@ -3,6 +3,7 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <meta name="referrer" content="no-referrer" />
     <title>{{title}}</title>
     <style>
       :root {
@@ -152,9 +153,9 @@
       <div class="st" id="rst"></div>
     </div>
 
-    <script src="/tvbox-seal.js"></script>
+    <script src="/tvbox-seal.js" data-v="2"></script>
     <script>
-      var code = new URLSearchParams(location.search).get("c") || "";
+      var code = tvboxSeal.code;
       function st(el, msg, cls) {
         el.textContent = msg;
         el.className = "st" + (cls ? " " + cls : "");

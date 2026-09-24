@@ -239,3 +239,20 @@ test("a config.json that does not parse is kept aside, and a save does not erase
     "the next save does not touch the only copy",
   );
 });
+
+test("a wrong PIN locks further checks after a few tries, and the right one clears it", () => {
+  const lim = config._pinLimitForTest;
+  let t = 1e12;
+  lim.now = () => t;
+  config.setParental({ pin: "4321" });
+  for (let i = 0; i < 5; i++) assert.strictEqual(config.verifyPin("0000"), false);
+  assert.ok(config.pinLockedFor() > 0, "locked after five misses");
+  assert.strictEqual(config.verifyPin("4321"), false, "even the right PIN waits out the lock");
+  t += 31 * 1000;
+  assert.strictEqual(config.verifyPin("4321"), true);
+  assert.strictEqual(config.pinLockedFor(), 0);
+  assert.strictEqual(config.verifyPin("0000"), false);
+  assert.strictEqual(config.pinLockedFor(), 0, "the count starts over after a success");
+  config.setParental({ pin: "" });
+  lim.now = () => Date.now();
+});

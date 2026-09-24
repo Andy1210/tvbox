@@ -31,6 +31,20 @@ function keyParam(key) {
   return Buffer.from(key).toString("base64url");
 }
 
+// A token for the requests that cannot be sealed: data GETs and bulk uploads
+// (a photo, a ROM chunk). It is derived from the key, so a page that has the key
+// has it, and it is not the code: someone who reads it off the air can fetch a
+// list or add a photo during the session, but cannot make a sealed or coded
+// write (backup, restore, passwords).
+const TOKEN_PREFIX = "tvbox-pairing-token:";
+function token(key) {
+  if (!key) return null;
+  const h = crypto.createHash("sha512");
+  h.update(Buffer.from(TOKEN_PREFIX, "utf8"));
+  h.update(Buffer.from(key));
+  return h.digest().subarray(0, 16).toString("base64url");
+}
+
 /** Seal an object the way the page does. Used by tests and by nothing else here. */
 function seal(obj, key) {
   const nonce = new Uint8Array(crypto.randomBytes(NONCE_BYTES));
@@ -70,25 +84,60 @@ function open(sealed, key, seen) {
 
 // What GET /tvbox-seal.js answers: the library, then the page-side helper.
 // `tvboxSeal.body(obj)` is a drop-in for JSON.stringify(obj) in a fetch body.
+// The fragment carries both the key and the code (#c=<code>&k=<key>), so neither
+// crosses the network. `tvboxSeal.code` is the code, `tvboxSeal.query()` the
+// query string a data GET or a bulk upload authenticates with, and
+// `tvboxSeal.body(obj)` a drop-in for JSON.stringify(obj) in a fetch body.
+//
+// A page that predates this reads the code from `?c=` and loads the script
+// without data-v="2"; for it the code is copied into the query in place (no
+// request is made), so it keeps working exactly as before - and keeps sending
+// the code in clear, which is that page's limit, not this one's.
 const PAGE_HELPER = `
 ;(function () {
-  var m = /[#&]k=([A-Za-z0-9_-]+)/.exec(location.hash || "");
+  var hash = location.hash || "";
+  function param(name) {
+    var m = new RegExp("[#&]" + name + "=([A-Za-z0-9_-]+)").exec(hash);
+    return m ? m[1] : "";
+  }
   var key = null;
-  if (m && self.nacl) {
-    var s = m[1].replace(/-/g, "+").replace(/_/g, "/");
+  var k = param("k");
+  if (k && self.nacl) {
+    var s = k.replace(/-/g, "+").replace(/_/g, "/");
     while (s.length % 4) s += "=";
     var bin = atob(s);
     key = new Uint8Array(bin.length);
     for (var i = 0; i < bin.length; i++) key[i] = bin.charCodeAt(i);
     if (key.length !== nacl.secretbox.keyLength) key = null;
   }
+  var code = param("c") || new URLSearchParams(location.search).get("c") || "";
+  var me = document.currentScript;
+  var v2 = !!(me && me.getAttribute("data-v") === "2");
+  if (!v2 && code && !new URLSearchParams(location.search).get("c")) {
+    history.replaceState(null, "", location.pathname + "?c=" + encodeURIComponent(code) + hash);
+  }
   function b64(u8) {
     var s = "";
     for (var i = 0; i < u8.length; i++) s += String.fromCharCode(u8[i]);
     return btoa(s);
   }
+  function b64url(u8) {
+    return b64(u8).replace(/\\+/g, "-").replace(/\\//g, "_").replace(/=+$/, "");
+  }
+  var tok = "";
+  if (key) {
+    var prefix = new TextEncoder().encode("${TOKEN_PREFIX}");
+    var both = new Uint8Array(prefix.length + key.length);
+    both.set(prefix);
+    both.set(key, prefix.length);
+    tok = b64url(nacl.hash(both).subarray(0, 16));
+  }
   self.tvboxSeal = {
     sealed: !!key,
+    code: code,
+    query: function () {
+      return tok ? "t=" + tok : "c=" + encodeURIComponent(code);
+    },
     body: function (obj) {
       var json = JSON.stringify(obj);
       if (!key) return json;
@@ -110,4 +159,4 @@ function script() {
   return pageScript;
 }
 
-module.exports = { newKey, keyParam, seal, open, script, KEY_BYTES };
+module.exports = { newKey, keyParam, seal, open, script, token, KEY_BYTES };

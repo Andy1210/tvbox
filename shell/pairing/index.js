@@ -9,7 +9,7 @@
 // gate, QR/URL, and a page-template renderer. The actual pages are APP-SPECIFIC
 // and live in pairing/<kind>.js providers (with pages/<kind>.html), registered
 // via register() - core registers the built-in ones, plugins register theirs.
-// A provider is { page(ctx) -> html, routes: { "METHOD /sub": handler | {handler,maxBody} } }.
+// A provider is { page(ctx) -> html, routes: { "METHOD /sub": handler | {handler,maxBody,bulk} } }.
 const http = require("http");
 const fs = require("fs");
 const path = require("path");
@@ -53,7 +53,9 @@ let activeKind = null;
 let activeLocale = "en";
 let pageOpened = false;
 let sessionKey = null; // this session's sealing key; travels only in the QR URL fragment
-let seenNonces = new Set(); // sealed bodies already accepted, so one cannot be replayed // the phone has loaded the current session's page (e.g. to auto-advance the TV)
+let seenNonces = new Set(); // sealed bodies already accepted, so one cannot be replayed
+let sessionToken = null; // derived from the key: what data GETs and bulk uploads carry
+let sealedSeen = false; // this session's phone has the key, so plain coded writes are refused
 
 function armTimeout() {
   if (timer) clearTimeout(timer);
@@ -79,6 +81,23 @@ function codeOk(presented) {
     stop();
   }
   return false;
+}
+
+// The request-level credential a data GET or a bulk upload carries: the token a
+// scanned page derives from its key, or the code for a page that has none.
+function queryOk(q) {
+  const t = q.get("t");
+  if (t != null && sessionToken) {
+    const a = Buffer.from(String(t));
+    const b = Buffer.from(sessionToken);
+    if (a.length === b.length && crypto.timingSafeEqual(a, b)) {
+      fails = 0;
+      armTimeout();
+      return true;
+    }
+    return codeOk(null); // a wrong token counts as a wrong code
+  }
+  return codeOk(q.get("c"));
 }
 
 // Render a page template file with {{token}} substitution (missing token -> "").
@@ -137,9 +156,14 @@ function handle(req, res) {
   }
   const handler = typeof entry === "function" ? entry : entry.handler;
   const maxBody = (typeof entry === "object" && entry.maxBody) || DEFAULT_MAX_BODY;
+  // A bulk route (a photo, a ROM chunk) takes plain bodies authenticated by the
+  // query, because sealing megabytes twice over on a phone buys nothing for data
+  // that is not a secret. An app's route that raises its body cap and predates
+  // the flag is treated the same way, so its uploads keep working.
+  const bulk = typeof entry === "object" && (entry.bulk === true || (prov.owner && entry.maxBody > DEFAULT_MAX_BODY));
   if (req.method === "GET") {
-    // data GET (e.g. list/thumbnail): gate by the ?c= code
-    if (!codeOk(u.searchParams.get("c"))) {
+    // data GET (e.g. list/thumbnail): gate by the session token or the ?c= code
+    if (!queryOk(u.searchParams)) {
       res.writeHead(403);
       return res.end();
     }
@@ -176,9 +200,17 @@ function handle(req, res) {
         return res.end(JSON.stringify({ ok: false, error: "sealed" }));
       }
       d = opened;
+      sealedSeen = true;
+    } else if (sealedSeen && !bulk) {
+      // The phone in this session has the key. A plain write now is not it.
+      res.writeHead(403, { "Content-Type": "application/json" });
+      return res.end(JSON.stringify({ ok: false, error: "sealed-required" }));
     }
-    const presented = d.code != null ? d.code : u.searchParams.get("c");
-    if (!codeOk(presented)) {
+    let allowed;
+    if (isSealed) allowed = codeOk(d.code != null ? d.code : u.searchParams.get("c"));
+    else if (bulk && u.searchParams.get("t") != null) allowed = queryOk(u.searchParams);
+    else allowed = codeOk(d.code != null ? d.code : u.searchParams.get("c"));
+    if (!allowed) {
       res.writeHead(403, { "Content-Type": "application/json" });
       return res.end(JSON.stringify({ ok: false, error: "code" }));
     }
@@ -209,7 +241,9 @@ function start(locale, kind) {
   fails = 0;
   pageOpened = false;
   sessionKey = seal.newKey();
+  sessionToken = seal.token(sessionKey);
   seenNonces = new Set();
+  sealedSeen = false;
   if (!server) {
     server = http.createServer(handle);
     server.on("error", (e) => console.warn("[pairing] server error:", e.message));
@@ -217,10 +251,10 @@ function start(locale, kind) {
   }
   armTimeout();
   const ip = netguard.lanIp() || "127.0.0.1"; // no external IPv4: a useless-but-valid QR beats a broken one
-  // The key rides in the fragment: a browser never sends that part of a URL, so
-  // it goes from the QR to the page without ever crossing the network.
+  // The code and the key ride in the fragment: a browser never sends that part
+  // of a URL, so they go from the QR to the page without crossing the network.
   const k = seal.keyParam(sessionKey);
-  return { url: `http://${ip}:${PORT}/?c=${code}#k=${k}`, shortUrl: `http://${ip}:${PORT}`, ip, port: PORT, code };
+  return { url: `http://${ip}:${PORT}/#c=${code}&k=${k}`, shortUrl: `http://${ip}:${PORT}`, ip, port: PORT, code };
 }
 
 function stop() {
@@ -230,6 +264,8 @@ function stop() {
   }
   code = null;
   sessionKey = null;
+  sessionToken = null;
+  sealedSeen = false;
   seenNonces = new Set();
   if (server) {
     try {

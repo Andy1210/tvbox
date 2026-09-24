@@ -420,7 +420,9 @@ function post(p, data, res, ctx) {
     );
   }
   if (p === "/tvbox/api/parental/verify") {
-    return httpserver.jsonRes(res, { ok: config.verifyPin(String(data.pin || "")) });
+    const ok = config.verifyPin(String(data.pin || ""));
+    const wait = ok ? 0 : config.pinLockedFor();
+    return httpserver.jsonRes(res, wait ? { ok, locked: true, retryInMs: wait } : { ok });
   }
   if (p === "/tvbox/api/pairing/start") {
     return httpserver.jsonRes(res, pairing.start(data.locale, data.kind)); // kind: "iptv" (default) | "spotify"

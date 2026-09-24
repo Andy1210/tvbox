@@ -26,19 +26,36 @@ tvbox is a LAN device with no cloud account. The interesting boundaries:
   that lets a manifest smuggle extra privileges past the validators
   (package-name/URL/path checks, sha256 verification) is a vulnerability.
 - **The pairing server** (`:8099`, LAN, only while pairing) - gated by an
-  on-screen code with lockout + TTL; bypasses matter. What a phone that scanned
-  the QR code sends is sealed (XSalsa20-Poly1305) with a per-session key that
-  travels only in the URL fragment; a phone that typed the short URL sends plain
-  JSON, which is the accepted limit.
+  on-screen code with lockout + TTL; bypasses matter. The QR code carries the
+  code and a per-session key in its URL fragment, which a browser never sends, so
+  a phone that scanned it never puts the code on the air: what it writes is
+  sealed (XSalsa20-Poly1305), its reads and bulk uploads (a photo, a ROM chunk)
+  carry a token derived from the key, and once one sealed body has arrived the
+  session refuses plain writes. This protects against a **passive** observer on
+  the same network only. The page itself is served over plain http, so someone
+  who can rewrite traffic can serve a page without the sealing. A phone that
+  typed the short URL has no key and sends the code and its bodies in clear,
+  which is the accepted limit, and so do app pages that predate the sealing.
+- **The phone remote** (`:8100`, LAN) - a paired phone holds a token of its own
+  (stored hashed on the box). Its traffic, text typed into on-screen fields
+  included, is plain http and not sealed; do not type a password through it on a
+  network you do not trust.
 - **The local API** (`:8097`, loopback-only) - reachable by local processes, and
   it answers only to `localhost`/`127.0.0.1` as a Host (DNS rebinding). Every
   local app is served from the same origin as the API, so the origin cannot tell
   them apart: each request a page makes is stamped by the browser session with
   the window that made it ([shell/apigate.js](shell/apigate.js)). The launcher
   reaches everything, an app window reaches the app routes in
-  [docs/app-api.md](docs/app-api.md) and its own plugin's routes, a process with
-  no browser headers reaches reads and the few writes the box's own services
-  make. An app reaching a launcher-only route (store sources, installs, power,
+  [docs/app-api.md](docs/app-api.md) and its own plugin's routes. The box's own
+  processes (the CEC and remote bridges, the voice satellite, a plugin's daemon)
+  prove themselves with a per-boot token the shell writes to
+  `~/.tvbox/local-token` (0600) and reach reads, plugin routes and the few writes
+  they make; a request with no headers at all (mpv fetching a URL, a sandboxed
+  program without access to `~/.tvbox`) gets only the public reads. A service
+  worker may be registered only by a local app, inside its own `/<id>/`, and none
+  survive a shell start. An app may change the parental PIN, or whether it is
+  asked for, only by presenting the current one, and every PIN check is rate
+  limited. An app reaching a launcher-only route (store sources, installs, power,
   another app's pairing code) is a vulnerability.
 - **Browser permissions** - every session refuses permissions it has not listed
   (microphone, camera, clipboard reads, device choosers), in

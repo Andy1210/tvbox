@@ -110,41 +110,24 @@ const WL_ENV = {
   WAYLAND_DISPLAY: process.env.WAYLAND_DISPLAY || "wayland-0",
 };
 
-// Auto-route audio: detect the present HDMI sink at runtime (TV/port-independent),
-// set it as default, AND remember its node.name so we can pass it to mpv as an
-// explicit --audio-device (mpv's "default" resolves to "no target node" here).
-let audioSink = null;
-// Every launch goes through here, so this is also where a launch is dropped when
-// something newer happened while the script ran: a later play (only the newest
-// launches) or any stop of the player (a Stop, Home, the TV going to standby).
-let audioSeq = 0;
-function ensureAudio(done) {
-  // Pass the manual override (if the user picked a sink in Settings); the script
-  // uses it when present and otherwise auto-detects the HDMI sink.
-  const pref = (config.rawAudio() && config.rawAudio().sink) || "";
-  const seq = ++audioSeq;
-  const stops = player.stopCount();
-  const finish = () => {
-    if (seq !== audioSeq || stops !== player.stopCount()) return console.log("[audio] launch superseded, dropped");
-    if (done) done();
-  };
-  try {
+// The HDMI sink is detected at runtime (TV/port-independent) and its node.name is
+// handed to mpv as an explicit --audio-device (mpv's "default" resolves to "no
+// target node" here).
+const audioRoute = require("./audioroute").create({
+  stopCount: () => player.stopCount(),
+  preferredSink: () => (config.rawAudio() && config.rawAudio().sink) || "",
+  log: (...a) => console.log(...a),
+  // A wedged PipeWire must not hold a play for ever: past the timeout the previous
+  // sink is kept and the launch goes ahead.
+  run: (pref, cb) =>
     execFile(
       "sh",
       [path.join(__dirname, "audio-default.sh"), pref],
-      // A wedged PipeWire must not hold a play for ever: past this the previous
-      // sink is kept and the launch goes ahead.
       { env: { ...process.env, ...WL_ENV }, timeout: 5000, killSignal: "SIGKILL" },
-      (_e, stdout) => {
-        const name = ((stdout || "").trim().split("\n").pop() || "").trim();
-        if (name) audioSink = name;
-        finish();
-      },
-    );
-  } catch (e) {
-    finish();
-  }
-}
+      (_e, stdout) => cb(stdout),
+    ),
+});
+const ensureAudio = audioRoute.ensure;
 
 // Pin userData to a name-independent path so renaming the package never loses
 // app state (each web-client app's login lives in localStorage there).
@@ -350,7 +333,7 @@ const mirroring = miracast.create({
       // A mirrored phone is live: there is no seeking and nothing to resume, so
       // it starts at zero and fullscreen like any other film. mpv reads the FIFO
       // as an ordinary file, which is what keeps this out of player.js entirely.
-      ensureAudio(() => player.launch(ev.fifo, 0, false, null, null));
+      ensureAudio(() => player.launch(ev.fifo, 0, false, null, null), { launch: true });
       // Get the launcher out of the way. mpv plays BEHIND this window, so
       // whatever page started mirroring - the Settings one, in practice - is
       // drawn straight over the phone's screen until the page is dropped and
@@ -564,7 +547,7 @@ function serve() {
     applyMqttConfig: mediapublish.applyConfig,
     publishIrDiscovery: mediapublish.publishIrDiscovery,
     irFailed: tvcommand.irFailed,
-    audioSink: () => audioSink,
+    audioSink: () => audioRoute.sink(),
     childEnv: () => ({ ...process.env, ...WL_ENV }),
     destroyAppWindow,
     // For the two paths that REMOVE an app rather than tear its window down: an
@@ -667,6 +650,22 @@ function serve() {
       res.end("misdirected request");
       return;
     }
+    // A service worker answers navigations inside its scope with whatever it
+    // likes, and a window showing that is still "our page" by its URL. So only a
+    // local package app may register one, and only inside its own /<id>/ - never
+    // the root-mounted web client, whose scope would cover the launcher.
+    if (String(req.headers["service-worker"] || "").toLowerCase() === "script") {
+      const localApp = (id) => {
+        const m = apps.manifestById(id);
+        return !!(m && m._dir && m.runtime && m.runtime.serve === "local");
+      };
+      if (!apigate.serviceWorkerAllowed(p, localApp)) {
+        console.warn("[main] refused a service worker script:", p.slice(0, 80));
+        res.writeHead(403, { "Content-Type": "text/plain" });
+        res.end("not permitted");
+        return;
+      }
+    }
     const caller = apigate.identify(req);
     const refuse = (why) => {
       console.warn("[main] refused", req.method, p, "for", caller.kind + (caller.id ? ":" + caller.id : ""), "-", why);
@@ -683,10 +682,14 @@ function serve() {
         body,
         pairingOwner: pairing.ownerOf,
         foreground: currentAppId,
+        parentalPinOk: (pin) => !config.hasPin() || config.verifyPin(String(pin || "")),
       });
     // Which plugin route, if any, this GET would reach. Resolved before the gate
-    // because the gate consults it, and reused when dispatching.
-    const pluginGet = req.method === "GET" ? httpserver.resolvePluginRoute(plugins.routes(), "GET", p) : null;
+    // because the gate consults it, and reused when dispatching. A HEAD is the
+    // same read without a body (node drops the body for it), so it resolves the
+    // same way.
+    const pluginGet =
+      req.method === "GET" || req.method === "HEAD" ? httpserver.resolvePluginRoute(plugins.routes(), "GET", p) : null;
     if (req.method !== "POST") {
       const why = gateFor(req.method, pluginGet, null);
       if (why) return refuse(why);
@@ -863,14 +866,18 @@ function showLauncher(hash) {
   nativeHostApp = null; // Home means HOME, not back into the UI the game was started from
   nativeapp.stop();
   // The launcher page stays loaded permanently now (apps run in their own
-  // windows), so returning home is a show(), not a reload. A hash still forces
-  // a load (plugins use it to open a view, e.g. host.showLauncher("#spotify")),
-  // and a stray non-launcher URL in this window gets reset defensively.
-  if (hash || !String(win.webContents.getURL() || "").startsWith(BASE + "/tvbox/")) {
+  // windows), so returning home is a show(), not a reload; a stray non-launcher
+  // URL in this window gets reset defensively.
+  // A hash on a page that is already the launcher is a same-document navigation,
+  // which remounts nothing, so the view it names is asked for over the nav
+  // channel instead - the path the launcher already answers while it is up.
+  const onLauncher = String(win.webContents.getURL() || "").startsWith(BASE + "/tvbox/");
+  if (!onLauncher) {
     win.loadURL(BASE + "/tvbox/" + (hash || ""));
   } else {
     try {
-      win.webContents.send("tvbox-nav", { dest: "home" }); // reset a lingering Settings/Catalog view
+      // "home" also resets a lingering Settings/Catalog view.
+      win.webContents.send("tvbox-nav", { dest: hash === "#settings" ? "settings" : "home" });
     } catch (e) {}
   }
   raiseWindow();
@@ -2076,7 +2083,7 @@ const host = {
   // shell's own), so a plugin's background work waits for the same moment the shell
   // considers free instead of inventing its own test from process lists.
   idle: boxFree,
-  audioSink: () => audioSink, // detected HDMI sink node.name (set by ensureAudio)
+  audioSink: () => audioRoute.sink(), // detected HDMI sink node.name (set by ensureAudio)
   showLauncher, // (hash) -> stop other playback + bring launcher forward
   navTo, // (id, {query}) -> open an app by id (a plugin foregrounds its app on a cast)
   // Is that app alive, and is it the one on screen? A plugin that answers a
@@ -2178,6 +2185,15 @@ app.whenReady().then(async () => {
     return app.exit(EXIT_ALREADY_RUNNING);
   }
   hardenSession(session.defaultSession);
+  try {
+    apigate.setLocalToken(require("./localtoken").create());
+  } catch (e) {
+    console.warn("[main] could not write the local token:", e.message);
+  }
+  // Every page of the shell's origin shares this session, and a service worker
+  // registered by one page outlives it (a reboot, the app's removal). None may
+  // carry over: the request gate below decides which may register again.
+  session.defaultSession.clearStorageData({ storages: ["serviceworkers"] }).catch(() => {});
   try {
     // Reap an mpv left by a previous run. The pattern is the OPTION, not the
     // socket file name: the socket carries a per-launch sequence number now
@@ -2555,7 +2571,7 @@ app.whenReady().then(async () => {
     dmode,
     panelHdr: () => panelHdr,
     outputSize: () => outputSize,
-    audioSink: () => audioSink,
+    audioSink: () => audioRoute.sink(),
     childEnv: () => ({ ...process.env, ...WL_ENV }),
   });
   // The background jobs need to know whether the box is free and how to reach the

@@ -143,6 +143,24 @@ STANDBY_URL = "http://127.0.0.1:8097/tvbox/api/tv/standby"
 # holds keyboard focus, so no renderer of ours can turn the key into "go home".
 NAV_URL = "http://127.0.0.1:8097/tvbox/api/nav"
 
+
+LOCAL_TOKEN_FILE = os.path.expanduser("~/.tvbox/local-token")
+
+
+def shell_headers(extra=None):
+    """Headers for a call to the shell's API. The token the shell writes at start
+    is what tells it this request comes from a process of the box's own, and it
+    changes with every shell start, so it is read per call."""
+    headers = dict(extra or {})
+    try:
+        with open(LOCAL_TOKEN_FILE, encoding="utf-8") as f:
+            token = f.read().strip()
+        if token:
+            headers["X-Tvbox-Local"] = token
+    except OSError:
+        pass
+    return headers
+
 # We own the (single) cec-client and its stdin, so the shell can't run its own
 # to send CEC. Instead it drops a whitelisted command into this FIFO and we
 # forward it to cec-client's stdin - how "turn the TV on/off" (voice / HA) works.
@@ -237,7 +255,7 @@ def ensure_vendor_shim() -> str | None:
 def notify_standby() -> None:
     def go() -> None:
         try:
-            urllib.request.urlopen(STANDBY_URL, timeout=2).read()
+            urllib.request.urlopen(urllib.request.Request(STANDBY_URL, headers=shell_headers()), timeout=2).read()
         except Exception:
             pass
     threading.Thread(target=go, daemon=True).start()
@@ -252,7 +270,7 @@ def nav_home() -> None:
             req = urllib.request.Request(
                 NAV_URL,
                 data=json.dumps({"dest": "home"}).encode(),
-                headers={"Content-Type": "application/json"},
+                headers=shell_headers({"Content-Type": "application/json"}),
             )
             urllib.request.urlopen(req, timeout=5).read()
         except Exception as ex:

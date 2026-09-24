@@ -3,6 +3,7 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <meta name="referrer" content="no-referrer" />
     <title>{{title}}</title>
     <style>
       :root {
@@ -139,9 +140,9 @@
     <h2 id="existingTitle" style="display: none">{{existing}}</h2>
     <div id="existing"></div>
 
-    <script src="/tvbox-seal.js"></script>
+    <script src="/tvbox-seal.js" data-v="2"></script>
     <script>
-      document.getElementById("code").value = new URLSearchParams(location.search).get("c") || "";
+      document.getElementById("code").value = tvboxSeal.code;
       var $ = function (id) {
         return document.getElementById(id);
       };
@@ -152,7 +153,7 @@
         return $("code").value;
       }
       function q(p) {
-        return p + (p.indexOf("?") < 0 ? "?" : "&") + "c=" + encodeURIComponent(code());
+        return p + (p.indexOf("?") < 0 ? "?" : "&") + tvboxSeal.query();
       }
       async function post(path, body) {
         var r = await fetch(path, {

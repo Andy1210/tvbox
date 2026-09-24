@@ -13,18 +13,33 @@
 // - `launcher` - the main window. Everything, as before.
 // - `app` - an app window. The routes the app API documents, its OWN plugin's
 //   routes, and nothing else.
-// - `local` - a request with no stamp and no browser headers at all: a process
-//   on the box (the CEC and remote bridges, the voice satellite, a plugin's own
-//   daemon calling back). Reads, plugin routes, and the few writes those
-//   processes make. A sandboxed native program can reach loopback too, so this
-//   is not a free pass either.
+// - `local` - a process of the box's own (the CEC and remote bridges, the voice
+//   satellite, a plugin's own daemon calling back), proven by the per-boot token
+//   the shell writes to ~/.tvbox/local-token (0600) and the process sends back as
+//   X-Tvbox-Local. Reads, plugin routes, and the few writes those processes make.
+//   A request with no headers at all is NOT this: mpv fetching a URL an app gave
+//   it, or a sandboxed program on loopback, sends exactly that.
 // Anything else - a stamp with the wrong secret, a browser request that somehow
-// carries none - is `unknown`, which gets the public reads only.
+// carries none, a bare request without the token - is `unknown`, which gets the
+// public reads only.
 const crypto = require("crypto");
 const os = require("os");
 
 const HEADER = "x-tvbox-caller";
+const LOCAL_HEADER = "x-tvbox-local";
 const SECRET = crypto.randomBytes(18).toString("base64url");
+let localToken = null; // set by main once it has written the token file
+
+function setLocalToken(t) {
+  localToken = t ? String(t) : null;
+}
+
+function localTokenOk(raw) {
+  if (!localToken || raw === undefined) return false;
+  const a = Buffer.from(String(raw));
+  const b = Buffer.from(localToken);
+  return a.length === b.length && crypto.timingSafeEqual(a, b);
+}
 
 /** The value main puts on a request from `identity` ("launcher" | "app:<id>" | "unknown"). */
 function stampValue(identity) {
@@ -38,7 +53,10 @@ function stampValue(identity) {
  */
 function stamp(requestHeaders, identity) {
   const out = {};
-  for (const [k, v] of Object.entries(requestHeaders || {})) if (k.toLowerCase() !== HEADER) out[k] = v;
+  for (const [k, v] of Object.entries(requestHeaders || {})) {
+    const name = k.toLowerCase();
+    if (name !== HEADER && name !== LOCAL_HEADER) out[k] = v;
+  }
   out["X-Tvbox-Caller"] = stampValue(identity);
   return out;
 }
@@ -47,11 +65,14 @@ function stamp(requestHeaders, identity) {
 function identify(req) {
   const h = (req && req.headers) || {};
   const raw = h[HEADER];
+  const local = h[LOCAL_HEADER];
   delete h[HEADER];
+  delete h[LOCAL_HEADER];
   if (raw === undefined) {
-    // No stamp. A browser always sends one of these to loopback; a script does not.
+    // No stamp. A browser always sends one of these to loopback; a process of the
+    // box's own sends the local token instead.
     const browser = h.origin || h["sec-fetch-site"] || h["sec-fetch-mode"] || h["sec-fetch-dest"];
-    return browser ? { kind: "unknown" } : { kind: "local" };
+    return !browser && localTokenOk(local) ? { kind: "local" } : { kind: "unknown" };
   }
   const s = String(raw);
   const at = s.indexOf(" ");
@@ -138,7 +159,16 @@ function decide(c) {
       if (!(c.caps || []).includes("config")) return "no config capability";
       const sections = Object.keys((c.body && typeof c.body === "object" && c.body) || {});
       const bad = sections.find((s) => !APP_CONFIG_SECTIONS.has(s));
-      return bad ? "config section not for apps: " + bad : null;
+      if (bad) return "config section not for apps: " + bad;
+      // An app may set the lock's groups freely, but changing or clearing the PIN,
+      // or whether it is asked for, needs the current PIN (none is needed to set
+      // the first one).
+      const parental = c.body && c.body.parental;
+      if (parental && typeof parental === "object" && ("pin" in parental || "requirePin" in parental)) {
+        const ok = typeof c.parentalPinOk === "function" && c.parentalPinOk(parental.currentPin);
+        if (!ok) return "parental pin required";
+      }
+      return null;
     }
     // Only the app in front may move the screen, and an app may close only itself.
     if (p === "/tvbox/api/nav") {
@@ -179,7 +209,35 @@ function hostAllowed(req, allowed, port) {
   const m = /^\[([^\]]+)\](?::(\d+))?$/.exec(raw) || /^([^:]+)(?::(\d+))?$/.exec(raw);
   if (!m) return false;
   if (String(port) !== (m[2] || "80")) return false;
-  return allowed.includes(m[1]);
+  // An IPv6 zone id ("[fe80::1%25wlan0]") names the client's interface, not a
+  // different host; the list holds addresses without it.
+  const name = m[1].replace(/%.*$/, "");
+  return allowed.includes(name);
+}
+
+// Suffixes a home router hands out for its LAN names. The ones the network
+// announced (resolv.conf `search`/`domain`, filled from DHCP) are added per
+// request; this fixed list covers the common defaults. A suffix outside both is
+// refused, because "<hostname>.<anything>" would let a public name that
+// resolves to the box pass the rebinding check.
+const LAN_SUFFIXES = ["local", "lan", "home", "home.arpa", "internal", "localdomain", "intranet"];
+
+function announcedSuffixes(readFile) {
+  try {
+    const text = (readFile || ((f) => require("fs").readFileSync(f, "utf8")))("/etc/resolv.conf");
+    const out = [];
+    for (const line of text.split("\n")) {
+      const m = /^\s*(search|domain)\s+(.+)$/.exec(line);
+      if (!m) continue;
+      for (const d of m[2].trim().split(/\s+/)) {
+        const clean = d.toLowerCase().replace(/\.$/, "");
+        if (/^[a-z0-9-]+(\.[a-z0-9-]+)*$/.test(clean)) out.push(clean);
+      }
+    }
+    return out;
+  } catch (e) {
+    return [];
+  }
 }
 
 /**
@@ -192,11 +250,41 @@ function boxNames() {
   const host = String(os.hostname() || "").toLowerCase();
   if (host) {
     names.add(host);
-    names.add(host + ".local");
+    for (const suffix of [...LAN_SUFFIXES, ...announcedSuffixes()]) names.add(host + "." + suffix);
   }
   for (const list of Object.values(os.networkInterfaces() || {}))
     for (const a of list || []) if (a && a.address) names.add(String(a.address).toLowerCase().split("%")[0]);
   return [...names];
+}
+
+/**
+ * May the script at `p` be registered as a service worker? Its default scope is
+ * its own directory, and the server never widens that with Service-Worker-Allowed,
+ * so a script inside /<id>/ of a local app can only ever control that app's pages.
+ * Anything else (the root-mounted web client at /, the launcher's /tvbox/, the API)
+ * is refused.
+ */
+function serviceWorkerAllowed(p, isLocalApp) {
+  const parts = String(p || "").split("/");
+  const seg = (parts[1] || "").toLowerCase();
+  if (parts.length < 3 || !seg || seg === "tvbox" || !/^[a-z0-9_-]+$/.test(seg)) return false;
+  return !!isLocalApp(seg);
+}
+
+// mpv fetches a URL with no browser headers at all, so a stream aimed at the box
+// itself would reach the shell's own servers as a request from the box, not from
+// the app that queued it. Nothing the box plays is served from its own address.
+function pointsAtThisBox(u) {
+  let host;
+  try {
+    host = new URL(u).hostname.toLowerCase().replace(/^\[|\]$/g, "");
+  } catch (e) {
+    return true; // unparseable: refuse rather than hand it to mpv
+  }
+  if (!host) return false;
+  if (host === "localhost" || host.endsWith(".localhost") || host === "0.0.0.0" || host === "::") return true;
+  if (/^127\./.test(host) || host === "::1" || /^::ffff:(127\.|7f)/.test(host)) return true;
+  return boxNames().includes(host);
 }
 
 function lanHostAllowed(req, port) {
@@ -205,13 +293,18 @@ function lanHostAllowed(req, port) {
 
 module.exports = {
   HEADER,
+  LOCAL_HEADER,
+  setLocalToken,
   stamp,
   stampValue,
   identify,
   decide,
   hostAllowed,
   lanHostAllowed,
+  serviceWorkerAllowed,
+  pointsAtThisBox,
   boxNames,
+  announcedSuffixes,
   APP_GET,
   APP_POST,
   LOCAL_POST,

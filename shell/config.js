@@ -259,12 +259,38 @@ function setParental({ pin, lockedGroups, requirePin }) {
   save(c);
 }
 
+// A four-digit PIN is ten thousand guesses, so every check goes through one
+// limiter: after PIN_FREE_TRIES wrong answers in a row, checks are refused for a
+// wait that doubles with each further miss (capped), and a correct answer resets it.
+const PIN_FREE_TRIES = 5;
+const PIN_BASE_WAIT_MS = 30 * 1000;
+const PIN_MAX_WAIT_MS = 15 * 60 * 1000;
+const pinLimit = { misses: 0, until: 0, now: () => Date.now() };
+
+function pinLockedFor() {
+  return Math.max(0, pinLimit.until - pinLimit.now());
+}
+
+function hasPin() {
+  const p = load().parental;
+  return !!(p && p.pinHash);
+}
+
 function verifyPin(pin) {
+  if (pinLockedFor() > 0) return false;
   const p = load().parental;
   if (!p || !p.pinHash) return false;
   // pre-salt configs stored sha(pin) - still verified; re-saving the PIN upgrades
   const h = p.pinSalt ? sha(p.pinSalt + pin) : sha(pin);
-  return timingEq(h, p.pinHash);
+  const ok = timingEq(h, p.pinHash);
+  if (ok) {
+    pinLimit.misses = 0;
+    pinLimit.until = 0;
+  } else if (++pinLimit.misses >= PIN_FREE_TRIES) {
+    const wait = PIN_BASE_WAIT_MS * 2 ** (pinLimit.misses - PIN_FREE_TRIES);
+    pinLimit.until = pinLimit.now() + Math.min(wait, PIN_MAX_WAIT_MS);
+  }
+  return ok;
 }
 
 // Raw IPTV (incl. credentials) for the Live TV provider only.
@@ -998,6 +1024,9 @@ module.exports = {
   setIptv,
   setParental,
   verifyPin,
+  hasPin,
+  pinLockedFor,
+  _pinLimitForTest: pinLimit,
   rawIptv,
   setSpotify,
   rawSpotify,

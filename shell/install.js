@@ -193,12 +193,32 @@ const PROTECTED_UNITS = [
   /^user@/,
   /^pipewire/,
   /^wireplumber/,
+  /^ufw/,
+  /^nftables/,
+  /^iptables/,
+  /^firewalld/,
+  /^apparmor/,
+  /^fail2ban/,
+  /^dhcpcd/,
+  /^modemmanager/,
 ];
-function disableServiceOk(svc) {
+// What disableService is for: a package the app has apt install ships a daemon
+// the shell supervises itself, and that package's own unit has to be stopped. So
+// a unit is allowed only when it belongs to one of the app's own apt packages
+// (named after it, or `<package>-...`/`<package>@...`), and never one the box
+// depends on even then.
+function disableServiceOk(svc, aptPackages) {
   if (typeof svc !== "string" || !/^[a-z0-9][a-z0-9@._-]{0,63}$/i.test(svc)) return false;
   const name = svc.toLowerCase();
   if (!/^[^.]+(\.(service|socket|timer))?$/.test(name)) return false;
-  return !PROTECTED_UNITS.some((re) => re.test(name));
+  if (PROTECTED_UNITS.some((re) => re.test(name))) return false;
+  const base = name.replace(/\.(service|socket|timer)$/, "");
+  return (Array.isArray(aptPackages) ? aptPackages : []).some((pkg) => {
+    const p = String(pkg || "")
+      .toLowerCase()
+      .replace(/[=:].*$/, "");
+    return !!p && (base === p || base.startsWith(p + "-") || base.startsWith(p + "@"));
+  });
 }
 
 function validateManifest(m, src) {
@@ -451,7 +471,8 @@ function validateManifest(m, src) {
   if (dis !== undefined) {
     if (!Array.isArray(dis) || dis.length > 4) return bad("requires.disableService must be an array of at most 4");
     for (const svc of dis)
-      if (!disableServiceOk(svc)) return bad("requires.disableService may not name " + JSON.stringify(svc));
+      if (!disableServiceOk(svc, m.requires.apt))
+        return bad("requires.disableService may name only a unit of its own apt packages: " + JSON.stringify(svc));
   }
   const CAPS = ["nav", "player", "config", "fetch", "storage", "display", "input", "shares", "system"];
   const caps = m.runtime && m.runtime.capabilities;

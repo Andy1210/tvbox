@@ -886,12 +886,27 @@ test("runtime.origins may not be a single label or a loopback name", () => {
   assert.ok(apps.validateManifest(ok, "t"));
 });
 
-test("requires.disableService names a plain unit the box does not depend on", () => {
-  for (const svc of ["ssh", "sshd.service", "NetworkManager", "greetd", "systemd-networkd", "a b", "../x", "x.mount"]) {
-    const m = { ...WEB_BASE, requires: { disableService: [svc] } };
+test("requires.disableService names only a unit of the app's own apt packages", () => {
+  const apt = ["raspotify", "librespot", "ssh", "ufw"];
+  for (const svc of [
+    "ssh",
+    "sshd.service",
+    "NetworkManager",
+    "greetd",
+    "systemd-networkd",
+    "ufw",
+    "a b",
+    "../x",
+    "x.mount",
+  ]) {
+    const m = { ...WEB_BASE, requires: { apt, disableService: [svc] } };
     assert.equal(apps.validateManifest(m, "t"), null, svc);
   }
-  const ok = { ...WEB_BASE, requires: { disableService: ["raspotify", "librespot.service"] } };
+  const stranger = { ...WEB_BASE, requires: { apt: ["raspotify"], disableService: ["nginx"] } };
+  assert.equal(apps.validateManifest(stranger, "t"), null, "a unit no package of its own ships");
+  const none = { ...WEB_BASE, requires: { disableService: ["raspotify"] } };
+  assert.equal(apps.validateManifest(none, "t"), null, "no apt packages, nothing to disable");
+  const ok = { ...WEB_BASE, requires: { apt, disableService: ["raspotify", "librespot.service", "librespot@x"] } };
   assert.ok(apps.validateManifest(ok, "t"));
 });
 

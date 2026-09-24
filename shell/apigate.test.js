@@ -33,10 +33,21 @@ test("a page cannot stamp itself: its own header is replaced, and a guessed one 
   assert.deepStrictEqual(apigate.identify(reqWith({ "x-tvbox-caller": "" })), unknown);
 });
 
-test("no stamp: a script is local, anything with browser headers is unknown", () => {
-  assert.deepStrictEqual(apigate.identify(reqWith({ host: "127.0.0.1:8097" })), local);
-  assert.deepStrictEqual(apigate.identify(reqWith({ "sec-fetch-site": "same-origin" })), unknown);
+test("no stamp: a process with the local token is local; a bare request or a browser is not", () => {
+  apigate.setLocalToken("tok-123");
+  assert.deepStrictEqual(apigate.identify(reqWith({ host: "127.0.0.1:8097", "x-tvbox-local": "tok-123" })), local);
+  assert.deepStrictEqual(apigate.identify(reqWith({ host: "127.0.0.1:8097" })), unknown, "mpv sends nothing");
+  assert.deepStrictEqual(apigate.identify(reqWith({ "x-tvbox-local": "tok-124" })), unknown);
+  assert.deepStrictEqual(
+    apigate.identify(reqWith({ "x-tvbox-local": "tok-123", "sec-fetch-site": "same-origin" })),
+    unknown,
+    "a page that somehow has the token is still a page",
+  );
   assert.deepStrictEqual(apigate.identify(reqWith({ origin: "http://localhost:8097" })), unknown);
+  const req = reqWith({ "x-tvbox-local": "tok-123" });
+  apigate.identify(req);
+  assert.strictEqual(req.headers["x-tvbox-local"], undefined, "no handler sees the token");
+  assert.deepStrictEqual(Object.keys(apigate.stamp({ "X-Tvbox-Local": "tok-123" }, "launcher")), ["X-Tvbox-Caller"]);
 });
 
 test("the launcher reaches everything, and pages are open to all", () => {
@@ -138,4 +149,57 @@ test("a LAN server answers to the box's own names and addresses only", () => {
     .find((a) => a && a.family === "IPv4");
   if (v4) assert.strictEqual(ok(v4.address + ":8099"), true);
   assert.strictEqual(ok("rebind.example:8099"), false);
+});
+
+test("a router's LAN name and a zoned link-local address reach a LAN server; a public suffix does not", () => {
+  const os = require("os");
+  const host = os.hostname().toLowerCase();
+  const ok = (h) => apigate.lanHostAllowed({ headers: { host: h } }, 8099);
+  assert.strictEqual(ok(host + ".lan:8099"), true);
+  assert.strictEqual(ok(host + ".home.arpa:8099"), true);
+  assert.strictEqual(ok(host + ".attacker.example:8099"), false);
+  assert.strictEqual(apigate.hostAllowed({ headers: { host: "[fe80::1%25wlan0]:8099" } }, ["fe80::1"], 8099), true);
+});
+
+test("the network's announced search domains are read from resolv.conf", () => {
+  const text = "nameserver 10.0.0.1\nsearch fritz.box Corp.Example.\ndomain lan\n# search nope\n";
+  assert.deepStrictEqual(
+    apigate.announcedSuffixes(() => text),
+    ["fritz.box", "corp.example", "lan"],
+  );
+  assert.deepStrictEqual(
+    apigate.announcedSuffixes(() => {
+      throw new Error("ENOENT");
+    }),
+    [],
+  );
+});
+
+test("only a local app may register a service worker, and only inside its own folder", () => {
+  const local = (id) => id === "files";
+  assert.strictEqual(apigate.serviceWorkerAllowed("/files/sw.js", local), true);
+  assert.strictEqual(apigate.serviceWorkerAllowed("/sw.js", local), false, "the root app's scope covers the launcher");
+  assert.strictEqual(
+    apigate.serviceWorkerAllowed("/tvbox/sw.js", () => true),
+    false,
+  );
+  assert.strictEqual(apigate.serviceWorkerAllowed("/other/sw.js", local), false);
+  assert.strictEqual(apigate.serviceWorkerAllowed("/files", local), false);
+  assert.strictEqual(
+    apigate.serviceWorkerAllowed("/../sw.js", () => true),
+    false,
+  );
+});
+
+test("an app changes the PIN, or whether it is asked for, only with the current PIN", () => {
+  const caps = ["config"];
+  const pinOk = (p) => p === "4321";
+  const post = (parental) =>
+    decide(app("livetv"), "POST", "/tvbox/api/config", { body: { parental }, caps, parentalPinOk: pinOk });
+  assert.strictEqual(post({ lockedGroups: ["adult"] }), null, "the groups need no PIN");
+  assert.ok(post({ pin: "" }), "clearing the PIN without it is refused");
+  assert.ok(post({ requirePin: false }));
+  assert.ok(post({ pin: "1111", currentPin: "0000" }));
+  assert.strictEqual(post({ pin: "1111", currentPin: "4321" }), null);
+  assert.ok(decide(app("livetv"), "POST", "/tvbox/api/config", { body: { parental: { pin: "" } }, caps }));
 });

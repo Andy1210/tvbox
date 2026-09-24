@@ -159,12 +159,21 @@ export async function saveIptv(iptv: IptvInput): Promise<PublicConfig> {
   return postConfig({ iptv });
 }
 
+// The PIN this page last proved, kept in memory only. An app window may change
+// or clear the PIN, or whether it is asked for, only by presenting the current
+// one, and the screen that does so has just asked for it through verifyPin.
+let provenPin: string | null = null;
+
 export async function saveParental(p: {
   pin?: string;
   lockedGroups?: string[];
   requirePin?: boolean;
 }): Promise<PublicConfig> {
-  return postConfig({ parental: p });
+  const touchesPin = p.pin !== undefined || p.requirePin !== undefined;
+  const body = touchesPin && provenPin !== null ? { ...p, currentPin: provenPin } : p;
+  const saved = await postConfig({ parental: body });
+  if (p.pin !== undefined) provenPin = p.pin || null;
+  return saved;
 }
 
 export type AmbientInput = Partial<{
@@ -262,6 +271,7 @@ export async function verifyPin(pin: string): Promise<boolean> {
       body: JSON.stringify({ pin }),
     });
     const data = await res.json();
+    if (data.ok) provenPin = pin;
     return !!data.ok;
   } catch {
     return false;

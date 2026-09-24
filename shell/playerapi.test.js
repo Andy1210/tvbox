@@ -338,3 +338,17 @@ test("a sidecar subtitle has to be a network URL", () => {
   assert.strictEqual(playerapi.queued.streams.sub, 0);
   assert.ok(log);
 });
+
+test("a stream aimed at the box itself is refused, since mpv would fetch it as the box", () => {
+  const os = require("os");
+  for (const bad of [
+    "http://127.0.0.1:8097/tvbox/api/tv/standby",
+    "http://localhost:8097/x",
+    "http://[::1]:8097/x",
+    "http://[::ffff:127.0.0.1]:8097/x",
+    "http://0.0.0.0:8099/",
+    "http://" + os.hostname().toLowerCase() + ".local:8100/",
+  ])
+    assert.strictEqual(playerapi.queueTarget(bad), null, bad);
+  assert.strictEqual(playerapi.queueTarget("http://media.example/a.mkv"), "net");
+});

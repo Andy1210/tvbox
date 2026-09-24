@@ -12,6 +12,7 @@
 // looking at the app, and pause/stop have to keep working from a phone or the house
 // assistant. What a background sender still may not do is start a PICTURE.
 const path = require("path");
+const apigate = require("./apigate"); // the names and addresses this box answers to
 const httpserver = require("./httpserver"); // originOf: a URL's origin, never the URL
 const playeropts = require("./playeropts"); // stream terms -> mpv commands + the settable-property allowlist
 
@@ -37,9 +38,10 @@ const STREAM_SCHEMES = new Set(["http", "https", "rtsp", "rtsps", "rtmp", "rtmps
 function queueTarget(u) {
   if (typeof u !== "string" || !u || u.length > 4096 || u.includes("\0")) return null;
   const m = /^([a-z][a-z0-9+.-]*):\/\//i.exec(u);
-  if (m) return STREAM_SCHEMES.has(m[1].toLowerCase()) ? "net" : null;
+  if (m) return STREAM_SCHEMES.has(m[1].toLowerCase()) && !apigate.pointsAtThisBox(u) ? "net" : null;
   return path.isAbsolute(u) ? "local" : null;
 }
+
 // A sidecar subtitle is fetched by mpv too, so it gets the same rule, minus the
 // local case: a local subtitle is not something an app has a path to.
 function vetStreams(streams) {
@@ -170,10 +172,12 @@ function handle(senderId, action, payload) {
       const start = (url) => {
         player.setPlaying(url);
         deps.setVideoMode(false);
-        deps.ensureAudio(() =>
-          player.launch(url, q.startPos, false, null, q.streams, {
-            audioOnly: q.kind === "audio",
-          }),
+        deps.ensureAudio(
+          () =>
+            player.launch(url, q.startPos, false, null, q.streams, {
+              audioOnly: q.kind === "audio",
+            }),
+          { launch: true },
         );
       };
       if (!q.local) start(q.url);
@@ -243,7 +247,9 @@ function handle(senderId, action, payload) {
     if (background) return { ok: false, error: "player not permitted (not the foreground app)" };
     if (player.playing()) {
       deps.setVideoMode(!!payload.on);
-      deps.ensureAudio(() => player.launch(player.playing(), 0, !!payload.on, payload.rect, queued.streams));
+      deps.ensureAudio(() => player.launch(player.playing(), 0, !!payload.on, payload.rect, queued.streams), {
+        launch: true,
+      });
     }
   }
   return { ok: true };
