@@ -237,4 +237,8 @@ test("a clone starts with no paired phones; a same-box restore keeps them", () =
   assert.strictEqual(cloned.enabled, true, "the setting itself carries over");
   backup.apply({ format: "tvbox-backup", version: 1, machineId: "0000deadbeef", clone: false, config: cfg });
   assert.deepStrictEqual(config.rawPhoneRemote().phones, phones);
+  // A clone file restored onto the very box that made it keeps that box's phones.
+  const identity = require("./identity");
+  backup.apply({ format: "tvbox-backup", version: 1, machineId: identity.machineId(), clone: true, config: cfg });
+  assert.deepStrictEqual(config.rawPhoneRemote().phones, phones);
 });

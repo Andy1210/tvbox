@@ -502,8 +502,9 @@ function apply(payload) {
       if (!r.changed.length) console.log("[backup] clone: no identity field needed re-deriving");
       // A phone paired with the source box holds a key for THAT box. Carried over,
       // it would drive this one too (and see its screen), so a clone starts with
-      // no phones and no screen sharing; each phone pairs with it on its own.
-      if (cfg.phoneRemote && typeof cfg.phoneRemote === "object") {
+      // no phones and no screen sharing; each phone pairs with it on its own. A
+      // clone file restored onto the box it came from is that box's own phones.
+      if (!sameBox(payload) && cfg.phoneRemote && typeof cfg.phoneRemote === "object") {
         cfg = { ...cfg, phoneRemote: { ...cfg.phoneRemote, phones: [], screenUntil: 0 } };
       }
     }

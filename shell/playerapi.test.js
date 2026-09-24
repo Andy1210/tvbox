@@ -205,7 +205,23 @@ test("nothing is said when the player was not somebody else's", () => {
 
 test("a play with nothing queued launches nothing", () => {
   const { log } = boot({ currentApp: "plex" });
-  assert.deepEqual(playerapi.handle("plex", "play"), { ok: true });
+  assert.deepEqual(playerapi.handle("plex", "play"), { ok: false, error: "nothing queued" });
+  assert.equal(log.filter((l) => l[0] === "launch").length, 0);
+});
+
+test("a refused url does not take the player from the app that is playing", () => {
+  const { log, state } = boot({
+    currentApp: "livetv",
+    owner: "music",
+    running: true,
+    playingUrl: "http://h/song.mp3",
+    audioOnly: true,
+    windows: ["music"],
+  });
+  assert.equal(playerapi.handle("livetv", "queue", { url: "http://127.0.0.1:8097/x" }).ok, false);
+  assert.equal(playerapi.handle("livetv", "play").ok, false);
+  assert.equal(state.owner, "music", "the music keeps its owner");
+  assert.equal(log.filter((l) => l[0] === "setOwner" || l[0] === "send" || l[0] === "clearCard").length, 0);
   assert.equal(log.filter((l) => l[0] === "launch").length, 0);
 });
 

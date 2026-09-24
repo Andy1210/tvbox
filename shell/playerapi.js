@@ -137,6 +137,15 @@ function handle(senderId, action, payload) {
     if (background && queued.kind !== "audio") {
       return { ok: false, error: "player not permitted (a background app may only play sound)" };
     }
+    // The KIND has to match as well as the URL. The same file asked for as
+    // sound after being played as a picture is a different launch - audio skips
+    // the mode handshake and the reveal - and resuming here would silently keep
+    // the mode the caller just said it did not want.
+    const sameKind = player.isAudioOnly() === (queued.kind === "audio");
+    const resume = player.running() && player.playing() === queued.url && sameKind && !player.isPip();
+    // Nothing to start and nothing to resume (a refused url emptied the queue):
+    // the player stays with whoever has it, and nobody is told they lost it.
+    if (!resume && !queued.url) return { ok: false, error: "nothing queued" };
     // remember whose window the video belongs to: the first-frame reveal
     // (setVideoMode(true) in observeMpv) must hit THAT window, not the launcher
     const previousOwner = player.running() ? player.owner() : null;
@@ -162,12 +171,7 @@ function handle(senderId, action, payload) {
       }
       deps.clearSoundWidget(previousOwner);
     }
-    // The KIND has to match as well as the URL. The same file asked for as
-    // sound after being played as a picture is a different launch - audio skips
-    // the mode handshake and the reveal - and resuming here would silently keep
-    // the mode the caller just said it did not want.
-    const sameKind = player.isAudioOnly() === (queued.kind === "audio");
-    if (player.running() && player.playing() === queued.url && sameKind && !player.isPip()) {
+    if (resume) {
       if (player.startPending()) {
         // Still in the paused-start handshake: the mode switch starts it in a
         // moment. Unpausing here would put the switch INSIDE playback.
