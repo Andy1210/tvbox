@@ -45,9 +45,12 @@ fi
 # A main process is any electron whose argv carries no --type= (every child -
 # renderer, GPU, utility - does). Matching argv ORDER instead would be brittle: the
 # app path and the flags trade places depending on how electron is invoked.
+# A Chromium child (zygote, GPU, renderer) rewrites its argv into one
+# space-joined string, so its --type= is not a separate argument; look for it
+# anywhere in the command line rather than at the start of one.
 shell_running() {
   for pid in $(pgrep -f 'electron[/]dist/electron' 2>/dev/null); do
-    tr '\0' '\n' < "/proc/$pid/cmdline" 2>/dev/null | grep -q '^--type=' || return 0
+    tr '\0' ' ' < "/proc/$pid/cmdline" 2>/dev/null | grep -q -e ' --type=' || return 0
   done
   return 1
 }

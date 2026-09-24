@@ -226,3 +226,14 @@ test("the FIFO writer waits for a reader without holding a pool thread", async (
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test("frames that arrive before the player reads are kept, oldest first, up to the bound", () => {
+  const q = miracast.createEarlyQueue(10);
+  q.push(Buffer.from("key"));
+  q.push(Buffer.from("next"));
+  q.push(Buffer.from("toolate!")); // would pass the bound
+  const written = [];
+  q.drainInto({ write: (c) => written.push(c.toString()) });
+  assert.deepStrictEqual(written, ["key", "next"]);
+  assert.strictEqual(q.size(), 0);
+});

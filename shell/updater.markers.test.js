@@ -61,6 +61,20 @@ test("run-shell.sh counts a boot of a readable pending release", () => {
   fs.rmSync(UPD, { recursive: true, force: true });
 });
 
+test("a rollback record is cleared once a release at or past it commits, and only then", () => {
+  fs.mkdirSync(UPD, { recursive: true });
+  const failed = path.join(UPD, "failed");
+  fs.writeFileSync(failed, "1.0.0 1.1.0\n");
+  updater.clearSupersededFailure("1.0.1");
+  assert.ok(fs.existsSync(failed), "an older release does not supersede the failed one");
+  updater.clearSupersededFailure("1.1.0");
+  assert.ok(!fs.existsSync(failed));
+  fs.writeFileSync(failed, "1.0.0 1.1.0\n");
+  updater.clearSupersededFailure("1.2.0");
+  assert.ok(!fs.existsSync(failed));
+  fs.rmSync(UPD, { recursive: true, force: true });
+});
+
 test("the shell removes an unreadable pending marker on its first healthy load", () => {
   fs.mkdirSync(UPD, { recursive: true });
   fs.writeFileSync(path.join(UPD, "pending"), "");
@@ -69,4 +83,22 @@ test("the shell removes an unreadable pending marker on its first healthy load",
   assert.ok(!fs.existsSync(path.join(UPD, "pending")));
   assert.ok(!fs.existsSync(path.join(UPD, "attempts")));
   fs.rmSync(HOME, { recursive: true, force: true });
+});
+
+test("a response body is abandoned as soon as it passes the cap", async () => {
+  let pulled = 0;
+  const body = new ReadableStream({
+    pull(c) {
+      pulled++;
+      c.enqueue(new Uint8Array(1000));
+      if (pulled > 1000) c.close();
+    },
+  });
+  const res = { headers: new Headers(), body };
+  await assert.rejects(updater.readCapped(res, 4096), /too large/);
+  assert.ok(pulled < 20, "stopped reading after " + pulled + " chunks");
+  const small = { headers: new Headers(), body: new Response("abc").body };
+  assert.strictEqual((await updater.readCapped(small, 10)).toString(), "abc");
+  const declared = { headers: new Headers({ "content-length": "99999" }), body: new Response("x").body };
+  await assert.rejects(updater.readCapped(declared, 10), /too large/);
 });

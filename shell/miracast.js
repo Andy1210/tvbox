@@ -157,6 +157,33 @@ function openFifoWriter(fifoPath, opts) {
   attempt();
 }
 
+/**
+ * What arrives while the player is still opening its end of the FIFO. The start
+ * of a stream is where a source puts its first key frame, so it is kept rather
+ * than dropped - the oldest bytes, up to `max` - and written out the moment the
+ * writer is ready.
+ */
+function createEarlyQueue(max) {
+  let chunks = [];
+  let bytes = 0;
+  return {
+    push(chunk) {
+      if (bytes + chunk.length > max) return;
+      chunks.push(chunk);
+      bytes += chunk.length;
+    },
+    drainInto(stream) {
+      for (const chunk of chunks) stream.write(chunk);
+      this.clear();
+    },
+    clear() {
+      chunks = [];
+      bytes = 0;
+    },
+    size: () => bytes,
+  };
+}
+
 function create(deps) {
   const d = deps || {};
   const run = d.run || execFile;
@@ -263,10 +290,12 @@ function create(deps) {
   // arrives, and one that never arrives keeps that thread for good.
   let writerGen = 0;
   let streaming = false;
+  const early = createEarlyQueue(MAX_QUEUED_BYTES);
 
   function closeWriter() {
     writerGen += 1;
     streaming = false;
+    early.clear();
     if (fifo) {
       try {
         fifo.destroy();
@@ -282,6 +311,14 @@ function create(deps) {
       log,
       onReady: (stream) => {
         fifo = stream;
+        early.drainInto(stream);
+        // Whatever did not fit is gone, key frame included; a fresh one costs
+        // the source nothing and saves a grey picture until its next periodic IDR.
+        if (socket && session) {
+          try {
+            socket.write(session.idrRequest());
+          } catch (e) {}
+        }
         // The player went away (a Stop, a crash): stop writing into a pipe
         // nobody reads. The next session opens a writer of its own.
         stream.on("error", (e) => {
@@ -312,7 +349,7 @@ function create(deps) {
         emit({ type: "streaming", fifo: fifoPath });
         startWriter();
       }
-      if (!fifo) return; // the player is still opening its end
+      if (!fifo) return early.push(payload); // the player is still opening its end
       // This is live: a player that has gone away, or is reading slowly, must
       // cost us frames rather than memory. So watch the queue and DROP when it
       // is over the mark. (Emitting "drain" by hand, which is what this did
@@ -507,6 +544,7 @@ function create(deps) {
 module.exports = {
   create,
   openFifoWriter,
+  createEarlyQueue,
   parseState,
   peersFromLeases,
   pairingGate,

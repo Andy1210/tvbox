@@ -353,15 +353,39 @@ function status() {
 
 const MAX_FEED_BYTES = 64 * 1024;
 
+// Reads a response body, giving up as soon as it passes `maxBytes` instead of
+// buffering whatever the server chose to send first.
+async function readCapped(res, maxBytes, ctl) {
+  const declared = Number(res.headers && res.headers.get && res.headers.get("content-length"));
+  if (declared > maxBytes) throw new Error("response too large");
+  if (!res.body || typeof res.body.getReader !== "function") {
+    const buf = Buffer.from(await res.arrayBuffer());
+    if (buf.length > maxBytes) throw new Error("response too large");
+    return buf;
+  }
+  const reader = res.body.getReader();
+  const chunks = [];
+  let total = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    total += value.length;
+    if (total > maxBytes) {
+      if (ctl) ctl.abort();
+      throw new Error("response too large");
+    }
+    chunks.push(Buffer.from(value));
+  }
+  return Buffer.concat(chunks);
+}
+
 async function fetchBytes(url, timeoutMs, maxBytes) {
   const ctl = new AbortController();
   const t = setTimeout(() => ctl.abort(), timeoutMs);
   try {
     const res = await guardedFetch(url, { signal: ctl.signal, cache: "no-store" });
     if (!res.ok) throw new Error("HTTP " + res.status);
-    const buf = Buffer.from(await res.arrayBuffer());
-    if (buf.length > maxBytes) throw new Error("response too large");
-    return buf;
+    return await readCapped(res, maxBytes, ctl);
   } finally {
     clearTimeout(t);
   }
@@ -722,6 +746,7 @@ function onLauncherLoaded() {
     /* cosmetic */
   }
   console.log("[updater] committed", pending.prev, "->", rel);
+  clearSupersededFailure(rel);
   syncInfraSafely(rel);
   try {
     prune(rel, pending.prev);
@@ -814,6 +839,13 @@ function prune(keep, alsoKeep) {
   }
 }
 
+// A rollback record describes the release that did not boot. Once a release at
+// or past it has committed, the record is history and no longer a warning.
+function clearSupersededFailure(rel) {
+  const failed = readPair(FAILED);
+  if (failed && cmpVer(rel, failed.next) >= 0) fs.rmSync(FAILED, { force: true });
+}
+
 function clearFailed() {
   fs.rmSync(FAILED, { force: true });
   return status();
@@ -871,6 +903,8 @@ module.exports = {
   onLauncherLoaded,
   feedSignatureOk, // exported for the test: a non-default feed must be signed
   rolledBack, // exported for the test: a rolled-back release is not installed again
+  readCapped, // same: a feed is not buffered past its cap
+  clearSupersededFailure, // same: a rollback record outlived by a newer committed release
   readPair, // same: the format run-shell.sh writes
   startSchedulers,
   cmpVer,

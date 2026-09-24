@@ -63,3 +63,19 @@ test("a copy replaces the target by rename", () => {
 });
 
 test.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+
+test("a temp left by an interrupted write is removed by the next process's first write", () => {
+  const sub = fs.mkdtempSync(path.join(dir, "sweep-"));
+  const f = path.join(sub, "c.json");
+  const stale = path.join(sub, ".c.json.1.1000.tmp");
+  const fresh = path.join(sub, ".c.json.2.2000.tmp");
+  const other = path.join(sub, ".d.json.1.1000.tmp");
+  for (const t of [stale, fresh, other]) fs.writeFileSync(t, "x");
+  const old = (Date.now() - 10 * 60 * 1000) / 1000;
+  fs.utimesSync(stale, old, old);
+  fs.utimesSync(other, old, old);
+  fsutil.writeJsonAtomic(f, { c: 1 });
+  assert.ok(!fs.existsSync(stale), "the old temp of this file is gone");
+  assert.ok(fs.existsSync(fresh), "a recent one may still be on its way to a rename");
+  assert.ok(fs.existsSync(other), "another file's temp is not ours to remove");
+});

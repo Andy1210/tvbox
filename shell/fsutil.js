@@ -22,6 +22,35 @@ function fsyncDir(dir) {
   }
 }
 
+// A power cut between the temp write and the rename leaves the temp behind, and
+// every later write names a new one. The first write of a file in a process
+// removes such leftovers: a temp of another process that is more than a minute
+// old cannot still be on its way to a rename.
+const swept = new Set();
+function sweepStaleTemps(dir, base) {
+  if (swept.has(dir + "/" + base)) return;
+  swept.add(dir + "/" + base);
+  const prefix = "." + base + ".";
+  let names;
+  try {
+    names = fs.readdirSync(dir);
+  } catch (e) {
+    return;
+  }
+  for (const name of names) {
+    if (!name.startsWith(prefix) || !name.endsWith(".tmp")) continue;
+    const m = /^(\d+)\.(\d+)\.tmp$/.exec(name.slice(prefix.length));
+    if (!m || Number(m[1]) === process.pid) continue;
+    const full = path.join(dir, name);
+    try {
+      const st = fs.lstatSync(full);
+      if (st.isFile() && Date.now() - st.mtimeMs > 60 * 1000) fs.rmSync(full, { force: true });
+    } catch (e) {
+      /* gone already */
+    }
+  }
+}
+
 // mode: the permission bits the file should end up with. When omitted, an
 // existing file keeps its own mode and a new one gets 0644 (masked by umask),
 // which is what writeFileSync would have done.
@@ -36,6 +65,7 @@ function writeFileAtomic(file, data, opts = {}) {
       mode = 0o644;
     }
   }
+  sweepStaleTemps(dir, path.basename(file));
   const tmp = path.join(dir, "." + path.basename(file) + "." + process.pid + "." + Date.now() + ".tmp");
   let fd = null;
   try {

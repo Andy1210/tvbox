@@ -273,6 +273,26 @@ function createSession(opts) {
         Session: state.session || "",
       });
     },
+    /**
+     * M13: ask the source for a fresh key frame. Sent once the player is
+     * reading, because the frames before that were buffered or dropped and a
+     * source may send its first IDR only at the start of the stream.
+     */
+    idrRequest() {
+      const body = "wfd_idr_request\r\n";
+      return (
+        "SET_PARAMETER " +
+        (state.url || "rtsp://localhost/wfd1.0") +
+        " RTSP/1.0\r\nCSeq: " +
+        nextCseq() +
+        "\r\nSession: " +
+        (state.session || "") +
+        "\r\nContent-Type: text/parameters\r\nContent-Length: " +
+        body.length +
+        "\r\n\r\n" +
+        body
+      );
+    },
     teardown() {
       state.torndown = true;
       return request("TEARDOWN " + (state.url || "rtsp://localhost/wfd1.0") + " RTSP/1.0", nextCseq(), {
