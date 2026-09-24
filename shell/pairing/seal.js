@@ -120,8 +120,10 @@ function open(sealed, key, seen) {
 //
 // The contract a pairing page follows (a v2 provider, see pairing/index.js):
 //   <script src="/tvbox-seal.js" data-v="2"></script>
-//   tvboxSeal.code            the code, from the URL fragment (#c=), or "" for a
-//                             phone that typed the short URL (it asks the person)
+//   tvboxSeal.code            the code, from the URL fragment (#c=) or the query
+//                             (?c=), or "" for a phone that typed the short URL.
+//                             With data-ask-code on the script tag the helper then
+//                             asks for it and reloads the page with ?c=.
 //   tvboxSeal.sealed          true when the page has the session key (#k=)
 //   tvboxSeal.param(name)     a value from the opening fragment (#name=...)
 //   tvboxSeal.body(obj, path) drop-in for JSON.stringify(obj): a sealed body with
@@ -149,7 +151,8 @@ function open(sealed, key, seen) {
 // used again only while the session it came from is the one the server is
 // running: the script is served per request with a tag of the live session's key
 // (a hash, never the key), so a later session opened in the same tab from the
-// short URL asks for its code instead of signing with a key nobody holds.
+// short URL does not sign with a key nobody holds (it asks for the code instead,
+// see data-ask-code).
 //
 // A pairing session ends 5 minutes after its last write. A v2 page with the key
 // keeps it open while it is on screen with a signed keepalive every 2 minutes,
@@ -193,14 +196,7 @@ const PAGE_HELPER = `
   }
   var key = null;
   var k = param("k");
-  if (k && self.nacl) {
-    var s = k.replace(/-/g, "+").replace(/_/g, "/");
-    while (s.length % 4) s += "=";
-    var bin = atob(s);
-    key = new Uint8Array(bin.length);
-    for (var i = 0; i < bin.length; i++) key[i] = bin.charCodeAt(i);
-    if (key.length !== nacl.secretbox.keyLength) key = null;
-  }
+  if (k && self.nacl) key = keyFrom(k);
   var code = param("c") || new URLSearchParams(location.search).get("c") || "";
   if (v2 && location.hash) history.replaceState(null, "", location.pathname + location.search);
   if (!v2 && code && !new URLSearchParams(location.search).get("c")) {
@@ -318,6 +314,41 @@ const PAGE_HELPER = `
     // open(key, base64) -> obj, openBytes(key, Uint8Array) -> Uint8Array.
     lib: { key: keyFrom, sign: sign, seal: sealWith, open: openWith, openBytes: openBytes },
   };
+  // A phone that typed the short URL has neither the key nor the code. A page
+  // that opts in (data-ask-code) gets a small form for the code; sending it
+  // reloads the page with ?c=, which every request of the page then carries.
+  if (v2 && !key && !code && me && me.getAttribute("data-ask-code") !== null) {
+    var ask = function () {
+      var hu = /^hu/i.test(document.documentElement.lang || navigator.language || "");
+      var box = document.createElement("form");
+      box.setAttribute("style", "position:fixed;inset:0;z-index:9999;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;background:rgba(0,0,0,.92);color:#fff;font:18px system-ui,sans-serif;padding:24px;text-align:center");
+      var label = document.createElement("label");
+      label.textContent = hu ? "Írd be a tévén látható kódot" : "Enter the code shown on the TV";
+      var input = document.createElement("input");
+      input.setAttribute("inputmode", "numeric");
+      input.setAttribute("pattern", "[0-9]*");
+      input.setAttribute("maxlength", "4");
+      input.setAttribute("autocomplete", "off");
+      input.setAttribute("style", "font-size:32px;width:5em;text-align:center;letter-spacing:.3em;padding:8px;border-radius:8px;border:0");
+      var go = document.createElement("button");
+      go.type = "submit";
+      go.textContent = hu ? "Tovább" : "Continue";
+      go.setAttribute("style", "font-size:18px;padding:10px 24px;border-radius:8px;border:0");
+      box.appendChild(label);
+      box.appendChild(input);
+      box.appendChild(go);
+      box.addEventListener("submit", function (ev) {
+        ev.preventDefault();
+        var v = input.value.replace(/\\D/g, "");
+        if (v.length !== 4) return;
+        location.replace(location.pathname + "?c=" + v);
+      });
+      document.body.appendChild(box);
+      input.focus();
+    };
+    if (document.body) ask();
+    else document.addEventListener("DOMContentLoaded", ask);
+  }
   if (v2 && key && self.__tvboxSealKeepalive) {
     setInterval(function () {
       if (document.visibilityState !== "visible") return;

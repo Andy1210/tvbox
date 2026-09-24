@@ -826,6 +826,11 @@ loads `<script src="/tvbox-seal.js" data-v="2"></script>` and uses:
 | `tvboxSeal.body({ code, ... }, path)` | In place of `JSON.stringify` for every write: sealed with the key, plain without. `path` is the route it is POSTed to (`"/save"`); it is sealed with the body, and a `v2` provider refuses a body sealed for another route or for none.                         |
 | `tvboxSeal.url(method, path, body?)`  | For a request that is not sealed - a data GET, or a write to a `{ bulk: true }` route. `path` starts with `/`; `body` is the exact string you will send. Returns the URL to fetch, signed with the key (`n=`, `m=` appended) or carrying `c=<code>` without it. |
 
+Adding `data-ask-code` to the script tag makes the helper ask a phone that typed
+the short URL (no key, no code) for the code in a small form of its own, then
+reload the page with `?c=<code>`, which `tvboxSeal.code` and `tvboxSeal.url` then
+use. A page with its own code field leaves the attribute off.
+
 A route that takes large plain bodies (a photo, a file chunk) is marked
 `{ bulk: true }`; every other write carries a sealed body. Once the phone has
 proved the key, an unauthenticated write is refused. A bulk handler should not

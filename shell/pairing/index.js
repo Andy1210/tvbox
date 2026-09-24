@@ -168,6 +168,14 @@ function handle(req, res) {
   // A page on screen keeps its session open with a signed, nonce-carrying POST
   // and an empty body (seal.js). Nothing else is done with it.
   if (req.method === "POST" && u.pathname === "/tvbox-keepalive") {
+    // The keepalive has no body; one that arrives with a body is refused before
+    // any of it is read.
+    const declared = Number(req.headers["content-length"] || 0);
+    if (declared > 0 || req.headers["transfer-encoding"]) {
+      res.writeHead(413, { Connection: "close" });
+      res.end();
+      return req.destroy();
+    }
     req.resume();
     return req.on("end", () => {
       res.writeHead(signedOk(req, "POST", Buffer.alloc(0), u, true) ? 204 : 403);

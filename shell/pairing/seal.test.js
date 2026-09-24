@@ -106,7 +106,7 @@ function memoryStorage() {
   };
 }
 
-function pageSandbox(hash, search, v2, storage, scriptOpts) {
+function pageSandbox(hash, search, v2, storage, scriptOpts, overrides) {
   const sandbox = {
     location: { hash, search: search || "", pathname: "/", href: "http://box/" + (search || "") + hash },
     history: {
@@ -127,6 +127,7 @@ function pageSandbox(hash, search, v2, storage, scriptOpts) {
     Uint8Array, // one realm's typed arrays, so nacl's type checks see the encoder's output
     crypto: { getRandomValues: (a) => require("crypto").randomFillSync(a) },
   };
+  Object.assign(sandbox, overrides || {});
   sandbox.self = sandbox;
   vm.runInNewContext(seal.script(scriptOpts), sandbox);
   return sandbox;
@@ -278,5 +279,101 @@ test("a read with the code does not hold the session open; a keepalive does", as
     assert.strictEqual((await get("/list?c=" + t.code)).status, 200, "a refused keepalive is not a code guess");
   } finally {
     pairing.stop();
+  }
+});
+
+test("a keepalive that carries a body is refused unread", async () => {
+  pairing.register("kabody", { page: () => "<p>x</p>", routes: {} }, "someapp");
+  const t = pairing.start("en", "kabody");
+  try {
+    await listening();
+    const key = new Uint8Array(Buffer.from(fromFragment(t.url, "k"), "base64url"));
+    const page = pageSandbox("", "", true, undefined, {});
+    const signed = page.tvboxSeal.lib.sign(page.tvboxSeal.lib.key(seal.keyParam(key)), "POST", "/tvbox-keepalive", "x");
+    const r = await post(signed, "x").catch(() => ({ status: 0 }));
+    assert.notStrictEqual(r.status, 204);
+    assert.notStrictEqual(r.status, 403, "refused before the signature is even looked at");
+  } finally {
+    pairing.stop();
+  }
+});
+
+test("a key in the fragment that is not base64 leaves the page working without one", () => {
+  const strict = (s) => {
+    if (s.length % 4 === 1) throw new Error("InvalidCharacterError");
+    return Buffer.from(s, "base64").toString("latin1");
+  };
+  const page = pageSandbox("#c=4321&k=A", "", true, undefined, undefined, { atob: strict });
+  assert.strictEqual(page.tvboxSeal.sealed, false);
+  assert.strictEqual(page.tvboxSeal.code, "4321");
+});
+
+function askDom(hasAttr) {
+  const made = [];
+  const el = () => {
+    const e = {
+      attrs: {},
+      children: [],
+      listeners: {},
+      value: "",
+      setAttribute(n, v) {
+        this.attrs[n] = v;
+      },
+      appendChild(c) {
+        this.children.push(c);
+      },
+      addEventListener(n, f) {
+        this.listeners[n] = f;
+      },
+      focus() {},
+    };
+    made.push(e);
+    return e;
+  };
+  const body = el();
+  return {
+    made,
+    body,
+    document: {
+      currentScript: {
+        getAttribute: (n) => (n === "data-v" ? "2" : n === "data-ask-code" && hasAttr ? "" : null),
+      },
+      documentElement: { lang: "hu" },
+      body,
+      createElement: () => el(),
+      addEventListener() {},
+    },
+  };
+}
+
+test("a typed short URL is asked for its code, and the answer reloads the page with it", () => {
+  const dom = askDom(true);
+  let went = null;
+  const page = pageSandbox("", "", true, undefined, undefined, {
+    document: dom.document,
+    navigator: { language: "hu" },
+  });
+  page.location.replace = (u) => (went = u);
+  assert.strictEqual(dom.body.children.length, 1, "the form is on the page");
+  const form = dom.body.children[0];
+  const input = form.children.find((c) => c.attrs.inputmode === "numeric");
+  assert.match(form.children[0].textContent, /kódot/);
+  input.value = "12";
+  form.listeners.submit({ preventDefault() {} });
+  assert.strictEqual(went, null, "a short code is not sent");
+  input.value = "1 2 3 4";
+  form.listeners.submit({ preventDefault() {} });
+  assert.strictEqual(went, "/?c=1234");
+});
+
+test("the code form is shown only when there is neither a key nor a code, and only when asked for", () => {
+  for (const [hash, search, attr] of [
+    ["#c=4321&k=" + seal.keyParam(seal.newKey()), "", true],
+    ["", "?c=4321", true],
+    ["", "", false],
+  ]) {
+    const dom = askDom(attr);
+    pageSandbox(hash, search, true, undefined, undefined, { document: dom.document, navigator: { language: "en" } });
+    assert.strictEqual(dom.body.children.length, 0, JSON.stringify([hash, search, attr]));
   }
 });
