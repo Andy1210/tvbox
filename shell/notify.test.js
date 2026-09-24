@@ -336,14 +336,14 @@ test("a refused placement is asked again after a while, not kept for the life of
 
 test("a note from MQTT cannot claim a shell notice or point an image at the box", () => {
   const n = fresh();
-  n.init({ boxNames: () => ["localhost", "127.0.0.1", "tvbox", "192.168.1.9"] });
+  n.init({ boxNames: () => ["localhost", "127.0.0.1", "tvbox", "10.0.0.9"] });
   const out = n.sanitizeRemote({ kind: "crashRestart", title: "t", message: "m", image: "http://ha.lan/cam.jpg" });
   assert.strictEqual(out.kind, undefined);
   assert.strictEqual(out.image, "http://ha.lan/cam.jpg");
   for (const image of [
     "http://127.0.0.1:8097/tvbox/api/tv/standby",
     "http://localhost:8097/x",
-    "http://192.168.1.9:8097/x",
+    "http://10.0.0.9:8097/x",
     "http://tvbox:8097/x",
     "http://127.1.2.3/x",
     "file:///etc/passwd",

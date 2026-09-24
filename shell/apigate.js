@@ -304,8 +304,8 @@ function ownPorts() {
   return new Set([...OWN_PORTS, ...more.map(Number).filter((n) => Number.isInteger(n) && n > 0)]);
 }
 
-// An IPv4 address written as IPv6 ("::ffff:c0a8:118", which is how the URL
-// parser normalises "[::ffff:192.168.1.24]") is that IPv4 address.
+// An IPv4 address written as IPv6 ("::ffff:c000:218", which is how the URL
+// parser normalises "[::ffff:192.0.2.24]") is that IPv4 address.
 function unmapped(host) {
   const hex = /^::ffff:([0-9a-f]{1,4}):([0-9a-f]{1,4})$/.exec(host);
   if (hex) {

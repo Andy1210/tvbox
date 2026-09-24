@@ -1303,7 +1303,7 @@ async def test_a_shell_that_refuses_the_note_is_survivable():
 async def test_an_address_outside_allow_from_never_gets_the_session():
     import ipaddress
     satellite = vs.Satellite({**CONFIG, "allow_from": [ipaddress.ip_network(HA + "/32")]})
-    outsider = FakeWriter(host="192.168.1.77")
+    outsider = FakeWriter(host="10.0.0.77")
     await satellite.handle_client(BlockingReader(), outsider)
     assert outsider.closed and satellite.writer is None, "an address not listed may not connect at all"
     ha = FakeWriter()
@@ -1316,7 +1316,7 @@ async def test_an_address_outside_allow_from_never_gets_the_session():
 
 async def test_the_default_allow_list_is_the_home_network():
     nets = vs._networks(None)
-    for ok in ("192.168.1.5", "10.1.2.3", "172.16.0.9", "127.0.0.1", "::ffff:192.168.1.5", "fe80::1%eth0"):
+    for ok in ("192.168.0.5", "10.1.2.3", "172.16.0.9", "127.0.0.1", "::ffff:192.168.0.5", "fe80::1%eth0"):
         assert vs.address_allowed(ok, nets), ok
     for bad in ("8.8.8.8", "2001:db8::1", "not an ip"):
         assert not vs.address_allowed(bad, nets), bad

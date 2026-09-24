@@ -23,7 +23,7 @@ test("only the fields the readers use survive, each bounded", () => {
 test("artwork is an http(s) URL or an inline image, nothing else", () => {
   const img = (image) => nowplaying.sanitize({ state: "playing", image }, "x").image;
   assert.strictEqual(img("https://cdn.example/a.jpg"), "https://cdn.example/a.jpg");
-  assert.strictEqual(img("http://192.168.1.5:32400/t?X-Token=1"), "http://192.168.1.5:32400/t?X-Token=1");
+  assert.strictEqual(img("http://10.0.0.5:32400/t?X-Token=1"), "http://10.0.0.5:32400/t?X-Token=1");
   assert.ok(img("data:image/png;base64,iVBORw0KGgo="));
   for (const bad of ["file:///etc/passwd", "javascript:alert(1)", "http://u:p@h/x", "data:text/html,<b>", 5])
     assert.strictEqual(img(bad), undefined, String(bad));
