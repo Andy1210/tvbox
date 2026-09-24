@@ -149,7 +149,6 @@ const RESERVED_STATE_FILES = new Set([
   "update-keys",
   "shell-userdata",
   "firetv-ir.sock",
-  "gamebox-share.json",
   "voice-notes",
   "native-sleeper.log",
   "librespot-cache",
