@@ -360,6 +360,13 @@
         var ask = { code: code, name: name };
         try {
           r = await send("/adopt", JSON.stringify(oneTime ? { sealed: lib.seal(oneTime, ask) } : ask));
+          if (r.status === 400 && r.body.error === "sealed" && oneTime) {
+            // The one-time key this tab held belongs to an adoption the box is no
+            // longer showing: pair with the code alone, as a typed address does.
+            oneTime = null;
+            tvboxSeal.forget && tvboxSeal.forget();
+            r = await send("/adopt", JSON.stringify(ask));
+          }
         } catch (e) {
           return say(setupMsg, t("noAnswer"), true);
         }
@@ -368,6 +375,7 @@
         if (!grant || !grant.id || !lib.key(grant.key)) return say(setupMsg, t("full"), true);
         me = { id: grant.id, key: lib.key(grant.key), raw: grant.key, skew: (grant.now || Date.now()) - Date.now() };
         oneTime = null;
+        tvboxSeal.forget && tvboxSeal.forget();
         remember();
         say(setupMsg, "");
         show(true);

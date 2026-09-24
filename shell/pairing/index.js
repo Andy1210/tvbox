@@ -91,14 +91,19 @@ function proved() {
 // Timing-safe code check. An EMPTY code is not an attempt: a page that could not
 // find the code (an older page opened from a URL that carries it elsewhere) would
 // otherwise lock the session out by loading its own lists.
-function codeOk(presented) {
+//
+// Only a write proves anything: a GET carrying the code in its query can be
+// replayed by whoever saw it, so for a read (`extend` false) a right code lets
+// the request through without resetting the count of wrong ones or holding the
+// session open.
+function codeOk(presented, extend = true) {
   if (!code) return false;
   const p = presented == null ? "" : String(presented);
   if (!p) return false;
   const a = Buffer.from(p);
   const b = Buffer.from(code);
   if (a.length === b.length && crypto.timingSafeEqual(a, b)) {
-    proved();
+    if (extend) proved();
     return true;
   }
   failed();
@@ -158,7 +163,16 @@ function handle(req, res) {
   const u = new URL(req.url, `http://localhost:${PORT}`);
   if (req.method === "GET" && u.pathname === "/tvbox-seal.js") {
     res.writeHead(200, { "Content-Type": "application/javascript; charset=utf-8", "Cache-Control": "no-store" });
-    return res.end(seal.script());
+    return res.end(seal.script({ key: sessionKey, keepalive: true }));
+  }
+  // A page on screen keeps its session open with a signed, nonce-carrying POST
+  // and an empty body (seal.js). Nothing else is done with it.
+  if (req.method === "POST" && u.pathname === "/tvbox-keepalive") {
+    req.resume();
+    return req.on("end", () => {
+      res.writeHead(signedOk(req, "POST", Buffer.alloc(0), u, true) ? 204 : 403);
+      res.end();
+    });
   }
   const prov = providers.get(activeKind);
   if (!prov) {
@@ -189,7 +203,7 @@ function handle(req, res) {
   if (req.method === "GET") {
     // A data GET (a list, a thumbnail): the page's MAC, or the code in the query.
     const signed = signedOk(req, "GET", Buffer.alloc(0), u, false);
-    if (signed === false || (signed === null && !codeOk(u.searchParams.get("c")))) {
+    if (signed === false || (signed === null && !codeOk(u.searchParams.get("c"), false))) {
       res.writeHead(403);
       return res.end();
     }

@@ -39,6 +39,7 @@ function keyParam(key) {
 // alter it nor make a different one. A write also carries a fresh `n`, and the
 // server refuses a write whose `n` it has seen, so it cannot be replayed either.
 const MAC_BYTES = 16;
+const TAG_CHARS = 16; // 64 bits of the key's hash: enough to tell two sessions apart
 function sha512hex(buf) {
   return crypto.createHash("sha512").update(buf).digest("hex");
 }
@@ -139,9 +140,21 @@ function open(sealed, key, seen) {
 //   tvboxSeal.query()         older helper: "c=<code>" without a key; with a key it
 //                             throws, because a bare query cannot be authenticated.
 //
+//   tvboxSeal.forget()        drop what this tab kept (see below), for a page whose
+//                             session is over (the phone remote after its adoption)
+//
 // A v2 page takes the code and key out of the address bar once it has read them
 // (a screenshot or a shared link would carry them otherwise) and keeps them in
-// sessionStorage, so a reload in the same tab still has them.
+// sessionStorage, so a reload in the same tab still has them. What it kept is
+// used again only while the session it came from is the one the server is
+// running: the script is served per request with a tag of the live session's key
+// (a hash, never the key), so a later session opened in the same tab from the
+// short URL asks for its code instead of signing with a key nobody holds.
+//
+// A pairing session ends 5 minutes after its last write. A v2 page with the key
+// keeps it open while it is on screen with a signed keepalive every 2 minutes,
+// so browsing a photo grid does not run into the timeout. A phone that typed the
+// short URL has no key and gets no keepalive.
 //
 // A page that predates this reads the code from `?c=` and loads the script
 // without data-v="2"; for it the code is copied into the query in place (no
@@ -158,12 +171,19 @@ const PAGE_HELPER = `
   } catch (e) {}
   // Kept no longer than a pairing session lasts, so a later short-URL visit in
   // the same tab does not pick up a key the box has already thrown away.
+  var live = typeof self.__tvboxSealSession === "string" ? self.__tvboxSealSession : "";
+  function tagOf(h) {
+    var m = /[#&]k=([A-Za-z0-9_-]+)/.exec(h || "");
+    var kk = m && self.nacl ? keyFrom(m[1]) : null;
+    return kk ? hex(nacl.hash(kk)).slice(0, ${TAG_CHARS}) : "";
+  }
   if (v2 && store) {
     try {
-      if (/[#&]k=/.test(hash)) store.setItem("tvboxSeal", JSON.stringify({ hash: hash, at: Date.now() }));
+      if (/[#&]k=/.test(hash)) store.setItem("tvboxSeal", JSON.stringify({ hash: hash }));
       else {
         var kept = JSON.parse(store.getItem("tvboxSeal") || "null");
-        if (kept && typeof kept.hash === "string" && Date.now() - kept.at < 10 * 60 * 1000) hash = kept.hash;
+        if (kept && typeof kept.hash === "string" && live && tagOf(kept.hash) === live) hash = kept.hash;
+        else store.removeItem("tvboxSeal");
       }
     } catch (e) {}
   }
@@ -234,7 +254,12 @@ const PAGE_HELPER = `
   function keyFrom(text) {
     var s = String(text || "").replace(/-/g, "+").replace(/_/g, "/");
     while (s.length % 4) s += "=";
-    var bin = atob(s);
+    var bin;
+    try {
+      bin = atob(s);
+    } catch (e) {
+      return null;
+    }
     var out = new Uint8Array(bin.length);
     for (var i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
     return out.length === nacl.secretbox.keyLength ? out : null;
@@ -283,19 +308,50 @@ const PAGE_HELPER = `
       if (path) bound._r = "POST " + new URL(String(path), location.href).pathname;
       return JSON.stringify({ sealed: sealWith(key, bound) });
     },
+    forget: function () {
+      try {
+        if (store) store.removeItem("tvboxSeal");
+      } catch (e) {}
+    },
     // The same primitives under a key of the page's own (the phone remote keeps
     // one per phone): sign(key, method, url, body), seal(key, obj) -> base64,
     // open(key, base64) -> obj, openBytes(key, Uint8Array) -> Uint8Array.
     lib: { key: keyFrom, sign: sign, seal: sealWith, open: openWith, openBytes: openBytes },
   };
+  if (v2 && key && self.__tvboxSealKeepalive) {
+    setInterval(function () {
+      if (document.visibilityState !== "visible") return;
+      fetch(sign(key, "POST", "/tvbox-keepalive", ""), { method: "POST", body: "" }).catch(function () {});
+    }, 2 * 60 * 1000);
+  }
 })();
 `;
-let pageScript = null;
-function script() {
-  if (pageScript === null) {
-    pageScript = fs.readFileSync(path.join(__dirname, "vendor", "nacl-fast.min.js"), "utf8") + PAGE_HELPER;
-  }
-  return pageScript;
+let naclSource = null;
+
+// What the page compares a kept fragment against: a prefix of the SHA-512 of the
+// live session's key. It says which session is running without saying anything
+// about the key.
+function sessionTag(key) {
+  if (!key) return "";
+  return crypto.createHash("sha512").update(Buffer.from(key)).digest("hex").slice(0, TAG_CHARS);
 }
 
-module.exports = { newKey, keyParam, seal, sealBytes, open, script, mac, macOk, splitMac, KEY_BYTES };
+/**
+ * The page script. `opts.key` is the live session's key (its tag goes out, never
+ * the key); `opts.keepalive` turns on the page's keepalive, for a server that
+ * answers POST /tvbox-keepalive. Served no-store, since the tag changes with the
+ * session.
+ */
+function script(opts) {
+  if (naclSource === null) naclSource = fs.readFileSync(path.join(__dirname, "vendor", "nacl-fast.min.js"), "utf8");
+  const o = opts || {};
+  const head =
+    ";self.__tvboxSealSession=" +
+    JSON.stringify(sessionTag(o.key)) +
+    ";self.__tvboxSealKeepalive=" +
+    (o.keepalive ? "true" : "false") +
+    ";";
+  return naclSource + head + PAGE_HELPER;
+}
+
+module.exports = { newKey, keyParam, seal, sealBytes, open, script, sessionTag, mac, macOk, splitMac, KEY_BYTES };

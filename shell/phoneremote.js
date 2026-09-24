@@ -404,7 +404,10 @@ function handle(req, res) {
   }
   if (req.method === "GET" && u.pathname === "/tvbox-seal.js") {
     res.writeHead(200, { "Content-Type": "application/javascript; charset=utf-8", "Cache-Control": "no-store" });
-    return res.end(seal.script());
+    // Tagged with the adoption the TV is showing, so a tab that kept an earlier
+    // one-time key does not try to adopt with it.
+    const live = adopt && Date.now() <= adopt.expires ? adopt.key : null;
+    return res.end(seal.script({ key: live }));
   }
   // The frame is sealed under the phone's key: it shows whatever is on the TV, a
   // password on the on-screen keyboard included. The page opens it and shows it.

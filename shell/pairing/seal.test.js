@@ -99,10 +99,14 @@ test("a sealed body is opened with the session key, once; the code never leaves 
 
 function memoryStorage() {
   const m = new Map();
-  return { getItem: (k) => (m.has(k) ? m.get(k) : null), setItem: (k, v) => m.set(k, String(v)) };
+  return {
+    getItem: (k) => (m.has(k) ? m.get(k) : null),
+    setItem: (k, v) => m.set(k, String(v)),
+    removeItem: (k) => m.delete(k),
+  };
 }
 
-function pageSandbox(hash, search, v2, storage) {
+function pageSandbox(hash, search, v2, storage, scriptOpts) {
   const sandbox = {
     location: { hash, search: search || "", pathname: "/", href: "http://box/" + (search || "") + hash },
     history: {
@@ -124,7 +128,7 @@ function pageSandbox(hash, search, v2, storage) {
     crypto: { getRandomValues: (a) => require("crypto").randomFillSync(a) },
   };
   sandbox.self = sandbox;
-  vm.runInNewContext(seal.script(), sandbox);
+  vm.runInNewContext(seal.script(scriptOpts), sandbox);
   return sandbox;
 }
 
@@ -201,9 +205,79 @@ test("the page's own-key primitives match the server's (the phone remote uses th
 test("a v2 page still has its key after a reload in the same tab", () => {
   const key = seal.newKey();
   const store = memoryStorage();
-  const first = pageSandbox("#c=4321&k=" + seal.keyParam(key), "", true, store);
+  const first = pageSandbox("#c=4321&k=" + seal.keyParam(key), "", true, store, { key });
   assert.strictEqual(first.tvboxSeal.sealed, true);
-  const reloaded = pageSandbox("", "", true, store);
+  const reloaded = pageSandbox("", "", true, store, { key });
   assert.strictEqual(reloaded.tvboxSeal.sealed, true);
   assert.strictEqual(reloaded.tvboxSeal.code, "4321");
+});
+
+test("a later session opened in the same tab does not reuse the earlier one's key", () => {
+  const a = seal.newKey();
+  const b = seal.newKey();
+  const store = memoryStorage();
+  pageSandbox("#c=1111&k=" + seal.keyParam(a), "", true, store, { key: a });
+  // Session A is over and B is running; the phone types the short URL in the same tab.
+  const typed = pageSandbox("", "", true, store, { key: b });
+  assert.strictEqual(typed.tvboxSeal.sealed, false, "no key: the page asks for the code");
+  assert.strictEqual(typed.tvboxSeal.code, "");
+  assert.strictEqual(store.getItem("tvboxSeal"), null, "what A left behind is dropped");
+  // With no session at all, a kept key is not used either.
+  pageSandbox("#c=2222&k=" + seal.keyParam(b), "", true, store, { key: b });
+  assert.strictEqual(pageSandbox("", "", true, store, {}).tvboxSeal.sealed, false);
+});
+
+test("forget() drops what the tab kept", () => {
+  const key = seal.newKey();
+  const store = memoryStorage();
+  pageSandbox("#c=4321&k=" + seal.keyParam(key), "", true, store, { key }).tvboxSeal.forget();
+  assert.strictEqual(pageSandbox("", "", true, store, { key }).tvboxSeal.sealed, false);
+});
+
+test("the script carries only a tag of the session key, never the key", () => {
+  const key = seal.newKey();
+  const src = seal.script({ key, keepalive: true });
+  assert.ok(src.includes('__tvboxSealSession="' + seal.sessionTag(key) + '"'));
+  assert.ok(!src.includes(seal.keyParam(key)));
+  assert.strictEqual(seal.sessionTag(null), "");
+  assert.notStrictEqual(seal.sessionTag(key), seal.sessionTag(seal.newKey()));
+});
+
+test("a read with the code does not hold the session open; a keepalive does", async () => {
+  pairing.register(
+    "ttltest",
+    {
+      page: () => "<p>x</p>",
+      routes: { "GET /list": (req, res, ctx) => ctx.json(res, { ok: true }) },
+    },
+    "someapp",
+  );
+  const s = pairing.start("en", "ttltest");
+  try {
+    await listening();
+    const key = new Uint8Array(Buffer.from(fromFragment(s.url, "k"), "base64url"));
+    // Seven wrong codes, then reads with the right one: the count is not reset by a read.
+    for (let i = 0; i < 7; i++) await get("/list?c=0000");
+    assert.strictEqual((await get("/list?c=" + s.code)).status, 200);
+    assert.strictEqual((await get("/list?c=" + s.code)).status, 200);
+    assert.strictEqual((await get("/list?c=0000")).status, 403);
+    // The eighth wrong one ended the session (a kept-alive socket may still get an answer).
+    const after = await get("/list?c=" + s.code).catch(() => ({ status: 0 }));
+    assert.notStrictEqual(after.status, 200);
+  } finally {
+    pairing.stop();
+  }
+  const t = pairing.start("en", "ttltest");
+  try {
+    await listening();
+    const key = new Uint8Array(Buffer.from(fromFragment(t.url, "k"), "base64url"));
+    const page = pageSandbox("", "", true, undefined, {});
+    const signed = page.tvboxSeal.lib.sign(page.tvboxSeal.lib.key(seal.keyParam(key)), "POST", "/tvbox-keepalive", "");
+    assert.strictEqual((await post(signed, "")).status, 204);
+    assert.strictEqual((await post(signed, "")).status, 403, "a keepalive cannot be replayed");
+    assert.strictEqual((await post("/tvbox-keepalive", "")).status, 403, "and needs the key");
+    assert.strictEqual((await get("/list?c=" + t.code)).status, 200, "a refused keepalive is not a code guess");
+  } finally {
+    pairing.stop();
+  }
 });
