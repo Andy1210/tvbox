@@ -122,16 +122,26 @@ function open(sealed, key, seen) {
 //   tvboxSeal.code            the code, from the URL fragment (#c=), or "" for a
 //                             phone that typed the short URL (it asks the person)
 //   tvboxSeal.sealed          true when the page has the session key (#k=)
-//   tvboxSeal.body(obj)       drop-in for JSON.stringify(obj): a sealed body with
-//                             the key, the plain JSON without it. Put the code in obj.
+//   tvboxSeal.param(name)     a value from the opening fragment (#name=...)
+//   tvboxSeal.body(obj, path) drop-in for JSON.stringify(obj): a sealed body with
+//                             the key, the plain JSON without it. Put the code in
+//                             obj. `path` is the route it is POSTed to ("/save");
+//                             it is sealed with the body, so a captured body cannot
+//                             be sent to another route. A v2 provider requires it.
 //   tvboxSeal.url(method, url, body)
 //                             for a request that is NOT sealed (a data GET, a bulk
 //                             upload): `url` is a path starting with "/", `body` the
 //                             exact string that will be sent (omit for a GET). With
 //                             the key it answers url + "n=<nonce>&m=<mac>"; without
-//                             it url + "c=<code>". Send the body unchanged.
+//                             it url + "c=<code>". Send the body unchanged. The url
+//                             is signed as the browser will send it (its URL
+//                             parser escapes characters such as ' in a query).
 //   tvboxSeal.query()         older helper: "c=<code>" without a key; with a key it
 //                             throws, because a bare query cannot be authenticated.
+//
+// A v2 page takes the code and key out of the address bar once it has read them
+// (a screenshot or a shared link would carry them otherwise) and keeps them in
+// sessionStorage, so a reload in the same tab still has them.
 //
 // A page that predates this reads the code from `?c=` and loads the script
 // without data-v="2"; for it the code is copied into the query in place (no
@@ -140,6 +150,23 @@ function open(sealed, key, seen) {
 const PAGE_HELPER = `
 ;(function () {
   var hash = location.hash || "";
+  var me = document.currentScript;
+  var v2 = !!(me && me.getAttribute("data-v") === "2");
+  var store = null;
+  try {
+    store = self.sessionStorage;
+  } catch (e) {}
+  // Kept no longer than a pairing session lasts, so a later short-URL visit in
+  // the same tab does not pick up a key the box has already thrown away.
+  if (v2 && store) {
+    try {
+      if (/[#&]k=/.test(hash)) store.setItem("tvboxSeal", JSON.stringify({ hash: hash, at: Date.now() }));
+      else {
+        var kept = JSON.parse(store.getItem("tvboxSeal") || "null");
+        if (kept && typeof kept.hash === "string" && Date.now() - kept.at < 10 * 60 * 1000) hash = kept.hash;
+      }
+    } catch (e) {}
+  }
   function param(name) {
     var m = new RegExp("[#&]" + name + "=([A-Za-z0-9_-]+)").exec(hash);
     return m ? m[1] : "";
@@ -155,8 +182,7 @@ const PAGE_HELPER = `
     if (key.length !== nacl.secretbox.keyLength) key = null;
   }
   var code = param("c") || new URLSearchParams(location.search).get("c") || "";
-  var me = document.currentScript;
-  var v2 = !!(me && me.getAttribute("data-v") === "2");
+  if (v2 && location.hash) history.replaceState(null, "", location.pathname + location.search);
   if (!v2 && code && !new URLSearchParams(location.search).get("c")) {
     history.replaceState(null, "", location.pathname + "?c=" + encodeURIComponent(code) + hash);
   }
@@ -199,6 +225,8 @@ const PAGE_HELPER = `
     throw new Error("tvboxSeal.url: body must be the string or bytes that will be sent");
   }
   function sign(key, method, url, body) {
+    var u = new URL(url, location.href);
+    url = u.pathname + u.search;
     var signed = url + (url.indexOf("?") < 0 ? "?" : "&") + "n=" + b64url(nacl.randomBytes(12));
     var msg = String(method).toUpperCase() + "\\n" + signed + "\\n" + hex(nacl.hash(bytes(body)));
     return signed + "&m=" + b64url(hmac(key, enc.encode(msg)).subarray(0, ${MAC_BYTES}));
@@ -237,6 +265,9 @@ const PAGE_HELPER = `
   self.tvboxSeal = {
     sealed: !!key,
     code: code,
+    // A value from the fragment the page was opened with (it is no longer in
+    // the address bar by the time the page's own script runs).
+    param: param,
     url: function (method, url, body) {
       url = String(url);
       if (!key) return url + (url.indexOf("?") < 0 ? "?" : "&") + "c=" + encodeURIComponent(code);
@@ -246,9 +277,11 @@ const PAGE_HELPER = `
       if (key) throw new Error("tvboxSeal.query cannot authenticate a request that has the key; use tvboxSeal.url");
       return "c=" + encodeURIComponent(code);
     },
-    body: function (obj) {
+    body: function (obj, path) {
       if (!key) return JSON.stringify(obj);
-      return JSON.stringify({ sealed: sealWith(key, obj) });
+      var bound = Object.assign({}, obj);
+      if (path) bound._r = "POST " + new URL(String(path), location.href).pathname;
+      return JSON.stringify({ sealed: sealWith(key, bound) });
     },
     // The same primitives under a key of the page's own (the phone remote keeps
     // one per phone): sign(key, method, url, body), seal(key, obj) -> base64,

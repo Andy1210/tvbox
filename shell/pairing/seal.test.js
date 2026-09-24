@@ -62,17 +62,27 @@ test("a sealed body is opened with the session key, once; the code never leaves 
     const key = new Uint8Array(Buffer.from(fromFragment(s.url, "k"), "base64url"));
     assert.strictEqual(key.length, seal.KEY_BYTES, "the key is in the fragment");
     assert.strictEqual((await post("/save", { code: s.code, v: 0 })).status, 200, "plain works before a sealed body");
-    const body = { sealed: seal.seal({ code: s.code, password: "hunter2" }, key) };
+    const unbound = { sealed: seal.seal({ code: s.code, password: "hunter2" }, key) };
+    assert.strictEqual((await post("/save", unbound)).status, 400, "a v2 body names its route");
+    const elsewhere = { sealed: seal.seal({ code: s.code, _r: "POST /other" }, key) };
+    assert.strictEqual((await post("/save", elsewhere)).status, 400, "a body sealed for another route");
+    const body = { sealed: seal.seal({ code: s.code, password: "hunter2", _r: "POST /save" }, key) };
     assert.strictEqual((await post("/save", body)).status, 200);
-    assert.deepStrictEqual(got[1], { code: s.code, password: "hunter2" });
+    assert.deepStrictEqual(got[1], { code: s.code, password: "hunter2" }, "the route is not handed on");
     assert.strictEqual((await post("/save", body)).status, 400, "a replay is refused");
     const wrong = { sealed: seal.seal({ code: s.code }, seal.newKey()) };
     assert.strictEqual((await post("/save", wrong)).status, 400);
     assert.strictEqual((await post("/save", { code: s.code, v: 1 })).status, 403, "plain is refused once sealed");
     const page = pageSandbox("#c=" + s.code + "&k=" + seal.keyParam(key), "", true).tvboxSeal;
     assert.strictEqual((await get(page.url("GET", "/list"))).status, 200, "a signed read");
+    // A browser escapes ' in a query; the page signs what it will really send.
+    const quoted = page.url("GET", "/list?name=" + encodeURIComponent("Dad's.jpg"));
+    assert.ok(quoted.includes("%27"), quoted);
+    assert.strictEqual((await get(quoted)).status, 200, "a name with an apostrophe");
     const other = pageSandbox("#k=" + seal.keyParam(seal.newKey()), "", true).tvboxSeal;
-    assert.strictEqual((await get(other.url("GET", "/list"))).status, 403, "signed with another key");
+    for (let i = 0; i < 12; i++)
+      assert.strictEqual((await get(other.url("GET", "/list"))).status, 403, "signed with another key");
+    assert.strictEqual((await get(page.url("GET", "/list"))).status, 200, "a MAC mismatch is not a code guess");
     const chunk = JSON.stringify({ data: "é".repeat(20000) });
     const signed = page.url("POST", "/upload", chunk);
     assert.strictEqual((await post(signed, chunk)).status, 200, "a bulk upload signed over its bytes");
@@ -87,16 +97,23 @@ test("a sealed body is opened with the session key, once; the code never leaves 
   }
 });
 
-function pageSandbox(hash, search, v2) {
+function memoryStorage() {
+  const m = new Map();
+  return { getItem: (k) => (m.has(k) ? m.get(k) : null), setItem: (k, v) => m.set(k, String(v)) };
+}
+
+function pageSandbox(hash, search, v2, storage) {
   const sandbox = {
-    location: { hash, search: search || "", pathname: "/" },
+    location: { hash, search: search || "", pathname: "/", href: "http://box/" + (search || "") + hash },
     history: {
       replaceState(_s, _t, url) {
         const u = new URL(url, "http://box");
         sandbox.location.search = u.search;
+        sandbox.location.hash = u.hash;
         sandbox.replaced = url;
       },
     },
+    sessionStorage: storage || undefined,
     document: { currentScript: { getAttribute: (n) => (n === "data-v" && v2 ? "2" : null) } },
     URLSearchParams,
     URL,
@@ -123,9 +140,9 @@ test("the page helper seals and signs what the server opens and verifies", () =>
   assert.strictEqual(seal.macOk(key, "GET", u, Buffer.from("body")), false, "the method is covered");
   assert.strictEqual(seal.macOk(key, "POST", u.replace("a=1", "a=2"), Buffer.from("body")), false);
   assert.strictEqual(seal.macOk(key, "POST", u, Buffer.from("bodY")), false);
-  assert.strictEqual(page.replaced, undefined, "a current page leaves the URL alone");
-  const wire = JSON.parse(page.tvboxSeal.body({ code: "1234", pass: "é" }));
-  assert.deepStrictEqual(seal.open(wire.sealed, key, new Set()), { code: "1234", pass: "é" });
+  assert.strictEqual(page.replaced, "/", "a v2 page takes the code and key out of the address bar");
+  const wire = JSON.parse(page.tvboxSeal.body({ code: "1234", pass: "é" }, "/save"));
+  assert.deepStrictEqual(seal.open(wire.sealed, key, new Set()), { code: "1234", pass: "é", _r: "POST /save" });
   const plain = pageSandbox("", "?c=1111", true);
   assert.strictEqual(plain.tvboxSeal.body({ a: 1 }), '{"a":1}');
   assert.strictEqual(plain.tvboxSeal.query(), "c=1111");
@@ -179,4 +196,14 @@ test("the page's own-key primitives match the server's (the phone remote uses th
     Buffer.from(lib.openBytes(key, new Uint8Array(seal.sealBytes(frame, k)))).toString(),
     "jpeg bytes",
   );
+});
+
+test("a v2 page still has its key after a reload in the same tab", () => {
+  const key = seal.newKey();
+  const store = memoryStorage();
+  const first = pageSandbox("#c=4321&k=" + seal.keyParam(key), "", true, store);
+  assert.strictEqual(first.tvboxSeal.sealed, true);
+  const reloaded = pageSandbox("", "", true, store);
+  assert.strictEqual(reloaded.tvboxSeal.sealed, true);
+  assert.strictEqual(reloaded.tvboxSeal.code, "4321");
 });

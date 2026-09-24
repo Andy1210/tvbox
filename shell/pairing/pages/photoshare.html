@@ -179,7 +179,7 @@
               await fetch("/pshare-delete", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
-                body: tvboxSeal.body({ code: code(), name: n }),
+                body: tvboxSeal.body({ code: code(), name: n }, "/pshare-delete"),
               });
             } catch (_) {}
             refresh();
@@ -258,7 +258,7 @@
           await fetch("/pshare-clear", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: tvboxSeal.body({ code: code() }),
+            body: tvboxSeal.body({ code: code() }, "/pshare-clear"),
           });
         } catch (_) {}
         say("");

@@ -29,10 +29,12 @@ tvbox is a LAN device with no cloud account. The interesting boundaries:
   on-screen code with lockout + TTL; bypasses matter. The QR code carries the
   code and a per-session key in its URL fragment, which a browser never sends, so
   a phone that scanned it never puts the code on the air: what it writes is
-  sealed (XSalsa20-Poly1305), its reads and bulk uploads (a photo, a ROM chunk)
+  sealed (XSalsa20-Poly1305) together with the route it is meant for, its reads and bulk uploads (a photo, a ROM chunk)
   carry an HMAC under the key over the method, the URL and the body (a write
   also a nonce, so it cannot be replayed), and once the phone has proved the key
-  the session refuses unauthenticated writes. What the box sends back (a list, a
+  the session refuses unauthenticated writes. A read that verifies does not keep
+  the session open (anyone who saw it could replay it), and a MAC that does not
+  verify is not counted as a guess at the code. What the box sends back (a list, a
   thumbnail) is not sealed. This protects against a **passive** observer on
   the same network only. The page itself is served over plain http, so someone
   who can rewrite traffic can serve a page without the sealing. A phone that
@@ -60,7 +62,10 @@ tvbox is a LAN device with no cloud account. The interesting boundaries:
   prove themselves with a per-boot token the shell writes to
   `~/.tvbox/local-token` (0600) and reach reads, plugin routes and the few writes
   they make; a request with no headers at all (mpv fetching a URL, a sandboxed
-  program without access to `~/.tvbox`) gets only the public reads. A service
+  program without access to `~/.tvbox`) gets only the public reads. A stream
+  URL an app hands the player is refused when it points at one of the shell's
+  own servers, but only the URL as written is checked: a redirect or a playlist
+  that leads there later lands as such a header-less request. A service
   worker may be registered only by a local app, inside its own `/<id>/`, and none
   survive a shell start. An app may change the parental PIN, or whether it is
   asked for, only by presenting the current one, and every PIN check is rate

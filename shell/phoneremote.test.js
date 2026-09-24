@@ -427,5 +427,20 @@ test("a phone paired before requests were signed has no key, and is refused unti
   const g = { id: "old1", key: seal.keyParam(seal.newKey()) };
   assert.equal((await spost(g, "/key", { action: "up" })).status, 403);
   assert.deepEqual(b.wrote, []);
-  assert.equal(phoneremote.list().length, 1, "it is still listed, so it can be forgotten");
+  assert.equal(phoneremote.list().length, 0, "it is not listed either: it can never connect");
+});
+
+test("a phone paired before phones held keys is dropped, and does not count toward the limit", async () => {
+  const legacy = { id: "old1", name: "old", tokenHash: "ab".repeat(32), addedAt: 1 };
+  const keyed = { id: "new1", name: "new", key: Buffer.alloc(32, 7).toString("base64url"), addedAt: 2 };
+  const b = await boxUp({ enabled: true, phones: [legacy, keyed] });
+  assert.deepEqual(
+    b.state.phones.map((p) => p.id),
+    ["new1"],
+    "the keyless row is gone from the config",
+  );
+  assert.deepEqual(
+    phoneremote.list().map((p) => p.id),
+    ["new1"],
+  );
 });

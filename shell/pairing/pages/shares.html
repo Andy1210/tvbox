@@ -161,7 +161,7 @@
         var r = await fetch(path, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: tvboxSeal.body(Object.assign({ code: code() }, body)),
+          body: tvboxSeal.body(Object.assign({ code: code() }, body), path),
         });
         return await r.json();
       }

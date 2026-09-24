@@ -138,7 +138,7 @@
               await fetch("/photo-delete", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
-                body: tvboxSeal.body({ code: code(), name: n }),
+                body: tvboxSeal.body({ code: code(), name: n }, "/photo-delete"),
               });
             } catch (_) {}
             load();

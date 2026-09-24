@@ -161,11 +161,11 @@
   </head>
   <body>
     <div id="setup">
-      <h1>Pair this phone</h1>
-      <p class="hint">Enter the four digits shown on the TV.</p>
+      <h1 data-t="pairTitle">Pair this phone</h1>
+      <p class="hint" data-t="pairHint">Enter the four digits shown on the TV.</p>
       <input id="code" inputmode="numeric" pattern="[0-9]*" maxlength="4" placeholder="0000" autocomplete="off" />
-      <input id="name" maxlength="40" placeholder="This phone" autocomplete="off" />
-      <button id="pair">Pair</button>
+      <input id="name" maxlength="40" placeholder="This phone" data-tp="namePh" autocomplete="off" />
+      <button id="pair" data-t="pair">Pair</button>
       <p class="hint" id="setup-msg"></p>
     </div>
 
@@ -182,18 +182,18 @@
         <span></span>
       </div>
       <div class="row">
-        <button data-key="back">Back</button>
-        <button data-key="home">Home</button>
-        <button data-key="playpause">Play</button>
+        <button data-key="back" data-t="back">Back</button>
+        <button data-key="home" data-t="home">Home</button>
+        <button data-key="playpause" data-t="play">Play</button>
       </div>
       <div class="row">
-        <button data-key="volume_down">Vol −</button>
-        <button data-key="mute">Mute</button>
-        <button data-key="volume_up">Vol +</button>
+        <button data-key="volume_down" data-t="volDown">Vol −</button>
+        <button data-key="mute" data-t="mute">Mute</button>
+        <button data-key="volume_up" data-t="volUp">Vol +</button>
       </div>
       <div class="row small">
         <button data-key="rewind">◀◀</button>
-        <button data-key="settings">Settings</button>
+        <button data-key="settings" data-t="settings">Settings</button>
         <button data-key="fastforward">▶▶</button>
       </div>
       <div id="screen">
@@ -211,6 +211,68 @@
       // instead of running a session. It never crosses the network after the
       // adoption: every request is signed with it (tvboxSeal.lib).
       var KEY = "tvbox-remote-v2";
+      // The page is served before anything knows the box's language, so it
+      // follows the phone's.
+      var STR = {
+        en: {
+          title: "tvbox remote",
+          pairTitle: "Pair this phone",
+          pairHint: "Enter the four digits shown on the TV.",
+          namePh: "This phone",
+          pair: "Pair",
+          back: "Back",
+          home: "Home",
+          play: "Play",
+          volDown: "Vol −",
+          mute: "Mute",
+          volUp: "Vol +",
+          settings: "Settings",
+          pairing: "Pairing…",
+          noAnswer: "The box did not answer.",
+          wrongCode: "That code is not the one on the TV.",
+          full: "This box cannot pair another phone.",
+          sendFailed: "The box could not send that.",
+          zoom: "Pinch to zoom, double-tap to reset",
+          notSharing: "The TV is no longer sharing its screen.",
+          pairAgain: "Pair this phone again: the box now asks for a new kind of key.",
+          unpaired: "This phone is no longer paired with the box.",
+        },
+        hu: {
+          title: "tvbox távirányító",
+          pairTitle: "Telefon párosítása",
+          pairHint: "Írd be a TV-n látható négy számjegyet.",
+          namePh: "Ez a telefon",
+          pair: "Párosítás",
+          back: "Vissza",
+          home: "Kezdőlap",
+          play: "Lejátszás",
+          volDown: "Hang −",
+          mute: "Némítás",
+          volUp: "Hang +",
+          settings: "Beállítások",
+          pairing: "Párosítás…",
+          noAnswer: "A box nem válaszolt.",
+          wrongCode: "Ez nem a TV-n látható kód.",
+          full: "Ehhez a boxhoz nem párosítható több telefon.",
+          sendFailed: "A box nem tudta elküldeni.",
+          zoom: "Két ujjal nagyíts, dupla koppintással vissza",
+          notSharing: "A TV már nem osztja meg a képernyőjét.",
+          pairAgain: "Párosítsd újra a telefont: a box most új fajta kulcsot kér.",
+          unpaired: "Ez a telefon már nincs párosítva a boxszal.",
+        },
+      };
+      var LANG = /^hu\b/i.test(navigator.language || "") ? "hu" : "en";
+      function t(k) {
+        return (STR[LANG] && STR[LANG][k]) || STR.en[k] || k;
+      }
+      document.documentElement.lang = LANG;
+      document.title = t("title");
+      document.querySelectorAll("[data-t]").forEach(function (el) {
+        el.textContent = t(el.getAttribute("data-t"));
+      });
+      document.querySelectorAll("[data-tp]").forEach(function (el) {
+        el.setAttribute("placeholder", t(el.getAttribute("data-tp")));
+      });
       var lib = tvboxSeal.lib;
       var me = null; // { id, key: Uint8Array, skew }
       var retired = false;
@@ -230,8 +292,12 @@
       var oneTime = null;
       var fromQr = tvboxSeal.code;
       (function () {
-        var m = /[#&]k=([A-Za-z0-9_-]+)/.exec(location.hash || "");
-        if (m) oneTime = lib.key(m[1]);
+        var k = tvboxSeal.param ? tvboxSeal.param("k") : "";
+        if (!k) {
+          var m = /[#&]k=([A-Za-z0-9_-]+)/.exec(location.hash || "");
+          k = m ? m[1] : "";
+        }
+        if (k) oneTime = lib.key(k);
         if (location.hash) history.replaceState(null, "", location.pathname);
       })();
       function remember() {
@@ -289,18 +355,17 @@
       document.getElementById("pair").addEventListener("click", async function () {
         var code = document.getElementById("code").value.trim();
         var name = document.getElementById("name").value.trim();
-        say(setupMsg, "Pairing…");
+        say(setupMsg, t("pairing"));
         var r;
         var ask = { code: code, name: name };
         try {
           r = await send("/adopt", JSON.stringify(oneTime ? { sealed: lib.seal(oneTime, ask) } : ask));
         } catch (e) {
-          return say(setupMsg, "The box did not answer.", true);
+          return say(setupMsg, t("noAnswer"), true);
         }
-        if (r.status === 403) return say(setupMsg, "That code is not the one on the TV.", true);
+        if (r.status === 403) return say(setupMsg, t("wrongCode"), true);
         var grant = r.body.ok ? (r.body.sealed ? lib.open(oneTime, r.body.sealed) : r.body) : null;
-        if (!grant || !grant.id || !lib.key(grant.key))
-          return say(setupMsg, "This box cannot pair another phone.", true);
+        if (!grant || !grant.id || !lib.key(grant.key)) return say(setupMsg, t("full"), true);
         me = { id: grant.id, key: lib.key(grant.key), raw: grant.key, skew: (grant.now || Date.now()) - Date.now() };
         oneTime = null;
         remember();
@@ -320,12 +385,12 @@
             // rather than leaving a pad that silently does nothing.
             unpair();
           } else if (!r.body.ok) {
-            say(msg, "The box could not send that.", true);
+            say(msg, t("sendFailed"), true);
           } else {
             say(msg, "");
           }
         } catch (e) {
-          say(msg, "The box did not answer.", true);
+          say(msg, t("noAnswer"), true);
         }
         busy = false;
       }
@@ -446,12 +511,12 @@
       function startScreen() {
         if (screenTimer || !me) return;
         screenBox.style.display = "flex";
-        shotcap.textContent = "Pinch to zoom, double-tap to reset";
+        shotcap.textContent = t("zoom");
         var gone = function () {
           // The box stopped sharing (it runs out on its own), or it could not
           // take a picture. Either way there is nothing to show.
           stopScreen();
-          say(msg, "The TV is no longer sharing its screen.");
+          say(msg, t("notSharing"));
         };
         // The frame comes back sealed under this phone's key, so it is fetched,
         // opened here and shown from memory.
@@ -474,7 +539,7 @@
       }
 
       show(!!me);
-      if (retired) say(setupMsg, "Pair this phone again: the box now asks for a new kind of key.", true);
+      if (retired) say(setupMsg, t("pairAgain"), true);
 
       // Asked repeatedly, not once: the TV is where sharing is turned on, so a
       // page that only looked at startup would sit there showing nothing until
@@ -497,7 +562,7 @@
         me = null;
         stopScreen();
         show(false);
-        say(setupMsg, "This phone is no longer paired with the box.", true);
+        say(setupMsg, t("unpaired"), true);
       }
       if (me) watch();
       setInterval(watch, 5000);

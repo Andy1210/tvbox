@@ -500,6 +500,12 @@ function apply(payload) {
       cfg = r.config;
       for (const c of r.changed) console.log("[backup] clone: " + c.path + " " + c.from + " -> " + c.to);
       if (!r.changed.length) console.log("[backup] clone: no identity field needed re-deriving");
+      // A phone paired with the source box holds a key for THAT box. Carried over,
+      // it would drive this one too (and see its screen), so a clone starts with
+      // no phones and no screen sharing; each phone pairs with it on its own.
+      if (cfg.phoneRemote && typeof cfg.phoneRemote === "object") {
+        cfg = { ...cfg, phoneRemote: { ...cfg.phoneRemote, phones: [], screenUntil: 0 } };
+      }
     }
     config.replaceAll(cfg);
   }

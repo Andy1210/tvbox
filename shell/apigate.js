@@ -304,8 +304,22 @@ function ownPorts() {
   return new Set([...OWN_PORTS, ...more.map(Number).filter((n) => Number.isInteger(n) && n > 0)]);
 }
 
+// An IPv4 address written as IPv6 ("::ffff:c0a8:118", which is how the URL
+// parser normalises "[::ffff:192.168.1.24]") is that IPv4 address.
+function unmapped(host) {
+  const hex = /^::ffff:([0-9a-f]{1,4}):([0-9a-f]{1,4})$/.exec(host);
+  if (hex) {
+    const hi = parseInt(hex[1], 16);
+    const lo = parseInt(hex[2], 16);
+    return [hi >> 8, hi & 255, lo >> 8, lo & 255].join(".");
+  }
+  const dotted = /^::ffff:(\d{1,3}(?:\.\d{1,3}){3})$/.exec(host);
+  return dotted ? dotted[1] : host;
+}
+
 function isThisBox(host) {
   if (!host) return false;
+  host = unmapped(host);
   if (host === "localhost" || host.endsWith(".localhost") || host === "0.0.0.0" || host === "::") return true;
   if (/^127\./.test(host) || host === "::1" || /^::ffff:(127\.|7f)/.test(host)) return true;
   return boxNames().includes(host);

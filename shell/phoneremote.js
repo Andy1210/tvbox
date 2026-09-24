@@ -144,10 +144,21 @@ function shareScreen(minutes) {
   return until;
 }
 
-const phones = () => {
+// Only a row with a key is a phone: one written before phones held keys can
+// never sign a request, so it is not listed, not counted toward MAX_PHONES, and
+// dropped from the config when the listener starts. That phone pairs again.
+const hasKey = (p) => !!p && typeof p.key === "string" && p.key.length > 0;
+const allRows = () => {
   const p = deps.rawPhoneRemote().phones;
   return Array.isArray(p) ? p : [];
 };
+const phones = () => allRows().filter(hasKey);
+
+function pruneKeyless() {
+  const rows = allRows();
+  const kept = rows.filter(hasKey);
+  if (kept.length !== rows.length) deps.setPhoneRemote({ phones: kept });
+}
 const enabled = () => !!deps.rawPhoneRemote().enabled;
 
 // What the launcher may show: names and times, never a key.
@@ -198,6 +209,7 @@ function signedBy(req, u, method, raw) {
 
 function start(cb) {
   if (server || !enabled()) return void (cb && cb());
+  pruneKeyless();
   const s = http.createServer(handle);
   server = s;
   let answered = false;

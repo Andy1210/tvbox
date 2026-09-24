@@ -175,7 +175,7 @@
           var r = await fetch("/backup-file", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: tvboxSeal.body({ code: code, password: pw, clone: clone }),
+            body: tvboxSeal.body({ code: code, password: pw, clone: clone }, "/backup-file"),
           });
           var d = await r.json();
           if (!d.ok) throw 0;
@@ -224,7 +224,7 @@
           var r = await fetch("/restore", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: tvboxSeal.body({ code: code, password: pw, envelope: envelope, hostname: host }),
+            body: tvboxSeal.body({ code: code, password: pw, envelope: envelope, hostname: host }, "/restore"),
           });
           var d = await r.json();
           if (d.ok) {

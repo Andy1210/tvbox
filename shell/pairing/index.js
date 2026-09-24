@@ -107,6 +107,11 @@ function codeOk(presented) {
 
 // A request carrying the page's MAC (seal.js). Answers null when it carries none,
 // else whether it verified. A write must also carry a nonce not seen before.
+//
+// A MAC that does not verify is not a guess at the code: a 128-bit MAC cannot be
+// guessed, so a mismatch is a page that signed something other than what it sent,
+// and counting it would turn that into a lockout. A GET can be replayed by
+// whoever saw it, so only a fresh write keeps the session open.
 function signedOk(req, method, raw, u, isWrite) {
   if (!seal.splitMac(req.url)) return null;
   let ok = !!sessionKey && seal.macOk(sessionKey, method, req.url, raw);
@@ -115,12 +120,9 @@ function signedOk(req, method, raw, u, isWrite) {
     if (!n || !/^[A-Za-z0-9_-]{8,32}$/.test(n) || seenNonces.has("n:" + n)) ok = false;
     else seenNonces.add("n:" + n);
   }
-  if (!ok) {
-    failed();
-    return false;
-  }
+  if (!ok) return false;
   sealedSeen = true;
-  proved();
+  if (isWrite) proved();
   return true;
 }
 
@@ -231,6 +233,11 @@ function handle(req, res) {
     if (isSealed) {
       const opened = seal.open(d.sealed, sessionKey, seenNonces);
       if (!opened) return refuse(400, "sealed");
+      // The route the page sealed it for. A v2 page always names it, so a body
+      // lifted off one request cannot be sent to another route.
+      const route = req.method + " " + u.pathname;
+      if (opened._r !== undefined ? opened._r !== route : prov.v2) return refuse(400, "sealed-route");
+      delete opened._r;
       d = opened;
       sealedSeen = true;
       allowed = codeOk(d.code != null ? d.code : u.searchParams.get("c"));

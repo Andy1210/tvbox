@@ -111,7 +111,9 @@ function publicConfig() {
       // /tvbox/api/phoneremote, never from here: a token hash has no business in
       // the config the launcher reads.
       enabled: !!(c.phoneRemote && c.phoneRemote.enabled),
-      paired: Array.isArray(c.phoneRemote && c.phoneRemote.phones) ? c.phoneRemote.phones.length : 0,
+      paired: Array.isArray(c.phoneRemote && c.phoneRemote.phones)
+        ? c.phoneRemote.phones.filter((p) => p && typeof p.key === "string" && p.key).length
+        : 0,
     },
     update: {
       // OTA self-update (updater.js); feed URL itself stays box-local
@@ -549,8 +551,8 @@ function rawKeyboard() {
 }
 
 // The phone remote (phoneremote.js): whether the LAN listener runs at all, and
-// the adopted phones. Raw because the rows carry a token HASH - publicConfig
-// below shows names and times only.
+// the adopted phones. Raw because each row carries the phone's signing KEY -
+// publicConfig below shows names and times only.
 function setPhoneRemote(patch) {
   const c = load();
   c.phoneRemote = { ...c.phoneRemote, ...patch };

@@ -245,3 +245,17 @@ test("an app may add to the parental lock, but taking a group off needs the PIN"
   assert.ok(write({ lockedGroups: null }));
   assert.strictEqual(write({ lockedGroups: [], currentPin: "4321" }), null, "with the PIN it may");
 });
+
+test("the box's own LAN address written as IPv4-mapped IPv6 is still the box", () => {
+  const os = require("os");
+  let ip = null;
+  for (const list of Object.values(os.networkInterfaces()))
+    for (const a of list || []) if (!ip && a.family === "IPv4" && !a.internal) ip = a.address;
+  if (!ip) return; // a host with no LAN address has nothing to map
+  const p = ip.split(".").map(Number);
+  const hex = ((p[0] << 8) | p[1]).toString(16) + ":" + ((p[2] << 8) | p[3]).toString(16);
+  assert.strictEqual(apigate.pointsAtThisBox("http://[::ffff:" + ip + "]:8100/"), true);
+  assert.strictEqual(apigate.pointsAtThisBox("http://[::ffff:" + hex + "]:8098/"), true);
+  assert.strictEqual(apigate.pointsAtThisBox("http://[::ffff:" + hex + "]:8888/"), false, "not a shell port");
+  assert.strictEqual(apigate.pointsAtThisBox("http://[::ffff:8.8.8.8]:8097/"), false, "not the box");
+});
