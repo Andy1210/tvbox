@@ -18,6 +18,10 @@ This LG TV quirks (discovered empirically):
   - Colored / Home / Menu buttons are NOT forwarded at all.
   - Every press emits press+release within ~70 ms regardless of how long it is
     physically held -> long-press is undetectable.
+A TV that follows the spec repeats the press while a button is held and sends
+the release when it is let go; there the key is held down in uinput for the
+whole hold (see Bridge.on_press), so what the client sees is one press and its
+own autorepeat, never a string of fresh presses.
 So Home is derived from a DOUBLE TAP of Back: single tap = Back (Esc), two taps
 within 0.4 s = Home (the first tap's Back is harmless wherever it lands).
 
@@ -94,6 +98,14 @@ DOUBLE_TAP_S = 0.4
 CEC_OSD_NAME = os.environ.get("TVBOX_CEC_OSD", "tvbox")
 CEC_CLIENT = ["cec-client", "-t", "p", "-o", CEC_OSD_NAME, "-d", "8"]
 RX_PRESS = re.compile(r">> [0-9a-f]{2}:44:([0-9a-f]{2})", re.IGNORECASE)
+# <User Control Released> (opcode 0x45, no operand): the button went up.
+RX_RELEASE = re.compile(r">> [0-9a-f]{2}:45(?![:0-9a-f])", re.IGNORECASE)
+# A TV that follows the spec repeats <User Control Pressed> every 200-500 ms while
+# a button is held, and sends <User Control Released> when it is let go. A
+# repeat is the SAME key still down, not a new press, so the key stays down in
+# uinput and the client's own autorepeat marks what follows as a repeat. With
+# no repeat and no release for this long, the button is taken as let go.
+HOLD_GAP_S = 0.6
 # TV vendor ID broadcast (<Device Vendor ID>, opcode 0x87). Trust only the TV:
 # initiator 0 - or 14 ("free use"), which LG sets use for SIMPLINK chatter.
 RX_TV_VENDOR = re.compile(r">> [0e]f:87:([0-9a-f]{2}):([0-9a-f]{2}):([0-9a-f]{2})", re.IGNORECASE)
@@ -308,12 +320,23 @@ class TVState:
 
 
 class Bridge:
-    def __init__(self, ui: UInput) -> None:
+    def __init__(self, ui: UInput, clock=time.monotonic, timer=threading.Timer) -> None:
         self.ui = ui
         self.last_back_ts = 0.0
         # Set from the shell over CEC_CMD_FIFO while a native app is in front: Home
         # then becomes an HTTP request instead of a key (see tap()).
         self.native = False
+        self.clock = clock
+        self.timer = timer
+        self.lock = threading.Lock()   # the release timer writes from its own thread
+        self.held_code = None          # CEC code of the button taken as still down
+        self.held_key = None           # the uinput key held for it (None for Back)
+        self.last_ucp = 0.0
+        self.release_timer = None
+        # Whether this TV sends <User Control Released> at all. Until it has, every
+        # press is a tap of its own, as before: without the release message a repeat
+        # cannot be told from a quick second press, and a Back double tap is Home.
+        self.seen_release = False
 
     def tap(self, key: int) -> None:
         if self.native and key == HOME_KEY:
@@ -327,20 +350,81 @@ class Bridge:
         self.ui.write(e.EV_KEY, key, 0)
         self.ui.syn()
 
-    def on_press(self, code: int) -> None:
+    def _release_locked(self) -> None:
+        if self.release_timer is not None:
+            self.release_timer.cancel()
+            self.release_timer = None
+        if self.held_key is not None:
+            self.ui.write(e.EV_KEY, self.held_key, 0)
+            self.ui.syn()
+        self.held_code = None
+        self.held_key = None
+
+    def _arm_release_locked(self) -> None:
+        if self.release_timer is not None:
+            self.release_timer.cancel()
+        t = self.timer(HOLD_GAP_S, lambda: self._expire(t))
+        t.daemon = True
+        t.start()
+        self.release_timer = t
+
+    def _expire(self, t) -> None:
+        # Only the timer still armed may let go: one that fired while a repeat was
+        # re-arming would otherwise release a button that is still held.
+        with self.lock:
+            if self.release_timer is t:
+                self.release_timer = None
+                self._release_locked()
+
+    def on_release(self) -> None:
+        with self.lock:
+            self.seen_release = True
+            self._release_locked()
+
+    def _back(self, now: float) -> None:
+        self.tap(BACK_KEY)                       # always Back, immediately
+        if now - self.last_back_ts <= DOUBLE_TAP_S:
+            print("double-tap Back -> HOME", flush=True)
+            self.tap(HOME_KEY)
+            self.last_back_ts = 0.0              # avoid triple-trigger
+        else:
+            self.last_back_ts = now
+
+    def _tap_press(self, code: int, now: float) -> None:
         if code == BACK_CODE:
-            now = time.monotonic()
-            self.tap(BACK_KEY)                       # always Back, immediately
-            if now - self.last_back_ts <= DOUBLE_TAP_S:
-                print("double-tap Back -> HOME", flush=True)
-                self.tap(HOME_KEY)
-                self.last_back_ts = 0.0              # avoid triple-trigger
-            else:
-                self.last_back_ts = now
+            self._back(now)
             return
         key = KEYMAP.get(code)
         if key is not None:
             self.tap(key)
+
+    def on_press(self, code: int) -> None:
+        with self.lock:
+            now = self.clock()
+            if not self.seen_release:
+                self._tap_press(code, now)
+                return
+            repeat = code == self.held_code and now - self.last_ucp <= HOLD_GAP_S
+            self.last_ucp = now
+            if repeat:
+                # The same button, still held: nothing new happens, it only stays down.
+                self._arm_release_locked()
+                return
+            self._release_locked()
+            if code == BACK_CODE:
+                self._back(now)
+                # Held, it is still one Back: a repeat must not read as a double tap.
+                self.held_code = code
+                self._arm_release_locked()
+                return
+            key = KEYMAP.get(code)
+            if key is None:
+                return
+            self.ui.write(e.EV_KEY, key, 1)
+            self.ui.syn()
+            self.held_code = code
+            self.held_key = key
+            self._arm_release_locked()
 
 
 def keep_active_source(proc: subprocess.Popen, tv: TVState) -> None:
@@ -518,6 +602,9 @@ def main() -> None:
             mp = RX_PRESS.search(line)
             if mp:
                 bridge.on_press(int(mp.group(1), 16))
+                continue
+            if RX_RELEASE.search(line):
+                bridge.on_release()
                 continue
             mv = RX_TV_VENDOR.search(line)
             if mv:
