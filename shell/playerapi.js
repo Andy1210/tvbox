@@ -106,7 +106,16 @@ function handle(senderId, action, payload) {
       return { ok: false, error: "player not permitted (a background app may only queue sound)" };
     }
     const target = queueTarget(payload.url);
-    if (!target) return { ok: false, error: "not a playable url" };
+    if (!target) {
+      // The refused url replaces what was staged: a play after this must not
+      // launch the item queued before it, which the caller already moved on from.
+      queued.url = null;
+      queued.local = false;
+      queued.startPos = 0;
+      queued.streams = null;
+      queued.kind = null;
+      return { ok: false, error: "not a playable url" };
+    }
     queued.url = payload.url;
     queued.local = target === "local";
     queued.startPos = payload.startPos || 0;

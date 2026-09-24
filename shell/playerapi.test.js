@@ -352,3 +352,15 @@ test("a stream aimed at the box itself is refused, since mpv would fetch it as t
     assert.strictEqual(playerapi.queueTarget(bad), null, bad);
   assert.strictEqual(playerapi.queueTarget("http://media.example/a.mkv"), "net");
 });
+
+test("a refused url empties the queue, so the next play launches nothing stale", () => {
+  const { log } = boot();
+  playerapi.handle("plex", "queue", { url: "http://media.example/a.mkv" });
+  assert.deepEqual(playerapi.handle("plex", "queue", { url: "http://127.0.0.1:8097/x" }), {
+    ok: false,
+    error: "not a playable url",
+  });
+  playerapi.handle("plex", "play");
+  assert.ok(!log.some((l) => l[0] === "launch"), "the earlier item must not start");
+  assert.strictEqual(playerapi.queued.url, null);
+});
