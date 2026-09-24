@@ -829,7 +829,7 @@
     "shared": "shared",
     "notShared": "no",
     "noFolders": "Nothing to share.",
-    "warnTvbox": "holds the box's settings and the apps' logins",
+    "warnTvbox": "the box's own files: settings and logins stay hidden, but anything written here changes the box",
     "installRclone": "Install rclone (it does the serving)",
     "installing": "installing...",
     "err": {

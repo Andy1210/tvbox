@@ -829,7 +829,7 @@
     "shared": "megosztva",
     "notShared": "nincs",
     "noFolders": "Nincs megosztható mappa.",
-    "warnTvbox": "a box beállításai és az appok bejelentkezései is benne vannak",
+    "warnTvbox": "a box saját fájljai: a beállítások és a bejelentkezések rejtve maradnak, de ami ide kerül, az a boxot változtatja meg",
     "installRclone": "Az rclone telepítése (ez szolgálja ki)",
     "installing": "telepítés...",
     "err": {

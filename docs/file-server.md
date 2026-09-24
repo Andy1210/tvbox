@@ -28,11 +28,19 @@ Discovered, not listed - a folder a future app introduces shows up on its own:
 | `~/.tvbox/*`      | user content, with the box's own machinery filtered out by name | `screensaver`, `games`                                                                 |
 | `~/*`             | the box user's own folders, when there are any                  | `Videos`                                                                               |
 | `~/.var/app/*`    | each installed flatpak app's data dir                           | `RetroArch` - and inside it `config/retroarch/system`, where a core looks for its BIOS |
-| `~/.tvbox` itself | offered, and flagged in the UI                                  | it holds `config.json` and the apps' logins                                            |
+| `~/.tvbox` itself | offered, and flagged in the UI                                  | its secrets are excluded, but it can be written to                                     |
 
 The machinery filter (`MACHINERY` in `shell/fileserver.js`) is the inverse of a list
 of shareable folders: `shell`, `shell-userdata`, `versions`, `update`, `bin`,
 `apps`, `apps-data`, `cache` and friends stay out, everything else is offered.
+
+When `~/.tvbox` itself is shared, the secrets in it are left out of what rclone
+serves (`SECRET_PATTERNS` in `shell/fileserver.js`, passed as `--exclude` rules):
+`config.json` and its snapshots, the local token, the update keys, the apps' stores
+and logins, the restore files, and every top-level file or folder the box keeps
+private (no group or other permission bits). They are not listed and cannot be read.
+They can still be overwritten by a client that names them, and the share holds the
+box's own code, so treat its password like root on the box.
 
 Two folders can share a name (`~/Videos` and `~/.tvbox/Videos`); the second one gets a
 `-2` suffix rather than replacing the first. That is settled when the folder is
