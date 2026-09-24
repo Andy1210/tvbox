@@ -136,6 +136,54 @@ const RESERVED_STATE_FILES = new Set([
   // `backup.state` could name it and a restore would write it - handing the next
   // boot a debug endpoint. Same pair of gates as every other shell-owned path.
   "debug-port",
+  // Every other name the shell itself keeps in ~/.tvbox that an app id could
+  // prefix. They carry a hyphen, so `<id>-` alone does not close them: an app
+  // called "local" could otherwise name local-token, one called "remote" the
+  // remote bridge's device list.
+  "local-token",
+  "remote-devices.json",
+  "remote-learned.json",
+  "mqtt-last-id",
+  "crash-notice",
+  "config-snapshots",
+  "update-keys",
+  "shell-userdata",
+  "firetv-ir.sock",
+  "gamebox-share.json",
+  "voice-notes",
+  "native-sleeper.log",
+  "librespot-cache",
+  "recover.sh",
+  // And the files a release lays down flat in ~/.tvbox (deploy/infra.list):
+  // install.test.js checks every one of them is here.
+  "run-shell.sh",
+  "tvbox-diag.sh",
+  "tvbox-safemode.sh",
+  "install-libcec8.sh",
+  "install-compositor.sh",
+  "tvbox-session",
+  "tvbox-cec.service",
+  "tvbox-remote.service",
+  "tvbox-gamepad.service",
+  "tvbox-voice.service",
+  "tvbox-flatpak-update.service",
+  "tvbox-flatpak-update.timer",
+  "tvbox-diag.service",
+  "tvbox-diag.timer",
+  "tvbox-safemode.service",
+  "tvbox-safemode-screen.service",
+  "tvbox-miracast",
+  "tvbox-miracast.service",
+  "52-tvbox-miracast.rules",
+  "tvbox-radio",
+  "tvbox-radio@.service",
+  "tvbox-sysupdate",
+  "tvbox-sysupdate.service",
+  "54-tvbox-sysupdate.rules",
+  "release-key.pem",
+  "greetd-tvbox-safemode.conf",
+  "coredump-tvbox-runtimemax.conf",
+  "journald-tvbox-persistent.conf",
 ]);
 
 // A ~/.tvbox/ sidecar an app may claim as its own in `backup.state`: one flat file
@@ -201,6 +249,22 @@ const PROTECTED_UNITS = [
   /^fail2ban/,
   /^dhcpcd/,
   /^modemmanager/,
+  // What keeps the box itself running: the seat the compositor sits on, the
+  // clock, the hardware watchdog, the firmware updater and the logs.
+  /^seatd/,
+  /^rpi-/,
+  /^raspberrypi/,
+  /^watchdog/,
+  /^chrony/,
+  /^ntp/,
+  /^openntpd/,
+  /^fake-hwclock/,
+  /^rsyslog/,
+  /^syslog/,
+  /^logrotate/,
+  /^dphys-swapfile/,
+  /^zram/,
+  /^rng-tools/,
 ];
 // What disableService is for: a package the app has apt install ships a daemon
 // the shell supervises itself, and that package's own unit has to be stopped. So

@@ -369,6 +369,24 @@ test("every shell sidecar the backup carries is reserved against apps", () => {
   }
 });
 
+test("every file a release lays down in ~/.tvbox is reserved against apps", () => {
+  const list = fs.readFileSync(path.join(__dirname, "..", "deploy", "infra.list"), "utf8");
+  const names = list
+    .split("\n")
+    .map((l) => l.trim())
+    .filter((l) => l && !l.startsWith("#"))
+    .map((l) => path.basename(l));
+  assert.ok(names.length > 10, "infra.list parsed short");
+  for (const name of names) {
+    // A name with no hyphen cannot satisfy the `<id>-` prefix at all.
+    if (!name.includes("-")) continue;
+    assert.ok(apps.RESERVED_STATE_FILES.has(name), name + " ships in ~/.tvbox but is not reserved in install.js");
+  }
+  for (const name of ["local-token", "remote-devices.json", "mqtt-last-id", "crash-notice", "config-snapshots"]) {
+    assert.strictEqual(apps.stateFileOk(name.split("-")[0], name), false, name);
+  }
+});
+
 // backup.state names files in ~/.tvbox/ next to config.json, so the id prefix is
 // the whole boundary: without it a manifest could ask for the shell's secrets.
 test("backup.state may only name the app's own id-prefixed sidecars", () => {
@@ -901,6 +919,12 @@ test("requires.disableService names only a unit of the app's own apt packages", 
   ]) {
     const m = { ...WEB_BASE, requires: { apt, disableService: [svc] } };
     assert.equal(apps.validateManifest(m, "t"), null, svc);
+  }
+  // What keeps the box itself running, even when a package of the app's own is
+  // named after it.
+  for (const unit of ["seatd", "rpi-eeprom-update", "watchdog", "chrony", "rsyslog", "fake-hwclock"]) {
+    const m = { ...WEB_BASE, requires: { apt: [unit], disableService: [unit + ".service"] } };
+    assert.equal(apps.validateManifest(m, "t"), null, unit);
   }
   const stranger = { ...WEB_BASE, requires: { apt: ["raspotify"], disableService: ["nginx"] } };
   assert.equal(apps.validateManifest(stranger, "t"), null, "a unit no package of its own ships");
