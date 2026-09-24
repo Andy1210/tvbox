@@ -62,6 +62,19 @@ test("a guard that names no route in the table throws, rather than guarding noth
   assert.throws(() => plugins.guardList({ guard: ["GET /state"] }, undefined), /names no route/);
 });
 
+test("a plugin that declares no public routes is a legacy table; an empty list closes all of them", () => {
+  const table = { "GET /auth/callback": () => {}, "POST /event": () => {} };
+  assert.strictEqual(plugins.publicList(undefined, table), null);
+  assert.strictEqual(plugins.publicList({ guard: [] }, table), null);
+  assert.deepEqual(plugins.publicList({ public: [] }, table), []);
+  assert.deepEqual(plugins.publicList({ public: ["GET /auth/callback", "POST /event"] }, table), [
+    "GET /auth/callback",
+    "POST /event",
+  ]);
+  assert.throws(() => plugins.publicList({ public: ["GET /auth/Callback"] }, table), /names no route/);
+  assert.throws(() => plugins.publicList({ public: "GET /auth/callback" }, table), /must be an array/);
+});
+
 test("a guard has to be an array, and may only name a GET", () => {
   const table = { "GET /a": () => {}, "POST /b": () => {} };
   assert.throws(() => plugins.guardList({ guard: "GET /a" }, table), /must be an array/);

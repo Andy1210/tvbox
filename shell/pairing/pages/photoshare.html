@@ -134,11 +134,11 @@
         countEl = document.getElementById("count"),
         grid = document.getElementById("grid"),
         clearBtn = document.getElementById("clear");
-      function q(p) {
-        // A scanned page authenticates reads and uploads with the token its key
-        // gives it, so the code never crosses the network; a typed one uses the code.
-        var auth = tvboxSeal.sealed ? tvboxSeal.query() : "c=" + encodeURIComponent(code());
-        return p + (p.indexOf("?") < 0 ? "?" : "&") + auth;
+      // A scanned page signs its reads and uploads with its key, so the code never
+      // crosses the network; a typed one sends the code it was given.
+      function q(p, method, body) {
+        if (tvboxSeal.sealed) return tvboxSeal.url(method || "GET", p, body);
+        return p + (p.indexOf("?") < 0 ? "?" : "&") + "c=" + encodeURIComponent(code());
       }
       function say(text, bad) {
         st.textContent = text;
@@ -169,7 +169,7 @@
           var img = document.createElement("img");
           // A tile, not the photo: the box renders these small, and the phone is
           // on wifi looking at thirty of them.
-          img.src = q("/pshare-img") + "&name=" + encodeURIComponent(n);
+          img.src = q("/pshare-img?name=" + encodeURIComponent(n));
           img.loading = "lazy";
           var b = document.createElement("button");
           b.textContent = "✕";
@@ -233,10 +233,11 @@
           var data = await resize(files[i]);
           if (!data) continue;
           try {
-            var r = await fetch(q("/pshare"), {
+            var body = JSON.stringify({ name: files[i].name, data: data });
+            var r = await fetch(q("/pshare", "POST", body), {
               method: "POST",
               headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ name: files[i].name, data: data }),
+              body: body,
             });
             if (r.ok) ok++;
             else if (r.status === 507) full = true;

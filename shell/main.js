@@ -678,6 +678,7 @@ function serve() {
         method,
         path: p,
         pluginOwner: route ? route.owner : undefined,
+        pluginOpen: route ? route.open : undefined,
         caps: caller.kind === "app" ? capsFor(caller.id) : [],
         body,
         pairingOwner: pairing.ownerOf,

@@ -309,3 +309,14 @@ test("an images-only root serves a picture, sandboxed, and nothing that could ru
   assert.strictEqual(res.headers["X-Content-Type-Options"], "nosniff");
   assert.match(res.headers["Content-Security-Policy"], /sandbox/);
 });
+
+test("a route says whether an unidentified caller may reach it", () => {
+  const fn = () => {};
+  const routes = [
+    { id: "a", prefix: "/tvbox/api/a", table: { "GET /cb": fn, "GET /list": fn }, open: ["GET /cb"] },
+    { id: "b", prefix: "/tvbox/api/b", table: { "POST /event": fn } },
+  ];
+  assert.strictEqual(httpserver.resolvePluginRoute(routes, "GET", "/tvbox/api/a/cb").open, true);
+  assert.strictEqual(httpserver.resolvePluginRoute(routes, "GET", "/tvbox/api/a/list").open, false);
+  assert.strictEqual(httpserver.resolvePluginRoute(routes, "POST", "/tvbox/api/b/event").open, "legacy");
+});

@@ -720,6 +720,22 @@ answers 403 and the sign-in window simply sits there. It looks exactly like "a
 read that spends something", which is the trap. The gate is for reads your OWN
 page makes.
 
+**Declare which routes a caller the shell cannot identify may reach.** Your own
+app window, the launcher and the box's own processes are identified; a sign-in
+popup landing on your OAuth callback, a daemon of yours calling back without the
+local token, mpv and a sandboxed program on loopback are not. List what they may
+call, and everything else of yours is refused to them:
+
+```js
+host.registerRoutes("/tvbox/api/myapp", table, { public: ["GET /auth/callback"] });
+```
+
+`public: []` closes all of them. A plugin that declares nothing keeps the
+behaviour it was written against, every route open to such a caller, so declare
+it: the list is what keeps a program on loopback from reading your routes. A
+daemon of your own is better off sending the local token (`X-Tvbox-Local`, read
+from `~/.tvbox/local-token`) than being listed.
+
 A guard entry that names no `GET` in the same table is a mistake the shell
 refuses: `registerRoutes` throws and your plugin does not load, with the bad key
 in the log. The quiet alternative would be the very bug the option exists to
@@ -751,7 +767,7 @@ registry's merge review exists for - there is no sandbox here.
 | `config`                                                                         | The config store (`rawSpotify`/`setSpotify`/`publicConfig`, …). **Read config through this, never by requiring a core config module.**                                                                                                                                                                                                              |
 | `json(res, obj)`                                                                 | Write a JSON response.                                                                                                                                                                                                                                                                                                                              |
 | `log(...args)`                                                                   | Prefixed console logging, into `~/.tvbox/shell.log`.                                                                                                                                                                                                                                                                                                |
-| `registerRoutes(prefix, table, opts)`                                            | HTTP routes, keyed `"METHOD /subpath"`. Call from the factory, before the server starts. `opts.guard` lists the GET keys that need the same-origin gate - see above.                                                                                                                                                                                |
+| `registerRoutes(prefix, table, opts)`                                            | HTTP routes, keyed `"METHOD /subpath"`. Call from the factory, before the server starts. `opts.guard` lists the GET keys that need the same-origin gate, `opts.public` the keys an unidentified caller may reach - see above.                                                                                                                       |
 | `onConfigChange(cb)`                                                             | `cb(sections)` after a config write. Tagged with your app, so unloading the plugin removes it - an untagged listener would survive its plugin and start a daemon nothing is left to stop.                                                                                                                                                           |
 | `switchOn(key)`                                                                  | The value in force for one of your manifest's own `switches`. Scoped: a plugin reading another app's settings is not a thing this API allows.                                                                                                                                                                                                       |
 | `spawnService(name, spec)` / `stopService(name)` / `restartService(name, delay)` | A supervised child process.                                                                                                                                                                                                                                                                                                                         |
@@ -790,17 +806,33 @@ listening socket. A `stop` that throws leaves whatever it held until a restart.
 
 ### A phone pairing page
 
-The QR code opens `http://<box>:8099/#c=<code>&k=<key>`: the code and a
-per-session key travel in the fragment, which never reaches the network. A page
-loads `<script src="/tvbox-seal.js" data-v="2"></script>` and then uses
-`tvboxSeal.code` for the code, `tvboxSeal.body({ code, ... })` in place of
-`JSON.stringify` for every write (it seals the body when the page has the key),
-and `tvboxSeal.query()` as the query string of a data GET or a bulk upload
-(`t=<token>` with the key, `c=<code>` without). Mark a route that takes large
-plain bodies (a photo, a file chunk) `{ bulk: true }`: it accepts the query token,
-while every other write in a session that has sent one sealed body must be sealed
-too. A page without `data-v="2"` gets the code copied into `?c=` so it keeps
-working, and keeps sending the code in clear.
+Register the kind with `v2: true` once its page follows this contract:
+
+```js
+host.pairing.register("mykind", { v2: true, page: (ctx) => ctx.render(...), routes: { ... } });
+```
+
+The QR code then opens `http://<box>:8099/#c=<code>&k=<key>`: the code and a
+per-session key travel in the fragment, which never reaches the network. The page
+loads `<script src="/tvbox-seal.js" data-v="2"></script>` and uses:
+
+| Helper                               | What it is                                                                                                                                                                                                                                                      |
+| ------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `tvboxSeal.code`                     | The code, or `""` on a phone that typed the short URL (ask the person for it then).                                                                                                                                                                             |
+| `tvboxSeal.sealed`                   | Whether the page has the key.                                                                                                                                                                                                                                   |
+| `tvboxSeal.body({ code, ... })`      | In place of `JSON.stringify` for every write: sealed with the key, plain without.                                                                                                                                                                               |
+| `tvboxSeal.url(method, path, body?)` | For a request that is not sealed - a data GET, or a write to a `{ bulk: true }` route. `path` starts with `/`; `body` is the exact string you will send. Returns the URL to fetch, signed with the key (`n=`, `m=` appended) or carrying `c=<code>` without it. |
+
+A route that takes large plain bodies (a photo, a file chunk) is marked
+`{ bulk: true }`; every other write carries a sealed body. Once the phone has
+proved the key, an unauthenticated write is refused. A bulk handler should not
+replace an existing file: a MAC stops a stranger from forging an upload, but an
+upload that can overwrite is still the one write that destroys something.
+
+A kind registered without `v2` keeps working as before: its QR carries the code
+in the query too (`/?c=<code>#k=<key>`), so a page that reads `location.search`
+finds it, and it sends the code in clear. An empty code is never counted as a
+wrong one.
 
 ## App lifecycle
 

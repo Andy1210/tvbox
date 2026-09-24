@@ -30,12 +30,16 @@ tvbox is a LAN device with no cloud account. The interesting boundaries:
   code and a per-session key in its URL fragment, which a browser never sends, so
   a phone that scanned it never puts the code on the air: what it writes is
   sealed (XSalsa20-Poly1305), its reads and bulk uploads (a photo, a ROM chunk)
-  carry a token derived from the key, and once one sealed body has arrived the
-  session refuses plain writes. This protects against a **passive** observer on
+  carry an HMAC under the key over the method, the URL and the body (a write
+  also a nonce, so it cannot be replayed), and once the phone has proved the key
+  the session refuses unauthenticated writes. What the box sends back (a list, a
+  thumbnail) is not sealed. This protects against a **passive** observer on
   the same network only. The page itself is served over plain http, so someone
   who can rewrite traffic can serve a page without the sealing. A phone that
   typed the short URL has no key and sends the code and its bodies in clear,
-  which is the accepted limit, and so do app pages that predate the sealing.
+  which is the accepted limit, and so do app pages that predate the sealing
+  (their provider did not register as `v2`, so their QR carries the code in the
+  query as well).
 - **The phone remote** (`:8100`, LAN) - a paired phone holds a token of its own
   (stored hashed on the box). Its traffic, text typed into on-screen fields
   included, is plain http and not sealed; do not type a password through it on a

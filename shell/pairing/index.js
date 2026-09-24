@@ -9,7 +9,13 @@
 // gate, QR/URL, and a page-template renderer. The actual pages are APP-SPECIFIC
 // and live in pairing/<kind>.js providers (with pages/<kind>.html), registered
 // via register() - core registers the built-in ones, plugins register theirs.
-// A provider is { page(ctx) -> html, routes: { "METHOD /sub": handler | {handler,maxBody,bulk} } }.
+// A provider is { page(ctx) -> html, routes: { "METHOD /sub": handler | {handler,maxBody,bulk} }, v2? }.
+//
+// `v2: true` says the provider's page follows the seal.js contract: it reads the
+// code from the URL fragment and authenticates every request itself. The QR then
+// carries the code only in the fragment. A provider without it (a page written
+// before) gets the code in the query as well, which is where such a page reads it.
+// The shell's own providers are all v2.
 const http = require("http");
 const fs = require("fs");
 const path = require("path");
@@ -31,7 +37,12 @@ const providers = new Map();
 function register(kind, provider, owner) {
   if (!kind || !provider || typeof provider.page !== "function")
     throw new Error("pairing.register: bad provider for '" + kind + "'");
-  providers.set(kind, { page: provider.page, routes: provider.routes || {}, owner: owner || null });
+  providers.set(kind, {
+    page: provider.page,
+    routes: provider.routes || {},
+    owner: owner || null,
+    v2: provider.v2 === true || !owner,
+  });
 }
 
 // The kind start() would really open for `kind`, the same fallback included.
@@ -53,51 +64,64 @@ let activeKind = null;
 let activeLocale = "en";
 let pageOpened = false;
 let sessionKey = null; // this session's sealing key; travels only in the QR URL fragment
-let seenNonces = new Set(); // sealed bodies already accepted, so one cannot be replayed
-let sessionToken = null; // derived from the key: what data GETs and bulk uploads carry
-let sealedSeen = false; // this session's phone has the key, so plain coded writes are refused
+let seenNonces = new Set(); // sealed bodies and signed writes already accepted, so one cannot be replayed
+let sealedSeen = false; // this session's phone has proved the key, so unauthenticated plain writes are refused
 
 function armTimeout() {
   if (timer) clearTimeout(timer);
   timer = setTimeout(stop, TTL_MS);
 }
 
-// Timing-safe code check that gates every write (and data GETs). A correct code
-// extends the window (active use); wrong codes DON'T (so an attacker can't hold
-// it open) and trip a lockout after MAX_FAILS - the 4-digit code alone is
-// guessable, the lockout + short TTL is what makes it safe.
-function codeOk(presented) {
-  if (!code) return false;
-  const a = Buffer.from(String(presented || ""));
-  const b = Buffer.from(code);
-  const good = a.length === b.length && crypto.timingSafeEqual(a, b);
-  if (good) {
-    fails = 0;
-    armTimeout();
-    return true;
-  }
+// A wrong answer counts toward the lockout: the 4-digit code alone is guessable,
+// the lockout + short TTL is what makes it safe.
+function failed() {
   if (++fails >= MAX_FAILS) {
     console.warn("[pairing] too many wrong codes - stopping");
     stop();
   }
+}
+
+// A request that proved itself extends the window (active use); wrong ones DON'T,
+// so an attacker cannot hold it open.
+function proved() {
+  fails = 0;
+  armTimeout();
+}
+
+// Timing-safe code check. An EMPTY code is not an attempt: a page that could not
+// find the code (an older page opened from a URL that carries it elsewhere) would
+// otherwise lock the session out by loading its own lists.
+function codeOk(presented) {
+  if (!code) return false;
+  const p = presented == null ? "" : String(presented);
+  if (!p) return false;
+  const a = Buffer.from(p);
+  const b = Buffer.from(code);
+  if (a.length === b.length && crypto.timingSafeEqual(a, b)) {
+    proved();
+    return true;
+  }
+  failed();
   return false;
 }
 
-// The request-level credential a data GET or a bulk upload carries: the token a
-// scanned page derives from its key, or the code for a page that has none.
-function queryOk(q) {
-  const t = q.get("t");
-  if (t != null && sessionToken) {
-    const a = Buffer.from(String(t));
-    const b = Buffer.from(sessionToken);
-    if (a.length === b.length && crypto.timingSafeEqual(a, b)) {
-      fails = 0;
-      armTimeout();
-      return true;
-    }
-    return codeOk(null); // a wrong token counts as a wrong code
+// A request carrying the page's MAC (seal.js). Answers null when it carries none,
+// else whether it verified. A write must also carry a nonce not seen before.
+function signedOk(req, method, raw, u, isWrite) {
+  if (!seal.splitMac(req.url)) return null;
+  let ok = !!sessionKey && seal.macOk(sessionKey, method, req.url, raw);
+  if (ok && isWrite) {
+    const n = u.searchParams.get("n");
+    if (!n || !/^[A-Za-z0-9_-]{8,32}$/.test(n) || seenNonces.has("n:" + n)) ok = false;
+    else seenNonces.add("n:" + n);
   }
-  return codeOk(q.get("c"));
+  if (!ok) {
+    failed();
+    return false;
+  }
+  sealedSeen = true;
+  proved();
+  return true;
 }
 
 // Render a page template file with {{token}} substitution (missing token -> "").
@@ -156,14 +180,14 @@ function handle(req, res) {
   }
   const handler = typeof entry === "function" ? entry : entry.handler;
   const maxBody = (typeof entry === "object" && entry.maxBody) || DEFAULT_MAX_BODY;
-  // A bulk route (a photo, a ROM chunk) takes plain bodies authenticated by the
-  // query, because sealing megabytes twice over on a phone buys nothing for data
-  // that is not a secret. An app's route that raises its body cap and predates
-  // the flag is treated the same way, so its uploads keep working.
-  const bulk = typeof entry === "object" && (entry.bulk === true || (prov.owner && entry.maxBody > DEFAULT_MAX_BODY));
+  // A bulk route (a photo, a ROM chunk) takes a plain body authenticated by the
+  // page's MAC, because sealing megabytes twice over on a phone buys little.
+  // Only a route that says so: anything else carries its body sealed.
+  const bulk = typeof entry === "object" && entry.bulk === true;
   if (req.method === "GET") {
-    // data GET (e.g. list/thumbnail): gate by the session token or the ?c= code
-    if (!queryOk(u.searchParams)) {
+    // A data GET (a list, a thumbnail): the page's MAC, or the code in the query.
+    const signed = signedOk(req, "GET", Buffer.alloc(0), u, false);
+    if (signed === false || (signed === null && !codeOk(u.searchParams.get("c")))) {
       res.writeHead(403);
       return res.end();
     }
@@ -176,44 +200,52 @@ function handle(req, res) {
     }
     return;
   }
-  // body-bearing write: read (capped), gate by the code (in body or query), dispatch
-  let body = "";
+  // body-bearing write: read (capped) as bytes, since a MAC covers the exact
+  // bytes and a multi-byte character may straddle two chunks.
+  const chunks = [];
+  let size = 0;
   req.on("data", (c) => {
-    body += c;
+    size += c.length;
     // A sealed body is base64, a third larger than what it carries.
-    if (body.length > Math.ceil(maxBody * 1.4) + 1024) req.destroy();
+    if (size > Math.ceil(maxBody * 1.4) + 1024) return req.destroy();
+    chunks.push(c);
   });
   req.on("end", () => {
+    const raw = Buffer.concat(chunks);
+    const body = raw.toString("utf8");
     let d = {};
     try {
       d = JSON.parse(body || "{}");
     } catch (e) {}
-    const isSealed = !!(d && typeof d.sealed === "string");
-    if (!isSealed && body.length > maxBody) {
+    if (!d || typeof d !== "object" || Array.isArray(d)) d = {};
+    const isSealed = typeof d.sealed === "string";
+    if (!isSealed && raw.length > maxBody) {
       res.writeHead(413, { "Content-Type": "application/json" });
       return res.end(JSON.stringify({ ok: false, error: "too large" }));
     }
+    const refuse = (status, error) => {
+      res.writeHead(status, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ ok: false, error }));
+    };
+    let allowed;
     if (isSealed) {
       const opened = seal.open(d.sealed, sessionKey, seenNonces);
-      if (!opened) {
-        res.writeHead(400, { "Content-Type": "application/json" });
-        return res.end(JSON.stringify({ ok: false, error: "sealed" }));
-      }
+      if (!opened) return refuse(400, "sealed");
       d = opened;
       sealedSeen = true;
-    } else if (sealedSeen && !bulk) {
-      // The phone in this session has the key. A plain write now is not it.
-      res.writeHead(403, { "Content-Type": "application/json" });
-      return res.end(JSON.stringify({ ok: false, error: "sealed-required" }));
+      allowed = codeOk(d.code != null ? d.code : u.searchParams.get("c"));
+    } else if (seal.splitMac(req.url)) {
+      // A signed plain body is for a bulk route only: anything else may carry a
+      // secret, and goes sealed.
+      if (!bulk) return refuse(403, "sealed-required");
+      allowed = signedOk(req, req.method, raw, u, true);
+    } else if (sealedSeen) {
+      // The phone in this session has the key. An unauthenticated write now is not it.
+      return refuse(403, "sealed-required");
+    } else {
+      allowed = codeOk(d.code != null ? d.code : u.searchParams.get("c"));
     }
-    let allowed;
-    if (isSealed) allowed = codeOk(d.code != null ? d.code : u.searchParams.get("c"));
-    else if (bulk && u.searchParams.get("t") != null) allowed = queryOk(u.searchParams);
-    else allowed = codeOk(d.code != null ? d.code : u.searchParams.get("c"));
-    if (!allowed) {
-      res.writeHead(403, { "Content-Type": "application/json" });
-      return res.end(JSON.stringify({ ok: false, error: "code" }));
-    }
+    if (!allowed) return refuse(403, "code");
     // A handler may be async (the restore one renames the box before applying).
     // Without following the promise, a rejection after the first await would go
     // unhandled and the phone would sit on a request that never answers. Only
@@ -241,7 +273,6 @@ function start(locale, kind) {
   fails = 0;
   pageOpened = false;
   sessionKey = seal.newKey();
-  sessionToken = seal.token(sessionKey);
   seenNonces = new Set();
   sealedSeen = false;
   if (!server) {
@@ -253,8 +284,12 @@ function start(locale, kind) {
   const ip = netguard.lanIp() || "127.0.0.1"; // no external IPv4: a useless-but-valid QR beats a broken one
   // The code and the key ride in the fragment: a browser never sends that part
   // of a URL, so they go from the QR to the page without crossing the network.
+  // A page written before that reads the code from the query, so for its
+  // provider the code goes there too - its limit, not the session's.
   const k = seal.keyParam(sessionKey);
-  return { url: `http://${ip}:${PORT}/#c=${code}&k=${k}`, shortUrl: `http://${ip}:${PORT}`, ip, port: PORT, code };
+  const v2 = !!(activeKind && providers.get(activeKind) && providers.get(activeKind).v2);
+  const url = v2 ? `http://${ip}:${PORT}/#c=${code}&k=${k}` : `http://${ip}:${PORT}/?c=${code}#k=${k}`;
+  return { url, shortUrl: `http://${ip}:${PORT}`, ip, port: PORT, code };
 }
 
 function stop() {
@@ -264,7 +299,6 @@ function stop() {
   }
   code = null;
   sessionKey = null;
-  sessionToken = null;
   sealedSeen = false;
   seenNonces = new Set();
   if (server) {

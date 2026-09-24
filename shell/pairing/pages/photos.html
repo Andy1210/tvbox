@@ -108,11 +108,11 @@
       var st = document.getElementById("st"),
         grid = document.getElementById("grid"),
         empty = document.getElementById("empty");
-      function q(p) {
-        // A scanned page authenticates reads and uploads with the token its key
-        // gives it, so the code never crosses the network; a typed one uses the code.
-        var auth = tvboxSeal.sealed ? tvboxSeal.query() : "c=" + encodeURIComponent(code());
-        return p + (p.indexOf("?") < 0 ? "?" : "&") + auth;
+      // A scanned page signs its reads and uploads with its key, so the code never
+      // crosses the network; a typed one sends the code it was given.
+      function q(p, method, body) {
+        if (tvboxSeal.sealed) return tvboxSeal.url(method || "GET", p, body);
+        return p + (p.indexOf("?") < 0 ? "?" : "&") + "c=" + encodeURIComponent(code());
       }
       async function load() {
         try {
@@ -127,7 +127,7 @@
           var cell = document.createElement("div");
           cell.className = "cell";
           var img = document.createElement("img");
-          img.src = q("/photo-img") + "&name=" + encodeURIComponent(n);
+          img.src = q("/photo-img?name=" + encodeURIComponent(n));
           img.loading = "lazy";
           var b = document.createElement("button");
           b.textContent = "✕";
@@ -187,10 +187,11 @@
           var data = await resize(files[i]);
           if (!data) continue;
           try {
-            var r = await fetch(q("/photo"), {
+            var body = JSON.stringify({ name: files[i].name, data: data });
+            var r = await fetch(q("/photo", "POST", body), {
               method: "POST",
               headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ name: files[i].name, data: data }),
+              body: body,
             });
             if (r.ok) ok++;
           } catch (_) {}

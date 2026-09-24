@@ -152,8 +152,10 @@
       function code() {
         return $("code").value;
       }
+      // A scanned page signs its reads with its key; a typed one sends the code.
       function q(p) {
-        return p + (p.indexOf("?") < 0 ? "?" : "&") + tvboxSeal.query();
+        if (tvboxSeal.sealed) return tvboxSeal.url("GET", p);
+        return p + (p.indexOf("?") < 0 ? "?" : "&") + "c=" + encodeURIComponent(code());
       }
       async function post(path, body) {
         var r = await fetch(path, {

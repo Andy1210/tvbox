@@ -13,7 +13,7 @@ pairing._setPortForTest(PORT);
 
 function post(path, body, host) {
   return new Promise((resolve, reject) => {
-    const data = JSON.stringify(body);
+    const data = typeof body === "string" ? body : JSON.stringify(body);
     const req = http.request(
       { host: "127.0.0.1", port: PORT, path, method: "POST", headers: { host: host || "127.0.0.1:" + PORT } },
       (res) => {
@@ -69,11 +69,18 @@ test("a sealed body is opened with the session key, once; the code never leaves 
     const wrong = { sealed: seal.seal({ code: s.code }, seal.newKey()) };
     assert.strictEqual((await post("/save", wrong)).status, 400);
     assert.strictEqual((await post("/save", { code: s.code, v: 1 })).status, 403, "plain is refused once sealed");
-    const t = seal.token(key);
-    assert.strictEqual((await get("/list?t=" + t)).status, 200, "a read carries the token");
-    assert.strictEqual((await get("/list?t=" + seal.token(seal.newKey()))).status, 403);
-    assert.strictEqual((await post("/upload?t=" + t, { data: "x" })).status, 200, "a bulk upload carries the token");
-    assert.strictEqual((await post("/save?t=" + t, { v: 2 })).status, 403, "the token is not the code");
+    const page = pageSandbox("#c=" + s.code + "&k=" + seal.keyParam(key), "", true).tvboxSeal;
+    assert.strictEqual((await get(page.url("GET", "/list"))).status, 200, "a signed read");
+    const other = pageSandbox("#k=" + seal.keyParam(seal.newKey()), "", true).tvboxSeal;
+    assert.strictEqual((await get(other.url("GET", "/list"))).status, 403, "signed with another key");
+    const chunk = JSON.stringify({ data: "é".repeat(20000) });
+    const signed = page.url("POST", "/upload", chunk);
+    assert.strictEqual((await post(signed, chunk)).status, 200, "a bulk upload signed over its bytes");
+    assert.strictEqual((await post(signed, chunk)).status, 403, "the same signed write twice is a replay");
+    const again = page.url("POST", "/upload", chunk);
+    assert.strictEqual((await post(again, JSON.stringify({ data: "evil" }))).status, 403, "the MAC covers the body");
+    assert.strictEqual((await post(page.url("POST", "/save", '{"v":2}'), '{"v":2}')).status, 403, "only bulk is plain");
+    assert.strictEqual((await post("/upload?c=" + s.code, { data: "x" })).status, 403, "the code is not enough now");
     assert.strictEqual((await post("/save", { code: s.code }, "rebind.example:" + PORT)).status, 421);
   } finally {
     pairing.stop();
@@ -104,21 +111,49 @@ function pageSandbox(hash, search, v2) {
   return sandbox;
 }
 
-test("the page helper seals what the server opens, and derives the server's token", () => {
+test("the page helper seals and signs what the server opens and verifies", () => {
   const key = seal.newKey();
   const page = pageSandbox("#c=4321&k=" + seal.keyParam(key), "", true);
   assert.strictEqual(page.tvboxSeal.sealed, true);
   assert.strictEqual(page.tvboxSeal.code, "4321");
-  assert.strictEqual(page.tvboxSeal.query(), "t=" + seal.token(key));
+  assert.throws(() => page.tvboxSeal.query(), /tvboxSeal.url/);
+  const u = page.tvboxSeal.url("POST", "/x?a=1", "body");
+  assert.ok(/^\/x\?a=1&n=[\w-]+&m=[\w-]{22}$/.test(u), u);
+  assert.strictEqual(seal.macOk(key, "POST", u, Buffer.from("body")), true);
+  assert.strictEqual(seal.macOk(key, "GET", u, Buffer.from("body")), false, "the method is covered");
+  assert.strictEqual(seal.macOk(key, "POST", u.replace("a=1", "a=2"), Buffer.from("body")), false);
+  assert.strictEqual(seal.macOk(key, "POST", u, Buffer.from("bodY")), false);
   assert.strictEqual(page.replaced, undefined, "a current page leaves the URL alone");
   const wire = JSON.parse(page.tvboxSeal.body({ code: "1234", pass: "é" }));
   assert.deepStrictEqual(seal.open(wire.sealed, key, new Set()), { code: "1234", pass: "é" });
   const plain = pageSandbox("", "?c=1111", true);
   assert.strictEqual(plain.tvboxSeal.body({ a: 1 }), '{"a":1}');
   assert.strictEqual(plain.tvboxSeal.query(), "c=1111");
+  assert.strictEqual(plain.tvboxSeal.url("GET", "/list"), "/list?c=1111");
 });
 
 test("a page that reads ?c= itself still finds the code", () => {
   const page = pageSandbox("#c=4321&k=" + seal.keyParam(seal.newKey()), "", false);
   assert.strictEqual(new URLSearchParams(page.location.search).get("c"), "4321");
+});
+
+test("an older page gets the code in the query, and an empty code is not an attempt", async () => {
+  pairing.register(
+    "legacytest",
+    {
+      page: () => "<p>x</p>",
+      routes: { "GET /list": (req, res, ctx) => ctx.json(res, { ok: true }) },
+    },
+    "someapp",
+  );
+  const s = pairing.start("en", "legacytest");
+  try {
+    await listening();
+    assert.ok(s.url.includes("/?c=" + s.code + "#k="), s.url);
+    // A page that found no code loads its lists with an empty one, many times over.
+    for (let i = 0; i < 12; i++) assert.strictEqual((await get("/list?c=")).status, 403);
+    assert.strictEqual((await get("/list?c=" + s.code)).status, 200, "the session is still open");
+  } finally {
+    pairing.stop();
+  }
 });

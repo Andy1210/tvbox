@@ -131,6 +131,8 @@ const PUBLIC_GET = new Set(["/tvbox/api/config", "/tvbox/api/system/region"]);
  * @param c.path        the decoded path
  * @param c.pluginOwner the app id whose plugin serves this path, null for a
  *                      route the bare host registered, undefined for none
+ * @param c.pluginOpen  whether that route is open to an unidentified caller:
+ *                      true, false, or "legacy" (the plugin declared nothing)
  * @param c.caps        the calling app's capabilities
  * @param c.body        the parsed body, for the routes whose answer depends on it
  * @param c.pairingOwner (kind) -> the app id that registered a pairing kind,
@@ -189,8 +191,12 @@ function decide(c) {
   }
 
   // unknown: a window no app owns (a sign-in popup, a window a plugin opened for
-  // an OAuth redirect back to its own callback route).
-  if (isGet && (plugin || PUBLIC_GET.has(p))) return null;
+  // an OAuth redirect back to its own callback route), or a process with no token.
+  // A plugin route is open to it only when the plugin said so. One that declared
+  // nothing keeps the old answer, reads and writes alike, so a released plugin's
+  // callback and its daemon's calls keep landing (plugins.publicList).
+  if (plugin) return c.pluginOpen === true || c.pluginOpen === "legacy" ? null : "not a public route";
+  if (isGet && PUBLIC_GET.has(p)) return null;
   return "unidentified caller";
 }
 const SHARED_PAIRING = new Set(["photoshare", "text"]);

@@ -121,11 +121,22 @@ test("a local process keeps its reads and the writes it makes, nothing else", ()
   assert.ok(decide(local, "GET", "/tvbox/api/backup/pending-localstorage"));
 });
 
-test("an unidentified browser caller gets public reads and a plugin's GETs only", () => {
+test("an unidentified caller gets public reads, and a plugin's routes only as the plugin declared", () => {
   assert.strictEqual(decide(unknown, "GET", "/tvbox/api/config"), null);
-  assert.strictEqual(decide(unknown, "GET", "/tvbox/api/spotify/auth/callback", { pluginOwner: "spotify" }), null);
   assert.ok(decide(unknown, "GET", "/tvbox/api/wifi/list"));
   assert.ok(decide(unknown, "POST", "/tvbox/api/notify"));
+  // A plugin that declared its public routes: only those.
+  const cb = { pluginOwner: "spotify", pluginOpen: true };
+  const closed = { pluginOwner: "livetv", pluginOpen: false };
+  assert.strictEqual(decide(unknown, "GET", "/tvbox/api/spotify/auth/callback", cb), null);
+  assert.ok(decide(unknown, "GET", "/tvbox/api/livetv/channels", closed));
+  assert.ok(decide(unknown, "POST", "/tvbox/api/livetv/save", closed));
+  // One that declared nothing keeps the old answer, writes included.
+  const legacy = { pluginOwner: "spotify", pluginOpen: "legacy" };
+  assert.strictEqual(decide(unknown, "GET", "/tvbox/api/spotify/liked", legacy), null);
+  assert.strictEqual(decide(unknown, "POST", "/tvbox/api/spotify/event", legacy), null);
+  // And an app is never helped by the declaration: another app's route stays shut.
+  assert.ok(decide(app("files"), "GET", "/tvbox/api/spotify/auth/callback", cb));
 });
 
 test("a Host that is not ours is refused (DNS rebinding)", () => {

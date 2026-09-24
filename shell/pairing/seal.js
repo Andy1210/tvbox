@@ -31,18 +31,44 @@ function keyParam(key) {
   return Buffer.from(key).toString("base64url");
 }
 
-// A token for the requests that cannot be sealed: data GETs and bulk uploads
-// (a photo, a ROM chunk). It is derived from the key, so a page that has the key
-// has it, and it is not the code: someone who reads it off the air can fetch a
-// list or add a photo during the session, but cannot make a sealed or coded
-// write (backup, restore, passwords).
-const TOKEN_PREFIX = "tvbox-pairing-token:";
-function token(key) {
+// A MAC for the requests that are not sealed: data GETs and bulk uploads (a
+// photo, a ROM chunk), where sealing megabytes twice over on a phone buys little.
+// HMAC-SHA512 under the session key, over the method, the path with its query
+// (the `m` parameter itself excluded, which the page appends last) and a hash of
+// the exact body bytes, so someone reading one request off the air can neither
+// alter it nor make a different one. A write also carries a fresh `n`, and the
+// server refuses a write whose `n` it has seen, so it cannot be replayed either.
+const MAC_BYTES = 16;
+function sha512hex(buf) {
+  return crypto.createHash("sha512").update(buf).digest("hex");
+}
+function mac(key, method, pathAndQuery, body) {
   if (!key) return null;
-  const h = crypto.createHash("sha512");
-  h.update(Buffer.from(TOKEN_PREFIX, "utf8"));
-  h.update(Buffer.from(key));
-  return h.digest().subarray(0, 16).toString("base64url");
+  const h = crypto.createHmac("sha512", Buffer.from(key));
+  h.update(String(method).toUpperCase() + "\n" + String(pathAndQuery) + "\n" + sha512hex(body || Buffer.alloc(0)));
+  return h.digest().subarray(0, MAC_BYTES).toString("base64url");
+}
+
+/**
+ * Split a request URL into the part the MAC covers and the MAC. The page puts
+ * `m` last, so the covered part is everything before the final "&m=". Answers
+ * null when there is none, or it is not the shape the page makes.
+ */
+function splitMac(url) {
+  const s = String(url || "");
+  const at = s.lastIndexOf("&m=");
+  if (at < 0) return null;
+  const m = s.slice(at + 3);
+  if (!/^[A-Za-z0-9_-]{22}$/.test(m)) return null;
+  return { signed: s.slice(0, at), mac: m };
+}
+
+function macOk(key, method, url, body) {
+  const parts = splitMac(url);
+  if (!parts || !key) return false;
+  const want = Buffer.from(mac(key, method, parts.signed, body));
+  const got = Buffer.from(parts.mac);
+  return want.length === got.length && crypto.timingSafeEqual(want, got);
 }
 
 /** Seal an object the way the page does. Used by tests and by nothing else here. */
@@ -83,11 +109,22 @@ function open(sealed, key, seen) {
 }
 
 // What GET /tvbox-seal.js answers: the library, then the page-side helper.
-// `tvboxSeal.body(obj)` is a drop-in for JSON.stringify(obj) in a fetch body.
-// The fragment carries both the key and the code (#c=<code>&k=<key>), so neither
-// crosses the network. `tvboxSeal.code` is the code, `tvboxSeal.query()` the
-// query string a data GET or a bulk upload authenticates with, and
-// `tvboxSeal.body(obj)` a drop-in for JSON.stringify(obj) in a fetch body.
+//
+// The contract a pairing page follows (a v2 provider, see pairing/index.js):
+//   <script src="/tvbox-seal.js" data-v="2"></script>
+//   tvboxSeal.code            the code, from the URL fragment (#c=), or "" for a
+//                             phone that typed the short URL (it asks the person)
+//   tvboxSeal.sealed          true when the page has the session key (#k=)
+//   tvboxSeal.body(obj)       drop-in for JSON.stringify(obj): a sealed body with
+//                             the key, the plain JSON without it. Put the code in obj.
+//   tvboxSeal.url(method, url, body)
+//                             for a request that is NOT sealed (a data GET, a bulk
+//                             upload): `url` is a path starting with "/", `body` the
+//                             exact string that will be sent (omit for a GET). With
+//                             the key it answers url + "n=<nonce>&m=<mac>"; without
+//                             it url + "c=<code>". Send the body unchanged.
+//   tvboxSeal.query()         older helper: "c=<code>" without a key; with a key it
+//                             throws, because a bare query cannot be authenticated.
 //
 // A page that predates this reads the code from `?c=` and loads the script
 // without data-v="2"; for it the code is copied into the query in place (no
@@ -116,6 +153,7 @@ const PAGE_HELPER = `
   if (!v2 && code && !new URLSearchParams(location.search).get("c")) {
     history.replaceState(null, "", location.pathname + "?c=" + encodeURIComponent(code) + hash);
   }
+  var enc = new TextEncoder();
   function b64(u8) {
     var s = "";
     for (var i = 0; i < u8.length; i++) s += String.fromCharCode(u8[i]);
@@ -124,29 +162,56 @@ const PAGE_HELPER = `
   function b64url(u8) {
     return b64(u8).replace(/\\+/g, "-").replace(/\\//g, "_").replace(/=+$/, "");
   }
-  var tok = "";
-  if (key) {
-    var prefix = new TextEncoder().encode("${TOKEN_PREFIX}");
-    var both = new Uint8Array(prefix.length + key.length);
-    both.set(prefix);
-    both.set(key, prefix.length);
-    tok = b64url(nacl.hash(both).subarray(0, 16));
+  function hex(u8) {
+    var s = "";
+    for (var i = 0; i < u8.length; i++) s += (u8[i] < 16 ? "0" : "") + u8[i].toString(16);
+    return s;
+  }
+  function cat(a, b) {
+    var out = new Uint8Array(a.length + b.length);
+    out.set(a);
+    out.set(b, a.length);
+    return out;
+  }
+  // HMAC-SHA512 (RFC 2104) over nacl.hash, which is SHA-512; block size 128.
+  function hmac(msg) {
+    var k = new Uint8Array(128);
+    k.set(key);
+    var ipad = new Uint8Array(128), opad = new Uint8Array(128);
+    for (var i = 0; i < 128; i++) {
+      ipad[i] = k[i] ^ 0x36;
+      opad[i] = k[i] ^ 0x5c;
+    }
+    return nacl.hash(cat(opad, nacl.hash(cat(ipad, msg))));
+  }
+  function bytes(body) {
+    if (body == null) return new Uint8Array(0);
+    if (typeof body === "string") return enc.encode(body);
+    if (body instanceof Uint8Array) return body;
+    if (body instanceof ArrayBuffer) return new Uint8Array(body);
+    throw new Error("tvboxSeal.url: body must be the string or bytes that will be sent");
   }
   self.tvboxSeal = {
     sealed: !!key,
     code: code,
+    url: function (method, url, body) {
+      url = String(url);
+      var sep = url.indexOf("?") < 0 ? "?" : "&";
+      if (!key) return url + sep + "c=" + encodeURIComponent(code);
+      var signed = url + sep + "n=" + b64url(nacl.randomBytes(12));
+      var msg = String(method).toUpperCase() + "\\n" + signed + "\\n" + hex(nacl.hash(bytes(body)));
+      return signed + "&m=" + b64url(hmac(enc.encode(msg)).subarray(0, ${MAC_BYTES}));
+    },
     query: function () {
-      return tok ? "t=" + tok : "c=" + encodeURIComponent(code);
+      if (key) throw new Error("tvboxSeal.query cannot authenticate a request that has the key; use tvboxSeal.url");
+      return "c=" + encodeURIComponent(code);
     },
     body: function (obj) {
       var json = JSON.stringify(obj);
       if (!key) return json;
       var nonce = nacl.randomBytes(nacl.secretbox.nonceLength);
-      var box = nacl.secretbox(new TextEncoder().encode(json), nonce, key);
-      var all = new Uint8Array(nonce.length + box.length);
-      all.set(nonce);
-      all.set(box, nonce.length);
-      return JSON.stringify({ sealed: b64(all) });
+      var box = nacl.secretbox(enc.encode(json), nonce, key);
+      return JSON.stringify({ sealed: b64(cat(nonce, box)) });
     },
   };
 })();
@@ -159,4 +224,4 @@ function script() {
   return pageScript;
 }
 
-module.exports = { newKey, keyParam, seal, open, script, token, KEY_BYTES };
+module.exports = { newKey, keyParam, seal, open, script, mac, macOk, splitMac, KEY_BYTES };
