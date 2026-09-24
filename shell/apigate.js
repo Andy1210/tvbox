@@ -138,6 +138,8 @@ const PUBLIC_GET = new Set(["/tvbox/api/config", "/tvbox/api/system/region"]);
  * @param c.pairingOwner (kind) -> the app id that registered a pairing kind,
  *                      null for a built-in one
  * @param c.foreground  the app id in front, null for the launcher
+ * @param c.lockedGroups the groups the parental lock holds now
+ * @param c.parentalPinOk (pin) -> whether it is the PIN, counted against this caller
  */
 function decide(c) {
   const p = c.path || "";
@@ -162,13 +164,18 @@ function decide(c) {
       const sections = Object.keys((c.body && typeof c.body === "object" && c.body) || {});
       const bad = sections.find((s) => !APP_CONFIG_SECTIONS.has(s));
       if (bad) return "config section not for apps: " + bad;
-      // An app may set the lock's groups freely, but changing or clearing the PIN,
-      // or whether it is asked for, needs the current PIN (none is needed to set
-      // the first one).
+      // An app may add to the lock's groups, but taking one off, changing or
+      // clearing the PIN, or whether it is asked for, needs the current PIN (none
+      // is needed while no PIN is set).
       const parental = c.body && c.body.parental;
-      if (parental && typeof parental === "object" && ("pin" in parental || "requirePin" in parental)) {
-        const ok = typeof c.parentalPinOk === "function" && c.parentalPinOk(parental.currentPin);
-        if (!ok) return "parental pin required";
+      if (parental && typeof parental === "object") {
+        const now = Array.isArray(c.lockedGroups) ? c.lockedGroups : [];
+        const next = Array.isArray(parental.lockedGroups) ? parental.lockedGroups : null;
+        const shrinks = "lockedGroups" in parental && (!next || now.some((g) => !next.includes(g)));
+        if ("pin" in parental || "requirePin" in parental || shrinks) {
+          const ok = typeof c.parentalPinOk === "function" && c.parentalPinOk(parental.currentPin);
+          if (!ok) return "parental pin required";
+        }
       }
       return null;
     }
@@ -277,20 +284,61 @@ function serviceWorkerAllowed(p, isLocalApp) {
   return !!isLocalApp(seg);
 }
 
-// mpv fetches a URL with no browser headers at all, so a stream aimed at the box
-// itself would reach the shell's own servers as a request from the box, not from
-// the app that queued it. Nothing the box plays is served from its own address.
-function pointsAtThisBox(u) {
-  let host;
+// mpv fetches a URL with no browser headers at all, so a stream aimed at one of
+// the shell's own servers would reach it as a request from nobody in particular.
+// Only those servers are refused: a media server the owner runs on the box itself
+// (a Jellyfin or Plex next to the shell) is a thing the box legitimately plays.
+// main.js adds the ports that come from config (the file server's, the app
+// shares' and a debug port).
+const OWN_PORTS = [8097, 8098, 8099, 8100];
+let extraPorts = () => [];
+function setOwnPorts(fn) {
+  extraPorts = typeof fn === "function" ? fn : () => [];
+}
+
+function ownPorts() {
+  let more = [];
   try {
-    host = new URL(u).hostname.toLowerCase().replace(/^\[|\]$/g, "");
-  } catch (e) {
-    return true; // unparseable: refuse rather than hand it to mpv
-  }
+    more = extraPorts() || [];
+  } catch (e) {}
+  return new Set([...OWN_PORTS, ...more.map(Number).filter((n) => Number.isInteger(n) && n > 0)]);
+}
+
+function isThisBox(host) {
   if (!host) return false;
   if (host === "localhost" || host.endsWith(".localhost") || host === "0.0.0.0" || host === "::") return true;
   if (/^127\./.test(host) || host === "::1" || /^::ffff:(127\.|7f)/.test(host)) return true;
   return boxNames().includes(host);
+}
+
+function pointsAtThisBox(u) {
+  const text = String(u || "");
+  // Where a player's URL parser and this one could disagree about the host. A
+  // backslash in the authority is how "http://a.example\\@127.0.0.1/" reads as
+  // a.example here and connects to 127.0.0.1 in ffmpeg, so it is refused.
+  const authority = /^[a-z][a-z0-9+.-]*:\/\/([^/?#]*)/i.exec(text);
+  if (authority && authority[1].includes("\\")) return true;
+  let url;
+  try {
+    url = new URL(text);
+  } catch (e) {
+    return true; // unparseable: refuse rather than hand it to mpv
+  }
+  const port = Number(url.port || (url.protocol === "https:" ? 443 : 80));
+  const clean = (h) =>
+    String(h || "")
+      .toLowerCase()
+      .replace(/^\[|\]$/g, "")
+      .replace(/\.$/, "");
+  const hosts = [clean(url.hostname)];
+  // Credentials in the URL are legitimate for a media server, and the host is what
+  // follows the LAST "@"; read it straight off the text too, so the two parsers are
+  // held to the same answer.
+  if (authority && authority[1].includes("@")) {
+    const rawHost = authority[1].slice(authority[1].lastIndexOf("@") + 1).replace(/:\d*$/, "");
+    hosts.push(clean(rawHost));
+  }
+  return hosts.some(isThisBox) && ownPorts().has(port);
 }
 
 function lanHostAllowed(req, port) {
@@ -309,6 +357,7 @@ module.exports = {
   lanHostAllowed,
   serviceWorkerAllowed,
   pointsAtThisBox,
+  setOwnPorts,
   boxNames,
   announcedSuffixes,
   APP_GET,

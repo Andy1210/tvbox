@@ -659,10 +659,12 @@ store, installs, power, Wi-Fi) gets a 403. Three routes are narrower still:
 except `{dest:"app", app:<its own id>}`, which is how a hidden app answers a cast;
 and `POST /tvbox/api/pairing/start` opens only a pairing kind the app's own plugin
 registered, or the shared `photoshare` and `text` kinds. In a `parental` patch, an
-app may set `lockedGroups` freely, but `pin` and `requirePin` need the current PIN
-as `currentPin` (the SDK's `saveParental` sends the one `verifyPin` last proved;
-none is needed while no PIN is set), and `parental/verify` locks out after a few
-wrong answers (`{ ok: false, locked: true, retryInMs }`). The `app` field of a
+app may add to `lockedGroups` freely, but taking a group off, and `pin` and
+`requirePin`, need the current PIN as `currentPin` (the SDK's `saveParental`
+sends the one `verifyPin` last proved; none is needed while no PIN is set), and
+`parental/verify` locks out after a few wrong answers (`{ ok: false, locked:
+true, retryInMs }`), counted per app so one app's guesses never lock the owner's
+PIN pad. The `app` field of a
 now-playing report is set from the sender, whatever the body says.
 
 A process of your own that calls the API (a daemon your plugin started, a hook

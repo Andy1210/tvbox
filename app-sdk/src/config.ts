@@ -169,8 +169,9 @@ export async function saveParental(p: {
   lockedGroups?: string[];
   requirePin?: boolean;
 }): Promise<PublicConfig> {
-  const touchesPin = p.pin !== undefined || p.requirePin !== undefined;
-  const body = touchesPin && provenPin !== null ? { ...p, currentPin: provenPin } : p;
+  // Sent with every write once proved: taking a group off the lock needs it too,
+  // and the shell ignores it where it is not needed.
+  const body = provenPin !== null ? { ...p, currentPin: provenPin } : p;
   const saved = await postConfig({ parental: body });
   if (p.pin !== undefined) provenPin = p.pin || null;
   return saved;

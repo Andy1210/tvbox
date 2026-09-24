@@ -259,16 +259,29 @@ function setParental({ pin, lockedGroups, requirePin }) {
   save(c);
 }
 
-// A four-digit PIN is ten thousand guesses, so every check goes through one
+// A four-digit PIN is ten thousand guesses, so every check goes through a
 // limiter: after PIN_FREE_TRIES wrong answers in a row, checks are refused for a
-// wait that doubles with each further miss (capped), and a correct answer resets it.
+// wait that doubles with each further miss (capped), and a correct answer resets
+// it. The count is kept per caller ("launcher", "app:<id>"), so an app spending
+// its own guesses cannot lock the owner out of the PIN pad.
 const PIN_FREE_TRIES = 5;
 const PIN_BASE_WAIT_MS = 30 * 1000;
 const PIN_MAX_WAIT_MS = 15 * 60 * 1000;
-const pinLimit = { misses: 0, until: 0, now: () => Date.now() };
+const pinLimit = { by: new Map(), now: () => Date.now() };
 
-function pinLockedFor() {
-  return Math.max(0, pinLimit.until - pinLimit.now());
+function pinState(who) {
+  const key = String(who || "launcher");
+  let st = pinLimit.by.get(key);
+  if (!st) {
+    // Bounded: an id only comes from an installed app, but the map outlives none.
+    if (pinLimit.by.size >= 64) pinLimit.by.clear();
+    pinLimit.by.set(key, (st = { misses: 0, until: 0 }));
+  }
+  return st;
+}
+
+function pinLockedFor(who) {
+  return Math.max(0, pinState(who).until - pinLimit.now());
 }
 
 function hasPin() {
@@ -276,21 +289,28 @@ function hasPin() {
   return !!(p && p.pinHash);
 }
 
-function verifyPin(pin) {
-  if (pinLockedFor() > 0) return false;
+function verifyPin(pin, who) {
+  if (pinLockedFor(who) > 0) return false;
   const p = load().parental;
   if (!p || !p.pinHash) return false;
+  const st = pinState(who);
   // pre-salt configs stored sha(pin) - still verified; re-saving the PIN upgrades
   const h = p.pinSalt ? sha(p.pinSalt + pin) : sha(pin);
   const ok = timingEq(h, p.pinHash);
   if (ok) {
-    pinLimit.misses = 0;
-    pinLimit.until = 0;
-  } else if (++pinLimit.misses >= PIN_FREE_TRIES) {
-    const wait = PIN_BASE_WAIT_MS * 2 ** (pinLimit.misses - PIN_FREE_TRIES);
-    pinLimit.until = pinLimit.now() + Math.min(wait, PIN_MAX_WAIT_MS);
+    st.misses = 0;
+    st.until = 0;
+  } else if (++st.misses >= PIN_FREE_TRIES) {
+    const wait = PIN_BASE_WAIT_MS * 2 ** (st.misses - PIN_FREE_TRIES);
+    st.until = pinLimit.now() + Math.min(wait, PIN_MAX_WAIT_MS);
   }
   return ok;
+}
+
+/** The groups the lock currently holds, for deciding whether a write removes one. */
+function lockedGroups() {
+  const p = load().parental;
+  return (p && Array.isArray(p.lockedGroups) && p.lockedGroups) || [];
 }
 
 // Raw IPTV (incl. credentials) for the Live TV provider only.
@@ -1026,6 +1046,7 @@ module.exports = {
   verifyPin,
   hasPin,
   pinLockedFor,
+  lockedGroups,
   _pinLimitForTest: pinLimit,
   rawIptv,
   setSpotify,

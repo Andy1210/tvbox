@@ -214,3 +214,34 @@ test("an app changes the PIN, or whether it is asked for, only with the current 
   assert.strictEqual(post({ pin: "1111", currentPin: "4321" }), null);
   assert.ok(decide(app("livetv"), "POST", "/tvbox/api/config", { body: { parental: { pin: "" } }, caps }));
 });
+
+test("a player URL is refused only when it aims at one of the shell's own servers", () => {
+  assert.strictEqual(apigate.pointsAtThisBox("http://127.0.0.1:8097/tvbox/api/apps"), true);
+  assert.strictEqual(apigate.pointsAtThisBox("http://localhost:8099/"), true);
+  assert.strictEqual(apigate.pointsAtThisBox("http://localhost.:8100/"), true, "a trailing dot is the same host");
+  assert.strictEqual(apigate.pointsAtThisBox("http://[::1]:8098/x"), true);
+  // A media server running on the box itself is a thing the box plays.
+  assert.strictEqual(apigate.pointsAtThisBox("http://127.0.0.1:8096/Videos/1/stream"), false);
+  assert.strictEqual(apigate.pointsAtThisBox("http://localhost:32400/library/parts/1/file.mkv"), false);
+  assert.strictEqual(apigate.pointsAtThisBox("http://127.0.0.1/"), false, "port 80 is not ours");
+  // An authority two URL parsers could read differently is refused outright.
+  assert.strictEqual(apigate.pointsAtThisBox("http://evil.invalid\\@127.0.0.1:8097/"), true);
+  assert.strictEqual(apigate.pointsAtThisBox("http://user:pass@nas.example/film.mkv"), false, "credentials are fine");
+  assert.strictEqual(apigate.pointsAtThisBox("http://user:pass@127.0.0.1:8097/"), true);
+  assert.strictEqual(apigate.pointsAtThisBox("https://example.com/film.mkv"), false);
+  // Ports that come from config.
+  apigate.setOwnPorts(() => [9222]);
+  assert.strictEqual(apigate.pointsAtThisBox("http://127.0.0.1:9222/json"), true);
+  apigate.setOwnPorts(null);
+  assert.strictEqual(apigate.pointsAtThisBox("http://127.0.0.1:9222/json"), false);
+});
+
+test("an app may add to the parental lock, but taking a group off needs the PIN", () => {
+  const base = { caps: ["config"], lockedGroups: ["adult", "news"], parentalPinOk: (p) => p === "4321" };
+  const write = (parental) => decide(app("livetv"), "POST", "/tvbox/api/config", { ...base, body: { parental } });
+  assert.strictEqual(write({ lockedGroups: ["adult", "news", "sport"] }), null, "adding is free");
+  assert.ok(write({ lockedGroups: [] }), "emptying the lock is not");
+  assert.ok(write({ lockedGroups: ["adult"] }));
+  assert.ok(write({ lockedGroups: null }));
+  assert.strictEqual(write({ lockedGroups: [], currentPin: "4321" }), null, "with the PIN it may");
+});

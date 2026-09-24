@@ -256,3 +256,14 @@ test("a wrong PIN locks further checks after a few tries, and the right one clea
   config.setParental({ pin: "" });
   lim.now = () => Date.now();
 });
+
+test("an app's wrong PINs lock that app, not the owner's PIN pad", () => {
+  config.setParental({ pin: "4321" });
+  for (let i = 0; i < 5; i++) assert.strictEqual(config.verifyPin("0000", "app:x"), false);
+  assert.ok(config.pinLockedFor("app:x") > 0);
+  assert.strictEqual(config.pinLockedFor("launcher"), 0);
+  assert.strictEqual(config.verifyPin("4321"), true, "the launcher is counted on its own");
+  assert.strictEqual(config.verifyPin("4321", "app:x"), false, "the app waits out its own lock");
+  config.setParental({ pin: "" });
+  config._pinLimitForTest.by.clear();
+});

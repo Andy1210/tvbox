@@ -683,7 +683,9 @@ function serve() {
         body,
         pairingOwner: pairing.ownerOf,
         foreground: currentAppId,
-        parentalPinOk: (pin) => !config.hasPin() || config.verifyPin(String(pin || "")),
+        lockedGroups: config.lockedGroups(),
+        parentalPinOk: (pin) =>
+          !config.hasPin() || config.verifyPin(String(pin || ""), caller.kind + (caller.id ? ":" + caller.id : "")),
       });
     // Which plugin route, if any, this GET would reach. Resolved before the gate
     // because the gate consults it, and reused when dispatching. A HEAD is the
@@ -751,7 +753,7 @@ function serve() {
         // origin, so a route that throws is a "restart the television" primitive
         // reachable from any page on the box. A 500 is the honest answer instead.
         try {
-          routes.post(p, d, res, routeCtx);
+          routes.post(p, d, res, routeCtx, caller);
         } catch (e) {
           console.warn("[api] route failed:", p, redact(e.message));
           endWith500(res);
@@ -2188,6 +2190,12 @@ app.whenReady().then(async () => {
   hardenSession(session.defaultSession);
   try {
     apigate.setLocalToken(require("./localtoken").create());
+    apigate.setOwnPorts(() => [
+      fileserver.portOf(config.rawFileserver().port),
+      appshares.portOf(config.rawAppshares().port),
+      // The DevTools port, when run-shell.sh started us with one.
+      Number((process.argv.find((a) => a.startsWith("--remote-debugging-port=")) || "").split("=")[1]) || 0,
+    ]);
   } catch (e) {
     console.warn("[main] could not write the local token:", e.message);
   }
